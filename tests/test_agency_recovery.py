@@ -146,17 +146,18 @@ class TransientReadRetryTests(unittest.TestCase):
             self.caps(SimpleNamespace(execute=offline), budget=WorkBudget(attempts=1)).execute('web_search', {'query': 'q'})
         self.assertEqual((caught.exception.code, len(calls)), ('attempt_budget', 1))
 
-    def test_a_private_context_keeps_605s_single_attempt(self):
+    def test_a_private_context_is_retried_like_a_clean_one(self):
+        """#826: the #605 one-attempt rule for private contexts is gone; a transient read is retried once."""
         calls = []
         def offline(plan):
             calls.append(plan)
             raise OFFLINE
         caps = self.caps(SimpleNamespace(execute=offline))
-        caps.lookup_private = lambda: True
+        caps.private_provenance.add('personal-space')
         with self.assertRaises(ProviderError):
             caps._read_network({'tool': 'weather', 'city': 'Seongnam'})
-        self.assertEqual(len(calls), 1, '#605: one network attempt per destination from a private context')
-        self.assertEqual(self.events, [])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(self.events), 1, 'the first failure is recorded before the retry')
 
 
 class SharedBudgetTests(unittest.TestCase):

@@ -4,6 +4,10 @@
 
 Under SECRETARY-01 the DecisionEngine is the gate that lets the assistant choose and change paths (provider, site, query, recovery, goal-reached judgment), not a request-time blocker. The `lookup_term_sensitivity` judgment and its qualification case are removed by SEC-PILOT-01 #654; SEC-LOOP-01 #657 adds a `goal_reached` judgment. See the [Secretary Agency Contract](secretary-agency-contract.en.md).
 
+## Amendment — #826 (2026-09-28)
+
+EGRESS-OPEN-01 (owner decision) removes the plan's tool subset (`tools_mode`, `tools`, `tools_reason`) and the pinned default worker. The subset existed only to keep private reads and web search apart, and that separation is removed; see the [request-path rule census](request-path-rule-census.en.md), class g. The plan is `{worker, model, brief: {notes}, reason}`. Every attempt keeps the worker's full toolset, and a repeat is refused on worker plus effective model. The "Tools per request" bullet below, the `pinned` rule and the `private_turn`, `orchestrated_private_tools` and `orchestrated_no_search` reasons are historical.
+
 ## Amendment — #710 (2026-09-27)
 
 ORCH-01 makes the DecisionEngine the **orchestrator** of each Work under Constitution C16: per request it chooses the AI worker and model, writes the brief and the tool subset, and re-delegates when the goal is not shown. It still never acts and never grants authority; see "Orchestration (ORCH-01 / #710)" below.

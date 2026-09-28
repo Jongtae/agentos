@@ -1,5 +1,19 @@
 # Personal AgentOS Secretary Agency Contract
 
+## Amendment — #826 (2026-09-28)
+
+EGRESS-OPEN-01 records an owner decision: "이 정보를 주는 건 엄청 큰 차이를 주는거네. 대신 어떤 정보를 이용해서 했는지만 확인 가능하도록 audit을 제공하면 될 듯. 허락할게." It supersedes the #678 separation stated in the #774, #701 and #705 amendments below. See the [request-path rule census](request-path-rule-census.en.md), class g.
+- **Private reads and web search share a turn.** A CLI turn with its own web search offers every private-read bridge tool (notes, Memory, calendar, connected-folder documents). The bridge's own search tools still step aside for the CLI's own search. Owner material spliced into the turn, or read by an earlier attempt, no longer turns that search off. The plan has no tool subset, and no worker is pinned.
+- **Public lookups.** AgentOS-composed lookups send the worker's words as written, including owner values the Work saved or read. A private context no longer refuses a lookup.
+- **Documents on the CLI.** `find_files`, `read_file`, `list_roots` and `public_page_read` are offered on trusted-local, within the folder grants and the owner's page approval, which the tools check on every call. Earlier document jobs reach a CLI's history.
+- **Kept, each with negative tests:**
+  - secrets never enter a prompt, a log, Evidence or a lookup;
+  - per-action payment approval (`browser_session`, unchanged);
+  - no replay of external effects, and a truthful `unknown`;
+  - #597 Memory authority;
+  - folder-grant scope, with no write, delete, move or send implied by a read grant.
+- **Information-use audit.** Every Work shows which owner information it used, where it went and what came back (`information_use.py`). It covers profile keys, Memory rows, calendar entries, files, current-context claims and the number of conversation turns included. It also covers the worker, route and model, the Judgment AI calls, whether web search ran and the queries, and the tool results. It is derived from `turn_provenance` (new fields `owner_information` and `workers`), `tool_events` and `decision_audit`. It holds references and short labels only, passed through the stored-secret redaction. It appears on the web task detail (이 답변에 쓴 정보), at `GET /api/tasks/<id>/information-use`, and in conversation through the read-only `information_use` tool; no keyword route decides it.
+
 ## Amendment — #818 (2026-09-28)
 
 OWNER-MODEL-04 follows owner feedback on Works `18c91ca7` and `7767e7da`, where a stated fact became a pending MemoryCandidate and the owner saw only a failure:

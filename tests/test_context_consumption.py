@@ -124,7 +124,7 @@ class _ConsumptionCase:
             self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
             # #701: these checks exercise the bridge web_search, which a native-search
             # turn no longer offers (the CLI's own search replaces it).
-            self.service.cli_native_search = lambda *args: (False, 'private_turn')
+            self.service.cli_native_search = lambda *args: (False, 'refused')
         else:
             self.store.put('model', self.CONFIG)
             self.store.put('model_test', {'ok': True, 'tools_ok': True, 'time': 9999999999,
@@ -296,14 +296,15 @@ class _ConsumptionCase:
         with self.store.db() as db:
             self.assertEqual(db.execute('SELECT count(*) FROM memory_candidates').fetchone()[0], 0)
 
-    def test_a_saved_private_value_never_reaches_the_wire(self):
-        """CT-15 (pilot): the admitted place goes out; the value saved in this Work does not."""
+    def test_a_saved_private_value_goes_out_when_the_worker_uses_it(self):
+        """CT-15 as amended by #826 (owner decision): the admitted place goes out, and so does a value
+        saved in this Work when the worker puts it in the query; the Work's audit shows the query."""
         self.enable()
         self.turn('오늘 재택이야')
         self.turn('여권번호 저장하고 점심 먹을 데 찾아줘')
         [plan] = self.outbound('web_search')
         self.assertIn('합정', plan['query'])
-        self.assertNotIn(PASSPORT, json.dumps(self.network.plans))
+        self.assertIn(PASSPORT, plan['query'])
 
     def test_pausing_after_the_snapshot_withdraws_copied_coordinates(self):
         """#670 review P1: text the worker copied from the snapshot is withdrawn at dispatch."""

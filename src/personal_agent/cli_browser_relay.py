@@ -250,6 +250,13 @@ def RELAYED_SETTINGS(*_args, **_kwargs):
     raise ToolError(RELAY_UNAVAILABLE_TEXT, 'browser_relay_unavailable')
 
 
+def RELAYED_INFORMATION_USE(*_args, **_kwargs):
+    """The bridge's ``Capabilities.information_use`` placeholder (#826): ``information_use`` is
+    listed, and its calls go to the service, which holds the Work records and the stored-secret
+    redaction.  Never run in the bridge."""
+    raise ToolError(RELAY_UNAVAILABLE_TEXT, 'browser_relay_unavailable')
+
+
 def RELAYED_LOCATION_REQUEST(*_args, **_kwargs):
     """The bridge's ``Capabilities.location_request`` placeholder (#774): ``ask_location`` is
     listed, and its calls go to the service, which holds the paired Telegram chat.  Never run in the bridge."""

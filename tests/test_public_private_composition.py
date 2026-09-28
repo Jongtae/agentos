@@ -1,17 +1,19 @@
-"""AGENCY-EGRESS-01 (#605) composition under the SEC-PILOT-01 (#654) pilot posture.
+"""Public lookup composition after EGRESS-OPEN-01 (#826), on top of #605/#654.
 
 Evidence class: unit and controlled local integration with fake transports.
 No model, provider, network, credential or owner data is used.  Every test
 asserts the *actual* outbound arguments that reached the fake public
 transport (or that none did), not merely the absence of one secret sentinel.
 
-What remains after #654 is deterministic only: the worker's query goes out
-as composed, in a clean and in a private context alike (a private document or
-store sharing the Work), minus saved or written private values in every
-spelling; the document-sharing grant and the provenance refusals hold.  No
-per-request sensitivity judgment, owner-worded composition, word cap, fixed
-order, one-attempt memo, per-Work lookup cap or `/search` requirement exists
-on either route.
+Owner decision (2026-09-28, #826): the worker's query goes out as the worker
+wrote it, in a clean and in a private context alike, including owner values
+this Work saved or read; a private context no longer refuses a lookup and a
+delegated specialist looks up like its parent.  What remains is deterministic
+only: stored secrets and credential shapes never leave (pilot invariant a),
+withdrawn current-context text is removed in every spelling (#627), the
+provider's query length bounds the text and the owner's page approval bounds
+``public_page_read``.  No per-request sensitivity judgment, word cap, fixed
+order, one-attempt memo, per-Work lookup cap or `/search` requirement exists.
 """
 import contextlib
 import io
@@ -24,7 +26,7 @@ from unittest import mock
 
 from personal_agent import mcp_bridge
 from personal_agent.agent_runtime import (ENGINE_UNMEDIATED, HISTORY_PREFIX, LOOKUP_QUERY_MAX, OWNER_CONVERSATION,
-                                          PUBLIC_TASK_UNRESOLVED, WORK_SOURCES_KEY, Capabilities, egress_refusal,
+                                          PUBLIC_TASK_UNRESOLVED, WORK_SOURCES_KEY, Capabilities,
                                           history_provenance, run_agent, work_sources)
 from personal_agent.bounded_execution import ExecutionResult
 from personal_agent.decision import FixtureDecisionEngine
@@ -99,7 +101,7 @@ class DecisionTable(unittest.TestCase):
         self.wire = Wire()
 
     def caps(self, labels=(), permitted=None, excluded=(), **kwargs):
-        sources = None if permitted is None else (lambda: {'permitted': list(permitted), 'excluded': list(excluded)})
+        sources = None if permitted is None else (lambda: {'current': (list(permitted) or [''])[-1], 'excluded': list(excluded)})
         kwargs.setdefault('public_page_scope', {URL})
         return Capabilities(self.store, None, CFG, '', next_work(), lambda *e: None, network=self.wire,
                             inherited_provenance=set(labels), lookup_sources=sources, **kwargs)
@@ -111,26 +113,28 @@ class DecisionTable(unittest.TestCase):
          [{'tool': 'web_search', 'query': 'weather radar'}], None),
         ('owner conversation alone is not a private store', (HISTORY_PREFIX + OWNER_CONVERSATION,), None, (),
          'weather', {'city': 'Daejeon', 'country': 'KR'}, [{'tool': 'weather', 'city': 'Daejeon', 'country': 'KR'}], None),
-        ('private context without a lookup resolver refuses and names the source', NOTES, None, (),
-         'web_search', {'query': PRIVATE}, [], '이전 대화의 저장된 메모'),
-        ('unrecorded history refuses without a resolver', (HISTORY_PREFIX + 'unrecorded',), None, (),
-         'weather', {'city': PRIVATE}, [], '출처 기록이 없는 이전 대화'),
+        ('#826: a private context without a lookup resolver sends the worker query', NOTES, None, (),
+         'web_search', {'query': PRIVATE}, [{'tool': 'web_search', 'query': PRIVATE}], None),
+        ('#826: unrecorded history no longer refuses a weather place', (HISTORY_PREFIX + 'unrecorded',), None, (),
+         'weather', {'city': PRIVATE}, [{'tool': 'weather', 'city': PRIVATE}], None),
         ('private context sends the worker query as composed (#654)', NOTES, ['병원 검색해줘'], (),
          'web_search', {'query': '분당 병원 hospital clinic'}, [{'tool': 'web_search', 'query': '분당 병원 hospital clinic'}], None),
-        ('a value this Work wrote is excluded in a private context', NOTES, ['성남에 있어', '여기 병원 찾아줘'], [PRIVATE],
-         'web_search', {'query': f'성남 병원 {PRIVATE}'}, [{'tool': 'web_search', 'query': '성남 병원'}], None),
-        ('passport number written to Memory is excluded even though the owner typed it', ('owner-memory',),
+        ('#826: a value this Work wrote goes out when the worker uses it', NOTES, ['성남에 있어', '여기 병원 찾아줘'], [PRIVATE],
+         'web_search', {'query': f'성남 병원 {PRIVATE}'}, [{'tool': 'web_search', 'query': f'성남 병원 {PRIVATE}'}], None),
+        ('#826: a passport number written to Memory goes out when the worker uses it', ('owner-memory',),
          [f'여권번호 {PASSPORT} 기억해 두고 병원 검색해줘'], [PASSPORT],
-         'web_search', {'query': f'병원 {PASSPORT}'}, [{'tool': 'web_search', 'query': '병원'}], None),
-        ('nothing remains after the exclusion: ask, send nothing', NOTES, ['그거 검색해줘'], [PRIVATE],
-         'web_search', {'query': PRIVATE}, [], PUBLIC_TASK_UNRESOLVED),
+         'web_search', {'query': f'병원 {PASSPORT}'}, [{'tool': 'web_search', 'query': f'병원 {PASSPORT}'}], None),
+        ('a credential shape never leaves; with nothing left, nothing is sent', NOTES, ['그거 검색해줘'], (),
+         'web_search', {'query': 'sk-abcdefghijklmnop1234'}, [], PUBLIC_TASK_UNRESOLVED),
+        ('a credential shape is removed from a query with other words', NOTES, ['병원 찾아줘'], (),
+         'web_search', {'query': '병원 token=hunter2hunter2'}, [{'tool': 'web_search', 'query': '병원'}], None),
         ('private context: a transliterated place and validated country go out (#654)', ('connected-document',),
          ['나는 대전에 있어'], (), 'weather', {'city': 'Daejeon', 'country': 'KR'},
          [{'tool': 'weather', 'city': 'Daejeon', 'country': 'KR'}], None),
         ('private context: a country that is not an ISO-2 code is omitted', ('connected-document',), ['나는 대전에 있어'], (),
          'weather', {'city': '대전', 'country': 'Korea'}, [{'tool': 'weather', 'city': '대전'}], None),
-        ('a saved value inside a longer word is withheld', NOTES, ['성남에 있어 병원 찾아줘'], ['정신과'],
-         'web_search', {'query': '성남정신과 병원'}, [{'tool': 'web_search', 'query': '병원'}], None),
+        ('#826: a saved value inside a longer word goes out', NOTES, ['성남에 있어 병원 찾아줘'], ['정신과'],
+         'web_search', {'query': '성남정신과 병원'}, [{'tool': 'web_search', 'query': '성남정신과 병원'}], None),
         ('approved page in the current scope', ('owner-calendar',), [], (),
          'public_page_read', {'url': URL}, [{'tool': 'public_page_read', 'url': URL, 'approved_urls': [URL]}], None),
         ('page outside the current scope', ('owner-calendar',), [], (),
@@ -148,8 +152,9 @@ class DecisionTable(unittest.TestCase):
                     self.assertIn(refusal, str(raised.exception))
                 else:
                     result = caps.execute(action, args)
-                    if permitted is not None:
-                        # Checked arguments are exactly the transmitted arguments.
+                    if permitted is not None and action != 'public_page_read':
+                        # Checked arguments are exactly the transmitted arguments; a page
+                        # address is fixed by the owner's approval, never composed.
                         self.assertEqual(result['composed_by'], 'agentos-public-task')
                         self.assertEqual({'tool': action, **result['sent']}, outbound[0])
                 self.assertEqual(self.wire.plans, outbound)
@@ -158,10 +163,24 @@ class DecisionTable(unittest.TestCase):
         caps = self.caps(self.NOTES, ['노트북 비교해줘'], [PRIVATE])
         with mock.patch.object(Capabilities, '_research', lambda self, mode, query, **selectors: {'query': query, 'mode': mode, 'sources': []}):
             result = caps.execute('bounded_public_research', {'mode': 'product', 'query': f'노트북 {PRIVATE}'})
-        self.assertEqual(result['sent'], {'query': '노트북', 'mode': 'product'})
+        self.assertEqual(result['sent'], {'query': f'노트북 {PRIVATE}', 'mode': 'product'})
 
-    def test_same_batch_memory_write_is_excluded_whichever_call_comes_first(self):
-        """"여권번호를 기억해 두고 병원 검색해줘" in one message, both call orders."""
+    def test_a_stored_secret_never_leaves_in_a_lookup(self):
+        """Pilot invariant a (#826 kept it): a stored secret's value is dropped from what is sent and recorded."""
+        caps = self.caps(self.NOTES, ['병원 찾아줘'], secret_redactor=lambda text: text.replace('OWNERSECRET99', '[redacted]'))
+        result = caps.execute('web_search', {'query': '병원 OWNERSECRET99 예약'})
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원 예약'}])
+        self.assertNotIn('OWNERSECRET99', json.dumps(result, ensure_ascii=False))
+        from personal_agent.agent_runtime import evidence_summary
+        self.assertEqual(evidence_summary('web_search', result)['sent'], {'query': '병원 예약'})
+        # A failing redactor withholds the text rather than sending it unredacted.
+        failing = self.caps(self.NOTES, ['병원 찾아줘'], secret_redactor=lambda text: 1 / 0)
+        with self.assertRaises(ValueError):
+            failing.execute('web_search', {'query': '병원 OWNERSECRET99'})
+        self.assertEqual(len(self.wire.plans), 1)
+
+    def test_same_batch_memory_write_no_longer_changes_the_query(self):
+        """#826: "여권번호를 기억해 두고 병원 검색해줘" in one message, both call orders: the worker's query goes out."""
         request = f'여권번호 {PASSPORT} 기억해 두고 병원 검색해줘'
         memory = tool_call('save_memory', {'memory_key': 'passport', 'content': PASSPORT}, 'm')
         search = tool_call('web_search', {'query': f'병원 {PASSPORT}'}, 's')
@@ -173,7 +192,7 @@ class DecisionTable(unittest.TestCase):
                 caps = self.caps((), [request])
                 run_agent(ModelAdapter(lambda *a, **k: replies.pop(0)), CFG, '', [{'role': 'user', 'content': request}],
                           '', caps, lambda *e: None)
-                self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+                self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': f'병원 {PASSPORT}'}])
 
     def test_revoked_page_scope_refuses_a_read_that_starts_afterwards(self):
         scope = {URL}
@@ -183,8 +202,11 @@ class DecisionTable(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '승인한 공개 페이지 범위가 없습니다'):
             caps.execute('public_page_read', {'url': URL + '#again'})
         tainted = self.caps(('connected-document',), [], public_page_scope=lambda: set(scope))
-        with self.assertRaisesRegex(ValueError, '현재 승인한 공개 페이지'):
+        with self.assertRaisesRegex(ValueError, '승인한 공개 페이지 범위가 없습니다'):
             tainted.execute('public_page_read', {'url': URL})
+        clean = self.caps(public_page_scope=lambda: {URL})
+        with self.assertRaisesRegex(ValueError, '현재 승인한 공개 페이지'):
+            clean.execute('public_page_read', {'url': URL + '?q=' + PRIVATE})
         self.assertEqual(len(self.wire.plans), 1, 'the read before revocation is not undone, and none follows it')
 
     def test_a_private_context_may_look_up_again_with_another_query(self):
@@ -198,7 +220,9 @@ class DecisionTable(unittest.TestCase):
         second = caps.execute('web_search', {'query': '분당 약국 pharmacy'})
         self.assertIsNot(second, first)
         self.assertEqual(second['sent'], {'query': '분당 약국 pharmacy'})
-        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}, {'tool': 'web_search', 'query': '성남 병원'},
+        # #826: the transient failure is retried once in a private context too (the #605 one-attempt rule is gone).
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}, {'tool': 'web_search', 'query': '병원'},
+                                           {'tool': 'web_search', 'query': '성남 병원'},
                                            {'tool': 'web_search', 'query': '분당 약국 pharmacy'}])
         # No durable one-attempt claim was recorded for the Work.
         with self.store.db() as db:
@@ -206,10 +230,10 @@ class DecisionTable(unittest.TestCase):
         self.assertEqual(requested, 0)
 
     def test_a_private_document_in_the_work_does_not_restrict_a_rewritten_query(self):
-        """#654: a worker rewrite with new words (translation, synonyms, provider keywords) goes out minus excluded values."""
+        """#654/#826: a worker rewrite with new words (translation, synonyms, provider keywords) goes out as written."""
         caps = self.caps(('connected-document',), ['성남 병원 찾아줘'], [SECRET_ID])
         caps.execute('web_search', {'query': f'Seongnam hospital clinic 병원 site:example.org {SECRET_ID}'})
-        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': 'Seongnam hospital clinic 병원 site:example.org'}])
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': f'Seongnam hospital clinic 병원 site:example.org {SECRET_ID}'}])
 
     def test_a_stale_binding_or_disabled_package_fails_closed_before_egress(self):
         def stale():
@@ -228,11 +252,12 @@ class DecisionTable(unittest.TestCase):
     def test_a_package_alias_is_governed_by_its_host_action(self):
         packages = runtime_packages([{'version': 1, 'id': 'news', 'enabled': True, 'roles': [],
                                       'tools': [{'id': 'news_search', 'host_action': 'web_search', 'mode': 'read_only'}]}])
-        self.caps(self.NOTES, ['병원 찾아줘'], [PRIVATE], packages=packages).execute('news_search', {'query': f'{PRIVATE} 병원'})
-        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+        result = self.caps(self.NOTES, ['병원 찾아줘'], [PRIVATE], packages=packages).execute('news_search', {'query': f'{PRIVATE} 병원'})
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': f'{PRIVATE} 병원'}])
+        self.assertEqual(result['composed_by'], 'agentos-public-task')
 
-    def test_a_delegated_specialist_never_composes_a_lookup(self):
-        """Laundering through another worker: the specialist is refused even when the parent could compose."""
+    def test_a_delegated_specialist_looks_up_like_its_parent(self):
+        """#826: a specialist holding the parent's private context is no longer refused a lookup."""
         bodies = []
 
         def transport(url, body, headers=None, timeout=60):
@@ -246,18 +271,9 @@ class DecisionTable(unittest.TestCase):
             return answer('report') if last['role'] in ('tool', 'system') else calls(tool_call('web_search', {'query': '병원'}, 'c1'))
 
         caps = Capabilities(self.store, ModelAdapter(transport), CFG, '', 'job-1', lambda *a: None, network=self.wire,
-                            inherited_provenance=set(self.NOTES), lookup_sources=lambda: {'permitted': ['병원 검색'], 'excluded': []})
+                            inherited_provenance=set(self.NOTES), lookup_sources=lambda: {'current': '병원 검색', 'excluded': []})
         run_agent(ModelAdapter(transport), CFG, '', [{'role': 'user', 'content': 'go'}], '', caps, lambda *a: None)
-        self.assertEqual(self.wire.plans, [])
-        child = [body for body in bodies if 'delegate_agent' not in [t['function']['name'] for t in body['tools']]]
-        refusal = next(json.loads(m['content']) for m in child[-1]['messages'] if m['role'] == 'tool')
-        self.assertIn('이전 대화의 저장된 메모', refusal['error'])
-
-    def test_the_refusal_names_every_actual_source(self):
-        text = egress_refusal('weather', {'owner-calendar', HISTORY_PREFIX + 'personal-space', 'delegated:owner-memory'})
-        for name in ('캘린더 일정', '이전 대화의 저장된 메모', '저장된 기억', '날씨 조회 지역명'):
-            self.assertIn(name, text)
-        self.assertNotIn('연결 문서', text)
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
 
 
 class RecordedSources(unittest.TestCase):
@@ -323,7 +339,7 @@ class ServiceComposition(unittest.TestCase):
             self.service.use_decision_engine(engine)
         self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
         # #701: these checks exercise the bridge web_search, which a native-search turn no longer offers.
-        self.service.cli_native_search = lambda *args: (False, 'private_turn')
+        self.service.cli_native_search = lambda *args: (False, 'refused')
 
     def turns(self, *texts):
         for text in texts:
@@ -458,7 +474,13 @@ TAG_ID = ''.join(chr(0xE0000 + ord(ch)) for ch in SECRET_ID)  # invisible Unicod
 
 
 class Redaction(unittest.TestCase):
-    """Deterministic redaction of saved/written values (#605 N4, kept by #654) on the one composition path."""
+    """Deterministic removal of withdrawn current-context text (#627) on the one composition path.
+
+    #826 removed saved and written owner values from the exclusion set; the
+    removal algorithm (#605 N4, P1-A, P2-B/D) now serves only the text a
+    current-context snapshot showed this Work whose source was paused,
+    cleared or superseded since.  ``excluded`` below is that withdrawn text.
+    """
 
     NOTES = (HISTORY_PREFIX + 'personal-space',)
     SAVED = [f'여권번호 {SECRET_ID}']
@@ -472,10 +494,11 @@ class Redaction(unittest.TestCase):
 
     def caps(self, labels=(), permitted=(), excluded=(), current=None, work=None, store=None, **kwargs):
         def sources():
-            return {'permitted': list(permitted), 'excluded': list(excluded),
-                    'current': current if current is not None else (list(permitted) or [''])[-1]}
-        return Capabilities(store or self.store, None, CFG, '', work or next_work(), lambda *e: None, network=self.wire,
+            return {'excluded': [], 'current': current if current is not None else (list(permitted) or [''])[-1]}
+        caps = Capabilities(store or self.store, None, CFG, '', work or next_work(), lambda *e: None, network=self.wire,
                             inherited_provenance=set(labels), lookup_sources=sources, **kwargs)
+        caps.withdrawn_context = lambda: list(excluded)
+        return caps
 
     def sent(self):
         return [plan.get('query', plan.get('city')) for plan in self.wire.plans]
@@ -487,14 +510,12 @@ class Redaction(unittest.TestCase):
                 self.caps((), list(permitted), saved).execute('web_search', {'query': query})
                 self.assertEqual(self.sent(), [expected])
 
-    # -- clean context: the worker's words go out as composed
+    # -- nothing withdrawn: the worker's words go out as written (#826)
     def test_clean_queries_keep_the_worker_string(self):
-        # Exactly what is sent under the P1-A separator policy: the ASCII
-        # operator allowlist survives; the currency symbol does not.
         for query, sent in (('Python 3.13 release notes', 'Python 3.13 release notes'),
                             ('"C++20" modules site:cppreference.com', '"C++20" modules site:cppreference.com'),
                             ('node.js -deno', 'node.js -deno'),
-                            ('₩50,000 이하 이어폰', '50,000 이하 이어폰'),
+                            ('₩50,000 이하 이어폰', '₩50,000 이하 이어폰'),
                             (BOOK_QUERY, BOOK_QUERY)):
             with self.subTest(query):
                 self.wire.plans.clear()
@@ -539,7 +560,9 @@ class Redaction(unittest.TestCase):
             self.caps(self.NOTES, ['병원 뉴스'], work='f3').execute('web_search', {'query': '병원'})
         self.wire.fail = False
         self.caps(self.NOTES, ['병원 뉴스'], work='f3').execute('web_search', {'query': '뉴스'})  # a new process
-        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}, {'tool': 'web_search', 'query': '뉴스'}])
+        # #826: the transient failure is retried once in a private context too.
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}, {'tool': 'web_search', 'query': '병원'},
+                                           {'tool': 'web_search', 'query': '뉴스'}])
 
     def test_r9_audit_appends_from_two_processes_are_not_lost(self):
         import threading
@@ -566,22 +589,18 @@ class Redaction(unittest.TestCase):
         self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': typed}] * 2)
         self.assertIsNone(self.store.config(f'work_lookup_state:{caps.job_id}', None))
 
-    def test_rewritten_words_go_out_and_saved_values_still_leave_out(self):
+    def test_rewritten_words_go_out(self):
         rewritten = self.caps((), ['/search 이혼소송 강남 변호사'])
         rewritten.execute('web_search', {'query': '이혼소송 강남 변호사 추천'})
         self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '이혼소송 강남 변호사 추천'}])
-        self.wire.plans.clear()
-        saved = self.caps(('owner-memory',), [f'/search {SECRET_ID} 병원'], [SECRET_ID])
-        saved.execute('web_search', {'query': f'{SECRET_ID} 병원'})
-        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
 
     def test_the_explicit_search_string_is_rechecked_too(self):
         typed = '병원 M123-여권번호-456-여권번호-78'
         self.caps((), [f'/search {typed}'], self.SAVED).execute('web_search', {'query': typed})
         self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
 
-    # -- saved and written values never leave, in any spelling
-    def test_r3_a_calendar_draft_is_excluded_in_process_and_after_a_restart(self):
+    # -- #826: a value this Work wrote goes out; withdrawn text never leaves, in any spelling
+    def test_r3_a_calendar_draft_value_goes_out_in_process_and_after_a_restart(self):
         from personal_agent.agent_runtime import lookup_sources
         from personal_agent.calendar import CALENDAR_STATE_KEY
 
@@ -596,7 +615,7 @@ class Redaction(unittest.TestCase):
         caps = self.caps((), [message], calendar=Calendar(), calendar_owner='owner')
         caps.execute('calendar_draft_create', {'summary': f'{SECRET_ID} 치과', 'start': 's', 'end': 'e', 'timezone': 'UTC'})
         caps.execute('web_search', {'query': f'{SECRET_ID} 병원'})
-        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': f'{SECRET_ID} 병원'}])
         # A restarted process: the draft is found through the Work's durable event.
         job = self.store.enqueue(message, 'r3')
         with self.store.db() as db:
@@ -608,7 +627,7 @@ class Redaction(unittest.TestCase):
         self.wire.plans.clear()
         Capabilities(QuickStore(self.path), None, CFG, '', job, lambda *e: None, network=self.wire,
                      lookup_sources=lambda: lookup_sources(QuickStore(self.path), job)).execute('web_search', {'query': f'{SECRET_ID} 병원'})
-        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '병원'}])
+        self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': f'{SECRET_ID} 병원'}])
 
     def test_r7_a_short_number_is_not_a_piece_of_a_saved_value(self):
         self.caps(('owner-memory',), ['3일 서울 날씨 검색해줘'], [SECRET_ID]).execute('web_search', {'query': '3일 서울 날씨'})
@@ -708,7 +727,7 @@ class Redaction(unittest.TestCase):
                 self.assertTrue(all(ord(ch) < 0xE0000 for ch in json.dumps(self.wire.plans, ensure_ascii=False)))
 
     def test_p1_a_separators_are_capped_per_separator_and_in_total(self):
-        self.caps((), ['검색해줘']).execute('web_search', {'query': 'a.-+#:/b c(),&"d ' + ' '.join('e' * 1 + '.' + 'f' for _ in range(10))})
+        self.caps((), ['검색해줘'], ['zz']).execute('web_search', {'query': 'a.-+#:/b c(),&"d ' + ' '.join('e' * 1 + '.' + 'f' for _ in range(10))})
         sent = self.wire.plans[0]['query']
         self.assertIn('a.-+b', sent, 'at most 3 operator characters per separator')
         self.assertLessEqual(sum(1 for ch in sent if not ch.isalnum() and not ch.isspace()), 12)
@@ -772,7 +791,7 @@ class PilotPostureEndToEnd(unittest.TestCase):
         service.local_tools = wire
         service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
         # #701: these checks exercise the bridge web_search, which a native-search turn no longer offers.
-        service.cli_native_search = lambda *args: (False, 'private_turn')
+        service.cli_native_search = lambda *args: (False, 'refused')
         return service, refusals
 
     def test_api_route_without_an_engine_sends_the_request_at_once(self):
@@ -805,14 +824,18 @@ class PilotPostureEndToEnd(unittest.TestCase):
     SEARCH = ('web_search', {'query': f'성남 병원 {SECRET_ID}'})
     SAVE = ('save_memory', {'memory_key': 'passport', 'content': SECRET_ID})
 
-    def test_a_value_saved_in_the_same_turn_is_redacted_deterministically(self):
+    def test_a_value_saved_in_the_same_turn_goes_out_when_the_worker_uses_it(self):
+        """#826: the owner decision replaces the exclusion with the Work's information-use audit."""
         cases = {'save then search': ([self.SAVE], [self.SEARCH]), 'same batch': ([self.SEARCH, self.SAVE],)}
         for case, batches in cases.items():
             with self.subTest(case):
                 self.wire.plans.clear()
                 service = self.api(self.steps(*batches))
-                self.turn(service, f'여권번호 {SECRET_ID} 기억해 두고 성남 병원 검색해줘')
-                self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': '성남 병원'}])
+                job = self.turn(service, f'여권번호 {SECRET_ID} 기억해 두고 성남 병원 검색해줘')
+                self.assertEqual(self.wire.plans, [{'tool': 'web_search', 'query': f'성남 병원 {SECRET_ID}'}])
+                audit = service.work_information_use(job['id'])
+                self.assertTrue(audit['sent_to']['web_search_ran'])
+                self.assertIn(f'성남 병원 {SECRET_ID}', audit['sent_to']['lookups'][0]['queries'])
 
     def test_an_unsaved_value_the_owner_typed_goes_out_under_the_pilot_posture(self):
         """The removed judgment is not replaced by a rule: what the owner typed and did not save is sent."""

@@ -862,7 +862,8 @@ class CliBrokerOutcomeTests(unittest.TestCase):
         self.assertEqual(row['status'], 'failed')
         self.assertEqual(row['response'], '확인했습니다.')
         self.assertEqual([event['tool'] for event in failed], ['web_search'])
-        self.assertIn('공개 조회에 보낼 수 있는 내용이 남지 않았습니다', row['owner_cause'] or '')
+        # #826: the search goes out (the saved value is no longer excluded) and fails without a provider.
+        self.assertIn('웹 검색', row['owner_cause'] or '')
 
 
 if __name__ == '__main__':

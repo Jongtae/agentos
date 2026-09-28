@@ -35,8 +35,9 @@ class _Capabilities:
 # #774: the owner-state tools are relayed to the service on the trusted-local route.
 # #814: so are the owner settings tools.
 BOUNDED_NAMES = ['ask_location', 'bounded_public_research', 'browser_click', 'browser_find', 'browser_open', 'browser_read', 'browser_type',
-                 'calendar_draft_cancel', 'calendar_draft_create', 'calendar_draft_update', 'calendar_query', 'list_memory',
-                 'list_notes', 'propose_current_state', 'save_memory', 'save_note', 'schedule_preparation',
+                 'calendar_draft_cancel', 'calendar_draft_create', 'calendar_draft_update', 'calendar_query', 'find_files',
+                 'information_use', 'list_memory', 'list_notes', 'list_roots', 'propose_current_state', 'public_page_read',
+                 'read_file', 'save_memory', 'save_note', 'schedule_preparation',
                  'settings_change', 'settings_read', 'weather', 'web_search']
 
 
@@ -357,15 +358,12 @@ class SubscriptionServiceTests(unittest.TestCase):
             self.assertTrue(service.run_one())
             self.assertEqual(adapter.call[0], 'codex')
             # The real service route with current context off (#627): no gated action.
-            # #678 P1: this clean turn may use the CLI's own web search, so no
-            # private-read bridge tool (list_notes) is offered to it; #701: nor the
-            # bridge's own search tools, which the CLI's search replaces.  The
-            # browser tools stay (served by this service through the relay).
-            # A native-search turn offers no private read (#678), now including Memory and calendar reads (#774);
-            # #804: save_memory is a write with no stored content in its result, so it stays offered.
+            # This clean turn uses the CLI's own web search, so the bridge's own search
+            # tools, which the CLI's search replaces, are not offered (#701).  #826: every
+            # private-read bridge tool (notes, Memory, calendar, connected-folder documents)
+            # is offered beside it.  The browser tools stay (served through the relay).
             self.assertEqual(adapter.call[2], [name for name in BOUNDED_NAMES if name not in
-                                               ('propose_current_state', 'list_notes', 'web_search', 'bounded_public_research',
-                                                'calendar_query', 'list_memory',
+                                               ('propose_current_state', 'web_search', 'bounded_public_research',
                                                 # #774: a non-Telegram Work could never be answered.
                                                 'ask_location')])
             self.assertEqual(store.job(job)['response'], 'engine answer')

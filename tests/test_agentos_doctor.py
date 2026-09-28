@@ -214,12 +214,11 @@ def test_deliberately_missing_binding_is_identified(tmp_path):
 
 
 def test_declared_profile_limits_are_reported_as_limits_not_missing_bindings(tmp_path):
-    """#604: an approval bound to another provider is a route limit, not incapability."""
+    """#604: a declared limit is a route limit, not incapability; #826: trusted-local now offers every public read."""
     report = installation(fake_install(tmp_path))
     routes = report["routes"]
-    assert {"weather", "web_search"} <= set(routes["bounded-cli-mcp"])
-    assert routes["declared_limits"]["bounded-cli-mcp"] == {
-        "public_page_read": "owner-page-approval-bound-to-direct-api-model"}
+    assert {"weather", "web_search", "public_page_read"} <= set(routes["bounded-cli-mcp"])
+    assert "bounded-cli-mcp" not in routes["declared_limits"]
     assert routes["trust"]["bounded-cli-mcp"]["trust"] == "trusted-local"
     assert "outside AgentOS provenance" in routes["trust"]["bounded-cli-mcp"]["limitation"]
     assert set(routes["declared_limits"]["isolated-cli-mcp"]) == {"weather", "web_search", "public_page_read"}

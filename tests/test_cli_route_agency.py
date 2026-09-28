@@ -400,7 +400,8 @@ class NativeSearchOnBackfilledHistory(unittest.TestCase):
         self.assertTrue(seen['native'], record.get('native_search_reason'))
         self.assertEqual(record['cli_native_tools'], ['web_search'])
         self.assertIsNone(record.get('native_search_reason'))
-        self.assertFalse({'web_search', 'bounded_public_research', 'list_notes'} & set(seen['names']))
+        self.assertFalse({'web_search', 'bounded_public_research'} & set(seen['names']))
+        self.assertIn('list_notes', seen['names'], '#826: private reads beside the CLI\'s own search')
         self.assertTrue(BROWSER_ACTIONS <= set(seen['names']), 'the browser tools stay on a native-search turn')
         self.assertNotIn('prompt_withheld', record, 'unrecorded/unmediated history no longer withholds the local envelope')
 
@@ -444,17 +445,19 @@ class _TurnCapture(BoundedExecutionAdapter):
 HISTORY_KINDS = ('notes-work', 'codex-list-notes', 'unrecorded', ENGINE_UNMEDIATED, 'owner-browser-session')
 HISTORY_LABEL = {'notes-work': 'personal-space', 'codex-list-notes': 'personal-space', 'unrecorded': 'unrecorded',
                  ENGINE_UNMEDIATED: ENGINE_UNMEDIATED, 'owner-browser-session': 'owner-browser-session'}
-PRIVATE_READS = {'list_notes', 'web_search', 'bounded_public_research'}
+#: The bridge's own search tools, which the CLI's own search replaces (#701).
+BRIDGE_SEARCH = {'web_search', 'bounded_public_research'}
 
 
 class HistoryNeverTurnsNativeSearchOff(unittest.TestCase):
-    """#705 (owner direction, pilot posture): prior conversation never turns the CLI's own search off.
+    """#705/#826 (owner decisions): owner-private material never turns the CLI's own search off.
 
-    Only this turn's own splices, the strict or isolated profile and a
-    remembered CLI refusal do.  The private-read bridge tools stay withheld
-    on a native-search turn, and the #605 history labels still reach the
-    bridge (AgentOS-composed third-party lookups) and the turn record.
-    Both CLI routes, through the production argv and bridge configuration.
+    Only the strict or isolated profile and a remembered CLI refusal do.
+    Since #826 neither this turn's own splices nor any history does, and the
+    private-read bridge tools are offered beside the CLI's own search.  The
+    #605 history labels still reach the bridge and the turn record, where
+    the Work's information-use audit reads them.  Both CLI routes, through
+    the production argv and bridge configuration.
     """
 
     def service(self, engine):
@@ -512,14 +515,16 @@ class HistoryNeverTurnsNativeSearchOff(unittest.TestCase):
         self.assertEqual(record['cli_native_tools'], ['web_search'])
         self.assertIn('--native-search', bridge)
         self.assertFalse([arg for arg in bridge if arg.startswith('--search-off-reason')])
-        self.assertFalse(PRIVATE_READS & listed, 'private reads and bridge search stay withheld')
+        self.assertFalse(BRIDGE_SEARCH & listed, 'the CLI\'s own search replaces the bridge search')
+        self.assertIn('list_notes', listed, '#826: private reads beside the CLI\'s own search')
         if engine == 'codex':
             self.assertIn('web_search="live"', argv)
         else:
             self.assertEqual(argv[argv.index('--tools') + 1], 'WebSearch')
             allowed = argv[argv.index('--allowedTools') + 1].split(',')
             self.assertIn('WebSearch', allowed)
-            self.assertFalse({'mcp__agentos__' + name for name in PRIVATE_READS} & set(allowed))
+            self.assertIn('mcp__agentos__list_notes', allowed)
+            self.assertFalse({'mcp__agentos__' + name for name in BRIDGE_SEARCH} & set(allowed))
 
     def assert_off(self, engine, record, reason):
         argv, bridge = self.seen['argv'], self.seen['bridge']
@@ -551,12 +556,13 @@ class HistoryNeverTurnsNativeSearchOff(unittest.TestCase):
                         # ...and a turn that carried a private store keeps size and digest only.
                         self.assertIn(HISTORY_LABEL[kind], record.get('prompt_withheld') or [])
 
-    def test_codex_own_list_notes_turns_search_off_for_that_turn_only(self):
+    def test_a_notes_splice_no_longer_turns_search_off(self):
+        """#826: the /summarize splice of the owner's notes keeps the CLI's own search on."""
         service = self.service('codex')
         with self.store.db() as db:
             db.execute('INSERT INTO notes VALUES (?,?,?)', ('n1', 'NOTE-705', 1))
         notes, record = self.run_turn(service, '/summarize')
-        self.assert_off('codex', record, 'private_turn')
+        self.assert_native('codex', record)
         # The CLI itself reads notes on a later search-off turn: recorded by the bridge.
         with self.store.db() as db:
             db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
@@ -567,14 +573,14 @@ class HistoryNeverTurnsNativeSearchOff(unittest.TestCase):
             self.assert_native('codex', record)
             self.assertIn('--provenance=history:personal-space', self.seen['bridge'])
 
-    def test_the_current_turns_own_splice_still_turns_it_off_on_either_cli(self):
+    def test_the_current_turns_own_splice_no_longer_turns_it_off_on_either_cli(self):
         for engine in ('codex', 'claude-code'):
             with self.subTest(engine=engine):
                 service = self.service(engine)
                 with self.store.db() as db:
                     db.execute('INSERT INTO notes VALUES (?,?,?)', ('n1', 'NOTE-705', 1))
                 _job, record = self.run_turn(service, '/summarize')
-                self.assert_off(engine, record, 'private_turn')
+                self.assert_native(engine, record)
                 _job, record = self.run_turn(service, '오늘 서울 날씨 알려줘')
                 self.assert_native(engine, record)
 
@@ -626,7 +632,7 @@ class HistoryNeverTurnsNativeSearchOff(unittest.TestCase):
                 self.assertTrue(self.seen.get('sidecar') if isolated else self.seen['native'] is False)
         service = self.service('codex')
         for profile, isolated in ((STRICT_PROFILE, False), (BOUNDED_PROFILE, True)):
-            self.assertEqual(service.cli_native_search('codex', profile, isolated, set()), (False, 'strict_profile'))
+            self.assertEqual(service.cli_native_search('codex', profile, isolated), (False, 'strict_profile'))
         adapter = BoundedExecutionAdapter(finder=lambda name: '/runtime/' + name)
         config = Path(tempfile.mkdtemp()) / 'agentos-mcp.json'
         self.addCleanup(lambda: config.unlink(missing_ok=True))
@@ -652,7 +658,8 @@ class NativeSearchTurnArgv(unittest.TestCase):
         self.assertIn('web_search="live"', argv)
         caps = _caps(browser=lambda: None)
         listed = [tool['name'] for tool in AgentOSMcpTools(caps, native_search=True).definitions()]
-        self.assertFalse({'web_search', 'bounded_public_research', 'list_notes'} & set(listed))
+        self.assertFalse({'web_search', 'bounded_public_research'} & set(listed))
+        self.assertIn('list_notes', listed, '#826: private reads beside the CLI\'s own search')
         self.assertTrue(BROWSER_ACTIONS <= set(listed))
         off = [tool['name'] for tool in AgentOSMcpTools(caps).definitions()]
         self.assertTrue({'web_search', 'bounded_public_research', 'list_notes'} <= set(off), 'a search-off turn keeps them')
@@ -663,7 +670,7 @@ class NativeSearchTurnArgv(unittest.TestCase):
         self.assertIn('WebSearch', allowed)
         self.assertNotIn('mcp__agentos__web_search', allowed)
         self.assertNotIn('mcp__agentos__bounded_public_research', allowed)
-        self.assertNotIn('mcp__agentos__list_notes', allowed)
+        self.assertIn('mcp__agentos__list_notes', allowed, '#826: private reads beside the CLI\'s own search')
         self.assertIn('mcp__agentos__browser_open', allowed)
         self.assertEqual(argv[argv.index('--tools') + 1], 'WebSearch')
         off = self.adapter.command('claude-code', '/runtime/claude', 'prompt', self.config, 'instructions')
@@ -674,11 +681,11 @@ class NativeSearchTurnArgv(unittest.TestCase):
         network = type('Network', (), {'providers': ProviderRegistry.from_config({'bing_enabled': True, 'native': {'subscription': 'codex'}})})()
         caps = _caps(network=network)
         tools = AgentOSMcpTools(caps)
-        tools.native_search_reason = 'private_turn'
+        tools.native_search_reason = 'refused'
         described = {tool['name']: tool['description'] for tool in tools.definitions()}
         for name in ('web_search', 'bounded_public_research'):
             self.assertIn("The CLI's own web search is off for this turn", described[name])
-            self.assertIn('개인 자료', described[name], 'the owner-facing reason')
+            self.assertIn('자체 웹 검색을 쓸 수 없다고', described[name], 'the owner-facing reason')
             self.assertIn('bing = Bing web search', described[name])
             self.assertIn('poor or off-topic for Korean', described[name], "the provider's own caveat")
         self.assertNotIn('off for this turn', described['save_note'])

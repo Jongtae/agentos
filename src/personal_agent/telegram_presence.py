@@ -124,6 +124,7 @@ FALLBACK_STEP_LINES = {
     'schedule_preparation': (None, '예약 만드는 중'),
     'ask_location': (None, '위치 요청 중'),
     'settings_read': (None, '설정 확인 중'),
+    'information_use': (None, '사용한 정보 확인 중'),
     'settings_change': (None, '설정 변경 초안 만드는 중'),
 }
 

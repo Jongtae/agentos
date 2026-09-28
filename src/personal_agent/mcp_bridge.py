@@ -13,7 +13,7 @@ import time
 
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
 
-from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_STATE_ACTIONS, TRANSIENT_FAILURE_TEXT,
+from .agent_runtime import (ENGINE_UNMEDIATED, OWNER_STATE_ACTIONS, TRANSIENT_FAILURE_TEXT,
                             Capabilities, ToolError, WorkBudget, WorkLedger, classify_failure, declared_effect,
                             evidence_summary, lookup_sources, progress_step, recorded_private_sources, split_status, work_source_records,
                             work_stop_requested)
@@ -21,7 +21,8 @@ from .current_context import redact_known_secrets
 from .providers import ProviderError
 from .bounded_execution import (AgentOSMcpTools, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, ExecutionError,  # noqa: F401
                                 profile_actions, redact_reason, turn_actions)
-from .cli_browser_relay import RELAYED_LOCATION_REQUEST, RELAYED_PREPARATIONS, RELAYED_SETTINGS, RelayClient, unused_browser_factory
+from .cli_browser_relay import (RELAYED_INFORMATION_USE, RELAYED_LOCATION_REQUEST, RELAYED_PREPARATIONS, RELAYED_SETTINGS,
+                                RelayClient, unused_browser_factory)
 from .context_observations import answerable_work
 from .local_tools import LocalTools
 from .search_providers import ProviderRegistry
@@ -47,12 +48,12 @@ def _send(value):
 
 
 def _provenance(labels):
-    """Egress-taint labels handed over by the AgentOS process for this Work.
+    """Private-source labels handed over by the AgentOS process for this Work.
 
     The bridge runs as a separate process, so the Work's private-source
     provenance (same-turn sources and conversation history) must be passed
-    in explicitly.  Any label -- known or not -- is kept: an unknown label
-    still closes public egress, never opens it.
+    in explicitly.  Any label -- known or not -- is kept.  #826: the labels
+    are a record for the Work's information-use audit, not an egress gate.
     """
     return {str(label) for label in labels or () if str(label).strip()}
 
@@ -95,8 +96,22 @@ def _recorded_private_sources(store, job_id, tools=None):
 
 
 def _lookup_sources(store, job_id):
-    """The same permitted-text resolver the host uses (#605)."""
+    """The same lookup resolver the host uses (#605): the running-Work binding and the Work's saved values."""
     return lambda: lookup_sources(store, job_id)
+
+
+def approved_public_pages(store):
+    """The owner's current approved public page addresses (#826).
+
+    The exact normalized URLs the owner approved in Settings; read on every
+    use, so a revoked approval refuses a later read.  On this route the
+    approval is the owner's page grant itself; it is not bound to the
+    direct-API model's fingerprint.
+    """
+    saved = store.config('public_page_sharing', {})
+    if not isinstance(saved, dict) or saved.get('approved') is not True:
+        return []
+    return [url for url in saved.get('urls') or [] if isinstance(url, str)]
 
 
 #: The Work this bridge serves has ended; a typed tool error, not a protocol one.
@@ -152,15 +167,14 @@ def unexpected_error_result(exc, action):
 
 
 def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROFILE, browser_relay=None,
-          search_off_reason='', only=None, relay_browser=True):
+          search_off_reason='', relay_browser=True):
     """Serve one Work's AgentOS tools over stdio for the route profile the host named (#701).
 
     ``profile`` is ``trusted-local`` or ``strict-isolated``; anything else
     serves the strict set.  ``browser_relay`` (trusted-local only) is the
     service's relay directory: the browser tools are then listed and every
     browser call is executed by the service (``cli_browser_relay``); without
-    it no browser tool is offered.  ``only`` (#710) is the orchestrator's
-    validated tool subset for this turn (None: the profile's set); it only narrows.
+    it no browser tool is offered.
     """
     profile = profile if profile in HOST_CLI_PROFILES else STRICT_PROFILE
     relay = RelayClient(browser_relay) if browser_relay and profile == BOUNDED_PROFILE else None
@@ -170,10 +184,13 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
             db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)', (job_id,tool,status,detail,time.time()))
     # #604: the Work's allowed actions are the bounded CLI profile; names and
     # schemas come from Capabilities.definitions(), never a bridge-local list.
-    capabilities = Capabilities(store, None, {}, '', job_id, record, network=LocalTools(providers=ProviderRegistry.from_store(store)), document_access=False,
-                                # #678 P1: a turn that may search natively gets no private read.
+    # #826: the connected-folder documents and approved public pages the profile offers are
+    # read here, within the folder grants (``Capabilities.roots``/``resolve_file``) and
+    # the owner's page approval (``approved_public_pages``) the tools check on every call.
+    capabilities = Capabilities(store, None, {}, '', job_id, record, network=LocalTools(providers=ProviderRegistry.from_store(store)), document_access=True,
+                                public_page_scope=lambda: approved_public_pages(store),
                                 # #774: owner-state tools run only in the service; without its relay they are not offered.
-                                allowed_tools=(set(turn_actions(profile, native_search and profile == BOUNDED_PROFILE, only))
+                                allowed_tools=(set(turn_actions(profile, native_search and profile == BOUNDED_PROFILE))
                                                - (set() if relay is not None else set(OWNER_STATE_ACTIONS))),
                                 # #701: a placeholder that lists the browser tools; their calls go to the service.
                                 browser=unused_browser_factory if relay is not None and relay_browser else None,
@@ -184,7 +201,9 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                                                   and answerable_work(store.job(job_id)) else None),
                                 # #814: a placeholder that lists the settings tools; their calls go to the service.
                                 settings=RELAYED_SETTINGS if relay is not None else None,
-                                inherited_provenance=_provenance(provenance), lookup_hint=CLI_LOOKUP_HINT,
+                                # #826: a placeholder that lists information_use; its calls go to the service.
+                                information_use=RELAYED_INFORMATION_USE if relay is not None else None,
+                                inherited_provenance=_provenance(provenance),
                                 lookup_sources=_lookup_sources(store, job_id),
                                 # #607 AX-10: the same durable attempt count and
                                 # deadline as the host serving this Work.
@@ -197,7 +216,6 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
     tools.PROFILE = profile
     tools.relay = relay
     tools.native_search_reason = str(search_off_reason or '')
-    tools.only = only
     for line in sys.stdin:
         try:
             request = json.loads(line)
@@ -289,10 +307,7 @@ if __name__ == '__main__':
     parser.add_argument('--search-off-reason',default='')
     parser.add_argument('--browser-relay',default=None)
     parser.add_argument('--relay-no-browser',action='store_true')
-    # #710: the orchestrator's per-request tool subset (comma-separated; absent: the profile's set).
-    parser.add_argument('--only',default=None)
     args=parser.parse_args()
-    only=None if args.only is None else frozenset(name for name in args.only.split(',') if name)
     serve(args.data, args.job, args.provenance, native_search=args.native_search, profile=args.profile,
-          browser_relay=args.browser_relay, search_off_reason=args.search_off_reason, only=only,
+          browser_relay=args.browser_relay, search_off_reason=args.search_off_reason,
           relay_browser=not args.relay_no_browser)

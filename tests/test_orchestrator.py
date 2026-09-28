@@ -20,7 +20,7 @@ from personal_agent import browser_session as bs
 from personal_agent import mcp_bridge
 from personal_agent.agent_runtime import GOAL_NOT_SHOWN, GOAL_UNJUDGED, WorkBudget, render_turn_prompt, turn_context
 from personal_agent.bounded_execution import (BOUNDED_PROFILE, AgentOSMcpTools, BoundedExecutionAdapter,
-                                              ExecutionError, ExecutionResult, private_read_actions, turn_actions)
+                                              ExecutionError, ExecutionResult, turn_actions)
 from personal_agent.conversation_handoff import ConversationJudgments
 from personal_agent.decision import (OUTCOME_DECIDED, OUTCOME_MALFORMED, OUTCOME_UNAVAILABLE, STRUCTURED_UNSUPPORTED,
                                      BinaryDecision, DecisionContext, DecisionPolicy, FixtureDecisionEngine,
@@ -49,14 +49,9 @@ def reported(calls, end='turn.completed'):
     return {'tool_calls': list(calls), 'stream_tail': ['turn.started', end]}
 
 
-def plan(worker, notes, *, model='', tools=None, reason='fits', tools_reason=None):
-    """One plan (#820): worker, model, tools and optional notes; it never selects context or criteria."""
-    return {'worker': worker, 'model': model,
-            'brief': {'notes': notes},
-            'tools_mode': 'worker_default' if tools is None else 'subset', 'tools': list(tools or ()),
-            'tools_reason': ('only these tools are needed' if tools is not None else '') if tools_reason is None
-            else tools_reason,
-            'reason': reason}
+def plan(worker, notes, *, model='', reason='fits'):
+    """One plan (#820, #826): worker, model and optional notes; it never selects context, criteria or a tool subset."""
+    return {'worker': worker, 'model': model, 'brief': {'notes': notes}, 'reason': reason}
 
 
 def decided(data, probability=0.9):
@@ -97,7 +92,7 @@ class Engine:
         offered = sorted(tools._offered())
         self.turns.append({'engine': engine, 'prompt': prompt, 'model': kwargs.get('model'),
                            'native_search': tools.native_search, 'reason': tools.native_search_reason,
-                           'only': None if tools.only is None else sorted(tools.only), 'offered': offered,
+                           'offered': offered,
                            'context': kwargs.get('context')})
         if self.before:
             self.before(tools)
@@ -172,16 +167,6 @@ class Harness(unittest.TestCase):
     def codex_tools(self):
         from personal_agent.orchestrator import worker_catalogue
         return worker_catalogue(self.service).worker('codex')['tools']
-
-    def no_search(self):
-        """The one subset shape that keeps private reads: the web-search tools removed (#735)."""
-        return tuple(tool for tool in self.codex_tools() if tool not in SEARCH_TOOLS)
-
-    def no_private(self):
-        """The other kept shape: the private-read tools removed (#774: Memory and calendar reads included)."""
-        from personal_agent.orchestrator import worker_catalogue
-        private = set(worker_catalogue(self.service).worker('codex')['private_tools'])
-        return tuple(tool for tool in self.codex_tools() if tool not in private)
 
     def events(self, job, status=None):
         with self.store.db() as db:
@@ -336,22 +321,20 @@ class Redelegation(Harness):
         last = self.events(job, 'evaluated')[-1][1]
         self.assertEqual((last['outcome'], last['stop']), ('not_reached', 'budget'))
 
-    def test_a_later_attempt_keeps_this_works_private_reads(self):
-        """Review P2-1: attempt 1 read notes; attempt 2 on a CLI with its usual tools
-        gets no own web search, no private-read-and-search pair, and a size/digest-only envelope."""
+    def test_a_later_attempt_keeps_this_works_private_reads_in_its_record(self):
+        """Review P2-1 / #826: attempt 1 read notes; attempt 2 keeps the CLI's own web search and the
+        private reads together (owner decision), and the envelope stays size/digest only."""
         def read_notes(tools):
             if len(self.engine.turns) == 1:
                 tools.capabilities.record('list_notes', 'succeeded',
                                           json.dumps({'host_action': 'list_notes', 'evidence': {'count': 1}}))
         self.engine.before = read_notes
-        self.script([plan('codex', 'Read the saved notes.', tools=self.no_search()), plan('codex', 'Answer from them.')],
+        self.script([plan('codex', 'Read the saved notes.'), plan('codex', 'Answer from them.', model='gpt-5.6-luna')],
                     goals=[False, True])
         job, row = self.run_work('메모 확인해줘')
         self.assertEqual(len(self.engine.turns), 2)
         first, second = self.engine.turns
-        self.assertIsNone(second['only'], 'worker_default')
-        self.assertFalse(second['native_search'])
-        self.assertEqual(second['reason'], 'private_turn')
+        self.assertTrue(second['native_search'])
         self.assertIn('list_notes', second['offered'])
         record = self.store.turn_provenance(job)
         self.assertTrue(record['prompt_envelope'].startswith('[not stored'), record['prompt_envelope'])
@@ -392,7 +375,6 @@ class Fallback(Harness):
         [turn] = self.engine.turns
         self.assertEqual((turn['engine'], turn['model']), ('codex', None))
         self.assertNotIn('# Brief for this attempt', turn['prompt'])
-        self.assertIsNone(turn['only'])
         [(status, detail)] = self.events(job)
         self.assertEqual((status, detail['code'], detail['worker']), ('fallback', code, 'codex'))
         self.assertEqual(detail['text'], FALLBACK_TEXT[code])
@@ -433,55 +415,34 @@ class Fallback(Harness):
         self.assertNotIn(NOTICE_ONCE, row['response'], 'said once, not on every turn')
 
 
-class PerRequestTools(Harness):
-    def test_notes_with_search_off_or_search_without_notes_never_both(self):
-        self.script([plan('codex', 'Read the owner\'s saved notes and list the matching ones.', tools=self.no_search()),
-                     plan('codex', 'Search the public web.', tools=self.no_private())], goals=[True, True])
-        self.run_work('메모에서 찾아줘')
-        self.run_work('검색해줘')
-        notes, search = self.engine.turns
-        self.assertFalse(notes['native_search'])
-        self.assertEqual(notes['reason'], 'orchestrated_private_tools')
-        self.assertIn('list_notes', notes['offered'])
-        self.assertFalse(set(notes['offered']) & set(SEARCH_TOOLS))
-        self.assertTrue(search['native_search'])
-        self.assertNotIn('list_notes', search['offered'])
-        self.assertFalse(set(search['offered']) & set(SEARCH_TOOLS), 'the CLI\'s own search replaces the bridge search')
-        private = private_read_actions()
-        for turn in (notes, search):
-            self.assertFalse(turn['native_search'] and set(turn['offered']) & private)
+class PrivateReadsWithSearch(Harness):
+    """EGRESS-OPEN-01 (#826): private reads and the CLI's own web search run in the same attempt."""
 
-    def test_the_bridge_and_the_claude_allowlist_carry_only_the_subset(self):
-        self.assertEqual(turn_actions(BOUNDED_PROFILE, native_search=False, only={'list_notes'}), ('list_notes',))
-        self.assertEqual(turn_actions(BOUNDED_PROFILE, native_search=True, only={'list_notes'}), ())
+    def test_private_reads_and_the_clis_own_search_are_offered_together(self):
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        self.run_work('메모에서 찾아서 웹에서도 확인해줘')
+        [turn] = self.engine.turns
+        self.assertTrue(turn['native_search'])
+        for name in ('list_notes', 'list_memory', 'calendar_query', 'find_files', 'read_file', 'list_roots', 'save_memory'):
+            self.assertIn(name, turn['offered'])
+        self.assertFalse(set(turn['offered']) & set(SEARCH_TOOLS), 'the CLI\'s own search replaces the bridge search')
+
+    def test_the_claude_allowlist_pre_approves_private_reads_beside_websearch(self):
         adapter = BoundedExecutionAdapter(finder=lambda name: '/runtime/' + name, runner=lambda *a, **k: None,
                                           runtime_root=self.tmp / 'turns')
         config = self.tmp / 'mcp.json'
         config.write_text(json.dumps({'mcpServers': {'agentos': {'args': []}}}))
-        argv = adapter.command('claude-code', '/runtime/claude', 'p', config, only=frozenset({'list_notes'}))
-        self.assertEqual(argv[-1], 'mcp__agentos__list_notes')
-        argv = adapter.command('claude-code', '/runtime/claude', 'p', config, native_search=True,
-                               only=frozenset({'web_search'}))
-        self.assertEqual(argv[-1], 'WebSearch', 'no private read pre-approved next to the CLI\'s own search')
-        seen = {}
+        argv = adapter.command('claude-code', '/runtime/claude', 'p', config, native_search=True)
+        allowed = argv[-1].split(',')
+        self.assertIn('WebSearch', allowed)
+        for name in ('list_notes', 'list_memory', 'find_files', 'read_file'):
+            self.assertIn('mcp__agentos__' + name, allowed)
+        self.assertNotIn('mcp__agentos__web_search', allowed)
+        self.assertEqual(turn_actions(BOUNDED_PROFILE, native_search=True),
+                         tuple(name for name in turn_actions(BOUNDED_PROFILE) if name not in SEARCH_TOOLS))
 
-        class Done:
-            returncode = 0
-            stdout = json.dumps({'item': {'type': 'agent_message', 'text': 'done'}})
-
-        def runner(argv, **kwargs):
-            seen['args'] = json.loads((Path(kwargs['cwd']) / 'agentos-mcp.json').read_text())['mcpServers']['agentos']['args']
-            return Done()
-        adapter = BoundedExecutionAdapter(finder=lambda name: '/runtime/' + name, runner=runner,
-                                          runtime_root=self.tmp / 'turns2', codex_home=self.tmp)
-        from personal_agent.agent_runtime import Capabilities
-        tools = AgentOSMcpTools(Capabilities(self.store, None, {}, '', 'job', lambda *a: None, document_access=False))
-        tools.only = frozenset({'list_notes'})
-        adapter.execute('codex', 'prompt', tools)
-        self.assertIn('--only=list_notes', seen['args'])
-
-    def test_the_bridge_process_serves_only_the_subset(self):
-        job = self.store.enqueue('메모', 'bridge-only')
+    def test_the_bridge_process_serves_private_reads_on_a_native_search_turn(self):
+        job = self.store.enqueue('메모', 'bridge-native')
         with self.store.db() as db:
             db.execute("UPDATE jobs SET status='running' WHERE id=?", (job,))
         requests = [{'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}},
@@ -489,74 +450,31 @@ class PerRequestTools(Harness):
         out = io.StringIO()
         with mock.patch.object(sys, 'stdin', io.StringIO(''.join(json.dumps(r) + '\n' for r in requests))), \
                 mock.patch.object(sys, 'stdout', out):
-            mcp_bridge.serve(str(self.store.root), job, only=frozenset({'list_notes'}))
+            mcp_bridge.serve(str(self.store.root), job, native_search=True)
         replies = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
-        self.assertEqual([tool['name'] for tool in replies[1]['result']['tools']], ['list_notes'])
+        names = [tool['name'] for tool in replies[1]['result']['tools']]
+        for name in ('list_notes', 'find_files', 'read_file', 'list_roots', 'public_page_read'):
+            self.assertIn(name, names)
+        self.assertNotIn('web_search', names)
 
 
 class ToolsAndReplan(Harness):
     """ORCH-02 (#729): full toolset by default, learning from failed attempts, the bridge timeout."""
 
-    def test_the_worker_keeps_its_full_toolset_unless_a_reason_narrows_it(self):
-        self.assertIn('tools_mode is "worker_default"', QUESTION)
+    def test_the_worker_always_keeps_its_full_toolset(self):
+        """#826: the plan has no tool subset (its one reason, keeping private reads and search apart, is gone)."""
+        self.assertIn('The worker keeps its full offered toolset', QUESTION)
         self.script([plan('codex', 'Answer.')], goals=[True])
         job, _row = self.run_work('알려줘')
         [turn] = self.engine.turns
-        self.assertIsNone(turn['only'])
         self.assertIn('weather', turn['offered'], 'the full offered toolset, not a subset')
         context, _question, schema = self.asked_plans[0]
-        self.assertIn('tools_reason', schema['required'])
+        self.assertEqual(set(schema['required']), {'worker', 'model', 'brief', 'reason'})
         descriptions = context.facts['tool_descriptions']
         self.assertIn('- bounded_public_research: ', descriptions)
         self.assertIn('- list_notes: ', descriptions)
         self.assertTrue(all(len(line) < 260 for line in descriptions.splitlines()), 'one line per tool')
-        self.assertIsNone(self.events(job, 'planned')[0][1]['tools_reason'])
-
-    def test_a_subset_without_a_stated_reason_keeps_its_private_reads(self):
-        """#795: an unreasoned subset that asks for private reads keeps them (search removed), never the default
-        toolset that would hide them again on a native-search turn."""
-        self.script([plan('codex', 'Answer.', tools=self.no_search(), tools_reason='')], goals=[True])
-        job, _row = self.run_work('알려줘')
-        self.assertEqual(self.engine.turns[0]['only'], sorted(self.no_search()))
-        self.assertFalse(self.engine.turns[0]['native_search'])
-        planned = self.events(job, 'planned')[0][1]
-        self.assertEqual(planned['tools_replaced'], {'requested': sorted(self.no_search()), 'why': 'no_reason',
-                                                     'kept': 'private_reads'})
-
-    def test_a_subset_without_private_reads_and_without_a_reason_becomes_the_full_toolset(self):
-        self.script([plan('codex', 'Answer.', tools=self.no_private(), tools_reason='')], goals=[True])
-        job, _row = self.run_work('알려줘', key='no-private-no-reason')
-        self.assertIsNone(self.engine.turns[0]['only'])
-        planned = self.events(job, 'planned')[0][1]
-        self.assertEqual(planned['tools_replaced'], {'requested': sorted(self.no_private()), 'why': 'no_reason'})
-
-    def test_a_subset_with_a_reason_is_kept_and_recorded(self):
-        self.script([plan('codex', 'Read the notes.', tools=self.no_search(), tools_reason='keep private reads apart')],
-                    goals=[True])
-        job, _row = self.run_work('메모 봐줘')
-        self.assertEqual(self.engine.turns[0]['only'], sorted(self.no_search()))
-        planned = self.events(job, 'planned')[0][1]
-        self.assertEqual((planned['tools_reason'], planned['tools_replaced']), ('keep private reads apart', None))
-
-    def test_only_the_two_separation_shapes_survive_validation(self):
-        """#735 (Work a8e6aa7b): every one-tool subset became the full toolset."""
-        # #795: ('list_notes',) asks for a private read, so it keeps the private reads (tested separately).
-        cases = {('bounded_public_research',): 'shape', ('web_search',): 'shape',
-                 ('weather', 'web_search'): 'shape', ('read_file',): 'not_offered'}
-        for tools, why in cases.items():
-            with self.subTest(tools=tools):
-                self.engine.turns.clear()
-                self.script([plan('codex', 'Answer.', tools=tools)], goals=[True])
-                job, _row = self.run_work('알려줘', key=f'shape-{tools}')
-                self.assertIsNone(self.engine.turns[0]['only'])
-                self.assertEqual(self.events(job, 'planned')[0][1]['tools_replaced']['why'], why)
-        for tools in (self.no_search(), self.no_private()):
-            with self.subTest(kept=tools):
-                self.engine.turns.clear()
-                self.script([plan('codex', 'Answer.', tools=tools)], goals=[True])
-                job, _row = self.run_work('알려줘', key=f'kept-{len(tools)}-{hash(tools) & 0xffff}')
-                self.assertEqual(self.engine.turns[0]['only'], sorted(tools))
-                self.assertIsNone(self.events(job, 'planned')[0][1]['tools_replaced'])
+        self.assertNotIn('tools', self.events(job, 'planned')[0][1])
 
     def test_a_replan_never_repeats_a_failed_combination_and_sees_the_incomplete_call(self):
         def hang(tools):
@@ -564,8 +482,8 @@ class ToolsAndReplan(Harness):
             tools.capabilities.record('bounded_public_research', 'running', json.dumps(
                 {'scope': 'subscription-mcp-bridge', 'host_action': 'bounded_public_research'}))
         self.engine.before = hang
-        subset = plan('codex', 'Research it.', tools=('bounded_public_research',))
-        self.script([subset, dict(subset)], goals=[False])
+        first = plan('codex', 'Research it.')
+        self.script([first, dict(first)], goals=[False])
         job, row = self.run_work('조사해줘')
         self.assertEqual(len(self.engine.turns), 1, 'the identical combination was not run again')
         last = self.events(job, 'evaluated')[-1][1]
@@ -581,12 +499,12 @@ class ToolsAndReplan(Harness):
                          [('tool_incomplete', 'transient', 'none')])
         self.assertNotEqual(row['status'], 'succeeded')
 
-    def test_a_changed_tool_set_is_allowed_after_a_failure(self):
-        self.script([plan('codex', 'Research it.', tools=self.no_private()), plan('codex', 'Use all tools.')],
+    def test_a_changed_model_is_allowed_after_a_failure(self):
+        self.script([plan('codex', 'Research it.'), plan('codex', 'Try another model.', model='gpt-5.6-luna')],
                     goals=[False, True])
         job, row = self.run_work('조사해줘')
         self.assertEqual(len(self.engine.turns), 2)
-        self.assertIsNone(self.engine.turns[1]['only'])
+        self.assertEqual(self.engine.turns[1]['model'], 'gpt-5.6-luna')
         self.assertEqual(row['status'], 'succeeded')
 
     def test_an_incomplete_effect_is_recorded_as_unknown(self):
@@ -722,46 +640,6 @@ class BundledListing(__import__('test_decision_routes').ServiceFixture):
         self.assertTrue(self.store.config(service.decision_routes.BUNDLED_CACHE)['failed'])
 
 
-class SubsetCategories(unittest.TestCase):
-    """#735 review: a subset removes a whole category or it is replaced."""
-
-    WORKER = {'tools': ['bounded_public_research', 'list_memory', 'list_notes', 'weather', 'web_search'],
-              'private_tools': ['list_memory', 'list_notes'], 'native_search': True}
-
-    def keep(self, removed, reason='keep them apart'):
-        from personal_agent.orchestrator import subset_or_default
-        return subset_or_default(self.WORKER, [tool for tool in self.WORKER['tools'] if tool not in removed], reason)
-
-    def test_whole_categories_are_kept(self):
-        self.assertEqual(self.keep({'list_memory', 'list_notes'})[1], None)
-        self.assertEqual(self.keep({'web_search', 'bounded_public_research'})[1], None)
-
-    def test_a_partial_private_category_with_search_asked_for_is_replaced(self):
-        """The plan asked for web search too, so the mix is the full toolset's (#795 review)."""
-        self.assertEqual(self.keep({'list_notes'}), (None, {'requested': ['bounded_public_research', 'list_memory',
-                                                                         'weather', 'web_search'], 'why': 'shape'}))
-
-    def test_a_worker_without_its_own_search_or_a_plan_asking_for_search_keeps_the_old_rule(self):
-        """#795 review: only a native-search worker hides private reads; a requested search is honoured."""
-        from personal_agent.orchestrator import subset_or_default
-        api = {**self.WORKER, 'native_search': False}
-        self.assertIsNone(subset_or_default(api, ['list_memory', 'weather'], 'why')[0])
-        self.assertIsNone(self.keep({'bounded_public_research', 'list_notes'})[0], 'web_search was asked for')
-
-    def test_a_single_private_read_request_keeps_every_private_read(self):
-        """The 2026-09-28 live case: the plan asked for calendar_query alone; it must not become the default set."""
-        tools, replaced = self.keep({'bounded_public_research', 'list_notes', 'weather', 'web_search'})
-        self.assertEqual(tools, frozenset({'list_memory', 'list_notes', 'weather'}))
-        self.assertEqual(replaced['kept'], 'private_reads')
-
-    def test_a_partial_search_category_is_replaced(self):
-        self.assertEqual(self.keep({'web_search'})[1]['why'], 'shape')
-        self.assertEqual(self.keep({'bounded_public_research'})[1]['why'], 'shape')
-
-    def test_a_category_plus_anything_else_is_replaced(self):
-        self.assertEqual(self.keep({'web_search', 'bounded_public_research', 'weather'})[1]['why'], 'shape')
-
-
 class UnsupportedModelSignal(unittest.TestCase):
     """#735 review: only the CLI's own unsupported-model signal marks a model refused."""
 
@@ -851,7 +729,7 @@ class BridgeSurvives(unittest.TestCase):
             import os
             env = {**os.environ, 'PYTHONPATH': os.pathsep.join(filter(None, (src, os.environ.get('PYTHONPATH'))))}
             done = subprocess.run([sys.executable, str(launcher), '--data', str(store.root), '--job', job,
-                                   '--profile=trusted-local', '--only=bounded_public_research'],
+                                   '--profile=trusted-local'],
                                   input=''.join(json.dumps(r) + '\n' for r in requests), capture_output=True, text=True,
                                   env=env, timeout=120)
             self.assertEqual(done.returncode, 0, done.stderr[-2000:])
@@ -1056,16 +934,6 @@ class OwnerQuestion(Harness):
 
 
 class Preflight(Harness):
-    def test_an_explicit_search_preflight_honours_a_subset_without_web_search(self):
-        """Review P2: the /search preflight is a web_search call; a subset without it skips it."""
-        self.script([plan('codex', 'Answer from the saved notes.', tools=self.no_search())], goals=[True])
-        job, row = self.run_work('/search 서울 날씨')
-        self.assertEqual(row['status'], 'succeeded')
-        self.assertEqual(len(self.engine.turns), 1)
-        with self.store.db() as db:
-            tools = [r['tool'] for r in db.execute('SELECT tool FROM tool_events WHERE job_id=?', (job,))]
-        self.assertNotIn('web_search', tools)
-
     def test_the_preflight_still_runs_with_the_usual_tools(self):
         self.script([plan('codex', 'Search it.')], goals=[True])
         job, _row = self.run_work('/search 서울 날씨')
@@ -1075,15 +943,16 @@ class Preflight(Harness):
         self.assertIn('subscription-preflight', scopes)
 
 
-class Pinned(Harness):
-    def test_spliced_private_material_keeps_the_default_worker(self):
+class NotPinned(Harness):
+    def test_spliced_private_material_no_longer_pins_the_default_worker(self):
+        """#826: material spliced into the turn (here the notes of /summarize) leaves every available worker open."""
         self.store.save_note = None
         with self.store.db() as db:
             db.execute('INSERT INTO notes VALUES (?,?,?)', ('n1', 'a saved note', 1.0))
         self.script([plan('codex', 'Summarize the notes.')], goals=[True])
         self.run_work('/summarize')
         [(_context, _question, schema)] = self.asked_plans
-        self.assertEqual(schema['properties']['worker']['enum'], ['codex'], 'only the approved destination')
+        self.assertEqual(set(schema['properties']['worker']['enum']), {'codex', 'openai'})
 
 
 class CatalogueData(Harness):
@@ -1093,7 +962,8 @@ class CatalogueData(Harness):
         codex, openai = catalogue.worker('codex'), catalogue.worker('openai')
         self.assertTrue(codex['default'] and codex['available'])
         self.assertIn('gpt-5.6-luna', codex['models'])
-        self.assertIn('list_notes', codex['private_tools'])
+        self.assertIn('list_notes', codex['tools'])
+        self.assertNotIn('private_tools', codex)
         self.assertTrue(openai['available'])
         self.assertEqual(openai['models'], ['gpt-4o-mini'], 'only the tool-call-verified model')
         self.assertEqual(openai['model_tiers'], {'gpt-4o-mini': 'lowest-cost'})
@@ -1299,13 +1169,13 @@ class OrchestrationUnit(unittest.TestCase):
         workers = [{'id': 'a', 'kind': 'subscription', 'name': 'A', 'destination': '', 'default': True, 'available': True,
                     'reason': '', 'native_search': True, 'browser': False, 'cost': 'c', 'latency': 'l',
                     'default_model': '', 'models': ['m1'], 'model_tiers': {'m1': 'lowest-cost'},
-                    'tools': ['list_notes', 'web_search'], 'private_tools': ['list_notes']},
+                    'tools': ['list_notes', 'web_search']},
                    {'id': 'b', 'kind': 'api', 'name': 'B', 'destination': '', 'default': False, 'available': True,
                     'reason': '', 'native_search': False, 'browser': False, 'cost': 'c', 'latency': 'l',
-                    'default_model': 'm2', 'models': ['m2'], 'model_tiers': {}, 'tools': ['weather'], 'private_tools': []},
+                    'default_model': 'm2', 'models': ['m2'], 'model_tiers': {}, 'tools': ['weather']},
                    {'id': 'c', 'kind': 'api', 'name': 'C', 'destination': '', 'default': False, 'available': False,
                     'reason': 'no_api_key', 'native_search': False, 'browser': False, 'cost': 'c', 'latency': 'l',
-                    'default_model': '', 'models': [], 'model_tiers': {}, 'tools': [], 'private_tools': []}]
+                    'default_model': '', 'models': [], 'model_tiers': {}, 'tools': []}]
         return Catalogue(workers, {}, 'a')
 
     def orchestration(self, answer, **kwargs):
@@ -1320,12 +1190,8 @@ class OrchestrationUnit(unittest.TestCase):
         orchestration, _events, _engine = self.orchestration(None)
         candidates = catalogue.available()
         self.assertEqual([row['id'] for row in candidates], ['a', 'b'], 'an unavailable worker is never offered')
-        ok, _ = orchestration.validate(plan('b', 'g', tools=('weather',)), candidates, 1)
-        self.assertEqual((ok.worker, ok.tools, ok.replaced), ('b', None, None), 'the full set is no subset')
-        ok, _ = orchestration.validate(plan('a', 'g', tools=('web_search',)), candidates, 1)
-        self.assertEqual((ok.tools, ok.replaced), (frozenset({'web_search'}), None), 'private reads removed')
-        ok, _ = orchestration.validate(plan('b', 'g', tools=('list_notes',)), candidates, 1)
-        self.assertEqual((ok.tools, ok.replaced), (None, {'requested': ['list_notes'], 'why': 'not_offered'}))
+        ok, _ = orchestration.validate(plan('b', 'g'), candidates, 1)
+        self.assertEqual((ok.worker, ok.signature), ('b', ('b', 'm2')))
         for data, what in ((plan('c', 'g'), 'worker'), (plan('zz', 'g'), 'worker'), (plan('a', 'g', model='m2'), 'model'),
                            ({'worker': 'a'}, 'shape'),
                            ({**plan('a', 'g'), 'brief': {'goal': 'g'}}, 'shape')):
@@ -1345,12 +1211,13 @@ class OrchestrationUnit(unittest.TestCase):
         self.assertEqual(orchestration.evaluate_answer('answer', 'none'), 'not_judged')
         self.assertEqual(asked, [])
 
-    def test_pinned_offers_only_the_default(self):
-        self.assertEqual([row['id'] for row in self.catalogue().available(pinned=True)], ['a'])
+    def test_every_available_worker_is_offered(self):
+        """#826: no pin to the default worker."""
+        self.assertEqual([row['id'] for row in self.catalogue().available()], ['a', 'b'])
 
     def test_the_question_and_catalogue_name_no_request(self):
         rendered = render_catalogue(self.catalogue().available())
-        self.assertIn('list_notes (private read)', rendered)
+        self.assertIn('tools: list_notes, web_search', rendered)
         self.assertIn('m1 (lowest-cost)', rendered)
         schema = plan_schema(self.catalogue().available())
         self.assertEqual(schema['properties']['worker']['enum'], ['a', 'b'])
@@ -1369,16 +1236,6 @@ class OrchestrationUnit(unittest.TestCase):
         self.assertEqual(context.facts['owner_request'], request)
         self.assertLessEqual(len(context.facts['recent_conversation']), 1500)
         self.assertFalse(context.too_large())
-
-    def test_attempt_native_search_never_pairs_with_a_private_read(self):
-        private = private_read_actions()
-        for tools in (None, set(), {'web_search'}, {'list_notes'}, {'list_notes', 'web_search'}, {'weather'}):
-            attempt = Attempt(1, 'a', notes='g', tools=tools, planned=True)
-            enabled, _reason = attempt.native_search(True, '', private)
-            offered = set(turn_actions(BOUNDED_PROFILE, enabled, None if tools is None else frozenset(tools)))
-            with self.subTest(tools=tools):
-                self.assertFalse(enabled and offered & private)
-        self.assertEqual(Attempt(1, 'a').native_search(False, 'private_turn', private), (False, 'private_turn'))
 
     def test_attempts_history_is_bounded(self):
         orchestration, _events, _engine = self.orchestration(None)
@@ -1548,7 +1405,7 @@ class OwnerStateOnTheCliRoute(Harness):
         self.engine.before = work
         self.script([plan('codex', 'Remind the owner.')], goals=[True])
         job, _row = self.run_work('오후 4시 반에 출발하라고 알려줘')
-        # A native-search turn offers the relayed writes; private reads stay apart from web search (#678).
+        # A native-search turn offers the relayed writes and, since #826, the private reads too.
         for name in ('schedule_preparation', 'calendar_draft_create'):
             self.assertIn(name, seen['offered'])
         with self.store.db() as db:
@@ -1557,11 +1414,9 @@ class OwnerStateOnTheCliRoute(Harness):
 
     def test_a_cli_memory_write_without_an_explicit_request_stays_a_candidate(self):
         """#597's gate holds on the relayed path: no owner request, so a MemoryCandidate, never canonical Memory."""
-        self.assertIn('save_memory', self.no_search())
         self.engine.before = lambda tools: tools.call('save_memory', {'memory_key': 'profile.place.home',
                                                                       'content': '성남 백현동'})
-        # The orchestrator keeps Memory apart from web search by choosing the no-search subset (#735).
-        self.script([plan('codex', 'Answer.', tools=self.no_search())], goals=[True])
+        self.script([plan('codex', 'Answer.')], goals=[True])
         self.run_work('백현동에서 출발해')
         with self.store.db() as db:
             memories = db.execute('SELECT count(*) FROM memories').fetchone()[0]
@@ -1629,17 +1484,18 @@ class HostRelayRouting(unittest.TestCase):
 class RelayAuthority(Harness):
     """#774 review: the relay grants nothing beyond the turn's own offered set."""
 
-    def test_a_direct_relay_call_to_a_withheld_private_read_is_refused_by_the_service(self):
+    def test_a_direct_relay_call_to_a_tool_the_turn_does_not_offer_is_refused_by_the_service(self):
         from personal_agent.cli_browser_relay import BrowserRelay, RelayClient
         seen = {}
 
         def work(tools):
-            # A native-search turn: list_memory is withheld (#678).  The CLI can read the relay key,
-            # so it tries the socket directly; the service-side facade refuses it.
+            # No browser profile is available, so the browser tools are not offered this turn (#826:
+            # the private reads now are).  The CLI can read the relay key, so it tries the socket
+            # directly; the service-side facade refuses it.
             relay = BrowserRelay(tools)
             try:
                 try:
-                    RelayClient(relay.address).call('list_memory', {})
+                    RelayClient(relay.address).call('browser_open', {'url': 'https://example.com/', 'effect': 'read'})
                     seen['result'] = 'ran'
                 except Exception as exc:
                     seen['result'] = type(exc).__name__
@@ -1649,7 +1505,7 @@ class RelayAuthority(Harness):
         self.script([plan('codex', 'Answer.')], goals=[True])
         self.run_work('알려줘')
         self.assertTrue(self.engine.turns[0]['native_search'])
-        self.assertNotIn('list_memory', self.engine.turns[0]['offered'])
+        self.assertNotIn('browser_open', self.engine.turns[0]['offered'])
         self.assertEqual(seen['result'], 'ExecutionError')
 
     def test_a_relayed_owner_state_result_reaches_the_service_memo(self):
@@ -1812,14 +1668,14 @@ class OwnerModelAlwaysOn(Harness):
         self.assertEqual(schema['properties']['brief']['properties'], {'notes': {'type': 'string'}}, '#820: no section choice')
         self.assertFalse(context.too_large())
 
-    def test_a_native_search_turn_offers_save_memory_but_not_list_memory(self):
+    def test_a_native_search_turn_offers_save_memory_and_list_memory(self):
+        """#826: the Memory read is offered beside the CLI's own search."""
         self.script([plan('codex', 'Acknowledge.')], goals=[True])
         self.run_work('난 오늘 판교로 출근했어')
         turn = self.engine.turns[-1]
         self.assertTrue(turn['native_search'])
         self.assertIn('save_memory', turn['offered'])
-        self.assertNotIn('list_memory', turn['offered'])
-        self.assertNotIn('save_memory', private_read_actions(), 'a write does not turn the CLI\'s own search off')
+        self.assertIn('list_memory', turn['offered'])
 
 
 class OwnerModelUnit(unittest.TestCase):
@@ -2085,8 +1941,8 @@ class ThinOrchestration(Harness):
         self.earlier_turn()
         before = len(self.engine.turns)
         self.engine.answers = [self.ACK]
-        # The plan of the live Work: notes that narrow to an acknowledgement, and an empty tool subset.
-        self.script([plan('codex', 'Short acknowledgement only.', tools=()),
+        # The plan of the live Work: notes that narrow to an acknowledgement (#826: no tool subset exists).
+        self.script([plan('codex', 'Short acknowledgement only.'),
                      plan('openai', 'Other path.'), plan('codex', 'Third.', model='gpt-5.6-luna')],
                     goals=[True, False, False])
         job, row = self.run_work(self.STATEMENT)
@@ -2102,11 +1958,8 @@ class ThinOrchestration(Harness):
         self.assertEqual([m['content'] for m in turn['context']['conversation']],
                          ['점심 뭐 먹을까?', '근처 점심으로 분짜와 국밥을 추천드려요.'])
         self.assertTrue(turn['prompt'].endswith('# Current request\n' + self.STATEMENT))
-        # The empty subset never narrows the worker: the Memory write path stays offered.
-        self.assertIsNone(turn['only'])
+        # The worker keeps its full toolset: the Memory write path stays offered.
         self.assertIn('save_memory', turn['offered'])
-        [(_status, planned)] = self.events(job, 'planned')
-        self.assertEqual(planned['tools_replaced'], {'requested': [], 'why': 'shape'})
         # The one judgment read the reply and the conversation, not a plan-written goal.
         [judged] = self.asked_goals
         self.assertEqual(judged.facts['owner_request'], self.STATEMENT)

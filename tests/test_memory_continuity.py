@@ -144,43 +144,40 @@ class MemoryContinuityTests(unittest.TestCase):
             self.assertTrue(store.delete_personal_space_item('memories',saved['id'])['deleted'])
             self.assertEqual(store.memories(),[])
 
-    def test_listed_memory_blocks_public_egress_in_same_turn(self):
+    def test_listed_memory_is_recorded_and_no_longer_blocks_public_egress(self):
+        """#826 (owner decision): a Memory read and a web search may share a turn; the read is recorded."""
         with tempfile.TemporaryDirectory() as tmp:
-            store=QuickStore(Path(tmp)/'state'); caps=Capabilities(store,None,{},'','job',lambda *args:None)
+            plans=[]
+            store=QuickStore(Path(tmp)/'state'); caps=Capabilities(store,None,{},'','job',lambda *args:None,network=type('N',(),{'execute':lambda _self,plan:plans.append(plan) or {'results':[],'sources':[]}})())
             caps.execute('list_memory',{})
-            with self.assertRaisesRegex(ValueError,'웹 검색어로 전송할 수 없습니다'):
-                caps.execute('web_search',{'query':'memory content'})
+            caps.execute('web_search',{'query':'memory content'})
+            self.assertEqual(plans,[{'tool':'web_search','query':'memory content'}])
+            self.assertEqual(caps.private_provenance,{'owner-memory'})
 
-    def test_memory_service_read_blocks_public_egress_in_the_same_turn(self):
-        """The service read surface must arm the same guard as list_memory.
-
-        agent_runtime.Capabilities refuses web_search/public_page_read while
-        its turn-scoped `evidence` is non-empty, and its own list_memory action
-        arms that guard. MemoryService is a second read surface over the same
-        private rows, so a conversation layer that reads Memory through the
-        service (#393/#394 wiring) must arm the guard too.
-        """
+    def test_memory_service_read_records_the_same_provenance_as_list_memory(self):
+        """MemoryService is a second read surface over the same private rows; its sink labels the
+        Work like list_memory does.  #826: the label is a record for the information-use audit and
+        no longer closes a public destination."""
         with tempfile.TemporaryDirectory() as tmp:
+            plans=[]
             store=QuickStore(Path(tmp)/'state'); store.save_memory('meeting-time','afternoons')
-            caps=Capabilities(store,None,{},'','job',lambda *args:None)
+            caps=Capabilities(store,None,{},'','job',lambda *args:None,network=type('N',(),{'execute':lambda _self,plan:plans.append(plan) or {'results':[],'sources':[]}})())
             service=MemoryService(store,private_read_sink=caps.evidence.append)
             listed=service.list_memories('local-owner')
             self.assertEqual(listed['memories'][0]['content'],'afternoons')
             self.assertTrue(listed['private_content_included'])
             self.assertTrue(listed['egress_guard_armed'])
-            with self.assertRaisesRegex(ValueError,'웹 검색어로 전송할 수 없습니다'):
-                caps.execute('web_search',{'query':'memory content'})
-            with self.assertRaisesRegex(ValueError,'공개 페이지 조회에 사용할 수 없습니다'):
-                caps.execute('public_page_read',{'url':'https://example.invalid/'})
+            self.assertEqual(caps.private_provenance,{'unattributed-tool-evidence'})
+            caps.execute('web_search',{'query':'memory content'})
+            self.assertEqual(len(plans),1)
 
-    def test_memory_service_inspect_also_arms_the_public_egress_guard(self):
+    def test_memory_service_inspect_also_records_its_provenance(self):
         with tempfile.TemporaryDirectory() as tmp:
             store=QuickStore(Path(tmp)/'state'); saved=store.save_memory('meeting-time','afternoons')
             caps=Capabilities(store,None,{},'','job',lambda *args:None)
             service=MemoryService(store,private_read_sink=caps.evidence.append)
             self.assertTrue(service.inspect_memory('local-owner',saved['id'])['egress_guard_armed'])
-            with self.assertRaisesRegex(ValueError,'웹 검색어로 전송할 수 없습니다'):
-                caps.execute('web_search',{'query':'memory content'})
+            self.assertTrue(caps.private_provenance)
 
     def test_memory_service_cannot_be_wired_without_an_explicit_egress_decision(self):
         """An integration cannot forget the guard: there is no default sink."""

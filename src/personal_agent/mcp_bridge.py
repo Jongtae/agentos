@@ -13,9 +13,9 @@ import time
 
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
 
-from .agent_runtime import (BROWSER_ACTIONS, CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_STATE_ACTIONS, TRANSIENT_FAILURE_TEXT,
-                            Capabilities, ToolError, WorkBudget, WorkLedger, classify_failure, evidence_summary,
-                            lookup_sources, progress_step, recorded_private_sources, split_status, work_source_records,
+from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_STATE_ACTIONS, TRANSIENT_FAILURE_TEXT,
+                            Capabilities, ToolError, WorkBudget, WorkLedger, classify_failure, declared_effect,
+                            evidence_summary, lookup_sources, progress_step, recorded_private_sources, split_status, work_source_records,
                             work_stop_requested)
 from .current_context import redact_known_secrets
 from .providers import ProviderError
@@ -210,24 +210,22 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                     record(listed, 'failed', json.dumps({'scope':'subscription-mcp-bridge','code':'unknown_tool','retry':'permanent',
                                                          'effect':'none','error':'Unknown AgentOS MCP tool.'}))
                     raise _Rejected(-32602, 'Unknown AgentOS MCP tool.')
+                # #787: a browser call's declared effect, recorded on every event of the call.
+                declared = {}
                 try:
                     if not _work_running(store, job_id):
                         raise ToolError(WORK_NOT_RUNNING, 'stopped')
                     capabilities.private_provenance.update(_recorded_private_sources(store, job_id, capabilities.tools))
                     arguments, status = split_status(params.get('arguments', {}))
+                    declared = declared_effect(action, arguments)
                     if action:
                         # #607: a call is durably in flight before it runs, so a
                         # crash mid-call leaves an attempted (possibly effectful)
                         # action that retry/resume refuse to replay blindly.
                         # #718: with the call's bounded, redacted display step.
-                        # #795: a browser step's declared effect (read/navigate/mutate/payment), so a
-                        # re-plan can tell a page read from an action; AgentOS's own guard still decides.
-                        declared = arguments.get('effect') if action in BROWSER_ACTIONS else None
-                        declared = declared if declared in ('read', 'navigate', 'mutate', 'payment') else None
                         record(listed, 'running', json.dumps({'scope':'subscription-mcp-bridge','host_action':action,
                                                               'step':progress_step(action, arguments, status, capabilities.judgment_text),
-                                                              **({'declared_effect':declared} if isinstance(declared, str) else {})},
-                                                             ensure_ascii=False))
+                                                              **declared}, ensure_ascii=False))
                     value = tools.call(name, arguments)
                 except ExecutionError as exc:
                     # Invalid arguments stay a protocol error (MCP: invalid
@@ -241,7 +239,7 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                     result, typed = tool_error_result(exc, action)
                     record(listed, 'failed',
                            json.dumps({'scope':'subscription-mcp-bridge', **({'host_action':action} if action else {}), **typed,
-                                       'error':redact_reason(str(exc))}, ensure_ascii=False))
+                                       'error':redact_reason(str(exc)), **declared}, ensure_ascii=False))
                     if ident is not None:
                         _send({'jsonrpc':'2.0','id':ident,'result':result})
                     continue
@@ -254,7 +252,7 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                     result, typed = unexpected_error_result(exc, action)
                     record(listed, 'failed',
                            json.dumps({'scope':'subscription-mcp-bridge', **({'host_action':action} if action else {}), **typed,
-                                       'error':redact_reason(TOOL_FAILED_TEXT)}, ensure_ascii=False))
+                                       'error':redact_reason(TOOL_FAILED_TEXT), **declared}, ensure_ascii=False))
                     if ident is not None:
                         _send({'jsonrpc':'2.0','id':ident,'result':result})
                     continue
@@ -262,7 +260,8 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                 # (sources, attempted/failed URLs, counts), never the payload.
                 host_action = capabilities.tools[name]['host_action']
                 record(name, 'succeeded', json.dumps({'scope':'subscription-mcp-bridge','host_action':host_action,
-                                                       'evidence':evidence_summary(host_action, value)}, ensure_ascii=False))
+                                                       'evidence':evidence_summary(host_action, value), **declared},
+                                                      ensure_ascii=False))
                 result = {'content':[{'type':'text','text':json.dumps(value, ensure_ascii=False)}]}
             elif method == 'notifications/initialized': continue
             else: raise _Rejected(-32601, 'Method not found.')

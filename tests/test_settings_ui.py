@@ -19,7 +19,8 @@ class Element {
  append(...nodes){this.children.push(...nodes);} replaceChildren(...nodes){this._text='';this.children=[];this.append(...nodes);}
  setAttribute(key,value){this.attrs[key]=value;} focus(){} get isConnected(){return true;}
  get classList(){const node=this;return {toggle(name,on){node._cls=Boolean(on);},add(){},remove(){},contains:()=>Boolean(node._cls)};}
- querySelector(selector){return descendants(this).find(node=>selector[0]==='.'?node.className.split(' ').includes(selector.slice(1)):node.tag===selector)||null;}
+ querySelectorAll(selector){return descendants(this).filter(node=>selector==='details[open]'?node.tag==='details'&&node.open:selector[0]==='.'?node.className.split(' ').includes(selector.slice(1)):node.tag===selector);}
+ querySelector(selector){return this.querySelectorAll(selector)[0]||null;}
 }
 function descendants(node){return node.children.flatMap(child=>typeof child==='string'?[]:[child,...descendants(child)]);}
 for(const id of ['active-ai','ai-chooser-list','ai-chooser-consequence','ai-chooser-feedback','ai-chooser-apply','telegram-current','telegram-change','telegram-form','telegram-status','telegram-feedback','telegram-submit','disconnect','new-pair','telegram-pair','connector-controls','connector-feedback','google-disconnect','google-disconnect-cancel','google-disconnect-confirm','google-disconnect-retry'])new Element('div').id=id;
@@ -28,14 +29,14 @@ const part=(start,end)=>app.slice(app.indexOf(start),app.indexOf(end));
 const source=part('const LANGUAGES=','function normalizeEndpoint(')+
  part('function element(', 'function setError(')+
  part('const providers=', 'let claimed=')+
- part('function renderExecutionConnection(', 'function renderSubscriptionEngines(')+
+ part('function aiFact(', 'function renderSubscriptionEngines(')+
  part('const DECISION_TRANSPORT_LABEL=','function decisionFailedSuffix(')+part('function decisionActiveTitle(','function decisionCheckText(')+
  part('function renderTelegram(', "$('telegram-change').onclick");
 const calls=[];let refreshes=0,failRoute=false;
 const ctx={document,$,telegramDraftOpen:false,console,api:async(path,body)=>{calls.push({path,body});if(failRoute)throw new Error('switch refused');return {};},refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');},setFeedback:(id,text)=>{$(id).textContent=text||'';}};
 vm.createContext(ctx);vm.runInContext(source,ctx);vm.runInContext("setLanguage('ko')",ctx);
 const buttonIn=id=>descendants($(id)).find(node=>node.tag==='button');
-// #619: one Main AI card with a subordinate Judgment AI line; the chooser keeps a fixed order.
+// #781: Main AI and Judgment AI are peer preferences; the chooser keeps a fixed order.
 const dialog=new Element('dialog');dialog.id='ai-chooser';dialog.open=false;dialog.showModal=()=>{dialog.open=true;};dialog.close=()=>{dialog.open=false;dialog.onclose&&dialog.onclose();};
 const api=(id,extra={})=>({id,kind:'api',name:{openai:'OpenAI',anthropic:'Anthropic',openrouter:'OpenRouter'}[id],destination:{openai:'api.openai.com',anthropic:'api.anthropic.com',openrouter:'openrouter.ai'}[id],model:'m-'+id,key:{saved:false,saved_at:null,pending:false},check:null,...extra});
 const sub=(id,extra={})=>({id,kind:'subscription',name:{codex:'Codex','claude-code':'Claude Code'}[id],destination:{codex:'OpenAI (Codex 구독 계정)','claude-code':'Anthropic (Claude Code 구독 계정)'}[id],installed:true,login:{state:'signed-in',checked_at:1700000000},credential:false,check:null,...extra});
@@ -51,15 +52,39 @@ const currentCount=()=>descendants($('active-ai')).filter(node=>node.className==
 let settings=settingsFor('anthropic',{anthropic:api('anthropic',{key:{saved:true,saved_at:1700000000,pending:false}})});
 ctx.renderExecutionConnection(settings);const changeButton=buttonsIn('active-ai').find(node=>node.textContent==='변경');ctx.renderExecutionConnection(JSON.parse(JSON.stringify(settings)));
 assert.equal(buttonsIn('active-ai').find(node=>node.textContent==='변경'),changeButton,'unchanged AI polling preserves the focused action node');
-same(titles(),['Anthropic · API','판단 AI (대화 해석)'],'exactly one Main AI card with a subordinate Judgment AI line');
-assert.equal(currentCount(),1,'exactly one current route');
+const groups=()=>$('active-ai').children.filter(node=>node.className==='ai-preference-group');
+same(groups().map(node=>node.attrs['aria-label']),['기본 AI','판단 AI'],'Main and Judgment are peer preference groups');
+assert(groups()[0].textContent.includes('Anthropic · API'));
+assert.equal(currentCount(),0,'configuration does not imply a currently running task');
+assert(groups()[0].textContent.includes('연결 확인됨'));
+assert(!descendants($('active-ai')).some(node=>node.className.split(' ').includes('subordinate')));
 assert($('active-ai').textContent.includes('기본 AI와 같은 계정의 가벼운 모델 (claude-haiku-4-5)'),'the Judgment AI line names its light model');
-assert($('active-ai').textContent.includes('전송 대상: api.anthropic.com'),'destinations stay on the scan path');
+assert(groups()[0].textContent.includes('전송 대상')&&groups()[0].textContent.includes('api.anthropic.com'),'destination is its own summary row');
 assert.equal(descendants($('active-ai')).filter(node=>node.tag==='details').length,1,'no per-row disclosures; one card-level 기술 세부 정보');
 assert(!$('active-ai').textContent.includes('다른 선택지'),'no second list of routes on the card');
+// Truthful state matrix: selected route, saved credential and observed check remain distinct.
+for(const [login,label,kind] of [['signed-out','로그인 필요','attention'],['unchecked','로그인 확인 전','neutral'],['unknown','로그인 상태 확인 필요','attention'],['token-saved','토큰 저장됨 · 로그인 확인 전','neutral'],['sidecar','실행 환경에서 인증 관리','neutral'],['signed-in','로그인 확인됨','neutral']]){
+ const view=ctx.mainAiView(settingsFor('codex',{codex:sub('codex',{login:{state:login}})}));
+ assert.equal(view.state,label);assert.equal(view.kind,kind);assert.equal(view.checkable,login!=='sidecar');
+}
+// A later login observation supersedes an older subscription login failure only.
+for(const [loginTime,checkTime,kind] of [[200,100,'neutral'],[100,200,'attention'],[100,100,'attention'],[200,undefined,'attention']]){
+ const stale=ctx.mainAiView(settingsFor('codex',{codex:sub('codex',{login:{state:'signed-in',checked_at:loginTime},check:{state:'failed',checked_at:checkTime,failure:'auth'}})}));
+ assert.equal(stale.kind,kind);assert.equal(stale.description.includes('마지막 확인 실패'),kind==='attention');
+}
+const savedApi=()=>settingsFor('openai',{openai:api('openai',{key:{saved:true,pending:false}})});
+let projected=savedApi();projected.main_ai.routes[2].key.pending=true;
+assert.equal(ctx.mainAiView(projected).state,'새 키 적용 전');
+projected=savedApi();projected.main_ai.last_check={state:'failed',error:'synthetic refusal'};
+assert.equal(ctx.mainAiView(projected).kind,'attention');assert(ctx.mainAiView(projected).description.includes('synthetic refusal'));
+projected=savedApi();projected.main_ai.last_check={state:'unchecked'};
+assert.equal(ctx.mainAiView(projected).state,'키 저장됨 · 연결 확인 전');
+const technical=descendants($('active-ai')).find(node=>node.tag==='details');technical.open=true;
+settings.main_ai.last_check.checked_at++;ctx.renderExecutionConnection(settings);
+assert(descendants($('active-ai')).find(node=>node.dataset.disclosure==='technical').open,'polling preserves expanded technical disclosure');
 (async()=>{
  // 확인 re-probes without switching.
- const check=buttonsIn('active-ai').find(node=>node.textContent==='확인');await check.onclick({currentTarget:check});
+ const check=buttonsIn('active-ai').find(node=>node.dataset.focusKey==='ai-check');await check.onclick({currentTarget:check});
  same(calls.pop(),{path:'/api/main-ai/check',body:{}});
  // The chooser opens as a modal dialog with the fixed order, whatever is current.
  ctx.openAiChooser(changeButton);assert(dialog.open,'the chooser is a modal <dialog>');
@@ -104,7 +129,7 @@ assert(!$('active-ai').textContent.includes('다른 선택지'),'no second list 
   effective:{state:'fallback',transport:'direct_api',model:'gpt-4o-mini',destination:'api.openai.com',template:'구독 판단을 쓸 수 없어 OpenAI API({model})를 쓰는 중: {reason}',params:{model:'gpt-4o-mini'},
    reason_template:'기본 AI({main})를 따르는 구독 판단을 아직 확인하지 않았습니다. 확인을 누르면 가장 저렴한 모델부터 검증합니다.',reason_params:{main:'Codex'}}}));
  assert($('active-ai').textContent.includes('구독 판단을 쓸 수 없어 OpenAI API(gpt-4o-mini)를 쓰는 중: 기본 AI(Codex)를 따르는 구독 판단을 아직 확인하지 않았습니다.'),'no silent API fallback');
- assert($('active-ai').textContent.includes('대체 경로 사용 중'));assert($('active-ai').textContent.includes('전송 대상: api.openai.com'));
+ assert($('active-ai').textContent.includes('대체 AI 사용 설정'));assert($('active-ai').textContent.includes('전송 대상: api.openai.com'));
  const followCheck=buttonsIn('active-ai').find(node=>node.dataset.focusKey==='judgment-check');assert(followCheck,'확인 re-resolves the follow route from the card');
  await followCheck.onclick({currentTarget:followCheck});same(calls.pop(),{path:'/api/decision-route/activate',body:{transport:'follow_main'}});
  ctx.renderExecutionConnection(settingsFor('codex',{},{follow:codexFollow,active:{transport:'subscription_cli',source:'follow',engine:'codex',requested_model:'gpt-5.6-luna',available:true,destination:'OpenAI (Codex 구독 계정)'},
@@ -116,15 +141,16 @@ assert(!$('active-ai').textContent.includes('다른 선택지'),'no second list 
  ctx.renderExecutionConnection({...settingsFor('other'),model:{provider:'ollama',endpoint:'http://127.0.0.1:11434',model:'llama'},main_ai:{...settingsFor('other').main_ai,other:{provider:'ollama',model:'llama',destination:'http://127.0.0.1:11434'}}});
  assert($('active-ai').textContent.includes('확인 필요')&&$('active-ai').textContent.includes('변경 목록에 없습니다'),'an existing Ollama route renders truthfully');
  ctx.renderExecutionConnection(settingsFor(''));
- assert.equal(currentCount(),0);assert($('active-ai').textContent.includes('선택되지 않음')&&$('active-ai').textContent.includes('작업에 사용할 AI를 선택하면 시작할 수 있습니다.'));
+ assert.equal(currentCount(),0);assert($('active-ai').textContent.includes('선택된 AI 없음')&&$('active-ai').textContent.includes('작업에 사용할 AI를 선택하면 시작할 수 있습니다.'));
  ctx.renderExecutionConnection(settingsFor('',{},{effective:{state:'fallback',transport:'direct_api',model:'gpt-4o-mini',destination:'api.openai.com',template:'기본 경로로 OpenAI API({model})를 쓰는 중',params:{model:'gpt-4o-mini'}}}));
- assert($('active-ai').textContent.includes('대체 경로 사용 중')&&$('active-ai').textContent.includes('전송 대상: api.openai.com'),'an effective Judgment AI fallback remains visible when Main AI is unset');
+ assert($('active-ai').textContent.includes('대체 AI 사용 설정')&&$('active-ai').textContent.includes('전송 대상: api.openai.com'),'an effective Judgment AI fallback remains visible when Main AI is unset');
  // #679: the Work model for a subscription CLI is shown, chosen in the chooser and sent with 확인하고 사용.
  const note='AgentOS는 Codex 개인 설정을 격리하므로 ~/.codex/config.toml의 모델은 쓰지 않습니다. 비워 두면 CLI 기본 모델을 씁니다.';
  calls.length=0;
  ctx.renderExecutionConnection(settingsFor('codex',{codex:sub('codex',{model:'gpt-5.6-luna',model_note:note})},{model_lists:{codex:{models:[{id:'gpt-5.6-luna'},{id:'gpt-5.6-terra'}]}}}));
- assert($('active-ai').textContent.includes('작업 모델: gpt-5.6-luna'),'the Work model is visible on the card');
- assert($('active-ai').textContent.includes('~/.codex/config.toml의 모델은 쓰지 않습니다'),'the ignored owner config is stated');
+ assert($('active-ai').textContent.includes('gpt-5.6-luna'),'the Work model is visible on the card');
+ assert(descendants($('active-ai')).find(node=>node.tag==='details').textContent.includes('~/.codex/config.toml의 모델은 쓰지 않습니다'),'config mechanics remain available in technical disclosure');
+ assert(!groups()[0].textContent.includes('~/.codex/config.toml'),'config mechanics stay off the scan path');
  ctx.openAiChooser(changeButton);
  const workModel=descendants($('ai-chooser-list')).find(node=>node.tag==='input'&&node.name==='main-ai-model');
  assert(workModel,'the selected subscription route offers a model field');assert.equal(workModel.value,'gpt-5.6-luna');
@@ -134,7 +160,7 @@ assert(!$('active-ai').textContent.includes('다른 선택지'),'no second list 
  same(calls.find(call=>call.path==='/api/main-ai/activate'),{path:'/api/main-ai/activate',body:{route:'codex',model:'gpt-5.6-terra'}});
  assert(!calls.some(call=>String(call.path).startsWith('/api/decision-route/models')),'no model list is fetched by rendering or choosing');
  ctx.renderExecutionConnection(settingsFor('claude-code',{'claude-code':sub('claude-code',{model:''})}));
- assert($('active-ai').textContent.includes('작업 모델: CLI 기본값'));
+ assert($('active-ai').textContent.includes('CLI 기본값'));
  // #679 review P1: the isolated sidecar takes no model - no field, and 확인하고 사용 clears a stored one.
  const isolatedNote='격리 런타임 배포는 작업 모델 지정을 지원하지 않아 CLI 기본 모델을 씁니다.';
  ctx.renderExecutionConnection(settingsFor('codex',{codex:sub('codex',{model:'gpt-5.6-luna',model_selectable:false,model_note:isolatedNote})}));
@@ -174,7 +200,7 @@ console.log('settings DOM regressions passed');
 
 
 def test_settings_uses_goal_oriented_owner_language():
-    assert "AI 설정" in HTML
+    assert "<h1>AI</h1>" in HTML
     assert ">AI</button>" in HTML
     assert "파일 · 저장" in HTML
     assert "외부 연결" in HTML
@@ -183,7 +209,8 @@ def test_settings_uses_goal_oriented_owner_language():
     assert "결과 저장 폴더" in HTML
     assert "<textarea id=\"root-paths\"" not in HTML
     assert "프로젝트는 대화와 결과" in HTML
-    assert "현재 상태를 먼저 확인" in HTML
+    assert "현재 상태를 먼저 확인" not in HTML
+    assert HTML.count('id="settings-nav"') == 1
 
 
 def test_ai_chooser_switches_in_one_explicit_request():
@@ -207,10 +234,12 @@ def test_mobile_checkbox_is_not_full_width_input():
 
 
 def test_owner_flow_has_two_destinations_and_optional_projects():
-    # #562: 작업 현황 and 설정 only; 내 기록 is no longer a destination.
-    for destination in ('data-view="tasks"', 'data-view="settings"'):
-        assert HTML.count(destination) == 1
-    assert HTML.count('data-view="') == 2
+    # #781: activity and settings categories share one rail, without a duplicate settings entry.
+    assert HTML.count('data-view="tasks"') == 1
+    assert 'data-view="settings"' not in HTML
+    assert HTML.count('data-view="') == 1
+    assert HTML.index('id="settings-nav"') < HTML.index('<main')
+    assert 'id="language-select"' in HTML and 'id="logout"' in HTML
     assert 'data-view="records"' not in HTML
     assert 'id="chat-form"' not in HTML
     # Projects stay reachable as optional grouping under 파일 · 저장.
@@ -288,10 +317,10 @@ for(const id of ['root-list','roots-feedback','root-path-input','roots-form','fi
 const $=id=>ids.get(id),document={getElementById:$,createElement:tag=>new Element(tag)};
 const part=(start,end)=>app.slice(app.indexOf(start),app.indexOf(end));
 const source=part('const LANGUAGES=','function normalizeEndpoint(')+part('function element(', 'function focusSettingsTarget(')+part('let savedRoots=', 'function renderTelegram(');
-const calls=[];let refreshes=0,refuse=null,revisions=0,gate=null;
+const calls=[];let refreshes=0,refuse=null,refuseReason=null,revisions=0,gate=null;
 const ctx={document,$,console,invalidateRootsLoad:()=>revisions++,invalidateFileWorkspaceLoad:()=>revisions++,
- api:async(path,body)=>{calls.push({path,body});if(gate)await gate;if(refuse)throw new Error(refuse);if(path==='/api/files/roots')return {roots:body.paths.map(path=>({path}))};if(path==='/api/file-workspace')return {references:body.references.map(path=>({path})),workspace:body.workspace};return {};},
- refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');},setFeedback:(id,text)=>{$(id).textContent=text||'';}};
+ api:async(path,body)=>{calls.push({path,body});if(gate)await gate;if(refuse){const failure=new Error(refuse);if(refuseReason)failure.reason=refuseReason;throw failure;}if(path==='/api/files/roots')return {roots:body.paths.map(path=>({path}))};if(path==='/api/file-workspace')return {references:body.references.map(path=>({path})),workspace:body.workspace};return {};},
+ refresh:async()=>{refreshes++;},busy:async(button,fn)=>fn(),setError:(id,error)=>{$(id).textContent=error?.message||String(error||'');$(id).dataset.error='1';},setFeedback:(id,text)=>{$(id).textContent=text||'';delete $(id).dataset.error;}};
 vm.createContext(ctx);vm.runInContext(source,ctx);vm.runInContext("setLanguage('ko')",ctx);
 const same=(actual,expected,message)=>assert.equal(JSON.stringify(actual),JSON.stringify(expected),message);
 const buttons=id=>descendants($(id)).filter(node=>node.tag==='button');
@@ -316,6 +345,16 @@ const press=async(id,label)=>{const button=buttons(id).find(node=>node.textConte
  assert.equal($('roots-feedback').textContent,refuse,'refusal shown next to the input');
  assert.equal($('root-path-input').value,'/Users/me','refused draft is kept');
  assert.equal(focused,$('root-path-input'),'focus returns to the refused input');
+ assert.equal($('roots-feedback').dataset.error,'1','an ordinary refusal is shown as an error');
+ // #779: a phone on the tunnel may not add a folder; that is a next step on the Mac, in the owner's language.
+ const macOnly='Mac에서 계속: 폴더 추가와 변경은 이 Mac에서 AgentOS를 열어 진행합니다. 연결된 폴더를 빼는 것은 여기서도 할 수 있습니다.';
+ refuse=macOnly;refuseReason='owner_local_surface';vm.runInContext("setLanguage('en')",ctx);
+ await $('roots-form').onsubmit({preventDefault(){},submitter:new Element('button')});
+ assert.equal($('roots-feedback').textContent,'Continue on the Mac: adding or changing a folder happens in AgentOS opened on this Mac. You can still remove a connected folder here.','an off-Mac add is a translated next step');
+ assert.equal($('roots-feedback').dataset.error,undefined,'an off-Mac add is not shown as an error');
+ assert.equal($('root-path-input').value,'/Users/me','the draft is kept for the Mac');
+ for(const language of ['zh-CN','ja']){vm.runInContext(`setLanguage('${language}')`,ctx);assert.notEqual(ctx.t(macOnly),macOnly,`${language} translates the off-Mac refusal`);}
+ vm.runInContext("setLanguage('ko')",ctx);refuseReason=null;
  refuse=null;const before=calls.length;
  await press('root-list','제거');
  assert.equal(calls.length,before,'remove asks before saving');
@@ -372,6 +411,12 @@ const press=async(id,label)=>{const button=buttons(id).find(node=>node.textConte
  refuse='참고 폴더와 관리 작업공간은 겹치지 않게 연결하세요.';$('file-workspace-path').value='/tmp/src/Meetings';
  await $('file-workspace-form').onsubmit({preventDefault(){},submitter:new Element('button')});
  assert.equal($('file-workspace-feedback').textContent,refuse);assert.equal($('file-workspace-form').hidden,false,'refused edit stays open');
+ refuse=macOnly;refuseReason='owner_local_surface';
+ await $('file-workspace-form').onsubmit({preventDefault(){},submitter:new Element('button')});
+ assert.equal($('file-workspace-feedback').textContent,macOnly,'an off-Mac result-folder change says to continue on the Mac');
+ assert.equal($('file-workspace-feedback').dataset.error,undefined,'an off-Mac change is not shown as an error');
+ assert.equal($('file-workspace-form').hidden,false,'the refused edit stays open');
+ refuseReason=null;
  refuse=null;$('file-workspace-cancel').onclick();assert.equal($('file-workspace-form').hidden,true);
  assert.equal(focused?.textContent,'폴더 변경','closing the editor returns focus to its opener');
 

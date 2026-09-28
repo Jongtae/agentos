@@ -92,7 +92,10 @@ class WebManagementReadinessTests(unittest.TestCase):
         self.assertEqual(html.count('data-view="tasks"'), 1)
         # #562: the generic 내 기록 destination is gone.
         self.assertEqual(html.count('data-view="records"'), 0)
-        self.assertEqual(html.count('data-view="settings"'), 1)
+        # #781: one settings category navigation lives beside the activity entry.
+        self.assertEqual(html.count('data-view="settings"'), 0)
+        self.assertEqual(html.count('id="settings-nav"'), 1)
+        self.assertLess(html.index('id="settings-nav"'), html.index('<main'))
         self.assertNotIn('id="chat-form"', html)
         self.assertNotIn('id="messages"', html)
         self.assertNotIn('대화</button>', html)
@@ -325,7 +328,9 @@ console.log(JSON.stringify({checks:40}));
         for retired in ('builtin-mcp-read', 'isolated-runtime-placeholder', 'google-calendar-create', 'renderCapabilities'):
             self.assertNotIn(retired, app)
         self.assertIn('id="connector-controls"', html)
-        self.assertIn("$('brand-home').onclick", app)
+        # The activity navigation remains the return path after the optional brand is removed.
+        self.assertIn('data-view="tasks"', html)
+        self.assertIn("document.querySelectorAll('[data-view]').forEach(button=>button.onclick=()=>navigate(button.dataset.view))", app)
         self.assertIn("aiFeedback(error.message,true)", app)
         self.assertIn('각 Telegram 작업마다 공유 승인이 필요합니다.', app)
 

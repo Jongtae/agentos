@@ -456,7 +456,10 @@ class OwnerReachesTheCandidatePathFromTheManagementUI(_OwnerSurface):
         # #394: no second default chat surface, and no third top-level view.
         self.assertNotIn('id="chat-form"', html)
         self.assertNotIn('id="messages"', html)
-        self.assertEqual(html.count('data-view='), 2)
+        # #781: activity plus the single settings-category navigation.
+        self.assertEqual(html.count('data-view='), 1)
+        self.assertEqual(html.count('id="settings-nav"'), 1)
+        self.assertEqual(html.count('data-settings='), 4)
 
         app = self.APP.read_text()
         # Wired to the routes WU4 built, not to a stub.

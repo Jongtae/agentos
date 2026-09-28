@@ -27,7 +27,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       TELEGRAM_RESULT_PREVIEW_CHARS, TERMINAL_FAILED_HEADER,
                                       TERMINAL_ANSWER_WITHHELD, TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
                                       BlockedTurn, ConversationProjection, context_message,
-                                      owner_cause, report_statement, terminal_text, turn_qualifier,
+                                      owner_cause, report_statement, terminal_text, tried_statement, turn_qualifier,
                                       verified_portion)
 from .subscription_engines import SubscriptionEngines
 from .bounded_execution import TOOL_INCOMPLETE, TOOL_INCOMPLETE_TEXT, incomplete_bridge_calls
@@ -86,6 +86,19 @@ LOCAL_DOCUMENT_APPROVAL_TEXT=('폴더를 허용한 방금 요청을 계속하려
 LOCAL_KEPT_WORKSPACE_TEXT=('설정에서 이미 결과 저장 폴더가 연결되어 있어 선택한 폴더로 바꾸지 않았습니다. '
                            '기존 결과 저장 폴더로 방금 요청을 이어서 처리합니다.')
 LOCAL_DOCUMENT_RESUMED_TEXT='문서 공유를 승인했습니다. 폴더를 허용한 요청을 한 번만 이어서 처리합니다.'
+#: #779: the Settings folder routes' "this Mac only" refusal, in the pattern of
+#: the #505 folder-request refusal.  The web UI keys its translation on it.
+SETTINGS_FOLDER_LOCAL_TEXT=('Mac에서 계속: 폴더 추가와 변경은 이 Mac에서 AgentOS를 열어 진행합니다. '
+                            '연결된 폴더를 빼는 것은 여기서도 할 수 있습니다.')
+
+
+class OwnerLocalRequired(Exception):
+    """A Settings folder change that adds or widens authority, asked off this Mac (#779)."""
+
+    reason='owner_local_surface'
+
+    def __init__(self):
+        super().__init__(SETTINGS_FOLDER_LOCAL_TEXT)
 
 LOG=logging.getLogger('personal_agent.service')
 
@@ -235,8 +248,14 @@ RETRY_REFUSED_RAN_CURRENT='retry-refused-ran-current'
 RETRY_EFFECT_TOOLS=frozenset({'save_note','save_memory','delegate_agent',
                               'calendar_draft_create','calendar_draft_update','calendar_draft_cancel',
                               # #656: a browser step in the owner's session may have added to a cart or submitted a form.
+                              # #787: a browser_open declared read/navigate only loaded a page (``effect_calls``).
                               'browser_open','browser_click','browser_type'})
 EFFECT_RETRY_REFUSAL='이전 요청이 상태를 바꾸는 작업을 시도해 자동으로 다시 실행하지 않았습니다.'
+#: #787: the next step of a Work whose last worker attempt failed, chosen from
+#: its own recorded state: a typed setup/approval need, the ``safe_retry`` gate.
+FAILED_NEXT_SETUP='필요한 연결이나 승인을 마친 뒤 다시 요청해 주세요.'
+FAILED_NEXT_RETRY='다시 시도하면 같은 요청을 한 번 다시 실행합니다.'
+FAILED_NEXT_REVIEW='실행 기록을 확인한 뒤 필요하면 요청을 바꿔 다시 보내 주세요.'
 ALREADY_RETRIED_REFUSAL='이 요청은 이미 한 번 다시 시도했습니다. 같은 요청을 중복으로 실행하지 않았습니다.'
 #: #730 review: the factual note the worker reads before the owner's current
 #: message when the earlier Work called effect tools (names, hosts, outcome only).
@@ -1234,7 +1253,7 @@ class AgentService:
             trace=event.get('trace') if isinstance(event.get('trace'),dict) else {}
             name=trace.get('host_action') if trace.get('host_action') in RETRY_EFFECT_TOOLS else event.get('tool')
             unknown=self._unknown_effect(trace)
-            if name not in RETRY_EFFECT_TOOLS and not unknown:continue
+            if not self.effect_calls(event) and not unknown:continue
             key=(str(name),self._event_host(trace))
             state=calls.setdefault(key,set())
             state.add('unknown' if unknown else event.get('status'))
@@ -1245,6 +1264,47 @@ class AgentService:
                      else 'observed: succeeded' if 'succeeded' in states else 'observed: failed')
             lines.append(f'- {name}'+(f' (host: {host})' if host else '')+f': outcome {outcome}')
         return '\n'.join([RETRY_EFFECT_NOTE_HEAD,*lines,RETRY_EFFECT_NOTE_TAIL])
+
+    def failed_attempt_report(self, job, failure):
+        """The owner report of a Work whose last worker attempt failed and nothing followed (#787), or None.
+
+        Built only from this Work's own recorded events, never model prose:
+        the failed steps and the worker failure in owner words
+        (``owner_cause``), the steps its workers tried and whether each was
+        observed to complete (``tried_statement``), why AgentOS handed the
+        request to no other worker (the orchestrator's last recorded
+        evaluation text), and a next step (``report_statement``): a typed
+        setup/approval need, else what ``safe_retry`` allows.  None when no
+        worker attempt was recorded.  Generic: no request, site or category.
+        """
+        from .agent_runtime import agency_report
+        events=self.store.task_events(job['id'])
+        with self.store.db() as db:
+            ran=db.execute("SELECT 1 FROM tool_events WHERE job_id=? AND tool IN ('subscription_engine','model') LIMIT 1",
+                           (job['id'],)).fetchone() is not None
+        if not ran:return None
+        failures,tried,stopped,setup=[],[],None,False
+        for event in events:
+            trace=event.get('trace') if isinstance(event.get('trace'),dict) else {}
+            tool,status=event.get('tool'),event.get('status')
+            if tool==ORCHESTRATION_EVENT:
+                if status=='evaluated' and isinstance(trace.get('text'),str):stopped=trace['text']
+                continue
+            # AgentOS's own bookkeeping, not a step a worker tried.
+            if tool in ('local_authority','conversation_continuity'):continue
+            if status=='failed':
+                failures.append((tool,self._redact_reason(trace.get('error') or trace.get('code')) or ''))
+                if trace.get('requires'):setup=True
+            if tool!='subscription_engine' and status in ('succeeded','failed'):
+                host=self._event_host(trace) or ''
+                tried.append((tool,host[:80],status))
+        if not any(tool=='subscription_engine' for tool,_reason in failures):
+            failures.append(('model',self._redact_reason(failure) or ''))
+        allowed,_reason=self.safe_retry({**job,'status':'failed'})
+        step=FAILED_NEXT_SETUP if setup else FAILED_NEXT_RETRY if allowed else FAILED_NEXT_REVIEW
+        parts=(owner_cause(failures),tried_statement(tried),stopped,
+               report_statement(agency_report(job.get('message') or '',[],[],[],step)))
+        return '\n'.join(part for part in parts if part) or None
 
     def safe_retry(self, previous, current_work_id=None):
         """Whether replaying this Work's original request is demonstrably safe."""
@@ -1274,16 +1334,27 @@ class AgentService:
         sources=work_source_records(self.store).get(previous['id'])
         if isinstance(sources,list) and ({'owner-settings',ENGINE_UNMEDIATED}&set(sources)):
             return False,'이전 요청이 설정 변경 또는 AgentOS가 중개하지 않은 엔진 작업을 포함해 자동으로 다시 실행하지 않았습니다.'
-        effectful=RETRY_EFFECT_TOOLS
-        for event in events:
-            trace=event.get('trace') or {}
-            # AgentPackage tool ids may alias an AgentOS write through
-            # trace.host_action, so checking only the public tool id can
-            # accidentally replay a completed mutation.
-            host_action=trace.get('host_action') if isinstance(trace,dict) else None
-            if event.get('tool') in effectful or host_action in effectful:
-                return False,EFFECT_RETRY_REFUSAL
+        # AgentPackage tool ids may alias an AgentOS write through
+        # trace.host_action, so checking only the public tool id can
+        # accidentally replay a completed mutation (``effect_calls``).
+        if any(self.effect_calls(event) for event in events):
+            return False,EFFECT_RETRY_REFUSAL
         return True,None
+
+    @staticmethod
+    def effect_calls(event):
+        """The ``RETRY_EFFECT_TOOLS`` names one recorded tool event may have changed state with.
+
+        Its public tool id and its ``host_action`` both count.  #787: a
+        ``browser_open`` whose call declared ``read`` or ``navigate``
+        (``page_load_only``) only loaded a page, the same rule the
+        re-delegation step uses; an undeclared open, a click or typing stays.
+        """
+        from .agent_runtime import page_load_only
+        trace=event.get('trace') if isinstance(event.get('trace'),dict) else {}
+        names={name for name in (event.get('tool'),trace.get('host_action')) if isinstance(name,str) and name in RETRY_EFFECT_TOOLS}
+        if names=={'browser_open'} and page_load_only(trace.get('host_action') or event.get('tool'),trace):return set()
+        return names
 
     def canonical_retry_source(self, previous):
         """Return the original Work request behind a retry chain.
@@ -2137,8 +2208,26 @@ class AgentService:
                     and result.get('fingerprint')==self.model_fingerprint(config)
                     and isinstance(result.get('time'),(int,float)))
 
-    def save_roots(self, body):
-        from pathlib import Path
+    def save_roots(self, body, local_surface=True):
+        """Replace the Settings read-folder list.
+
+        ``local_surface`` is False for an owner session that is not this Mac
+        reached directly (#779).  Such a session may only keep a subset of the
+        stored folders, exactly as stored: removing a folder reduces authority,
+        like declining a folder request.  A new, replaced or re-spelled path
+        raises ``OwnerLocalRequired`` before anything is written.  The check and
+        the write share the service lock, so a concurrent removal on the Mac
+        cannot turn a remote "keep" back into an add.
+        """
+        with self.lock:
+            if not local_surface:
+                paths=body.get('paths') if isinstance(body,dict) else None
+                stored={root.get('path') for root in self.store.config('file_roots',[]) if isinstance(root,dict)}
+                if not isinstance(paths,list) or not all(isinstance(p,str) and p in stored for p in paths):
+                    raise OwnerLocalRequired()
+            return self._save_roots(body)
+
+    def _save_roots(self, body):
         paths=body.get('paths')
         if not isinstance(paths,list) or len(paths)>8 or any(not isinstance(p,str) for p in paths):raise ValueError('폴더는 최대 8개까지 연결할 수 있습니다.')
         roots=[];stored={root.get('path'):root for root in self.store.config('file_roots',[])}
@@ -2155,12 +2244,30 @@ class AgentService:
         self.store.put('document_sharing',{})
         return {'roots':[{**root,'blocked':folder_grants.blocked(root['path'],self.store)} for root in roots]}
 
-    def configure_file_workspace(self, body):
+    def configure_file_workspace(self, body, local_surface=True):
+        """Replace the reference folders and the result folder.
+
+        Off this Mac (#779) only a removal is accepted: the same result folder,
+        exactly as stored, and a subset of the stored reference folders.
+        Setting or changing the result folder, or adding a reference, raises
+        ``OwnerLocalRequired`` before anything is written.
+        """
         if not isinstance(body,dict): raise ValueError('파일 작업공간 정보를 확인하세요.')
         files=FileWorkspace(self.store)
-        files.configure(body.get('references',[]),body.get('workspace',''))
-        self.store.put('document_sharing',{})
-        return files.projection()
+        with self.lock:
+            if not local_surface:
+                status=files.status()
+                stored={ref.get('path') for ref in status.get('references',[]) if isinstance(ref,dict)}
+                references=body.get('references')
+                if not (isinstance(references,list) and all(isinstance(p,str) and p in stored for p in references)
+                        and status.get('workspace') and body.get('workspace')==status.get('workspace')):
+                    raise OwnerLocalRequired()
+            # Off this Mac the result folder is kept, never re-chosen: a stored
+            # folder the rules now block (e.g. a parent replaced by a symlink)
+            # stays as stored instead of being re-resolved to a new target.
+            files.configure(body.get('references',[]),body.get('workspace',''),keep_blocked_workspace=not local_surface)
+            self.store.put('document_sharing',{})
+            return files.projection()
 
     def record_work_sources(self, job_id, labels):
         """Widen one Work's durable source record (#605); never narrows it.
@@ -2772,20 +2879,18 @@ class AgentService:
         tool evidence AgentOS recorded for this attempt.  A raised worker
         failure is ``worker_failed``.  An attempt that ran any action outside
         the effect-free reads, or left an unknown effect, is never
-        re-delegated (C8), and no judgment is asked for it.
+        re-delegated (C8), and no judgment is asked for it.  #787: a
+        ``browser_open`` counts as a read only when the call declared ``read``
+        or ``navigate`` (``page_load_only``); a click, typing, a declared
+        ``mutate``/``payment`` or an undeclared open stays an effect.
         """
         if orchestration is None or attempt is None or not orchestration.orchestrated:return None
-        from .agent_runtime import EFFECT_FREE_READS, INTERNAL_STATE_ACTIONS
-        # A navigation in the owner's browser session counts as an effect here,
-        # as it does for the retry rule (``safe_retry``): it is never repeated -
-        # unless (#795) the bridge recorded the step's declared effect as a page read
-        # or navigation; ``mutate``/``payment`` or an undeclared open stays an effect.
+        from .agent_runtime import EFFECT_FREE_READS, INTERNAL_STATE_ACTIONS, page_load_only
         repeatable=(EFFECT_FREE_READS-{'browser_open'})|INTERNAL_STATE_ACTIONS
         with self.store.db() as db:
             rows=db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? AND id>? ORDER BY id',(job_id,since or 0)).fetchall()
         effect=outcome=='unknown' or self._work_has_unknown_effect(job_id)
         observed,failures=[],[]
-        open_declared=[False]
         # #729: the factual summary the next plan call reads (names and codes only).
         called,failed_codes,incomplete,sourceless=[],[],[],0
         for row in rows:
@@ -2795,12 +2900,7 @@ class AgentService:
             except (TypeError,ValueError):data={}
             data=data if isinstance(data,dict) else {}
             action=data.get('host_action') or row['tool']
-            declared_read=(action=='browser_open' and data.get('declared_effect') in ('read','navigate'))
-            if row['status']=='running' and action=='browser_open':
-                open_declared[0]=declared_read
-            if action=='browser_open' and row['status']!='running':
-                declared_read=open_declared[0]
-            if action not in repeatable and not declared_read:effect=True
+            if action not in repeatable and not page_load_only(action,data):effect=True
             if row['tool'] not in called:called.append(row['tool'])
             if row['status']=='succeeded':
                 evidence=data.get('evidence') if isinstance(data.get('evidence'),dict) else {}
@@ -3119,7 +3219,11 @@ class AgentService:
         def schedule(work_id):
             # Reached only after a successful single-use claim: the grant is
             # written, then the parked Work is re-queued by compare-and-set.
-            if not kept_existing:commit()
+            # #779 review: the commit reads the current folders and writes them
+            # under the service lock that Settings writes use, so a Mac approval
+            # and a phone removal cannot lose each other's update.
+            if not kept_existing:
+                with self.lock:commit()
             scheduled=self._schedule_resumed_work(work_id)
             if scheduled:self._remember_work(LOCAL_RESUMED_KEY,work_id)
             return scheduled
@@ -6250,20 +6354,34 @@ class AgentService:
                     transcript=calendar_notice+self.projection.blocked_reply(self.connector_owner_id(job),exc.kind,response)
                 else:
                     transcript=calendar_notice+'이 요청은 완료하지 못했습니다: '+response
+                # #607: a run that failed (or was stopped / timed out) after an
+                # action whose effect is unknown is not a plain failure: the
+                # unknown effect stays visible and retry refuses to replay it.
+                outcome='unknown' if self._work_has_unknown_effect(job['id']) else 'failed'
+                # #787: a worker attempt failed and nothing followed; the owner reads
+                # what was tried, what failed and the next step, not only the error.
+                report=None
+                if outcome=='failed' and not isinstance(exc,BlockedTurn):
+                    try:report=self.failed_attempt_report(job,response)
+                    except Exception:
+                        LOG.warning('failed-attempt report could not be built job=%s',job['id'])
+                    if report:transcript=calendar_notice+TERMINAL_FAILED_HEADER+'\n\n'+report
                 if prep.preparation_of(job.get('request_key')):
                     # #659: see the success path; nothing unscrubbed is persisted.
                     response,transcript=self.scrub_work_text(job['id'],response),self.scrub_work_text(job['id'],transcript)
+                    report=self.scrub_work_text(job['id'],report) if report else report
                 # Tool reads of a failed run are also read back from its
                 # durable tool events; this records what was declared so far
                 # plus the run-time labels of a worker that had started.
                 self.record_work_sources(job['id'],work_sources|set(getattr(work_capabilities[0],'private_provenance',()) or ()))
                 with self.store.db() as db:
+                    # #787 review: an unknown effect recorded while the report was built still wins.
+                    if outcome=='failed' and self._work_has_unknown_effect(job['id']):
+                        outcome,report='unknown',None
+                        transcript=calendar_notice+'이 요청은 완료하지 못했습니다: '+response
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id,delivery_projection) VALUES (?,?,?,?,?,?,?)',('assistant',transcript,job['channel'],time.time(),job.get('workspace_id'),job['id'],'blocked-turn' if isinstance(exc,BlockedTurn) else None))
-                    # #607: a run that failed (or was stopped / timed out) after an
-                    # action whose effect is unknown is not a plain failure: the
-                    # unknown effect stays visible and retry refuses to replay it.
-                    outcome='unknown' if self._work_has_unknown_effect(job['id']) else 'failed'
-                    db.execute("UPDATE jobs SET status=?,error=?,delivery=? WHERE id=?",(outcome,response,'pending' if job['chat_id'] else 'none',job['id']))
+                    db.execute("UPDATE jobs SET status=?,error=?,delivery=?,owner_cause=COALESCE(?,owner_cause) WHERE id=?",
+                               (outcome,response,'pending' if job['chat_id'] else 'none',report,job['id']))
                 self.record_turn_provenance(job['id'],goal=self.work_goal(job['id'],work_capabilities[0],outcome))
             self.update_task_card(job,outcome)
             # #709: a login page during this run: show the window now that the

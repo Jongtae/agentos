@@ -251,6 +251,10 @@ RETRY_EFFECT_TOOLS=frozenset({'save_note','save_memory','delegate_agent',
                               # #787: a browser_open declared read/navigate only loaded a page (``effect_calls``).
                               'browser_open','browser_click','browser_type'})
 EFFECT_RETRY_REFUSAL='이전 요청이 상태를 바꾸는 작업을 시도해 자동으로 다시 실행하지 않았습니다.'
+#: #795: ``bounded_execution.cli_metadata`` keeps at most this many of the tool
+#: calls a CLI reported; a list that long may have dropped some, so it cannot
+#: show that the CLI ran no host action (``cli_host_actions``).
+CLI_TOOL_CALLS_KEPT=30
 #: #787: the next step of a Work whose last worker attempt failed, chosen from
 #: its own recorded state: a typed setup/approval need, the ``safe_retry`` gate.
 FAILED_NEXT_SETUP='필요한 연결이나 승인을 마친 뒤 다시 요청해 주세요.'
@@ -1362,6 +1366,46 @@ class AgentService:
         names={name for name in (event.get('tool'),trace.get('host_action')) if isinstance(name,str) and name in RETRY_EFFECT_TOOLS}
         if names=={'browser_open'} and page_load_only(trace.get('host_action') or event.get('tool'),trace):return set()
         return names
+
+    @staticmethod
+    def cli_host_actions(meta):
+        """What a trusted-local CLI reported running with its own tools (#795), or None when that is unobservable.
+
+        Read only from the CLI's own stream as ``cli_metadata`` summarised it
+        (``tool_calls``): Codex ``exec --json`` items and Claude Code
+        ``stream-json`` ``tool_use`` blocks and ``permission_denials``.  Not
+        host actions: an AgentOS bridge call (Claude Code ``mcp__agentos__*``;
+        a Codex ``mcp_tool_call`` naming a trusted-local bridge action, since
+        the summary drops the server and ``agentos`` is the only one a Work
+        turn configures), which AgentOS records as its own tool event and
+        ``orchestration_step`` already evaluates, and the CLI's own web search
+        (Codex ``web_search``, Claude Code ``WebSearch``), a public read
+        recorded as a ``cli-native`` ``web_search``.  A Claude Code tool call
+        its permission layer reported denied did not run.  Everything else (a
+        shell command, a file change, any other built-in tool) is returned by
+        name.  None when there is no parsed list (the CLI was killed, timed out
+        or never reported one) or the list reached ``CLI_TOOL_CALLS_KEPT``:
+        absent evidence is not evidence of no action.
+        """
+        from collections import Counter
+        from .bounded_execution import CLAUDE_NATIVE_SEARCH_TOOL
+        bridge=set(profile_actions(BOUNDED_PROFILE))
+        calls=meta.get('tool_calls') if isinstance(meta,dict) else None
+        if not isinstance(calls,list) or len(calls)>=CLI_TOOL_CALLS_KEPT:return None
+        host,denied=[],Counter()
+        for call in calls:
+            if not isinstance(call,dict):return None
+            kind,name=call.get('type'),str(call.get('name') or '')
+            if (kind=='mcp_tool_call' and name in bridge) or (kind=='tool_use' and name.startswith('mcp__agentos__')):continue
+            if kind=='web_search' or (kind=='tool_use' and name==CLAUDE_NATIVE_SEARCH_TOOL):continue
+            if kind=='tool_use' and call.get('status')=='denied':
+                denied[name]+=1
+                continue
+            host.append(name or str(kind or 'unknown'))
+        for name,count in denied.items():
+            for _ in range(count):
+                if name in host:host.remove(name)
+        return tuple(host)
 
     def canonical_retry_source(self, previous):
         """Return the original Work request behind a retry chain.
@@ -2878,7 +2922,7 @@ class AgentService:
                                              'error':TOOL_INCOMPLETE_TEXT},ensure_ascii=False))
 
     def orchestration_step(self, orchestration, attempt, job_id, since, *, result=None, answer='', outcome=None,
-                           owner_needed=False, failed=None):
+                           owner_needed=False, failed=None, unmediated=False, engine_meta=None):
         """Evaluate one attempt and return the next one, or None (#710).
 
         Direct route: the run's own #657 completion judgment, no new call.
@@ -2890,6 +2934,13 @@ class AgentService:
         ``browser_open`` counts as a read only when the call declared ``read``
         or ``navigate`` (``page_load_only``); a click, typing, a declared
         ``mutate``/``payment`` or an undeclared open stays an effect.
+        #795: ``unmediated`` is an attempt whose CLI ran on the trusted-local
+        profile, where AgentOS does not confine the CLI's own tools (the same
+        reason ``safe_retry`` refuses a Work recorded ``ENGINE_UNMEDIATED``).
+        It is a possible effect unless the CLI's own report (``engine_meta``)
+        shows it ran no host action (``cli_host_actions``).  An attempt
+        AgentOS ran confined (strict-isolated, the isolated sidecar) or on the
+        direct route is evaluated from its tool events alone, as before.
         """
         if orchestration is None or attempt is None or not orchestration.orchestrated:return None
         from .agent_runtime import EFFECT_FREE_READS, INTERNAL_STATE_ACTIONS, page_load_only
@@ -2897,6 +2948,7 @@ class AgentService:
         with self.store.db() as db:
             rows=db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? AND id>? ORDER BY id',(job_id,since or 0)).fetchall()
         effect=outcome=='unknown' or self._work_has_unknown_effect(job_id)
+        if unmediated and self.cli_host_actions(engine_meta)!=():effect=True
         observed,failures=[],[]
         # #729: the factual summary the next plan call reads (names and codes only).
         called,failed_codes,incomplete,sourceless=[],[],[],0
@@ -5887,6 +5939,8 @@ class AgentService:
                         section=(lambda name,value:attempt.section(name,value)) if attempt is not None else (lambda name,value:value)
                         brief=attempt.brief(adjusted=attempt.number>1) if attempt is not None else None
                         attempt_start=self.last_event_id(job['id'])
+                        # #795: whether this attempt's CLI ran with its own tools unconfined, and what it reported.
+                        unmediated_turn,engine_meta=False,None
                         # #710 review P2-1: what earlier attempts of this Work read from a private
                         # store stays with the Work: it closes AgentOS-composed egress, keeps the
                         # CLI's own search off and keeps the local envelope to size and digest.
@@ -5918,6 +5972,8 @@ class AgentService:
                             # profile through this service (``cli_browser_relay``); the strict
                             # and isolated profiles never get it.
                             cli_browser=(not isolated and facade.PROFILE==BOUNDED_PROFILE)
+                            # #795: on trusted-local AgentOS does not confine the CLI's own tools.
+                            unmediated_turn=not isolated and facade.PROFILE==BOUNDED_PROFILE
                             capabilities=Capabilities(self.store,None,{},'',job['id'],record,network=self.local_tools,
                                                       document_access=False,packages=self.runtime_packages(),
                                                       allowed_tools=allowed_tools,inherited_provenance=set(turn_provenance)|work_private,
@@ -6117,7 +6173,8 @@ class AgentService:
                                     self._remember_engine_login(subscription['id'],'signed-out','run')
                                 record('subscription_engine','failed',json.dumps({'engine':subscription['id'],'error':str(exc),**diagnostics},ensure_ascii=False))
                                 # #710: a failed worker may be re-delegated within the Work's bounds.
-                                following=self.orchestration_step(orchestration,attempt,job['id'],attempt_start,failed=str(exc))
+                                following=self.orchestration_step(orchestration,attempt,job['id'],attempt_start,failed=str(exc),
+                                                                  unmediated=unmediated_turn,engine_meta=getattr(exc,'meta',None))
                                 if following is not None:
                                     refusals.clear();verified_parts.clear()
                                     attempt=following
@@ -6135,6 +6192,7 @@ class AgentService:
                             if not isolated and result.exit_code==0 and (self.store.config('engine_login',{}) or {}).get(subscription['id'],{}).get('state')!='signed-in':
                                 self._remember_engine_login(subscription['id'],'signed-in','run')
                             response,provider,model=result.content,'subscription',result.engine
+                            engine_meta=getattr(result,'meta',None)
                             # #678: the CLI's own searches become web_search evidence, and
                             # the URLs it reported are listed under the answer.
                             native_urls=[] if isolated else self.record_cli_native_searches(job['id'],subscription['id'],getattr(result,'meta',None),record,native_search)
@@ -6271,7 +6329,8 @@ class AgentService:
                         # effect in this attempt).  A fallback run is never re-delegated.
                         following=self.orchestration_step(orchestration,attempt,job['id'],attempt_start,
                                                           result=None if subscription.get('id') else result,answer=response,
-                                                          outcome=outcome,owner_needed=approval_needed[0] or context_approval_needed[0])
+                                                          outcome=outcome,owner_needed=approval_needed[0] or context_approval_needed[0],
+                                                          unmediated=unmediated_turn,engine_meta=engine_meta)
                         if following is None:break
                         attempt=following
                         refusals.clear();verified_parts.clear();agency_report=None;unknown_statement=None

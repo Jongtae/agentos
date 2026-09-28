@@ -39,6 +39,9 @@ OPENAI_KEY = 'sk-fixture-openai-0710'
 #: A bundled listing without the ranked gpt-6-luna (codex-cli 0.153.4 shape).
 BUNDLED = ('gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5')
 SEARCH_TOOLS = ('bounded_public_research', 'web_search')
+#: #795: what ``cli_metadata`` reports for a CLI stream with no tool call.  A
+#: trusted-local attempt is re-delegated only when its CLI reported this much.
+NO_TOOL_CALLS = {'tool_calls': []}
 
 
 def plan(worker, goal, *, model='', context=SECTIONS, criteria=('the answer states it',), tools=None, reason='fits',
@@ -83,7 +86,7 @@ class Engine:
         self.answers = []
         self.before = None
         self.fail = []
-        self.meta = None
+        self.meta = dict(NO_TOOL_CALLS)
 
     def execute(self, engine, prompt, tools, **kwargs):
         offered = sorted(tools._offered())
@@ -362,7 +365,7 @@ class Redelegation(Harness):
         self.assertEqual(self.goals, [False], 'no judgment was asked when nothing may follow')
 
     def test_a_failed_worker_is_redelegated(self):
-        self.engine.fail = [ExecutionError('usage limit', failure_class='usage-limit')]
+        self.engine.fail = [ExecutionError('usage limit', failure_class='usage-limit', meta=NO_TOOL_CALLS)]
         self.script([plan('codex', 'Look it up.'), plan('openai', 'Answer directly.')])
         job, row = self.run_work('알려줘')
         self.assertEqual(row['status'], 'succeeded')
@@ -371,7 +374,7 @@ class Redelegation(Harness):
         self.assertEqual((first['outcome'], first['next']), ('worker_failed', 'redelegate'))
 
     def test_a_failed_worker_without_a_new_plan_fails_as_before(self):
-        self.engine.fail = [ExecutionError('usage limit', failure_class='usage-limit')]
+        self.engine.fail = [ExecutionError('usage limit', failure_class='usage-limit', meta=NO_TOOL_CALLS)]
         self.script([plan('codex', 'Look it up.')])
         job, row = self.run_work('알려줘')
         self.assertEqual(row['status'], 'failed')
@@ -595,7 +598,7 @@ class ToolsAndReplan(Harness):
 
     def test_goal_reached_sees_the_model_stated_answer_when_native_search_has_no_urls(self):
         seen = []
-        self.engine.meta = {'native_searches': [{'id': 'n1', 'state': 'succeeded', 'queries': ['q'], 'results': []}]}
+        self.engine.meta = {**NO_TOOL_CALLS, 'native_searches': [{'id': 'n1', 'state': 'succeeded', 'queries': ['q'], 'results': []}]}
         self.engine.answers = ['about forty minutes by car']
         self.script([plan('codex', 'Answer it.'), plan('openai', 'Answer it another way.')])
 
@@ -628,7 +631,7 @@ class RunnableModels(Harness):
         refusal = "The 'gpt-5.6-luna' model is not supported when using Codex with a ChatGPT account."
         self.engine.fail = [ExecutionError('Codex 엔진이 작업을 완료하지 못했습니다(종료 코드 1). 엔진 응답: ' + refusal,
                                            failure_class='request-rejected', exit_code=1, reason=refusal,
-                                           meta={'unsupported_model': 'gpt-5.6-luna'})]
+                                           meta={**NO_TOOL_CALLS, 'unsupported_model': 'gpt-5.6-luna'})]
         self.script([plan('codex', 'Answer.', model='gpt-5.6-luna'), plan('codex', 'Answer.', model='gpt-5.6-luna')])
         job, row = self.run_work('알려줘')
         self.assertEqual(len(self.engine.turns), 1, 'the refused model did not run again')
@@ -644,7 +647,8 @@ class RunnableModels(Harness):
         """#735 review: a generic rejection that names the model (context length) is not a refusal."""
         from personal_agent.orchestrator import MODEL_REFUSALS_KEY, model_refused
         context = "This model's maximum context length for gpt-5.6-luna is exceeded."
-        self.engine.fail = [ExecutionError('rejected: ' + context, failure_class='request-rejected', reason=context)]
+        self.engine.fail = [ExecutionError('rejected: ' + context, failure_class='request-rejected', reason=context,
+                                           meta=NO_TOOL_CALLS)]
         self.script([plan('codex', 'Answer.', model='gpt-5.6-luna')])
         self.run_work('알려줘')
         self.assertEqual(self.store.config(MODEL_REFUSALS_KEY, {}), {})
@@ -676,7 +680,7 @@ class RunnableModels(Harness):
         self.store.put(SUBSCRIPTION_MODELS, {'codex': 'gpt-5.6-luna'})
         refusal = "The 'gpt-5.6-luna' model is not supported when using Codex with a ChatGPT account."
         self.engine.fail = [ExecutionError(refusal, failure_class='request-rejected', reason=refusal,
-                                           meta={'unsupported_model': 'gpt-5.6-luna'})]
+                                           meta={**NO_TOOL_CALLS, 'unsupported_model': 'gpt-5.6-luna'})]
         self.script([plan('codex', 'Answer.'), plan('codex', 'Answer again.')], goals=[True])
         self.run_work('알려줘')
         self.assertEqual([turn['model'] for turn in self.engine.turns], ['gpt-5.6-luna', 'gpt-5.6-terra'])
@@ -1206,7 +1210,7 @@ class ReadIsNotAnEffect(Harness):
                 for tool, declared in steps:
                     bridge_step(tools.capabilities.record, tool, declared)
         self.engine.before = run
-        self.engine.fail = [ExecutionError(INVALID_OUTPUT, failure_class='invalid-output')]
+        self.engine.fail = [ExecutionError(INVALID_OUTPUT, failure_class='invalid-output', meta=NO_TOOL_CALLS)]
         self.script(plans or [plan('codex', 'Look it up.'), plan('openai', 'Answer directly.')])
         return self.run_work('알려줘', key=f'read-effect-{len(self.asked_plans)}-{steps}')
 
@@ -1810,3 +1814,144 @@ class StreamErrorsInTheTurnRecord(Harness):
         stored = json.dumps(errors, ensure_ascii=False)
         self.assertNotIn(OPENAI_KEY, stored)
         self.assertNotIn('비밀 요청 문장 그대로 반복', stored)
+
+
+class UnmediatedEngine(Harness):
+    """ORCH-07 (#795): re-delegation honours the unmediated-engine rule ``safe_retry`` applies.
+
+    On trusted-local AgentOS does not confine the CLI's own tools, so an
+    attempt there is a possible effect unless the CLI's own report shows no
+    host action.  A strict-isolated attempt is judged from its tool events only.
+    """
+
+    def failing_attempt(self, meta, before=None):
+        self.engine.before = before
+        self.engine.fail = [ExecutionError(INVALID_OUTPUT, failure_class='invalid-output', meta=meta)]
+        self.script([plan('codex', 'Look it up.'), plan('openai', 'Answer directly.')])
+        return self.run_work('알려줘', key=f'unmediated-{len(self.engine.turns)}')
+
+    def assert_stopped_for_effect(self, job, outcome='worker_failed'):
+        last = self.events(job, 'evaluated')[-1][1]
+        self.assertEqual((last['outcome'], last['next'], last['stop']), (outcome, 'stop', 'effect'))
+        self.assertEqual(len(self.asked_plans), 1, 'no re-plan after a possible unmediated effect')
+        self.assertEqual(self.transport.bodies, [], 'no other worker ran')
+
+    def test_a_trusted_local_attempt_recorded_unmediated_without_a_cli_report_stops_with_effect(self):
+        from personal_agent.agent_runtime import ENGINE_UNMEDIATED, work_source_records
+        # A killed or timed-out CLI reports no parsed stream: absent evidence is not "no action".
+        for meta in (None, {'argv': ['codex', 'exec'], 'duration_ms': 1}):
+            with self.subTest(meta=meta):
+                self.asked_plans.clear()
+                job, row = self.failing_attempt(meta)
+                self.assertIn(ENGINE_UNMEDIATED, work_source_records(self.store)[job])
+                self.assert_stopped_for_effect(job)
+                self.assertEqual(row['status'], 'failed')
+
+    def test_a_trusted_local_attempt_whose_cli_ran_a_host_action_stops_with_effect(self):
+        for call in ({'type': 'command_execution', 'name': 'command_execution', 'status': 'completed'},
+                     {'type': 'file_change', 'name': 'file_change', 'status': 'completed'},
+                     {'type': 'tool_use', 'name': 'Read', 'status': 'requested'}):
+            with self.subTest(call=call):
+                self.asked_plans.clear()
+                job, _row = self.failing_attempt({'tool_calls': [call]})
+                self.assert_stopped_for_effect(job)
+
+    def test_a_trusted_local_answer_after_a_host_action_is_not_judged_or_redelegated(self):
+        self.engine.meta = {'tool_calls': [{'type': 'command_execution', 'name': 'command_execution',
+                                            'status': 'completed'}]}
+        self.script([plan('codex', 'Look it up.'), plan('openai', 'Answer directly.')], goals=[False])
+        job, row = self.run_work('알려줘')
+        self.assert_stopped_for_effect(job, outcome='not_judged')
+        self.assertEqual(self.goals, [False], 'nothing may follow, so no goal judgment was asked')
+        self.assertEqual(row['response'], 'cli answer')
+
+    def test_a_trusted_local_attempt_whose_cli_reported_no_host_action_is_redelegated(self):
+        calls = [{'type': 'mcp_tool_call', 'name': 'web_search', 'status': 'completed'},
+                 {'type': 'web_search', 'name': 'web_search', 'status': 'completed'},
+                 {'type': 'tool_use', 'name': 'mcp__agentos__list_notes', 'status': 'requested'},
+                 {'type': 'tool_use', 'name': 'WebSearch', 'status': 'requested'},
+                 # Claude Code's permission layer refused it, so it did not run.
+                 {'type': 'tool_use', 'name': 'Bash', 'status': 'requested'},
+                 {'type': 'tool_use', 'name': 'Bash', 'status': 'denied'}]
+        job, row = self.failing_attempt({'tool_calls': calls})
+        first = self.events(job, 'evaluated')[0][1]
+        self.assertEqual((first['outcome'], first['next'], first['stop']), ('worker_failed', 'redelegate', None))
+        self.assertEqual(row['response'], 'api answer')
+
+    def strict(self):
+        from personal_agent.bounded_execution import STRICT_PROFILE, StrictIsolatedAgentOSMcpTools
+        self.store.put('subscription_isolation', {'profile': STRICT_PROFILE,
+                                                  'qualified': {'codex': {'platform': sys.platform}}})
+        self.assertIs(self.service.subscription_facade('codex')[0], StrictIsolatedAgentOSMcpTools)
+
+    def test_a_strict_profile_attempt_with_only_reads_is_redelegated(self):
+        self.strict()
+
+        def read(tools):
+            tools.capabilities.record('web_search', 'succeeded',
+                                      json.dumps({'host_action': 'web_search', 'evidence': {'sources': ['https://a.test']}}))
+        # AgentOS confined this CLI's own tools, so no CLI report is needed.
+        job, row = self.failing_attempt(None, before=read)
+        first = self.events(job, 'evaluated')[0][1]
+        self.assertEqual((first['outcome'], first['next'], first['stop']), ('worker_failed', 'redelegate', None))
+        self.assertEqual(row['status'], 'succeeded')
+        self.assertEqual(row['response'], 'api answer')
+
+    def test_a_strict_profile_attempt_that_ran_an_effect_still_stops(self):
+        self.strict()
+
+        def save(tools):
+            tools.capabilities.record('save_note', 'succeeded', json.dumps({'host_action': 'save_note', 'evidence': {}}))
+        job, _row = self.failing_attempt(None, before=save)
+        self.assert_stopped_for_effect(job)
+
+
+class CliHostActions(unittest.TestCase):
+    """#795: what a CLI's own report shows about host actions, read in ``cli_metadata``'s shape."""
+
+    def test_unobservable_reports_are_none(self):
+        from personal_agent.quickstart_service import CLI_TOOL_CALLS_KEPT
+        host = AgentService.cli_host_actions
+        full = [{'type': 'mcp_tool_call', 'name': 'web_search', 'status': 'completed'}] * CLI_TOOL_CALLS_KEPT
+        for meta in (None, {}, {'tool_calls': None}, {'tool_calls': 'x'}, {'tool_calls': [None]}, {'tool_calls': full}):
+            with self.subTest(meta=meta):
+                self.assertIsNone(host(meta))
+
+    def test_bridge_calls_own_search_and_denied_calls_are_not_host_actions(self):
+        host = AgentService.cli_host_actions
+        self.assertEqual(host({'tool_calls': []}), ())
+        self.assertEqual(host({'tool_calls': [{'type': 'mcp_tool_call', 'name': 'save_note', 'status': 'completed'},
+                                              {'type': 'tool_use', 'name': 'mcp__agentos__save_note', 'status': 'requested'},
+                                              {'type': 'web_search', 'name': 'web_search', 'status': 'completed'},
+                                              {'type': 'tool_use', 'name': 'WebSearch', 'status': 'requested'}]}), ())
+        self.assertEqual(host({'tool_calls': [{'type': 'tool_use', 'name': 'Bash', 'status': 'requested'},
+                                              {'type': 'tool_use', 'name': 'Bash', 'status': 'denied'}]}), ())
+
+    def test_everything_else_is_named(self):
+        host = AgentService.cli_host_actions
+        self.assertEqual(host({'tool_calls': [{'type': 'command_execution', 'name': 'command_execution', 'status': 'in_progress'},
+                                              {'type': 'file_change', 'name': 'file_change', 'status': 'completed'},
+                                              {'type': 'tool_use', 'name': 'Write', 'status': 'requested'}]}),
+                         ('command_execution', 'file_change', 'Write'))
+        # A denial covers one call only; an MCP server other than agentos is not the bridge.
+        self.assertEqual(host({'tool_calls': [{'type': 'tool_use', 'name': 'Bash', 'status': 'requested'},
+                                              {'type': 'tool_use', 'name': 'Bash', 'status': 'requested'},
+                                              {'type': 'tool_use', 'name': 'Bash', 'status': 'denied'},
+                                              {'type': 'tool_use', 'name': 'mcp__other__x', 'status': 'requested'},
+                                              {'type': 'mcp_tool_call', 'name': 'other_server_tool', 'status': 'completed'}]}),
+                         ('Bash', 'mcp__other__x', 'other_server_tool'))
+
+    def test_the_kept_count_and_shapes_match_cli_metadata(self):
+        from personal_agent.bounded_execution import cli_metadata
+        from personal_agent.quickstart_service import CLI_TOOL_CALLS_KEPT
+        line = json.dumps({'type': 'item.completed', 'item': {'type': 'command_execution', 'status': 'completed'}})
+        calls = cli_metadata('codex', '\n'.join([line] * (CLI_TOOL_CALLS_KEPT + 10)))['tool_calls']
+        self.assertEqual(len(calls), CLI_TOOL_CALLS_KEPT)
+        self.assertIsNone(AgentService.cli_host_actions({'tool_calls': calls}))
+        self.assertEqual(AgentService.cli_host_actions(cli_metadata('codex', line)), ('command_execution',))
+        claude = json.dumps({'type': 'assistant', 'message': {'content': [
+            {'type': 'tool_use', 'name': 'mcp__agentos__web_search'}, {'type': 'tool_use', 'name': 'Bash'}]}})
+        denied = json.dumps({'type': 'result', 'permission_denials': [{'tool_name': 'Bash'}]})
+        self.assertEqual(AgentService.cli_host_actions(cli_metadata('claude-code', claude + '\n' + denied)), ())
+        self.assertEqual(AgentService.cli_host_actions(cli_metadata('claude-code', claude)), ('Bash',))
+

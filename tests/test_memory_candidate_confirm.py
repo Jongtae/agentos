@@ -19,8 +19,9 @@ from pathlib import Path
 from personal_agent.agent_runtime import (CORE_INSTRUCTIONS, DEFINITIONS, event_trail, goal_summary, memory_proposal,
                                           outcome_from_events, state_change_short)
 from personal_agent.orchestrator import QUESTION
-from personal_agent.providers import ModelAdapter
-from personal_agent.quickstart_service import MEMORY_CANDIDATES_KIND, AgentService
+from personal_agent.providers import ModelAdapter, ProviderError
+from personal_agent.quickstart_service import (MEMORY_CANDIDATES_KIND, MEMORY_PENDING_TELEGRAM_NOTE, MEMORY_PENDING_WEB_NOTE,
+                                               MEMORY_UPKEEP_KIND, AgentService)
 from personal_agent.quickstart_store import QuickStore
 
 CHAT = 8181
@@ -74,11 +75,15 @@ class TelegramConfirmTests(unittest.TestCase):
         self.store = QuickStore(Path(self.temp.name) / 'data')
         self.calls = []
         self.plan = []
+        self.lose_reply = False   # the next sendMessage times out (delivery 'unknown')
         self.text = '출근하셨군요. 점심 추천은 판교 기준으로 다시 드릴게요.'
 
         def transport(url, body=None, headers=None, timeout=60):
             method = url.rsplit('/', 1)[-1]
             self.calls.append((method, body))
+            if method == 'sendMessage' and self.lose_reply:
+                self.lose_reply = False
+                raise ProviderError('Telegram timed out')
             if method == 'sendMessage':
                 return {'ok': True, 'result': {'message_id': 700 + len(self.calls)}}
             if method == 'getMe':
@@ -111,10 +116,10 @@ class TelegramConfirmTests(unittest.TestCase):
     def answers(self):
         return [body.get('text') for method, body in self.calls if method == 'answerCallbackQuery']
 
-    def notification(self, job_id):
+    def notification(self, job_id, kind=MEMORY_CANDIDATES_KIND):
         with self.store.db() as db:
             rows = db.execute('SELECT * FROM telegram_notifications WHERE job_id=? AND kind=?',
-                              (job_id, MEMORY_CANDIDATES_KIND)).fetchall()
+                              (job_id, kind)).fetchall()
         return [dict(row) for row in rows]
 
     def turn(self, message='난 오늘 내 직장인 판교 카카오뱅크로 출근했어.', channel=True):
@@ -131,7 +136,8 @@ class TelegramConfirmTests(unittest.TestCase):
         job_id = self.turn()
         self.assertEqual(self.notification(job_id), [], 'nothing is offered before the reply')
         self.service.deliver_one()
-        self.assertEqual(self.sends()[-1]['text'], self.text, 'the answer is delivered, not withheld')
+        self.assertEqual(self.sends()[-1]['text'], self.text + '\n\n' + MEMORY_PENDING_TELEGRAM_NOTE,
+                         'the answer is delivered with AgentOS\'s own not-yet-saved line')
         self.assertTrue(self.service.deliver_notification())
         [row] = self.notification(job_id)
         return self.store.job(job_id), self.sends()[-1], row
@@ -320,6 +326,112 @@ class TelegramConfirmTests(unittest.TestCase):
         self.assertIn('그 밖의 후보 2개는 내 기록에서 확인할 수 있습니다.', text)
         self.assertTrue(all(len(button['callback_data'].encode()) <= 64
                             for line in self.sends()[-1]['reply_markup']['inline_keyboard'] for button in line))
+
+    # --- review round 2 (Codex threads on #819) ------------------------------------
+
+    def test_the_reply_says_nothing_was_saved_yet_on_telegram_and_the_web(self):
+        """P1: AgentOS's own line, not a scan of the model's prose; gone once the owner decided."""
+        self.text = '기억해 둘게요.'
+        job, _prompt, row = self.offered()
+        reply = self.sends()[-2]['text']
+        self.assertEqual(reply, '기억해 둘게요.\n\n' + MEMORY_PENDING_TELEGRAM_NOTE)
+        [served] = [item for item in self.service.owner_jobs(self.store.jobs()) if item['id'] == job['id']]
+        self.assertEqual(served['response'], '기억해 둘게요.\n\n' + MEMORY_PENDING_WEB_NOTE)
+        [message] = [item for item in self.service.owner_messages(self.store.history())
+                     if item.get('role') == 'assistant' and item.get('job_id') == job['id']]
+        self.assertTrue(message['content'].endswith(MEMORY_PENDING_WEB_NOTE))
+        self.tap(f"p7m:{row['id']}:1:accept", row['message_id'])
+        [served] = [item for item in self.service.owner_jobs(self.store.jobs()) if item['id'] == job['id']]
+        self.assertEqual(served['response'], '기억해 둘게요.', 'decided: the line is no longer true, so it is gone')
+
+    def test_a_reply_without_candidates_carries_no_line(self):
+        job_id = self.store.enqueue('안녕', 'plain', channel=f'telegram:{GENERATION}', chat_id=CHAT)
+        self.text = '안녕하세요.'
+        self.service.run_one()
+        self.service.deliver_one()
+        self.assertEqual(self.sends()[-1]['text'], '안녕하세요.')
+        self.assertEqual(self.notification(job_id), [])
+
+    def test_only_a_value_shown_complete_and_unchanged_gets_a_button(self):
+        """P1: the owner approves exactly what was shown; anything else is left to 내 기록."""
+        job_id = self.store.enqueue('세 가지', 'three', channel=f'telegram:{GENERATION}', chat_id=CHAT)
+        self.store.save_memory_candidate(job_id, KEY, VALUE)
+        self.store.save_memory_candidate(job_id, 'profile.note.long', '가' * 121)
+        self.store.save_memory_candidate(job_id, 'profile.note.key', 'sk-proj-abcdefghijklmnopqrstuvwxyz123456')
+        self.service.queue_memory_candidates(self.store.job(job_id))
+        self.assertTrue(self.service.deliver_notification())
+        [row] = self.notification(job_id)
+        prompt = self.sends()[-1]
+        lines = prompt['text'].splitlines()
+        self.assertEqual(lines[1], f'1. place.work: {VALUE}')
+        self.assertTrue(lines[2].endswith('… → 내 기록에서 확인해 주세요'), lines[2])
+        self.assertEqual(lines[3], '3. note.key: [redacted] → 내 기록에서 확인해 주세요')
+        self.assertEqual([[button['callback_data'] for button in line] for line in prompt['reply_markup']['inline_keyboard']],
+                         [[f"p7m:{row['id']}:1:accept", f"p7m:{row['id']}:1:reject"]])
+        for target in ('2', '3'):
+            self.tap(f"p7m:{row['id']}:{target}:accept", row['message_id'])
+        self.assertEqual(self.store.memories(), [])
+        self.tap(f"p7m:{row['id']}:a:accept", row['message_id'])
+        self.assertEqual([(m['memory_key'], m['content']) for m in self.store.memories()], [(KEY, VALUE)],
+                         '"all" covers only what the message showed complete')
+        self.assertEqual(sorted(c['memory_key'] for c in self.store.memory_candidates()),
+                         ['profile.note.key', 'profile.note.long'])
+
+    def test_a_prompt_with_nothing_tappable_is_only_a_list(self):
+        job_id = self.store.enqueue('긴 값', 'long', channel=f'telegram:{GENERATION}', chat_id=CHAT)
+        self.store.save_memory_candidate(job_id, KEY, '가' * 200)
+        self.service.queue_memory_candidates(self.store.job(job_id))
+        self.assertTrue(self.service.deliver_notification())
+        self.assertEqual(self.sends()[-1]['reply_markup'], {'inline_keyboard': []})
+        self.assertEqual(self.notification(job_id)[0]['state'], 'memory_listed')
+
+    def test_no_prompt_after_an_unknown_reply_delivery(self):
+        """P2: a reply that may not have arrived is never followed by an approval prompt."""
+        job_id = self.turn()
+        self.lose_reply = True
+        self.service.deliver_one()
+        self.assertEqual(self.store.job(job_id)['delivery'], 'unknown')
+        self.assertEqual(self.notification(job_id), [])
+        self.assertFalse(self.service.deliver_notification())
+        self.assertEqual([c['state'] for c in self.store.memory_candidates()], ['pending'], 'still in 내 기록')
+
+    def upkeep_adds(self, job_id, key='profile.routine.commute', content='지하철'):
+        """Run the #805 upkeep path with a scripted result that leaves one pending candidate."""
+        def run(job, judgments, **_kwargs):
+            candidate = self.store.save_memory_candidate(job['id'], key, content)
+            return 'done', 1, 'recorded', {'applied': [{'memory_key': key, 'candidate_id': candidate['id'],
+                                                         'outcome': 'candidate', 'refused_because': 'inferred'}]}
+        self.service.owner_model.run = run
+        self.assertTrue(self.service.owner_model_flight.acquire(blocking=False))
+        self.service._owner_model_run({'job_id': job_id, 'expired': 0}, 0)
+
+    def test_upkeep_candidates_get_one_later_prompt(self):
+        """P2: upkeep runs after the only reply-time queueing point; it queues its own prompt."""
+        job, _prompt, first = self.offered()
+        self.upkeep_adds(job['id'])
+        [later] = self.notification(job['id'], MEMORY_UPKEEP_KIND)
+        self.assertTrue(self.service.deliver_notification())
+        prompt = self.sends()[-1]
+        self.assertEqual(prompt['text'], '기억해 둘까요?\n• routine.commute: 지하철', 'only what no earlier prompt listed')
+        later = self.notification(job['id'], MEMORY_UPKEEP_KIND)[0]
+        self.tap(f"p7m:{later['id']}:1:accept", later['message_id'])
+        self.assertEqual([m['content'] for m in self.store.memories()], ['지하철'])
+        # The reply's own prompt still decides its own candidate.
+        self.tap(f"p7m:{first['id']}:1:accept", first['message_id'])
+        self.assertEqual(sorted(m['content'] for m in self.store.memories()), sorted(['지하철', VALUE]))
+        # At most one upkeep prompt per Work.
+        self.upkeep_adds(job['id'], 'profile.routine.gym', '헬스장')
+        self.assertEqual(len(self.notification(job['id'], MEMORY_UPKEEP_KIND)), 1)
+        self.assertFalse(self.service.deliver_notification())
+
+    def test_no_upkeep_prompt_before_the_reply_was_sent(self):
+        job_id = self.turn()
+        self.upkeep_adds(job_id)
+        self.assertEqual(self.notification(job_id, MEMORY_UPKEEP_KIND), [])
+        self.service.deliver_one()
+        self.assertTrue(self.service.deliver_notification())
+        self.assertEqual(self.sends()[-1]['text'].splitlines()[1:],
+                         [f'1. place.work: {VALUE}', '2. routine.commute: 지하철'], 'the reply prompt lists both')
 
     # --- P3: the in-process outcome agrees with the event-derived one --------------
 

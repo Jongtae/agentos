@@ -112,6 +112,9 @@ Object.assign(I18N["zh-CN"],{"입력 보관 중":"输入已保留","선택한 �
 Object.assign(I18N["en"],{"입력한 변경 사항을 버릴까요?":"Discard the changes you entered?","계속 편집":"Keep editing","변경 사항 버리기":"Discard changes","설정 정보가 바뀌어 이 입력을 바로 적용할 수 없습니다. 입력은 보관되며, 현재 설정으로 다시 열 수 있습니다.":"The settings have changed, so this input cannot be applied directly. Your draft is retained; reopen with the current settings to continue.","현재 설정으로 다시 열기":"Reopen with current settings"});
 Object.assign(I18N["ja"],{"입력한 변경 사항을 버릴까요?":"入力した変更を破棄しますか？","계속 편집":"編集を続ける","변경 사항 버리기":"変更を破棄","설정 정보가 바뀌어 이 입력을 바로 적용할 수 없습니다. 입력은 보관되며, 현재 설정으로 다시 열 수 있습니다.":"設定情報が変わったため、この入力はそのまま適用できません。入力内容は保持され、現在の設定で開き直せます。","현재 설정으로 다시 열기":"現在の設定で開き直す"});
 Object.assign(I18N["zh-CN"],{"입력한 변경 사항을 버릴까요?":"要放弃输入的更改吗？","계속 편집":"继续编辑","변경 사항 버리기":"放弃更改","설정 정보가 바뀌어 이 입력을 바로 적용할 수 없습니다. 입력은 보관되며, 현재 설정으로 다시 열 수 있습니다.":"设置信息已更改，无法直接应用此输入。输入内容已保留，可使用当前设置重新打开。","현재 설정으로 다시 열기":"使用当前设置重新打开"});
+Object.assign(I18N["en"],{"설정된 모델 없음":"No model configured","추론 강도: CLI 기본값":"Reasoning effort: CLI default","추론 강도: 별도 설정 없음":"Reasoning effort: not configured separately","기본 AI 구독 사용 · 판단 모델은 별도":"Uses the Main AI subscription · separate judgment model","기본 AI API 계정 사용 · 판단 모델은 별도":"Uses the Main AI API account · separate judgment model","기본 AI 따라가기 설정 · 현재는 대체 AI":"Set to follow Main AI · currently using a fallback","기본 AI 따라가기 설정 · 적용 확인 중":"Set to follow Main AI · verification pending"});
+Object.assign(I18N["ja"],{"설정된 모델 없음":"モデル未設定","추론 강도: CLI 기본값":"推論強度: CLI の既定値","추론 강도: 별도 설정 없음":"推論強度: 個別設定なし","기본 AI 구독 사용 · 판단 모델은 별도":"メイン AI のサブスクリプションを使用 · 判断モデルは別設定","기본 AI API 계정 사용 · 판단 모델은 별도":"メイン AI の API アカウントを使用 · 判断モデルは別設定","기본 AI 따라가기 설정 · 현재는 대체 AI":"メイン AI に追従する設定 · 現在は代替 AI","기본 AI 따라가기 설정 · 적용 확인 중":"メイン AI に追従する設定 · 適用を確認中"});
+Object.assign(I18N["zh-CN"],{"설정된 모델 없음":"未配置模型","추론 강도: CLI 기본값":"推理强度：CLI 默认值","추론 강도: 별도 설정 없음":"推理强度：未单独设置","기본 AI 구독 사용 · 판단 모델은 별도":"使用主 AI 订阅 · 判断模型单独设置","기본 AI API 계정 사용 · 판단 모델은 별도":"使用主 AI API 账户 · 判断模型单独设置","기본 AI 따라가기 설정 · 현재는 대체 AI":"设置为跟随主 AI · 当前使用备用 AI","기본 AI 따라가기 설정 · 적용 확인 중":"设置为跟随主 AI · 正在验证应用"});
 // I18N-CATALOG-END
 let currentLanguage='en',TIME_MINUTE,TIME_CLOCK,TIME_ABSOLUTE,TIME_RELATIVE,TIME_DAY,TIME_YEAR;
 function t(source,vars){let text=String(source??'');if(currentLanguage!=='ko'){const entry=I18N[currentLanguage]?.[text];if(entry!==undefined)text=entry;}if(vars)text=text.replace(/\{(\w+)\}/g,(match,key)=>key in vars?String(vars[key]):match);return text;}
@@ -406,14 +409,29 @@ function invalidateFileWorkspaceLoad(){fileWorkspaceLoadRevision++;}
 function aiFact(label,value,actions=null,description='',kind='neutral'){
  const row=settingsRow(t(label),description,value,kind,actions);row.className+=' ai-fact';return row;
 }
+// Summarize the effective Judgment configuration, never the not-yet-applied follow candidate.
+function judgmentSummary(settings){
+ const decision=settings?.decision_route||{},active=decision.active||{},effective=decision.effective,main=settings?.main_ai||{};
+ const mode=decision.mode||'follow_main',off=effective?.state==='off'||(!effective&&mode==='off');
+ const transport=effective?.transport||active.transport||'none',model=effective?effective.model:active.requested_model;
+ const matches=!effective||(transport===active.transport&&model===active.requested_model);
+ const label=transport==='subscription_cli'&&matches?({codex:'Codex','claude-code':'Claude Code'}[active.engine]||active.engine):transport==='jev'?'Jev (TypeSafe)':transport==='direct_api'?(matches&&active.provider?t(providerNames[active.provider]||active.provider):t('API')):'';
+ const effort=matches&&typeof active.effort==='string'?active.effort:'';
+ const summary=off?t('사용 안 함'):transport==='none'||transport==='off'?t('설정된 모델 없음'):[label,model||t('모델 확인 안 됨'),effort].filter(Boolean).join(' · ');
+ let relationship=t(mode==='explicit'?'따로 지정':mode==='off'?'사용 안 함':'기본 AI 따라가기');
+ const following=mode==='follow_main'&&active.source==='follow'&&active.available!==false&&!active.stale&&(!effective||effective.state==='active');
+ if(following&&matches&&main.current&&(active.main===main.current||active.engine===main.current))relationship=t(transport==='subscription_cli'?'기본 AI 구독 사용 · 판단 모델은 별도':'기본 AI API 계정 사용 · 판단 모델은 별도');
+ else if(mode==='follow_main'&&effective?.state==='fallback')relationship=t('기본 AI 따라가기 설정 · 현재는 대체 AI');
+ else if(mode==='follow_main'&&effective?.state==='checking')relationship=t('기본 AI 따라가기 설정 · 적용 확인 중');
+ return {summary,relationship,effort};
+}
 function renderExecutionConnection(settings){
  aiSettings=settings;const main=settings?.main_ai||{},box=$('active-ai'),execution=settings?.subscription_execution||{};
  const fingerprint=JSON.stringify([main,settings?.decision_route,execution,settings?.model,settings?.model_ready]);if(box.dataset.state===fingerprint)return;box.dataset.state=fingerprint;
  const focused=rememberFocus(box),opened=[...box.querySelectorAll('details[open]')].map(node=>node.dataset.disclosure),notice=$('active-ai-feedback')?[$('active-ai-feedback').textContent,$('active-ai-feedback').classList.contains('error')]:null;box.replaceChildren();
  const view=mainAiView(settings),currentRoute=mainAiRoutes(settings)[main.current]||{},mainGroup=element('section',undefined,'ai-preference-group');mainGroup.setAttribute('aria-label',t('기본 AI'));
- mainGroup.append(aiFact('기본 AI',view.title,focusKey(settingsAction(main.current?t('변경'):t('AI 선택'),event=>openAiChooser(event.currentTarget)),'ai-change')));
+ const mainSummary=aiFact('기본 AI',main.current?[view.title,view.model||t('모델 확인 안 됨')].join(' · '):view.title,focusKey(settingsAction(main.current?t('변경'):t('AI 선택'),event=>openAiChooser(event.currentTarget)),'ai-change'),main.current?t(currentRoute.kind==='subscription'?'추론 강도: CLI 기본값':'추론 강도: 별도 설정 없음'):'');mainSummary.className+=' ai-summary';mainGroup.append(mainSummary);
  if(main.current){
-  mainGroup.append(aiFact('모델',view.model||t('모델 확인 안 됨')));
   mainGroup.append(aiFact(currentRoute.kind==='subscription'?'로그인':'상태',view.state,view.checkable?focusKey(settingsAction(t('상태 확인'),event=>checkMainAi(event.currentTarget)),'ai-check'):null,view.description,view.kind));
   if(view.destination)mainGroup.append(aiFact('전송 대상',view.destination));
   if(currentRoute.agency)mainGroup.append(aiFact('사용 가능한 도구',agencyText(currentRoute)));
@@ -423,10 +441,9 @@ function renderExecutionConnection(settings){
  const judgmentActions=[];
  if(judgment.followable)judgmentActions.push(focusKey(settingsAction(t('상태 확인'),event=>followMainAi(event.currentTarget)),'judgment-check'));
  if(judgment.cancelable)judgmentActions.push(focusKey(settingsAction(t('확인 취소'),event=>cancelJudgmentCheck(event.currentTarget)),'judgment-cancel'));
- judgmentGroup.append(aiFact('판단 AI',t(decision.mode==='explicit'?'따로 지정':decision.mode==='off'?'사용 안 함':'기본 AI 따라가기'),focusKey(settingsAction(t('설정'),event=>openJudgmentChooser(event.currentTarget)),'judgment-advanced')));
- const effectiveModel=effective.model||active.requested_model;
- if(effectiveModel&&effective.state!=='off')judgmentGroup.append(aiFact('모델',effectiveModel));
- judgmentGroup.append(aiFact('상태',judgment.state,judgmentActions,judgment.description,judgment.kind));
+ const summary=judgmentSummary(settings),judgmentSummaryRow=aiFact('판단 AI',summary.summary,focusKey(settingsAction(t('설정'),event=>openJudgmentChooser(event.currentTarget)),'judgment-advanced'),summary.relationship);judgmentSummaryRow.className+=' ai-summary';judgmentGroup.append(judgmentSummaryRow);
+ const judgmentDescription=effective.state==='active'&&!effective.note&&!effective.note_template&&summary.summary.includes(effective.model)?(effective.destination?t('전송 대상: {destination}',{destination:t(effective.destination)}):''):judgment.description;
+ judgmentGroup.append(aiFact('상태',judgment.state,judgmentActions,judgmentDescription,judgment.kind));
  judgmentGroup.append(element('p',t('요청에 맞는 AI와 도구를 고르고 결과를 확인합니다.'),'ai-group-note'));box.append(judgmentGroup);
  const selectedId=(settings?.subscription_engines||{}).selected||'',lines=[];
  if(selectedId&&Array.isArray(execution.selectable)&&execution.selectable.includes('strict-isolated')){

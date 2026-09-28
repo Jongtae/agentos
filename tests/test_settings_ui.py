@@ -75,6 +75,22 @@ assert($('active-ai').textContent.includes('기본 AI와 같은 계정의 가벼
 assert(groups()[0].textContent.includes('전송 대상')&&groups()[0].textContent.includes('api.anthropic.com'),'destination is its own summary row');
 assert.equal(descendants($('active-ai')).filter(node=>node.tag==='details').length,1,'no per-row disclosures; one card-level 기술 세부 정보');
 assert(!$('active-ai').textContent.includes('다른 선택지'),'no second list of routes on the card');
+// #809: provider/model/effort and subscription relationship are in the leading summary.
+const summaryState=settingsFor('codex',{codex:sub('codex',{model:'gpt-6-luna'})},{mode:'follow_main',main:'codex',active:{transport:'subscription_cli',engine:'codex',source:'follow',main:'codex',available:true,requested_model:'gpt-5.6-luna',effort:'low'},effective:{state:'active',transport:'subscription_cli',model:'gpt-5.6-luna',destination:'OpenAI'}});
+ctx.renderExecutionConnection(summaryState);
+const mainSummary=groups()[0].children[0],judgeSummary=groups()[1].children[0];
+assert(mainSummary.textContent.includes('Codex · 구독 계정 · gpt-6-luna'));
+assert(mainSummary.textContent.includes('추론 강도: CLI 기본값'));assert(!mainSummary.textContent.includes('medium'),'no invented Main effort');
+assert(judgeSummary.textContent.includes('Codex · gpt-5.6-luna · low'));assert(judgeSummary.textContent.includes('기본 AI 구독 사용 · 판단 모델은 별도'));
+let summaryVariant=JSON.parse(JSON.stringify(summaryState));summaryVariant.decision_route.effective={state:'fallback',transport:'direct_api',model:'fallback-model',destination:'api.openai.com'};
+let summary=ctx.judgmentSummary(summaryVariant);assert(summary.summary.includes('fallback-model'));assert(!summary.summary.includes('low'));assert(!summary.summary.includes('Codex'));assert(summary.relationship.includes('현재는 대체 AI'));
+summaryVariant.decision_route.effective.state='checking';assert(ctx.judgmentSummary(summaryVariant).relationship.includes('적용 확인 중'));
+summaryVariant.decision_route.effective={state:'off',transport:'off',model:''};summary=ctx.judgmentSummary(summaryVariant);assert.equal(summary.summary,'사용 안 함');
+summaryVariant=JSON.parse(JSON.stringify(summaryState));summaryVariant.decision_route.mode='explicit';assert.equal(ctx.judgmentSummary(summaryVariant).relationship,'따로 지정');
+summaryVariant.decision_route.mode='follow_main';summaryVariant.main_ai.current=null;assert(!ctx.judgmentSummary(summaryVariant).relationship.includes('구독 사용'));summaryVariant.main_ai.current='codex';summaryVariant.decision_route.active.stale=true;assert(!ctx.judgmentSummary(summaryVariant).relationship.includes('구독 사용'));
+summaryVariant.decision_route.active.stale=false;summaryVariant.decision_route.active.effort=null;assert(!ctx.judgmentSummary(summaryVariant).summary.includes('low'));
+summaryVariant.decision_route.active={transport:'direct_api',provider:'openai',requested_model:'api-model',source:'default',available:true};summaryVariant.decision_route.effective={state:'fallback',transport:'direct_api',model:'api-model'};assert(ctx.judgmentSummary(summaryVariant).summary.startsWith('OpenAI · api-model'));
+ctx.renderExecutionConnection(settings);
 // Truthful state matrix: selected route, saved credential and observed check remain distinct.
 for(const [login,label,kind] of [['signed-out','로그인 필요','attention'],['unchecked','로그인 확인 전','neutral'],['unknown','로그인 상태 확인 필요','attention'],['token-saved','토큰 저장됨 · 로그인 확인 전','neutral'],['sidecar','실행 환경에서 인증 관리','neutral'],['signed-in','로그인 확인됨','neutral']]){
  const view=ctx.mainAiView(settingsFor('codex',{codex:sub('codex',{login:{state:login}})}));
@@ -157,7 +173,7 @@ assert(descendants($('active-ai')).find(node=>node.dataset.disclosure==='technic
  await followCheck.onclick({currentTarget:followCheck});same(calls.pop(),{path:'/api/decision-route/activate',body:{transport:'follow_main'}});
  ctx.renderExecutionConnection(settingsFor('codex',{},{follow:codexFollow,active:{transport:'subscription_cli',source:'follow',engine:'codex',requested_model:'gpt-5.6-luna',available:true,destination:'OpenAI (Codex 구독 계정)'},
   effective:{state:'active',transport:'subscription_cli',model:'gpt-5.6-luna',destination:'OpenAI (Codex 구독 계정)',template:'기본 AI({main})를 따라가는 중 — {model}, {verified}',params:{main:'Codex',model:'gpt-5.6-luna',verified:'검증됨'}}}));
- assert($('active-ai').textContent.includes('기본 AI(Codex)를 따라가는 중 — gpt-5.6-luna, 검증됨'));
+ assert(groups()[1].children[0].textContent.includes('Codex · gpt-5.6-luna'));assert(groups()[1].children[0].textContent.includes('기본 AI 구독 사용'));assert(groups()[1].textContent.includes('확인됨'));
  assert(!buttonsIn('active-ai').some(node=>node.dataset.focusKey==='judgment-check'),'an active route offers no re-check on the card');
  ctx.renderExecutionConnection(settingsFor('codex',{codex:sub('codex',{installed:false})}));
  assert($('active-ai').textContent.includes('선택한 CLI를 찾지 못했습니다'));assert.equal(currentCount(),0,'a missing CLI is not presented as in use');

@@ -30,6 +30,7 @@ Vocabulary is mapped, not installed: OWL-Time intervals (``effective_from``/
 ``homeLocation``/``workLocation`` (the ``profile.place.*`` anchors).
 """
 import json
+import os
 import math
 import uuid
 from datetime import datetime, timedelta, timezone as dt_timezone
@@ -135,19 +136,25 @@ def zone(name):
         return None
 
 
-def host_zone():
+def host_zone(store=None, environ=None):
     """``(name, tzinfo)`` of the host's local zone, for the turn's clock only (#804).
 
-    The calendar's resolver (``resolve_local_timezone``: ``TZ``, then the
-    host's ``/etc/localtime``) without the owner's calendar setting; a host
-    offset with no IANA name is labelled ``host-local``.  Never used for a
-    hypothesis interval: an unknown owner zone is still not guessed there.
+    The calendar's resolver (``resolve_local_timezone``: the owner's calendar
+    zone, ``TZ``, then the host's ``/etc/localtime``); a host offset with no
+    IANA name is labelled ``host-local``.  A bare UTC that nothing set - no
+    owner zone, no ``TZ``, a zero offset: a container's default - is not the
+    owner's clock, so it raises ``LookupError`` and the zone stays unknown
+    (#804 review).  Never used for a hypothesis interval.
     """
-    from .calendar_conversation import resolve_local_timezone
-    name = resolve_local_timezone()
+    from .calendar_conversation import TIMEZONE_CONFIG_KEY, resolve_local_timezone
+    environ = os.environ if environ is None else environ
+    name = resolve_local_timezone(store, environ)
     local = datetime.now().astimezone().tzinfo
     if name == 'UTC' and local.utcoffset(None) != timedelta(0):
         return 'host-local', local
+    explicit = environ.get('TZ') or (store.config(TIMEZONE_CONFIG_KEY, None) if store is not None else None)
+    if name in ('UTC', 'Etc/UTC') and not explicit:
+        raise LookupError('host zone is an unset UTC default')
     return name, ZoneInfo(name)
 
 
@@ -537,7 +544,7 @@ class CurrentContext:
         if tz is None:
             # #804: the turn always knows the time; the host's zone, said to be the host's.
             try:
-                snap['timezone'], tz = host_zone()
+                snap['timezone'], tz = host_zone(self.store)
                 snap['timezone_source'] = 'host'
             except Exception:
                 tz = None

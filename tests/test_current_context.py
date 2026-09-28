@@ -595,3 +595,40 @@ class TurnContextSection(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class HostZoneFallback(unittest.TestCase):
+    """#804 review: a container's unset UTC default is never presented as the owner's local clock."""
+
+    def zone(self, environ, real='/usr/share/zoneinfo/UTC', offset=0, store=None):
+        from datetime import timedelta, timezone as dt_timezone
+        from personal_agent.current_context import host_zone
+        local = dt_timezone(timedelta(hours=offset))
+        with mock.patch('os.path.realpath', return_value=real), \
+                mock.patch('personal_agent.current_context.datetime') as dt:
+            dt.now.return_value.astimezone.return_value.tzinfo = local
+            return host_zone(store, environ)
+
+    def test_an_unset_utc_default_is_unknown(self):
+        with self.assertRaises(LookupError):
+            self.zone({})
+
+    def test_an_explicit_utc_or_a_real_host_zone_is_kept(self):
+        self.assertEqual(self.zone({'TZ': 'UTC'})[0], 'UTC')
+        self.assertEqual(self.zone({}, real='/var/db/timezone/zoneinfo/Asia/Seoul', offset=9)[0], 'Asia/Seoul')
+
+    def test_the_owners_calendar_zone_wins(self):
+        store = mock.Mock()
+        store.config.return_value = 'Asia/Seoul'
+        self.assertEqual(self.zone({}, store=store)[0], 'Asia/Seoul')
+
+    def test_an_unknown_zone_leaves_no_local_time_in_the_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            from personal_agent.current_context import CurrentContext
+            context = CurrentContext(QuickStore(Path(tmp) / 's'))
+            with mock.patch('personal_agent.current_context.host_zone', side_effect=LookupError('unset')):
+                body = context.snapshot(now=1790000000.0)
+        self.assertEqual(body['timezone'], 'unknown')
+        self.assertNotIn('local_time', body)
+        self.assertNotIn('timezone_source', body)
+        self.assertIn('as_of', body)

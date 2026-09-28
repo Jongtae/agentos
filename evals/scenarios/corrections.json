@@ -1,0 +1,26 @@
+[
+ {
+  "id": "correct-earlier-advice-hiking",
+  "title": "Correct earlier advice after a new personal fact",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "내일 아침 8시에 한라산 성판악 코스로 올라갈 건데 준비물 알려줘."
+   },
+   {
+    "say": "아 참, 나 무릎이 좀 안 좋아."
+   }
+  ],
+  "rubric": [
+   "follow_through",
+   "context_carry",
+   "specific_sourced",
+   "honest_unverified"
+  ],
+  "good_secretary": "Revises its own earlier advice for a weak knee (poles, knee support, pacing, turnaround time, or a shorter course) and says what changed, instead of starting over generically. Mentions checking trail/entry rules if not verified.",
+  "tags": [
+   "correction",
+   "follow-through"
+  ]
+ }
+]

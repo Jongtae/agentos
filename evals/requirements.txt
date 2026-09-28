@@ -1,0 +1,8 @@
+# EVAL-LOOP-01 (#821): development-only evaluation harness. Never imported by
+# src/personal_agent and never installed into the AgentOS runtime.
+#
+# inspect-ai: UK AI Security Institute, MIT licence, 0.3.271 (PyPI, 2026-09-26).
+# openai: OpenAI Python SDK, Apache-2.0; Inspect's provider for an openai/* judge.
+# Install into a separate virtualenv, e.g. ~/.local/share/agentos-evals/venv.
+inspect-ai==0.3.271
+openai==3.19.2

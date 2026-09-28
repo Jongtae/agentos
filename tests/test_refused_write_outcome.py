@@ -1,5 +1,9 @@
 """A refused durable write must not be reported as a completed one.
 
+#818: a `save_memory` held as a pending MemoryCandidate is since a recorded
+proposal the owner confirms, not a refused write; the calendar and
+delegation cases below keep the #488 rule, and so does a write that errored.
+
 #476 stopped a `failed`/`partial` turn from handing the owner the model's
 claim. Its independent review then found the other half: `save_memory`
 signals a refusal by *returning* `{'refused_because': ...}` with no
@@ -25,7 +29,7 @@ from personal_agent.connector_contract import ConnectorRegistry, ConnectorState
 from personal_agent.decision import OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, fixture_confidence
 from personal_agent.google_calendar import CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE
 from personal_agent.providers import ModelAdapter
-from personal_agent.quickstart_service import AgentService
+from personal_agent.quickstart_service import MEMORY_PENDING_TELEGRAM_NOTE, AgentService
 from personal_agent.quickstart_store import QuickStore
 from test_agency_loop import goal_engine
 
@@ -148,44 +152,39 @@ class RefusedWriteTestCase(unittest.TestCase):
 
 
 class RefusedMemoryWriteTests(RefusedWriteTestCase):
-    """The owner never asked for a memory, so the write is held as a candidate."""
+    """The owner never asked for a memory, so the write is held as a candidate.
+
+    #818 (owner feedback 2026-09-28): a held candidate is a recorded proposal
+    awaiting the owner, not a failed state-changing action.  The owner gets
+    the answer, then one message to confirm the candidate
+    (`test_memory_candidate_confirm`).  A write that errored still fails.
+    """
 
     UNASKED = ('point-of-contact', '땅콩 알레르기가 있습니다')
 
-    def test_a_refused_write_does_not_make_the_turn_succeed(self):
+    def test_a_memory_proposal_alone_does_not_fail_the_turn(self):
         self.plan = [('save_memory', {'memory_key': self.UNASKED[0],
                                       'content': self.UNASKED[1]})]
-        self.text = '기억했습니다. 앞으로 땅콩을 피해 드릴게요.'
-        job, _bubble = self.ask('오늘 점심 뭐 먹을까?')
-        # Exactly 'failed', not merely "not succeeded": the only tool call did
-        # not do its job, so claiming '일부 단계만 완료했습니다' would be the
-        # same unobserved claim one step down.
-        self.assertEqual(job['status'], 'failed')
-
-    def test_the_owner_is_not_told_the_thing_was_remembered(self):
-        self.plan = [('save_memory', {'memory_key': self.UNASKED[0],
-                                      'content': self.UNASKED[1]})]
-        self.text = '기억했습니다. 앞으로 땅콩을 피해 드릴게요.'
-        _job, bubble = self.ask('오늘 점심 뭐 먹을까?')
-        self.assertIsNotNone(bubble)
-        self.assertNotIn('기억했습니다', bubble)
-
-    def test_the_owner_is_told_what_is_actually_pending(self):
-        """Not a machine slug: `no-owner-memory-request` means nothing to a person."""
-        self.plan = [('save_memory', {'memory_key': self.UNASKED[0],
-                                      'content': self.UNASKED[1]})]
-        self.text = '기억했습니다.'
+        self.text = '알겠어요. 땅콩은 피해서 추천할게요.'
         job, bubble = self.ask('오늘 점심 뭐 먹을까?')
-        self.assertNotIn('no-owner-memory-request', bubble)
-        self.assertIn('기억 후보로 보관', bubble)
-        self.assertTrue(job['error'], 'the job carries no cause')
-        # #598 X1: the same cause in owner words; the id stays in job['error'].
-        self.assertIn(job['owner_cause'], bubble)
-        self.assertIn('save_memory', job['error'])
-        self.assertNotIn('save_memory', bubble)
+        self.assertEqual(job['status'], 'succeeded', job.get('error'))
+        self.assertFalse(self.service.answer_withheld(job))
+        self.assertEqual(bubble, self.text + '\n\n' + MEMORY_PENDING_TELEGRAM_NOTE, 'AgentOS says nothing was saved yet')
 
-    def test_a_turn_that_did_other_work_is_partial_not_failed(self):
-        """The distinction the outcome exists to carry must survive the fix."""
+    def test_the_owner_is_asked_to_confirm_in_owner_words(self):
+        """Not a machine slug: the confirm prompt names the key and the value."""
+        self.plan = [('save_memory', {'memory_key': self.UNASKED[0],
+                                      'content': self.UNASKED[1]})]
+        self.text = '알겠어요.'
+        self.ask('오늘 점심 뭐 먹을까?')
+        self.assertTrue(self.service.deliver_notification())
+        prompt = self.sent[-1]
+        self.assertTrue(prompt.startswith('기억해 둘까요?'), prompt)
+        self.assertIn(f'{self.UNASKED[0]}: {self.UNASKED[1]}', prompt)
+        self.assertNotIn('no-owner-memory-request', prompt)
+
+    def test_a_proposal_beside_other_work_does_not_hold_the_work_down(self):
+        """A done claim rests on the other work; the proposal is not evidence and not a failure."""
         root = Path(self.temp.name) / 'docs'
         root.mkdir()
         (root / 'pay.txt').write_text('급여 명세', encoding='utf-8')
@@ -193,10 +192,11 @@ class RefusedMemoryWriteTests(RefusedWriteTestCase):
         self.plan = [('find_files', {'query': '급여'}),
                      ('save_memory', {'memory_key': self.UNASKED[0],
                                       'content': self.UNASKED[1]})]
-        self.text = '파일을 찾았고 기억했습니다.'
+        self.text = '급여 파일을 찾았습니다.'
+        self.claim_completion()
         job, bubble = self.ask('급여 파일 찾아줘')
-        self.assertEqual(job['status'], 'partial')
-        self.assertNotIn('기억했습니다', bubble)
+        self.assertEqual(job['status'], 'succeeded', job.get('error'))
+        self.assertEqual(bubble, self.text + '\n\n' + MEMORY_PENDING_TELEGRAM_NOTE, 'AgentOS says nothing was saved yet')
 
     def test_the_candidate_is_preserved_as_pending_for_the_owner(self):
         """A refusal must not become a discarded write.
@@ -215,14 +215,17 @@ class RefusedMemoryWriteTests(RefusedWriteTestCase):
         self.assertEqual([row['content'] for row in pending], [self.UNASKED[1]])
         self.assertEqual(pending[0]['state'], 'pending')
 
-    def test_the_durable_tool_event_does_not_say_succeeded(self):
-        """The web record must not disagree with the bubble."""
+    def test_the_durable_tool_event_records_a_pending_proposal(self):
+        """The web record says what happened: a candidate, not a saved Memory."""
         self.plan = [('save_memory', {'memory_key': self.UNASKED[0],
                                       'content': self.UNASKED[1]})]
-        self.text = '기억했습니다.'
+        self.text = '알겠어요.'
         job, _bubble = self.ask('오늘 점심 뭐 먹을까?')
-        self.assertIn(('save_memory', 'failed'), self.tool_events(job['id']))
-        self.assertNotIn(('save_memory', 'succeeded'), self.tool_events(job['id']))
+        [event] = [row for row in self.store.task_events(job['id'])
+                   if row['tool'] == 'save_memory' and row['status'] == 'succeeded']
+        evidence = event['trace']['evidence']
+        self.assertEqual((evidence['saved'], evidence['state'], evidence['refused_because']),
+                         (False, 'pending', 'no-owner-memory-request'))
 
     def test_a_silent_model_still_gets_the_useful_pending_message(self):
         """The fix must not replace a helpful answer with a provider error.
@@ -238,6 +241,16 @@ class RefusedMemoryWriteTests(RefusedWriteTestCase):
         self.assertIn('기억 후보로 보관', bubble)
         self.assertNotIn('모델이 답변을 반환하지 않았습니다', bubble)
         self.assertNotIn('모델이 답변을 반환하지 않았습니다', job['error'] or '')
+
+    def test_a_write_that_errored_still_fails_the_turn(self):
+        """#818 keeps #488 for a real failure: nothing was proposed or written."""
+        self.plan = [('save_memory', {'memory_key': self.UNASKED[0], 'content': 'x' * 4001})]
+        self.text = '기억했습니다.'
+        job, bubble = self.ask('오늘 점심 뭐 먹을까?')
+        self.assertEqual(job['status'], 'failed')
+        self.assertTrue(self.service.answer_withheld(job))
+        self.assertNotIn('기억했습니다', bubble)
+        self.assertEqual(self.store.memory_candidates(), [])
 
 
 class AcceptedWriteTests(RefusedWriteTestCase):

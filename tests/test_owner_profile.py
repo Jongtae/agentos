@@ -124,8 +124,8 @@ class ProfileFactsInConversation(_OwnerSurface):
         [pending] = self.store.memory_candidates()
         self.assertEqual((pending['memory_key'], pending['content'], pending['state']),
                          ('profile.allergy.peanut', '땅콩 알러지', 'pending'))
-        # #488: a withheld write is not a completed turn, and the reason is visible.
-        self.assertEqual(self.store.job(job)['status'], 'failed')
+        # #818: a pending candidate is a recorded proposal the owner confirms, not a failed turn.
+        self.assertEqual(self.store.job(job)['status'], 'succeeded')
         self.assertEqual(self.web('/api/personal-space/profile')['memories'], [])
         self.assertEqual(self.web('/api/personal-space')['memory_candidate_count'], 1)
 

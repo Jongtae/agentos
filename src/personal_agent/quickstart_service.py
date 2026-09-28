@@ -320,6 +320,29 @@ BROWSER_LOGIN_NO_SESSION_LINE=('주의: 이 사이트는 AgentOS 로그인 창�
 #: to through an AgentOS login window (evidence of a sign-in when the window closed and saved, #765).
 BROWSER_OWNER_SIGNINS_KEY='browser_owner_signins'
 BROWSER_LOGIN_SKIP_LABEL='예상한 사이트가 아니면 건너뛰기'
+#: #818: one Telegram message after a Work's reply lists the Work's pending MemoryCandidates
+#: of that moment; each is confirmed or declined through the owner's approval path.  The
+#: message is bound at send time to the shown candidate ids, their content digests and the
+#: current Memory under each key, and its buttons expire.  A candidate added later (#805
+#: upkeep) is not added to it: it is left to 내 기록.
+MEMORY_CANDIDATES_KIND='memory_candidates'
+#: #818 review: at most one later prompt per Work for candidates #805 upkeep adds after the reply.
+MEMORY_UPKEEP_KIND='memory_candidates_upkeep'
+MEMORY_PROMPT_KINDS=(MEMORY_CANDIDATES_KIND,MEMORY_UPKEEP_KIND)
+#: #818 review: AgentOS's own line under a reply whose Work left pending candidates;
+#: nothing in the model's prose is inspected (no text rules).
+MEMORY_PENDING_TELEGRAM_NOTE='기억은 아직 저장되지 않았어요. 아래에서 확인하시면 저장돼요.'
+MEMORY_PENDING_WEB_NOTE='기억은 아직 저장되지 않았어요. 내 기록에서 확인하시면 저장돼요.'
+MEMORY_CANDIDATE_IN_RECORDS='내 기록에서 확인해 주세요'
+MEMORY_CANDIDATES_HEADER='기억해 둘까요?'
+MEMORY_CANDIDATES_SHOWN=5
+MEMORY_CANDIDATE_CHARS=120
+MEMORY_CANDIDATES_TTL_SECONDS=86400
+MEMORY_CANDIDATES_SWEEP_SECONDS=60
+MEMORY_CANDIDATE_STATUS={'accepted':'기억함','rejected':'기억 안 함','outdated':'그 사이 바뀌어 처리하지 않음'}
+MEMORY_CANDIDATES_SAVED_TEXT='기억한 내용은 내 기록에서 고치거나 지울 수 있습니다.'
+MEMORY_CANDIDATES_OUTDATED_TEXT='그 사이 기억이나 후보가 바뀌어 처리하지 않은 항목이 있습니다. 내 기록에서 확인해 주세요.'
+MEMORY_CANDIDATES_EXPIRED_TEXT='확인 시간이 지나 버튼을 닫았습니다. 남은 후보는 내 기록에서 결정할 수 있습니다.'
 BROWSER_LOGIN_RESULT_TEXT={'resumed':'로그인 창을 닫고 요청을 한 번 이어서 처리합니다.',
                            'skipped':'로그인을 건너뛰었습니다. 요청은 지금까지의 결과로 마칩니다.',
                            'expired':'로그인 요청 시간이 지나 창을 닫았습니다. 요청은 지금까지의 결과로 마칩니다.',
@@ -805,6 +828,9 @@ class AgentService:
                                                  cancelled=cancelled)
             upkeep.finish(work_id,state,calls,status,detail,upkeep.clock())
             LOG.info('owner-model upkeep work=%s state=%s calls=%s applied=%s',work_id,state,calls,len(detail.get('applied') or ()))
+            # #818 review: candidates this upkeep left pending get one later prompt.
+            if any(item.get('candidate_id') and item.get('outcome')==om.APPLIED_CANDIDATE for item in detail.get('applied') or ()):
+                self.queue_upkeep_memory_candidates(work_id)
         except Exception as exc:  # noqa: BLE001 - a background run never raises
             LOG.warning('owner-model upkeep run failed work=%s kind=%s',work_id,type(exc).__name__)
             try:upkeep.finish(work_id,om.STATE_UNAVAILABLE,None,om.EVENT_UNAVAILABLE,{'reason':'run-failed'},upkeep.clock())
@@ -886,6 +912,197 @@ class AgentService:
         """Offer this Work's unaccepted preparations to the paired owner once (#659)."""
         rows=self.preparations.proposed_from(job['id'])
         if rows:self.queue_notification(job,'preparation_proposed',fingerprint=prep.digest(prep.proposal_page(rows)[0]))
+
+    def pending_memory_candidates(self, job_id):
+        """``(shown, remaining)``: this Work's pending MemoryCandidates, oldest first (#818).
+
+        At most ``MEMORY_CANDIDATES_SHOWN`` are shown; the rest are only
+        counted (the owner decides them in 내 기록).
+        """
+        rows=sorted(self.store.memory_candidates(MEMORY_OWNER,job_id,limit=101),key=lambda row:(row['created'],row['id']))
+        return rows[:MEMORY_CANDIDATES_SHOWN],max(0,len(rows)-MEMORY_CANDIDATES_SHOWN)
+
+    def pending_candidate_works(self):
+        """A test for "this Work id has a pending MemoryCandidate" (#818 review).
+
+        Candidates carry the Work only as its opaque binding (``work_ref``),
+        so a Work id is compared through ``QuickStore._work_binding``.
+        """
+        keys,offset=set(),0
+        while True:
+            page=self.store.memory_candidates(MEMORY_OWNER,limit=101,offset=offset)
+            keys|={row['work_ref'][len('workref:'):] for row in page}
+            if len(page)<101:break
+            offset+=101
+        return lambda work_id:bool(keys) and isinstance(work_id,str) and self.store._work_binding(work_id) in keys
+
+    def queue_memory_candidates(self, job, kind=MEMORY_CANDIDATES_KIND, rows=None):
+        """Offer pending MemoryCandidates of this Work to the paired owner once per ``kind`` (#818).
+
+        ``kind`` is the reply's prompt (queued only after the reply was sent)
+        or the one later upkeep prompt, with its own ``rows``.
+        """
+        shown,more=(rows[:MEMORY_CANDIDATES_SHOWN],max(0,len(rows)-MEMORY_CANDIDATES_SHOWN)) if rows is not None \
+            else self.pending_memory_candidates(job['id'])
+        if shown:self.queue_notification(job,kind,fingerprint=json.dumps(
+            {'candidates':[[row['id'],row['content_digest']] for row in shown],'more':more}))
+
+    def queue_upkeep_memory_candidates(self, work_id):
+        """After #805 upkeep: one prompt for the pending candidates no earlier prompt listed (#818 review).
+
+        Only for a Telegram Work whose reply was delivered ``sent``; at most one
+        per Work (the notification is unique per Work and kind).
+        """
+        job=self.store.job(work_id)
+        if not job or job.get('delivery')!='sent':return
+        with self.store.db() as db:
+            row=db.execute('SELECT * FROM telegram_notifications WHERE job_id=? AND kind=?',(work_id,MEMORY_CANDIDATES_KIND)).fetchone()
+        listed={item['id'] if isinstance(item,dict) else item[0] for item in (self.memory_binding(dict(row)) or {}).get('candidates',())} if row else set()
+        rows=[candidate for candidate in sorted(self.store.memory_candidates(MEMORY_OWNER,work_id,limit=101),
+                                                key=lambda candidate:(candidate['created'],candidate['id']))
+              if candidate['id'] not in listed]
+        if rows:self.queue_memory_candidates(job,MEMORY_UPKEEP_KIND,rows)
+
+    @staticmethod
+    def memory_binding(notification):
+        """A memory prompt's recorded binding (queued ids, or the send-time binding with ``sent``), or None (#818)."""
+        try:binding=json.loads((notification or {}).get('fingerprint') or '')
+        except (TypeError,ValueError):return None
+        return binding if isinstance(binding,dict) and isinstance(binding.get('candidates'),list) else None
+
+    def memory_candidate_still(self, job_id, candidate_id, content_digest):
+        """The candidate while it is still pending with exactly that content, else None (#818)."""
+        row=self.store.memory_candidate(candidate_id,MEMORY_OWNER,job_id) if isinstance(candidate_id,str) else None
+        return row if row and row['state']=='pending' and hmac.compare_digest(str(row['content_digest']),str(content_digest)) else None
+
+    def current_memory_ref(self, memory_key):
+        """``[id, content_digest]`` of the current Memory under ``memory_key``, or None (#818)."""
+        current=self.store.current_memory(memory_key,MEMORY_OWNER)
+        return [current['id'],current['content_digest']] if current else None
+
+    def memory_display(self, text, limit):
+        """``(shown, complete)``: ``text`` as a prompt shows it, and whether that is the whole value unchanged (#818 review).
+
+        Whitespace is collapsed, stored secrets and credential shapes are
+        removed and the result is bounded; only when none of that changed the
+        text does the owner see exactly the value a tap would approve.
+        """
+        text=str(text or '')
+        shown=self._redact_known_secrets(' '.join(text.split()))
+        complete=shown==text and len(shown)<=limit
+        return (shown if len(shown)<=limit else shown[:limit-1]+'…'),complete
+
+    def bind_memory_prompt(self, notification, now):
+        """What a memory prompt shows, bound at send time; None when no queued candidate is still pending (#818).
+
+        Only the queued ids count: a candidate added to the Work later neither
+        changes nor cancels this prompt.  Each keeps its content digest and the
+        current Memory under its key, which a tap must still find.  ``tap`` is
+        set only when the prompt shows the key and the value complete and
+        unchanged (#818 review); any other candidate is listed for 내 기록.
+        """
+        queued=self.memory_binding(notification)
+        if not queued or 'sent' in queued:return None
+        candidates=[]
+        for item in queued['candidates']:
+            row=self.memory_candidate_still(notification['job_id'],*item) if isinstance(item,list) and len(item)==2 else None
+            if not row:continue
+            key=row['memory_key'][len('profile.'):] if row['memory_key'].startswith('profile.') else row['memory_key']
+            tap=self.memory_display(key,60)[1] and self.memory_display(row['content'],MEMORY_CANDIDATE_CHARS)[1]
+            candidates.append({'id':row['id'],'digest':row['content_digest'],'key':row['memory_key'],
+                               'current':self.current_memory_ref(row['memory_key']),'tap':bool(tap)})
+        if not candidates:return None
+        return {'candidates':candidates,'more':int(queued.get('more') or 0),'sent':now,'done':{}}
+
+    @staticmethod
+    def memory_open(binding):
+        """The 1-based indices of the tappable candidates not yet decided (#818)."""
+        return [index for index,item in enumerate(binding['candidates'],1) if item.get('tap') and item['id'] not in binding['done']]
+
+    def memory_prompt_text(self, job_id, binding, footer=None):
+        """The candidates in owner words: key, value, the value it would replace, and each decision (#818).
+
+        Bounded; stored secrets and credential shapes removed.  No per-key
+        vocabulary exists, so the key is shown as the web shows it.  A
+        candidate the prompt cannot show complete is left to 내 기록.
+        """
+        numbered=len(binding['candidates'])>1
+        lines=[MEMORY_CANDIDATES_HEADER]
+        for index,item in enumerate(binding['candidates'],1):
+            row=self.store.memory_candidate(item['id'],MEMORY_OWNER,job_id) or {}
+            key=item['key'][len('profile.'):] if item['key'].startswith('profile.') else item['key']
+            line=(f'{index}. ' if numbered else '• ')+f"{self.memory_display(key,60)[0]}: {self.memory_display(row.get('content'),MEMORY_CANDIDATE_CHARS)[0]}"
+            old=self.store.memory(item['current'][0],MEMORY_OWNER,current_only=False) if item.get('current') else None
+            if old:line+=f" (현재: {self.memory_display(old['content'],60)[0]})"
+            status=binding['done'].get(item['id'])
+            if status:line+=' → '+MEMORY_CANDIDATE_STATUS[status]
+            elif not item.get('tap'):line+=' → '+MEMORY_CANDIDATE_IN_RECORDS
+            lines.append(line)
+        if binding.get('more'):lines.append(f"그 밖의 후보 {binding['more']}개는 내 기록에서 확인할 수 있습니다.")
+        if footer:lines.append(footer)
+        return '\n'.join(lines)
+
+    @classmethod
+    def memory_prompt_markup(cls, notification_id, binding):
+        """Per tappable candidate [기억하기] [아니요], plus both for all when more than one is open (#818)."""
+        def pair(target,accept,reject):
+            return [{'text':accept,'callback_data':f'p7m:{notification_id}:{target}:accept'},
+                    {'text':reject,'callback_data':f'p7m:{notification_id}:{target}:reject'}]
+        open_=cls.memory_open(binding)
+        if len(binding['candidates'])==1:return {'inline_keyboard':[pair(1,'기억하기','아니요')] if open_ else []}
+        rows=[pair(index,f'{index} 기억하기',f'{index} 아니요') for index in open_]
+        if len(open_)>1:rows.append(pair('a','모두 기억하기','모두 아니요'))
+        return {'inline_keyboard':rows}
+
+    def decide_memory_prompt(self, job_id, binding, targets, accept):
+        """Apply one tap to the open ``targets`` (1-based) of a bound prompt; returns the ids it decided (#818).
+
+        Per candidate: it must still be pending with the shown content and,
+        for a yes, the current Memory under its key must still be the one the
+        prompt showed; otherwise it is ``outdated`` and nothing is written.  A
+        yes is the existing owner approval path (exact approval bound to owner,
+        Work, candidate and content digest, then accept); a no is the existing
+        reject.
+        """
+        decided=[]
+        for index in targets:
+            item=binding['candidates'][index-1]
+            status='outdated'
+            if self.memory_candidate_still(job_id,item['id'],item['digest']) and (
+                    not accept or self.current_memory_ref(item['key'])==item.get('current')):
+                try:
+                    if accept:
+                        approval=self.store.issue_candidate_memory_approval(MEMORY_OWNER,job_id,item['id'],item['digest'])
+                        self.store.accept_memory_candidate(MEMORY_OWNER,job_id,item['id'],item['digest'],approval['approval_token'])
+                        status='accepted'
+                    else:
+                        self.store.reject_memory_candidate(MEMORY_OWNER,job_id,item['id'],item['digest'])
+                        status='rejected'
+                except ValueError as exc:
+                    LOG.info('memory candidate %s refused work=%s kind=%s',('accept' if accept else 'reject'),job_id,type(exc).__name__)
+            binding['done'][item['id']]=status;decided.append(item['id'])
+        return decided
+
+    def expire_memory_prompt(self, notification, binding):
+        """Refuse further taps on one memory prompt and remove its buttons (#818)."""
+        self.store.update_notification(notification['id'],'expired')
+        if isinstance(notification.get('message_id'),int):
+            try:self.telegram.edit_message_text(notification['chat_id'],notification['message_id'],
+                                                self.memory_prompt_text(notification['job_id'],binding,MEMORY_CANDIDATES_EXPIRED_TEXT),
+                                                {'inline_keyboard':[]})
+            except ProviderError:pass
+
+    def expire_memory_prompts(self, now=None):
+        """Close memory prompts older than ``MEMORY_CANDIDATES_TTL_SECONDS`` (#818); at most once a minute."""
+        now=time.time() if now is None else now
+        if now-getattr(self,'_memory_prompt_sweep',0)<MEMORY_CANDIDATES_SWEEP_SECONDS:return
+        self._memory_prompt_sweep=now
+        with self.store.db() as db:
+            rows=[dict(row) for row in db.execute("SELECT * FROM telegram_notifications WHERE kind IN (?,?) AND state='sent'",MEMORY_PROMPT_KINDS)]
+        for row in rows:
+            binding=self.memory_binding(row)
+            if binding and 'sent' in binding and now-float(binding['sent'])>MEMORY_CANDIDATES_TTL_SECONDS:
+                self.expire_memory_prompt(row,binding)
 
     def offered_proposals(self, notification):
         """The exact proposals a proposal message shows, or [] if they changed (#659).
@@ -2960,14 +3177,30 @@ class AgentService:
         return state_change_short(self.work_trail(job['id']))
 
     def owner_jobs(self, jobs):
-        """Work rows as the web reads them: a withheld answer is removed (#752 review)."""
-        return [{**job,'response':None,'answer_withheld':True} if self.answer_withheld(job) else job for job in jobs]
+        """Work rows as the web reads them: a withheld answer is removed (#752 review).
+
+        #818 review: a Work with pending memory candidates carries AgentOS's
+        own line that nothing was saved yet, pointing to 내 기록.
+        """
+        pending=self.pending_candidate_works()
+        return [{**job,'response':None,'answer_withheld':True} if self.answer_withheld(job) else
+                {**job,'response':job['response']+'\n\n'+MEMORY_PENDING_WEB_NOTE} if job.get('response') and pending(job['id']) else job
+                for job in jobs]
 
     def owner_messages(self, messages):
-        """Transcript rows as the web reads them: a withheld answer is replaced by a notice (#752 review)."""
+        """Transcript rows as the web reads them: a withheld answer is replaced by a notice (#752 review).
+
+        #818 review: an answer of a Work with pending memory candidates
+        carries AgentOS's own line that nothing was saved yet.
+        """
         withheld={job['id'] for job in self.store.jobs() if self.answer_withheld(job)}
-        return [{**row,'content':TERMINAL_ANSWER_WITHHELD} if row.get('role')=='assistant' and row.get('job_id') in withheld
-                else row for row in messages]
+        pending=self.pending_candidate_works()
+        def view(row):
+            if row.get('role')!='assistant':return row
+            if row.get('job_id') in withheld:return {**row,'content':TERMINAL_ANSWER_WITHHELD}
+            if row.get('content') and pending(row.get('job_id')):return {**row,'content':row['content']+'\n\n'+MEMORY_PENDING_WEB_NOTE}
+            return row
+        return [view(row) for row in messages]
 
     def goal_upgrade_allowed(self, job_id):
         """Whether a ``reached`` goal verdict may make a partial/failed CLI Work succeeded (#752 review).
@@ -5288,6 +5521,13 @@ class AgentService:
                     {'text':'수락','callback_data':f"p7p:{notification['id']}:accept"},
                     {'text':'예약 안 함','callback_data':f"p7p:{notification['id']}:deny"},
                 ]]}
+            elif notification['kind'] in MEMORY_PROMPT_KINDS:
+                # #818: bound now to the queued candidates still pending; none left -> not offered.
+                memory_prompt=self.bind_memory_prompt(notification,time.time())
+                if not memory_prompt:
+                    self.store.update_notification(notification['id'],'cancelled')
+                    return True
+                reply_markup=self.memory_prompt_markup(notification['id'],memory_prompt)
             elif notification['kind']=='settings_change_proposed':
                 # #814: the exact drafts of one Work; changed or expired since -> not offered.
                 settings_drafts=self.offered_settings_drafts(notification)
@@ -5309,6 +5549,7 @@ class AgentService:
                 ]]}
             try:
                 text=(prep.proposal_text(proposals,remaining) if notification['kind']=='preparation_proposed' else
+                      self.memory_prompt_text(notification['job_id'],memory_prompt) if notification['kind'] in MEMORY_PROMPT_KINDS else
                       self.settings_orchestrator.confirmation_text(settings_drafts) if notification['kind']=='settings_change_proposed' else
                       watch_text if notification['kind']==prep.NOTIFY_KIND else
                       LOCAL_DOCUMENT_APPROVAL_TEXT if notification['kind']=='approval_needed'
@@ -5326,7 +5567,11 @@ class AgentService:
                 else:
                     result=self.telegram.send_message(notification['chat_id'],text,reply_markup)
                 message_id=result.get('message_id') if isinstance(result,dict) else None
-                self.store.update_notification(notification['id'],'sent',message_id if isinstance(message_id,int) else None)
+                # #818 review: a memory prompt with nothing tappable is only a list ('memory_listed').
+                listed=notification['kind'] in MEMORY_PROMPT_KINDS and not self.memory_open(memory_prompt)
+                self.store.update_notification(notification['id'],'memory_listed' if listed else 'sent',
+                                               message_id if isinstance(message_id,int) else None,
+                                               json.dumps(memory_prompt) if notification['kind'] in MEMORY_PROMPT_KINDS else None)
                 if notification['kind']==prep.NOTIFY_KIND:
                     # #719: only a confirmed send is what the owner was last told.
                     try:
@@ -5657,6 +5902,40 @@ class AgentService:
                         self.store.update_notification(notification['id'],result_kind)
                         try:self.telegram.edit_message_text(sender,notification['message_id'],self.notification_text(result_kind),{'inline_keyboard':[]})
                         except ProviderError:pass
+                        changed=True
+            elif authorized and isinstance(data,str) and data.startswith('p7m:'):
+                # #818: the owner's yes/no for one candidate (or all open ones) of a
+                # memory prompt.  Exact: this notification, sent, this chat and
+                # message, within its TTL, and a candidate not yet decided here;
+                # each is then re-validated against what the message showed.
+                parts=data.split(':')
+                if len(parts)==4 and parts[3] in ('accept','reject'):
+                    notification=self.store.notification(parts[1])
+                    binding=self.memory_binding(notification) if notification and notification['kind'] in MEMORY_PROMPT_KINDS else None
+                    # #818 review: only a candidate the message showed complete is tappable.
+                    open_=self.memory_open(binding) if binding and 'sent' in binding else []
+                    targets=(open_ if parts[2]=='a' else
+                             [int(parts[2])] if parts[2].isdigit() and int(parts[2]) in open_ else [])
+                    exact=(targets and notification['state']=='sent'
+                           and notification['generation']==generation and notification['chat_id']==sender
+                           and notification['message_id']==message.get('message_id'))
+                    if exact and time.time()-float(binding['sent'])>MEMORY_CANDIDATES_TTL_SECONDS:
+                        self.expire_memory_prompt(notification,binding)
+                        alert=(MEMORY_CANDIDATES_EXPIRED_TEXT,True)
+                    elif exact:
+                        decided=self.decide_memory_prompt(notification['job_id'],binding,targets,parts[3]=='accept')
+                        finished=not self.memory_open(binding)
+                        self.store.update_notification(notification['id'],'memory_decided' if finished else 'sent',
+                                                       fingerprint=json.dumps(binding))
+                        outdated=any(binding['done'][item]=='outdated' for item in decided)
+                        LOG.info('memory candidates %s by owner button work=%s decided=%s outdated=%s',parts[3],notification['job_id'],len(decided),outdated)
+                        footer=(MEMORY_CANDIDATES_OUTDATED_TEXT if outdated else
+                                MEMORY_CANDIDATES_SAVED_TEXT if finished and 'accepted' in binding['done'].values() else None)
+                        try:self.telegram.edit_message_text(sender,notification['message_id'],
+                                                            self.memory_prompt_text(notification['job_id'],binding,footer),
+                                                            self.memory_prompt_markup(notification['id'],binding))
+                        except ProviderError:pass
+                        if outdated:alert=(MEMORY_CANDIDATES_OUTDATED_TEXT,True)
                         changed=True
             elif authorized and isinstance(data,str) and data.startswith('p7q:'):
                 # #719: stop one watch from its own notification.  Exact: this
@@ -6887,6 +7166,13 @@ class AgentService:
                                                       verified=job.get('owner_verified'))
             # #659: a prepared answer arrives without an owner turn; say what it is for.
             text=self.preparation_reply_prefix(job)+text
+            # #818 review: AgentOS's own line when this Work left pending memory
+            # candidates, so the reply never reads as if Memory changed.
+            try:memory_pending=not blocked and bool(self.pending_memory_candidates(job['id'])[0])
+            except Exception as exc:
+                LOG.warning('memory candidate read failed work=%s kind=%s',job['id'],type(exc).__name__)
+                memory_pending=False
+            if memory_pending:text+='\n\n'+MEMORY_PENDING_TELEGRAM_NOTE
             # #581: one durable reply, valid Telegram HTML (no leaked `**`),
             # anchored to the owner turn only when that clarifies it, with
             # bounded recovery controls only when the turn did not succeed.
@@ -6919,6 +7205,12 @@ class AgentService:
             self.presence.pop(job['id'],None)
             if markup and isinstance(message_id,int):
                 self.telegram_turns.record_reply(job['id'],job['chat_id'],message_id)
+            # #818: after a reply confirmed sent (never 'unknown'), one message with
+            # this Work's pending memory proposals.
+            try:
+                if memory_pending and status=='sent':self.queue_memory_candidates(job)
+            except Exception as exc:
+                LOG.warning('memory candidate offer failed work=%s kind=%s',job['id'],type(exc).__name__)
 
     def mark_telegram_connected(self):
         cfg=self.store.config('telegram',{})
@@ -6965,6 +7257,8 @@ class AgentService:
                 self.run_one()
                 self.deliver_one()
                 self.deliver_notification()
+                # #818: memory prompts whose buttons outlived their TTL are closed.
+                self.expire_memory_prompts()
                 # #709: close and settle in-flow logins (decisions, owner closes, timeouts).
                 self.process_browser_logins()
                 # #805: claim one pending owner-model upkeep when idle; it runs off this thread.

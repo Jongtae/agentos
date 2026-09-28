@@ -641,10 +641,9 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
             self.model_text = '저장하지 않았습니다.'
             sneaky = self.says(16, '이건 기억하지 마. 그냥 방금 이야기만 정리해 줘')
             self.drain()
-            # #488: the write was withheld, so the turn is not a success.  The
-            # owner is told what is pending instead of being told it was saved.
-            self.assertEqual(self.store.job(sneaky)['status'], 'failed')
-            self.assertIn('기억 후보로 보관', self.store.job(sneaky)['error'])
+            # #818: the write is held as a candidate - a recorded proposal the
+            # owner confirms, not a failed action - so the turn is not failed by it.
+            self.assertEqual(self.store.job(sneaky)['status'], 'succeeded')
             self.assertEqual(self.store.memories(), [])
             candidates = self.store.memory_candidates()
             self.assertEqual([row['state'] for row in candidates], ['pending'])
@@ -880,8 +879,8 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
             injected = self.says(27, '내 회의 시간 선호를 기억해 줘: 오전이 좋아',
                                  service=restarted)
             self.drain(service=restarted, store=restarted_store)
-            # #488: withheld, therefore not succeeded.
-            self.assertEqual(restarted_store.job(injected)['status'], 'failed')
+            # #818: held as a candidate the owner confirms, not a failed action.
+            self.assertEqual(restarted_store.job(injected)['status'], 'succeeded')
             # Not canonical Memory - and not silently dropped either.
             self.assertEqual(restarted_store.memories(), [])
             pending = [row for row in restarted_store.memory_candidates()
@@ -894,12 +893,13 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
             # carries the machine reason, and now also the owner-facing one.
             written = [event for event in restarted_store.task_events(injected)
                        if event['tool'] == 'save_memory' and event['trace'].get('evidence')]
-            self.assertEqual([event['status'] for event in written], ['failed'])
+            # #818: the event records the proposal: pending, never saved.
+            self.assertEqual([event['status'] for event in written], ['succeeded'])
             self.assertEqual([event['trace']['evidence'].get('refused_because')
                               for event in written], ['value-not-in-owner-request'])
+            self.assertEqual([event['trace']['evidence'].get('state') for event in written], ['pending'])
             self.assertNotIn(True, [event['trace']['evidence'].get('saved')
                                     for event in written])
-            self.assertIn('기억 후보로 보관', written[0]['trace']['error'])
             self.model_plan = []
             self.model_text = MODEL_ANSWER
 

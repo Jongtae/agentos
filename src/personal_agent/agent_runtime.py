@@ -1636,12 +1636,14 @@ class Capabilities:
    except Exception:pass
   return excluded
  def judgment_text(self,text,private=True):
-  """Text as it may reach the completion judgment (#657, pilot boundary 1).
+  """Text as it may reach the completion judgment or a local record (#657, pilot boundary 1).
 
   Deterministic exclusion only, no judgment about the text: saved private
   values (``private``; the same #605 set the browser mediation uses), the
   stored secrets' literal values and credential-shaped tokens.  A failing
-  redactor withholds the text rather than sending it unredacted.
+  redactor withholds the text rather than sending it unredacted.  #826: the
+  judgment path (``goal_judgment``) asks with ``private=False`` (secrets
+  only); recorded step text and arguments keep the default.
   """
   from .bounded_execution import SECRET_PATTERN
   text=str(text or '')
@@ -2847,10 +2849,12 @@ def goal_judgment(judgments,goal,claim,observations,failures,work_id=None,redact
  ``unavailable``, which never yields ``succeeded``.  ``redact(text,
  private)`` (``Capabilities.judgment_text``) runs on every fact before it is
  bounded, so a cut can never leave part of a secret; the owner's request is
- passed whole and only its stored-secret values are replaced.
+ passed whole and only its stored-secret values are replaced.  #826 (owner
+ decision): every fact gets the secrets-only pass (``private=False``); the
+ Work's saved private values are no longer masked from the owner's Judgment AI.
  """
  if judgments is None or not hasattr(judgments,'goal_reached'):return 'unavailable'
- clean=redact or (lambda text,private=True:str(text or ''))
+ clean=(lambda text,private=False:redact(text,private=False)) if redact else (lambda text,private=False:str(text or ''))
  refs=claim['evidence_refs']
  share=max(300,GOAL_OBSERVATION_CHARS//max(1,len(refs)))
  observed='\n'.join(clean(_observation_text(ref,observations[ref][0],observations[ref][3]))[:share] for ref in refs)[:GOAL_OBSERVATION_CHARS]

@@ -132,8 +132,9 @@ class ConnectionRouteUiTests(unittest.TestCase):
         all_ids = [attrs["id"] for _, attrs in items if "id" in attrs]
         self.assertEqual(len(all_ids), len(set(all_ids)))
         pane = html[html.index('id="settings-ai"'):html.index('id="settings-files"')]
-        for retired in ("advanced-model", "optional-providers", "model-form", "직접 API 설정 변경", "다른 연결 방법", "<details"):
+        for retired in ("advanced-model", "optional-providers", "model-form", "직접 API 설정 변경", "다른 연결 방법"):
             self.assertNotIn(retired, pane)
+        self.assertNotIn("<details", pane[:pane.index("<dialog")])
         self.assertEqual(by_id["ai-chooser"][0], "dialog")
         self.assertEqual(by_id["judgment-chooser"][0], "dialog")
         self.assertEqual(by_id["ai-chooser"][1]["aria-labelledby"], "ai-chooser-title")
@@ -142,6 +143,14 @@ class ConnectionRouteUiTests(unittest.TestCase):
         # Explicit Judgment routes remain in their settings dialog.
         self.assertLess(html.index('id="judgment-chooser"'), html.index('id="decision-route"'))
         self.assertIn("확인하고 사용", pane)
+        self.assertIn("preference-dialog", by_id["ai-chooser"][1]["class"])
+        self.assertEqual(by_id["ai-chooser-feedback"][1].get("tabindex"), "-1")
+        for control in ("ai-chooser-discard", "ai-discard-keep", "ai-discard-confirm"):
+            self.assertIn(control, by_id)
+        self.assertIn("hidden", by_id["ai-chooser-discard"][1])
+        chooser = pane[pane.index('<dialog id="ai-chooser"'):pane.index('</dialog>')]
+        self.assertIn('<footer class="button-row dialog-actions">', chooser)
+        self.assertLess(chooser.index('id="ai-chooser-discard"'), chooser.index('<footer'))
 
     def test_existing_draft_and_primary_route_wiring_are_preserved(self):
         app = (WEB / "app.js").read_text(encoding="utf-8")

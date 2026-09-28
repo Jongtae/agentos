@@ -699,6 +699,9 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if path=='/api/personal-space/profile':
                 # #658: current ``profile.*`` Memory rows for the Settings 프로필 group.
                 return self.reply(200,service.memory_profile_request({'operation':'list'}))
+            if path=='/api/owner-model':
+                # #805: the owner-model upkeep controls (pause switch, daily call cap).
+                return self.reply(200,service.owner_model_request({'operation':'read'}))
             if path=='/api/preparations':
                 # #659: the Settings 준비해 둔 일 list.
                 return self.reply(200,service.preparation_request({'operation':'list'}))
@@ -907,6 +910,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/context-inbox/telegram-policy':return self.reply(200,service.set_context_telegram_policy(body))
                 # #626: current-context privacy control (use/timezone/clear only).
                 if path=='/api/current-context':return self.reply(200,service.set_current_context(body))
+                if path=='/api/owner-model/request':return self.reply(200,service.owner_model_request(body))
                 if path=='/api/documents/approval':return self.reply(200,service.approve_document_sharing_from_settings(body))
                 if path=='/api/public-pages/approval':return self.reply(200,service.set_public_page_approval(body))
                 if path=='/api/model':return self.reply(200,service.save_model(body,strict=True))

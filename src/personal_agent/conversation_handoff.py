@@ -767,6 +767,28 @@ class ConversationJudgments:
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
                         source=decision.confidence.provider or decision.outcome)
 
+    def owner_model_proposals(self, request, answer, profile, clock, work_id=None):
+        """``(data, decision)``: durable owner-model proposals from one finished Work (#805).
+
+        One ``structured`` call over the owner's request (owner words, never
+        cut), the final answer excerpt (model-stated), the profile snapshot and
+        the clock, each redacted first.  ``data`` is the answer only when
+        decided with enough confidence; what may be stored is the caller's
+        deterministic validation.  Judgment only: it writes nothing.
+        """
+        from .decision import OUTCOME_UNAVAILABLE, StructuredDecision
+        from .owner_model import ANSWER_CHARS, CLOCK_CHARS, PROFILE_CHARS, PURPOSE, QUESTION, SCHEMA, shape
+        # Redacted before they are cut, so a cut never leaves part of a secret.
+        facts = {'owner_request': str(request or ''),
+                 'final_answer_excerpt': self.redact(answer)[:ANSWER_CHARS] or 'none',
+                 'owner_profile': self.redact(profile)[:PROFILE_CHARS] or 'none',
+                 'clock': self.redact(clock)[:CLOCK_CHARS] or 'unknown'}
+        context = self._context(PURPOSE, facts, work_id=work_id, uncut='owner_request')
+        method = getattr(self.engine, 'structured', None)
+        decision = (method(context, QUESTION, SCHEMA, shape) if method is not None
+                    else StructuredDecision(OUTCOME_UNAVAILABLE))
+        return self.policy.structured(decision), decision
+
     def explicit_preparation_request(self, utterance, proposal):
         """Is ``utterance`` the owner's own request for ``proposal`` (#659)?
 

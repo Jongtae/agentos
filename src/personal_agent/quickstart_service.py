@@ -70,9 +70,11 @@ from .conversation_handoff import (LOCAL_AUTHORITY_KIND, LOCAL_AUTHORITY_LABELS,
 from . import local_folder_picker
 # PRESENCE-TG-01 / #581: native Telegram presence (reaction, typing, draft, anchor).
 from .context_observations import ContextObservations, answerable_work, continuation_key, continuation_request
-from .current_context import CurrentContext, KNOWN_SECRET_NAMES, redact_known_secrets
+from .current_context import CLOCK_KEYS, CurrentContext, KNOWN_SECRET_NAMES, redact_known_secrets, render as current_context_render
 # SEC-ATTN-01 (#659): owner-accepted preparations (reminders, prepared answers).
 from . import preparations as prep
+# OWNER-MODEL-03 (#805): asynchronous, minimised post-Work owner-model upkeep.
+from . import owner_model as om
 from .browser_session import BrowserProfile, ascii_host, binding_digest, registrable_domain
 from .browser_jar import unexpired
 from .cli_browser_relay import BrowserRelay
@@ -364,6 +366,8 @@ class AgentService:
         self.current_state=CurrentContext(store,self.context_observations)
         # #659: owner-accepted preparations, run by the existing work loop.
         self.preparations=prep.Preparations(store)
+        # #805: post-Work owner-model upkeep, run by the same loop when idle.
+        self.owner_model=om.Upkeep(store)
         self.presence_timing=PresenceTiming()
         self.presence={}
         # #718: the CLI's own streamed step per running Work (presentation only, never persisted).
@@ -671,6 +675,71 @@ class AgentService:
             except Exception as exc:
                 LOG.warning('preparation tick failed id=%s kind=%s',row['id'],type(exc).__name__)
         return True
+
+    # -- OWNER-MODEL-03 (#805): asynchronous owner-model upkeep ------------------
+    @staticmethod
+    def owner_model_eligible(job, outcome, provider):
+        """Whether a settled Work gets one owner-model upkeep (#805); typed markers only.
+
+        A Work a worker AI answered that succeeded or is partial.  Not a
+        rule/command reply (``provider`` stays ``builtin``: no worker AI ran),
+        not a preparation's run (its request is the accepted goal, not new
+        owner words) and not a location continuation (the owner's latest
+        message was the location; the asking Work has its own upkeep).
+        """
+        key=job.get('request_key')
+        return (outcome in ('succeeded','partial') and provider!='builtin'
+                and prep.preparation_of(key) is None and continuation_request(key) is None)
+
+    def run_owner_model_upkeep(self, now=None):
+        """One work-loop tick of the #805 upkeep: at most one pending Work, only when idle.
+
+        Nothing pending is one indexed query and no model call.  Paused, over
+        the rolling daily cap, or with a Work queued or running, it waits.
+        """
+        try:
+            return self._owner_model_upkeep(now)
+        except Exception as exc:  # noqa: BLE001 - never stop the work loop
+            LOG.warning('owner-model upkeep failed kind=%s',type(exc).__name__)
+            return False
+
+    def _owner_model_upkeep(self, now):
+        upkeep=self.owner_model
+        now=upkeep.clock() if now is None else now
+        row=upkeep.due(now)
+        if row is None or not upkeep.claim(row['job_id'],now):return False
+        job=self.store.job(row['job_id'])
+        if now-row['created']>om.MAX_PENDING_SECONDS:
+            upkeep.finish(row['job_id'],om.STATE_EXPIRED,0,om.EVENT_EXPIRED,{'reason':'expired'},now)
+            return True
+        if not job or job.get('status') not in ('succeeded','partial'):
+            upkeep.finish(row['job_id'],om.STATE_GONE,0,om.EVENT_UNAVAILABLE,{'reason':'work-not-finished'},now)
+            return True
+        work_id=job['id']
+        # Every fact is redacted by the judgment redaction scoped to the source Work:
+        # stored secrets and credential shapes always, and its saved private values
+        # (#605 set) from the model-stated facts.
+        judgments=ConversationJudgments(self.decision_judge.engine,policy=self.decision_judge.policy,
+                                        redactor=lambda text,private=True:(self.scrub_work_text(work_id,text) if private
+                                                                            else self._redact_known_secrets(text)))
+        try:
+            clock=current_context_render({key:value for key,value in (self.current_state.snapshot() or {}).items()
+                                           if key in CLOCK_KEYS})
+        except Exception:
+            clock=''
+        state,calls,status,detail=upkeep.run(job,judgments,answer=job.get('response') or '',
+                                             profile=self.owner_profile_snapshot(),clock=clock,now=now)
+        upkeep.finish(work_id,state,calls,status,detail,now)
+        LOG.info('owner-model upkeep work=%s state=%s calls=%s applied=%s',work_id,state,calls,len(detail.get('applied') or ()))
+        return True
+
+    def owner_model_request(self, body=None):
+        """The owner's upkeep controls (#805): ``read`` or ``set`` (pause switch, daily call cap)."""
+        body=body if isinstance(body,dict) else {}
+        operation=body.get('operation','read')
+        if operation=='read':return self.owner_model.status()
+        if operation=='set':return self.owner_model.set_controls(body)
+        raise ValueError('요청을 확인하세요.')
 
     #: #719: bounds of the texts one watch judgment is asked over.
     WATCH_RESULT_CHARS=3000
@@ -3189,7 +3258,7 @@ class AgentService:
 
     #: Records that are AgentOS's own bookkeeping, not tool attempts.
     #: #710: ``orchestrator`` events record the plan and its evaluation, never a tool attempt.
-    LOCAL_NON_TOOL_EVENTS=frozenset({'model','local_authority','conversation_continuity',ORCHESTRATION_EVENT})
+    LOCAL_NON_TOOL_EVENTS=frozenset({'model','local_authority','conversation_continuity',ORCHESTRATION_EVENT,om.EVENT_TOOL})
 
     def attempted_only_reads(self, job_id):
         """True only when every tool this Work attempted is a declared read.
@@ -6568,6 +6637,8 @@ class AgentService:
                     cause,spoken,observed=scrub(cause),scrub(spoken),scrub(observed)
                     db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=?,owner_cause=?,owner_verified=? WHERE id=?",
                                (outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',spoken,observed,job['id']))
+                    # #805: one pending owner-model upkeep, settled with the Work.
+                    if self.owner_model_eligible(job,outcome,provider):self.owner_model.enqueue(db,job['id'])
                 self.record_turn_provenance(job['id'],goal=self.work_goal(job['id'],work_capabilities[0],outcome))
             except (ValueError,ProviderError,ExecutionError,OSError) as exc:
                 resolved_blocker=False
@@ -6738,6 +6809,8 @@ class AgentService:
                 self.deliver_notification()
                 # #709: close and settle in-flow logins (decisions, owner closes, timeouts).
                 self.process_browser_logins()
+                # #805: one pending owner-model upkeep, only when no Work is queued or running.
+                self.run_owner_model_upkeep()
                 self.stop.wait(.3)
         def poll():
             while not self.stop.is_set():

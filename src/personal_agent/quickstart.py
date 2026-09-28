@@ -554,6 +554,18 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             """
             return self.local_setup()
 
+        def folder_settings_surface(self):
+            """Whether Settings may add, replace or widen a folder Grant (#779).
+
+            On the loopback-bound Mac install this is ``owner_local_surface``:
+            a phone on a tunnel must not connect a Mac folder.  A non-loopback
+            deployment (compose/VPS/K8s, ``--host 0.0.0.0``) has no "this Mac"
+            and every request comes through its own network or reverse proxy,
+            so, as in ``tunneled``, it keeps its previous behaviour except that
+            the configured public tunnel host is still refused.
+            """
+            return self.owner_local_surface() if self.loopback_server() else not self.public_host()
+
         def cookie(self,token,max_age=86400):
             secure='; Secure' if os.environ.get('AGENTOS_SECURE_COOKIE')=='1' or public_hosts else ''
             return f'agentos_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}{secure}'
@@ -855,7 +867,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     # session may, like declining a folder request.
                     save=service.save_roots if path=='/api/files/roots' else service.configure_file_workspace
                     try:
-                        return self.reply(200,save(body,local_surface=self.owner_local_surface()))
+                        return self.reply(200,save(body,local_surface=self.folder_settings_surface()))
                     except OwnerLocalRequired as exc:
                         return self.reply(403,{'error':str(exc),'reason':exc.reason})
                 if path=='/api/context-inbox/config':return self.reply(200,service.context_inbox().configure(body))

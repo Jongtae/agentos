@@ -735,6 +735,7 @@ class PickerTests(unittest.TestCase):
 class HttpSurfaceTests(HandoffTestCase):
     def serve(self, claim=True):
         server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(self.service, (MOBILE_HOST,), 'pairing-token'))
+        self.handler_class = server.RequestHandlerClass
         thread = threading.Thread(target=server.serve_forever)
         thread.start()
 
@@ -984,6 +985,31 @@ class HttpSurfaceTests(HandoffTestCase):
                                   {'references': [str(research)], 'workspace': str(notes)})
         self.assertEqual(status, 200, reply)
         self.assertEqual(FileWorkspace(self.store).status()['workspace'], str(notes.resolve()))
+
+    def test_a_non_loopback_deployment_keeps_settings_folders_but_not_the_public_host(self):
+        # compose/VPS/K8s bind 0.0.0.0: there is no "this Mac", and a reverse
+        # proxy adds forwarding headers to every request.  As with tunneled(),
+        # such a deployment keeps its previous behaviour; the public tunnel
+        # host is still refused.  (Simulated without binding 0.0.0.0.)
+        base, session = self.serve()
+        research, results, extra = (self.folder(name) for name in ('research', 'results', 'extra'))
+        host = base.split('//', 1)[1]
+        with mock.patch.object(self.handler_class, 'loopback_server', return_value=False):
+            for label, headers in (('direct', session), ('reverse proxy', {**session, 'Host': host, 'X-Forwarded-For': '10.0.0.2'})):
+                with self.subTest(via=label):
+                    status, reply = self.call(base, '/api/files/roots', headers, {'paths': [str(research)]})
+                    self.assertEqual(status, 200, reply)
+                    status, reply = self.call(base, '/api/file-workspace', headers,
+                                              {'references': [str(research)], 'workspace': str(results)})
+                    self.assertEqual(status, 200, reply)
+            public = {**session, 'Host': MOBILE_HOST}
+            status, reply = self.call(base, '/api/files/roots', public, {'paths': [str(research), str(extra)]})
+            self.assertEqual((status, reply.get('reason')), (403, 'owner_local_surface'))
+            status, reply = self.call(base, '/api/file-workspace', public,
+                                      {'references': [str(research)], 'workspace': str(extra)})
+            self.assertEqual((status, reply.get('reason')), (403, 'owner_local_surface'))
+        self.assertEqual(self.roots(), [str(research.resolve())])
+        self.assertEqual(FileWorkspace(self.store).status()['workspace'], str(results.resolve()))
 
     def test_an_unauthenticated_caller_is_refused(self):
         self.park_read()

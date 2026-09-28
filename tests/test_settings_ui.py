@@ -67,6 +67,11 @@ for(const [login,label,kind] of [['signed-out','로그인 필요','attention'],[
  const view=ctx.mainAiView(settingsFor('codex',{codex:sub('codex',{login:{state:login}})}));
  assert.equal(view.state,label);assert.equal(view.kind,kind);assert.equal(view.checkable,login!=='sidecar');
 }
+// A later login observation supersedes an older subscription login failure only.
+for(const [loginTime,checkTime,kind] of [[200,100,'neutral'],[100,200,'attention'],[100,100,'attention'],[200,undefined,'attention']]){
+ const stale=ctx.mainAiView(settingsFor('codex',{codex:sub('codex',{login:{state:'signed-in',checked_at:loginTime},check:{state:'failed',checked_at:checkTime,failure:'auth'}})}));
+ assert.equal(stale.kind,kind);assert.equal(stale.description.includes('마지막 확인 실패'),kind==='attention');
+}
 const savedApi=()=>settingsFor('openai',{openai:api('openai',{key:{saved:true,pending:false}})});
 let projected=savedApi();projected.main_ai.routes[2].key.pending=true;
 assert.equal(ctx.mainAiView(projected).state,'새 키 적용 전');

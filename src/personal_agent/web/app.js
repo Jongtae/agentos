@@ -454,10 +454,10 @@ function mainAiView(settings){
  if(!route)return {title:current,description:t('선택된 연결을 이 컴퓨터에서 확인할 수 없습니다. 자동 전환하지 않습니다.'),state:t('확인 필요'),kind:'attention',checkable:false};
  const view={title:t(route.kind==='subscription'?'{name} · 구독 계정':'{name} · API',{name:route.name}),model:route.model||t(route.kind==='subscription'?'CLI 기본값':'모델 확인 안 됨'),destination:t(route.destination||''),description:'',state:t('확인 필요'),kind:'neutral',checkable:true};
  if(route.kind==='subscription'){
-  const login=route.login?.state||'unchecked';
+  const login=route.login?.state||'unchecked',failed=route.check?.state==='failed'&&!(login==='signed-in'&&Number(route.login?.checked_at)>Number(route.check?.checked_at));
   if(!route.installed)return {...view,description:t('선택한 CLI를 찾지 못했습니다. 다른 AI로 자동 전환하지 않습니다.'),state:t('설치 확인 필요'),kind:'attention',checkable:false};
   const states={'signed-in':'로그인 확인됨','signed-out':'로그인 필요',unchecked:'로그인 확인 전',unknown:'로그인 상태 확인 필요','token-saved':'토큰 저장됨 · 로그인 확인 전',sidecar:'실행 환경에서 인증 관리'};
-  return {...view,state:t(states[login]||'로그인 상태 확인 필요'),kind:['signed-out','unknown'].includes(login)?'attention':'neutral',checkable:login!=='sidecar',description:login==='signed-out'?t('변경에서 로그인 방법을 확인하세요.'):route.check?.state==='failed'?t('마지막 확인 실패: {reason}',{reason:t(DECISION_FAILURE_TEXT[route.check.failure]||route.check.failure||'확인 실패')}):'',...(route.check?.state==='failed'?{kind:'attention'}:{})};
+  return {...view,state:t(states[login]||'로그인 상태 확인 필요'),kind:['signed-out','unknown'].includes(login)?'attention':'neutral',checkable:login!=='sidecar',description:login==='signed-out'?t('변경에서 로그인 방법을 확인하세요.'):failed?t('마지막 확인 실패: {reason}',{reason:t(DECISION_FAILURE_TEXT[route.check.failure]||route.check.failure||'확인 실패')}):'',...(failed?{kind:'attention'}:{})};
  }
  if(!route.key?.saved)return {...view,state:t('키 없음'),kind:'attention',description:t('저장된 API 키가 없어 요청이 실패합니다.')};
  if(route.key?.pending)return {...view,state:t('새 키 적용 전'),kind:'attention',description:t('새로 저장한 키는 변경에서 확인하고 사용을 눌러야 적용됩니다.')};

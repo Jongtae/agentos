@@ -625,6 +625,48 @@ class AlternativesAndCompletionTests(unittest.TestCase):
         self.assertIn('공항 3시', facts['observations'])
         self.assertIn('[redacted]', facts['owner_request'])
 
+    def test_the_direct_route_judgment_reads_the_owner_context_the_worker_was_given(self):
+        """#833 (JUDGE-FAIR-02): the direct route's outcome judgment sees the same profile and
+        current-context snapshot the worker's system text carried, secrets redacted, cut to the
+        orchestrator's bounds; without a turn context both read ``none``."""
+        from personal_agent.agent_runtime import CURRENT_CONTEXT_FACT_CHARS, PROFILE_FACT_CHARS, owner_context_fact
+        secret = 'stored-fixture-secret-9f8e7d6c'
+        seen = []
+        turn = {'profile': f'- 이름: 홍길동 (mail key {secret})\n' + '- 취향: 조용한 카페\n' * 200,
+                'current_context': f'- 시각: 2026-09-29 09:00 KST (clock)\n- 위치: 서울 (key {secret})\n' + '- 날씨: 맑음\n' * 200}
+        script = Script({'tool_calls': [call('1', 'list_notes')]}, finish('f', '1', summary='메모를 찾았습니다.'))
+        caps = Capabilities(self.store, ModelAdapter(script), CFG, '', 'job', self.record, network=Network(),
+                            judgments=judgments(lambda facts: seen.append(dict(facts)) or True),
+                            secret_redactor=lambda text: text.replace(secret, '[redacted]'))
+        result = run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': '메모 찾아줘'}], '', caps, self.record,
+                           owner_context=turn)
+        self.assertEqual(result.outcome, 'succeeded')
+        [facts] = seen
+        owner = facts['owner_context']
+        self.assertIn('owner_profile: - 이름: 홍길동 (mail key [redacted])', owner)
+        self.assertIn('current_context: - 시각: 2026-09-29 09:00 KST (clock)', owner)
+        self.assertIn('- 위치: 서울 (key [redacted])', owner)
+        self.assertNotIn(secret, json.dumps(facts, ensure_ascii=False))
+        # The same bounds the orchestrator's judgment applies (#829): redacted, then cut.
+        profile_part, current_part = owner.split('\ncurrent_context: ')
+        self.assertEqual(len(profile_part), len('owner_profile: ') + PROFILE_FACT_CHARS)
+        self.assertEqual(len(current_part), CURRENT_CONTEXT_FACT_CHARS)
+        self.assertEqual(owner, owner_context_fact(turn, caps.judgment_text))
+        # A finished-without-claim reply is judged with the same fact.
+        seen.clear()
+        script = Script({'tool_calls': [call('1', 'list_notes')]}, {'content': '메모를 찾았습니다.'})
+        caps = Capabilities(self.store, ModelAdapter(script), CFG, '', 'job', self.record, network=Network(),
+                            judgments=judgments(lambda facts: seen.append(dict(facts)) or True))
+        run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': '메모 찾아줘'}], '', caps, self.record,
+                  owner_context={'profile': '- 이름: 홍길동'})
+        self.assertEqual(seen[-1]['owner_context'], 'owner_profile: - 이름: 홍길동\ncurrent_context: none')
+        # No turn context (a delegated specialist, the MCP bridge): the fact reads none, never fails.
+        seen.clear()
+        _result, _caps = self.run_script(Script({'tool_calls': [call('1', 'list_notes')]},
+                                                finish('f', '1', summary='메모를 찾았습니다.')),
+                                         answer=lambda facts: seen.append(dict(facts)) or True)
+        self.assertEqual(seen[-1]['owner_context'], 'owner_profile: none\ncurrent_context: none')
+
     def test_the_whole_request_reaches_the_judgment_and_its_last_part_counts(self):
         """A long request is never cut: an unmet requirement at its end keeps the Work from succeeding."""
         request = '다음 조건을 모두 확인해 줘. ' + '앞부분 조건은 이미 충족됐습니다. ' * 60 + '마지막 조건: 영수증 번호 R-7788이 보여야 합니다.'

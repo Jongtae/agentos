@@ -125,7 +125,8 @@ def judge_prompt(scenario, run):
     for label, rows, keys in (('new memory', diff.get('memories', []), ('content',)),
                               ('new memory candidate (awaiting owner confirmation)', diff.get('candidates', []),
                                ('content', 'value')),
-                              ('new reminder/preparation', diff.get('preparations', []), ('goal', 'due_local', 'state'))):
+                              ('new reminder/preparation', diff.get('preparations', []),
+                               ('kind', 'goal', 'due_local', 'every_minutes', 'until_local', 'delivery', 'state'))):
         for row in rows[:10]:
             lines.append(f'- {label}: ' + ' / '.join(str(row.get(key)) for key in keys if row.get(key)))
     if not any(diff.get(key) for key in ('memories', 'candidates', 'preparations')):

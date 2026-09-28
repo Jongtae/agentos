@@ -1424,6 +1424,19 @@ class OwnerStateOnTheCliRoute(Harness):
         self.assertEqual(memories, 0)
         self.assertEqual([row['content'] for row in candidates], ['성남 백현동'])
 
+    def test_the_request_sentence_is_refused_at_the_save_boundary(self):
+        """#846: a worker that saves the owner's wish sentence as a value makes no candidate at all."""
+        request = '값이  내려가면 알려줘.'
+        results = []
+        self.engine.before = lambda tools: results.append(tools.call('save_memory', {
+            'memory_key': 'profile.wish', 'content': ' 값이 내려가면 알려줘. '}))
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        self.run_work(request)
+        with self.store.db() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM memories').fetchone()[0], 0)
+            self.assertEqual(db.execute('SELECT count(*) FROM memory_candidates').fetchone()[0], 0)
+        self.assertIn('value-is-the-request', json.dumps(results))
+
 
 class HostRelayRouting(unittest.TestCase):
     """#774: the relay serves browser and owner-state tools, and nothing else."""

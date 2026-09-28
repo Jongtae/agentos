@@ -754,8 +754,10 @@ class WindowTests(_WatchCase):
         self.assertEqual(prep.normalize_window(10, until(3600), None, due, 'Asia/Seoul', self.now), (600, due + 3600, 6), 'slots before the deadline')
         self.assertEqual(prep.normalize_window('10', until(3600), 3, due, 'Asia/Seoul', self.now)[2], 3)
         self.assertEqual(prep.normalize_window(5, until(86400), None, due, 'Asia/Seoul', self.now)[2], prep.MAX_WINDOW_RUNS)
+        # #846: about three checks a day up to a deadline weeks away fits the window.
+        self.assertEqual(prep.normalize_window(480, until(30 * 86400), None, due, 'Asia/Seoul', self.now)[2], 90)
         for every, span, runs in ((4, 3600, None), (721, 3600, None), (10, 0, None), (10, -600, None),
-                                  (10, 86400 + 60, None), (True, 3600, None), (10, 3600, 0), (10, 3600, 49)):
+                                  (10, 31 * 86400 + 60, None), (True, 3600, None), (10, 3600, 0), (10, 3600, 97)):
             with self.assertRaises(prep.PreparationRefusal, msg=(every, span, runs)):
                 prep.normalize_window(every, until(span), runs, due, 'Asia/Seoul', self.now)
         with self.assertRaises(prep.PreparationRefusal):

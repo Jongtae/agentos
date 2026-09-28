@@ -192,7 +192,7 @@ PROPOSE_CURRENT_STATE_DESCRIPTION='Record the owner\'s own temporary present sit
 SCHEDULE_PREPARATION_DESCRIPTION=('Schedule something for a later time that the owner asked for. kind reminder: at due AgentOS sends goal to the owner as the reminder text; no model runs then. kind prepare: at due AgentOS runs goal as a new request with the usual tools and keeps the result as a prepared answer for when the owner asks (delivery send also sends it to the owner). '
  'A preparation is a proposal the owner accepts: it is scheduled at once only when the owner\'s own latest message asks for exactly this; otherwise it waits for the owner\'s explicit acceptance, and the result says which. Never schedule what the owner did not ask for, and do not use it to answer a question now. '
  'due: an RFC3339 time; without an offset it is local time in timezone (an IANA name such as Asia/Seoul; default the owner\'s time zone). For an event, pick a time before the event. recurrence: daily, weekdays or weekly (repeating from due); omit for once. '
- 'every_minutes with until (#719): instead of recurrence, repeat every that many minutes (a whole number, 5 to 720) from due until the until time (RFC3339, within a day of due), at most max_runs times (1 to 48; default every slot) - for watching something up to a deadline. '
+ 'every_minutes with until (#719): instead of recurrence, repeat every that many minutes (a whole number, 5 to 720) from due until the until time (RFC3339, within 31 days of due), at most max_runs times (1 to 96; default every slot) - for watching something up to a deadline. '
  'delivery: send (every result reaches the owner), keep (results stay in AgentOS), or when_needed (kind prepare: every result stays in AgentOS and AgentOS tells the owner only when a result needs them). '
  'goal: one short sentence the owner will read (reminder) or the request to run (prepare); never credentials. '
  'Standing wish (#846): when the owner states a wish about something that changes over time (a price, availability, weather, a delivery, an opening) and wants to know when it comes about, propose one kind prepare watch with delivery when_needed in one question, rather than answering once and stopping: goal states what to check and what counts as news, due is the first check, until is the owner\'s deadline. '
@@ -255,6 +255,7 @@ MEMORY_OWNER='local-owner'
 MEMORY_REFUSALS={
  'no-owner-memory-request':'소유자 확인이 필요해 기억 후보로 보관했습니다. 승인 후 저장할 수 있습니다.',
  'value-not-in-owner-request':'요청에 없는 내용이라 기억으로 저장하지 않고 기억 후보로 보관했습니다. 개인 공간에서 확인 후 승인할 수 있습니다.',
+ 'value-is-the-request':'요청 문장 자체는 기억이 아니라서 저장하지 않았습니다. 필요하면 지켜보기로 제안합니다.',
  'replaces-a-memory-the-request-did-not-name':'요청에 없던 기존 기억을 대체하는 값이라 저장하지 않고 기억 후보로 보관했습니다. 개인 공간에서 확인 후 승인할 수 있습니다.',
 }
 
@@ -2158,6 +2159,11 @@ class Capabilities:
    # Every model-proposed write becomes a value-scoped MemoryCandidate first.
    # Only a write the owner's own request covers is then accepted through the
    # owner's exact-approval path; everything else stays pending for them.
+   from .owner_model import normalized as _normalized
+   if _normalized(args.get('content')) and _normalized(args.get('content'))==_normalized((self.store.job(self.job_id) or {}).get('message')):
+    # #846: the owner's request sentence is the task, not a fact about the owner; no candidate is made of it
+    # (an equality check on the value's shape, the same as owner_model.validate; no intent detection).
+    return {'saved':False,'state':'refused','memory_key':args.get('memory_key'),'refused_because':'value-is-the-request'}
    self.written_labels.add('owner-memory')
    candidate=self.store.save_memory_candidate(self.job_id,args['memory_key'],args['content'])
    refusal=self.memory_write_refusal(candidate['memory_key'],candidate['content'])

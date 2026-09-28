@@ -96,14 +96,18 @@ class DecisionConfidence:
     """
 
     __slots__ = ('probability', 'provider', 'model', 'observed_model', 'elapsed_seconds',
-                 'route', 'engine', 'model_policy')
+                 'route', 'engine', 'model_policy', 'sent')
 
     def __init__(self, probability=None, *, provider='', model='', observed_model='', elapsed_seconds=None,
-                 route='', engine='', model_policy=''):
+                 route='', engine='', model_policy='', sent=None):
         self.probability = probability
         self.provider, self.model, self.observed_model = provider, model, observed_model
         self.elapsed_seconds = elapsed_seconds
         self.route, self.engine, self.model_policy = route, engine, model_policy
+        #: #805 review: whether the adapter started a call on its transport (an HTTP
+        #: request, a CLI process).  False when it answered before one; None when
+        #: the engine does not report it (a caller counting calls counts it).
+        self.sent = sent
 
 
 # NOT_REPORTED (imported from ``providers``) is recorded when a provider/CLI
@@ -206,7 +210,8 @@ class DecisionEngine:
         check over the parsed object.  An engine that cannot answer says so:
         the default is an explicit non-answer marked ``STRUCTURED_UNSUPPORTED``.
         """
-        return StructuredDecision(OUTCOME_UNAVAILABLE, confidence=DecisionConfidence(engine=STRUCTURED_UNSUPPORTED))
+        return StructuredDecision(OUTCOME_UNAVAILABLE, confidence=DecisionConfidence(engine=STRUCTURED_UNSUPPORTED,
+                                                                                     sent=False))
 
 
 class UnavailableDecisionEngine(DecisionEngine):
@@ -480,8 +485,9 @@ class SchemaDecisionEngine(DecisionEngine):
     _ANSWER_FIELD = {'judge': 'answer', 'choose': 'choice', 'score': 'score', 'choose_many': 'choices',
                      'structured': None}
 
-    def _done(self, context, kind, outcome, data, confidence, started, failure='', diagnostics=None):
+    def _done(self, context, kind, outcome, data, confidence, started, failure='', diagnostics=None, sent=False):
         confidence.elapsed_seconds = round(self.now() - started, 3)
+        confidence.sent = bool(sent)
         if self.audit:
             self.audit(audit_record(context, kind, outcome, data, confidence, self.now(), failure, diagnostics))
         return outcome, data if isinstance(data, dict) else {}, confidence
@@ -577,7 +583,7 @@ class ModelDecisionEngine(SchemaDecisionEngine):
         except ProviderError as exc:
             outcome = OUTCOME_TIMEOUT if exc.status == 'timeout' else OUTCOME_REJECTED if exc.status in (400, 413) else OUTCOME_UNAVAILABLE
             failure = 'auth' if exc.status in (401, 403) else 'usage-limit' if exc.status == 429 else ''
-            return self._done(context, kind, outcome, {}, DecisionConfidence(**identity), started, failure)
+            return self._done(context, kind, outcome, {}, DecisionConfidence(**identity), started, failure, sent=True)
         except ValueError:
             # The adapter refuses a configuration it cannot call (for example
             # a provider that requires a key).  Nothing was sent.
@@ -587,7 +593,8 @@ class ModelDecisionEngine(SchemaDecisionEngine):
         confidence = DecisionConfidence(data.get('confidence') if isinstance(data, dict) else None,
                                         observed_model=observed if isinstance(observed, str) else '', **identity)
         outcome = self._checked(data, confidence, valid)
-        return self._done(context, kind, outcome, data if outcome == OUTCOME_DECIDED else {}, confidence, started)
+        return self._done(context, kind, outcome, data if outcome == OUTCOME_DECIDED else {}, confidence, started,
+                          sent=True)
 
     @staticmethod
     def _arguments(message):

@@ -1,0 +1,74 @@
+[
+ {
+  "id": "travel-time-from-earlier-place",
+  "title": "Travel time from a place named in the previous turn",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "이번 토요일 점심에 수원 화성행궁 근처에서 친구 도윤이랑 약속 있어."
+   },
+   {
+    "say": "거기서 인천공항까지 차로 얼마나 걸려?"
+   }
+  ],
+  "rubric": [
+   "context_carry",
+   "specific_sourced",
+   "honest_unverified"
+  ],
+  "good_secretary": "Reads '거기' as the Hwaseong Haenggung area named in turn 1, gives a concrete driving time/route range for a Saturday afternoon with where the estimate comes from, and says the live traffic is not verified.",
+  "tags": [
+   "travel",
+   "context"
+  ]
+ },
+ {
+  "id": "travel-time-after-event",
+  "title": "Train time after an earlier-stated event",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "다음 주 화요일 오후 2시에 대전컨벤션센터에서 세미나 발표가 있어."
+   },
+   {
+    "say": "발표 끝나고 서울역까지 KTX로 가면 얼마나 걸려? 몇 시쯤 기차 타면 돼?"
+   }
+  ],
+  "rubric": [
+   "context_carry",
+   "specific_sourced",
+   "honest_unverified",
+   "follow_through"
+  ],
+  "good_secretary": "Uses the Daejeon venue and the 2pm talk from turn 1, estimates venue-to-Daejeon-station transfer plus KTX time, suggests a realistic departure window, and is honest that timetables/seat availability were not checked unless a source is shown.",
+  "tags": [
+   "travel",
+   "context"
+  ]
+ },
+ {
+  "id": "travel-time-with-clock-note",
+  "title": "Will I be late - travel time against a stated appointment",
+  "split": "heldout",
+  "turns": [
+   {
+    "say": "내일 오후 3시에 광교중앙역 근처 카페에서 거래처 미팅이 있어."
+   },
+   {
+    "say": "강남역에서 2시 10분쯤 출발하면 늦지 않을까?",
+    "note": "The owner asks on the day of the meeting."
+   }
+  ],
+  "rubric": [
+   "context_carry",
+   "specific_sourced",
+   "honest_unverified"
+  ],
+  "good_secretary": "Connects the 3pm Gwanggyo meeting with a 2:10 departure from Gangnam, gives a concrete subway/bus or driving estimate with its basis, and says clearly whether that is tight, without inventing live traffic.",
+  "tags": [
+   "travel",
+   "context",
+   "time"
+  ]
+ }
+]

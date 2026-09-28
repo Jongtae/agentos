@@ -1,0 +1,148 @@
+[
+ {
+  "id": "food-on-route-rest-area",
+  "title": "Rest-area food on a stated route, with menu and price",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "내일 서울에서 부산까지 경부고속도로로 운전해서 내려가."
+   },
+   {
+    "say": "가는 길에 휴게소에서 먹을 만한 거 추천해줘. 메뉴랑 가격까지."
+   }
+  ],
+  "rubric": [
+   "context_carry",
+   "specific_sourced",
+   "honest_unverified"
+  ],
+  "good_secretary": "Names specific rest areas on the Gyeongbu route in driving order, specific signature menus with prices and where that information came from, and flags prices/opening as possibly outdated if not verified.",
+  "tags": [
+   "food",
+   "route"
+  ]
+ },
+ {
+  "id": "food-on-route-budget-correction",
+  "title": "Rest-area recommendation corrected by a later budget",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "주말에 서울에서 강릉까지 영동고속도로로 갈 거야."
+   },
+   {
+    "say": "중간에 휴게소 하나 들러서 밥 먹을 건데 추천해줘."
+   },
+   {
+    "say": "아 그리고 한 사람당 만 원 이하로 먹고 싶어."
+   }
+  ],
+  "rubric": [
+   "context_carry",
+   "specific_sourced",
+   "follow_through",
+   "honest_unverified"
+  ],
+  "good_secretary": "Turn 2 names specific rest areas on the Yeongdong route. Turn 3 revises its own earlier picks to options under 10,000 won per person and says which earlier suggestion no longer fits.",
+  "tags": [
+   "food",
+   "route",
+   "correction"
+  ]
+ },
+ {
+  "id": "weekday-lunch-near-workplace",
+  "title": "Weekday lunch near a stated workplace",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "나 평일에는 을지로입구역 근처 한빛타워로 출근해."
+   },
+   {
+    "say": "오늘 점심 회사 근처에서 뭐 먹을지 추천해줘. 걸어서 10분 안쪽으로."
+   }
+  ],
+  "rubric": [
+   "owner_model",
+   "context_carry",
+   "specific_sourced",
+   "honest_unverified",
+   "follow_through"
+  ],
+  "expect": {
+   "memory_any": [
+    [
+     "을지로",
+     "한빛타워"
+    ]
+   ]
+  },
+  "good_secretary": "Keeps the stated workplace (records it or proposes remembering it), then recommends specific restaurants near Euljiro 1-ga station within a short walk, with menu/price hints and sources, without asking where the office is.",
+  "tags": [
+   "food",
+   "workplace",
+   "memory"
+  ]
+ },
+ {
+  "id": "already-ate-lunch",
+  "title": "'I already ate' after a lunch recommendation",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "점심 메뉴 하나 추천해줘."
+   },
+   {
+    "say": "아 근데 나 벌써 김치찌개 먹었어."
+   }
+  ],
+  "rubric": [
+   "follow_through",
+   "owner_model",
+   "honest_unverified"
+  ],
+  "expect": {
+   "memory_any": [
+    [
+     "김치찌개"
+    ]
+   ]
+  },
+  "good_secretary": "Acknowledges it missed the timing, records (or proposes recording) that lunch was kimchi stew so later suggestions avoid repeating it, and does not keep pushing lunch options.",
+  "tags": [
+   "food",
+   "memory",
+   "follow-through"
+  ]
+ },
+ {
+  "id": "already-ate-dinner-next-meal",
+  "title": "Already ate dinner, plan the next meal without repeating",
+  "split": "heldout",
+  "turns": [
+   {
+    "say": "저녁 뭐 먹을까?"
+   },
+   {
+    "say": "아까 6시에 이미 초밥 먹었어. 내일 점심은 겹치지 않게 추천해줘."
+   }
+  ],
+  "rubric": [
+   "follow_through",
+   "context_carry",
+   "owner_model"
+  ],
+  "expect": {
+   "memory_any": [
+    [
+     "초밥"
+    ]
+   ]
+  },
+  "good_secretary": "Acknowledges dinner already happened, keeps that it was sushi, and suggests tomorrow's lunch that is clearly not raw fish/Japanese.",
+  "tags": [
+   "food",
+   "memory"
+  ]
+ }
+]

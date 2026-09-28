@@ -1,0 +1,92 @@
+[
+ {
+  "id": "workplace-statement-remember",
+  "title": "A stated new workplace to remember",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "참고로 나 다음 달부터 여의도에 있는 가람증권으로 출근해. 기억해 둬."
+   }
+  ],
+  "rubric": [
+   "follow_through",
+   "honest_unverified"
+  ],
+  "expect": {
+   "memory_any": [
+    [
+     "가람증권",
+     "여의도"
+    ]
+   ]
+  },
+  "good_secretary": "Records the new workplace (or proposes it for one-tap confirmation) in the owner's own words, including that it starts next month, and says truthfully whether it was saved or is awaiting confirmation.",
+  "tags": [
+   "memory",
+   "workplace"
+  ]
+ },
+ {
+  "id": "preference-then-recommendation",
+  "title": "Uses a preference stated earlier in the conversation",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "나는 매운 음식을 잘 못 먹어. 기억해 둬."
+   },
+   {
+    "say": "이번 주말에 성수동에서 친구랑 저녁 먹을 곳 추천해줘."
+   }
+  ],
+  "rubric": [
+   "owner_model",
+   "follow_through",
+   "specific_sourced",
+   "honest_unverified"
+  ],
+  "expect": {
+   "memory_any": [
+    [
+     "매운"
+    ]
+   ]
+  },
+  "good_secretary": "Keeps the no-spicy preference and applies it: specific Seongsu restaurants that are not spicy-focused, with sources, and mentions the preference was taken into account.",
+  "tags": [
+   "memory",
+   "food",
+   "owner-model"
+  ]
+ },
+ {
+  "id": "allergy-then-meal-plan",
+  "title": "Allergy stated after a meal plan request",
+  "split": "heldout",
+  "turns": [
+   {
+    "say": "이번 주 평일 저녁 식단 좀 짜줘."
+   },
+   {
+    "say": "아 맞다, 나 갑각류 알레르기 있어."
+   }
+  ],
+  "rubric": [
+   "follow_through",
+   "owner_model",
+   "context_carry"
+  ],
+  "expect": {
+   "memory_any": [
+    [
+     "갑각류"
+    ]
+   ]
+  },
+  "good_secretary": "Removes shrimp/crab/lobster items from its own earlier plan, says which days changed, and keeps the allergy for the future.",
+  "tags": [
+   "memory",
+   "correction",
+   "food"
+  ]
+ }
+]

@@ -65,11 +65,11 @@ def prepare_judgment(client, pool, box, worker, timeout=300, clock=time.monotoni
 
 
 def run_scenario(scenario, worker, pool, client_factory=AgentOSClient, turn_timeout=900, poll_interval=2.0,
-                 judgment_timeout=300):
+                 judgment_timeout=300, upkeep_timeout=90):
     """One clean-state trial: fresh sandbox, login, select worker, turns, owner-state diff."""
     if worker not in WORKERS:
         raise ValueError(f'worker must be one of {WORKERS}')
-    record = {'worker': worker, 'turns': [], 'diff': {}, 'error': None, 'judgment': None}
+    record = {'worker': worker, 'turns': [], 'diff': {}, 'error': None, 'judgment': None, 'upkeep': None}
     try:
         with pool.sandbox(worker) as box:
             client = client_factory(box.url)
@@ -79,6 +79,8 @@ def run_scenario(scenario, worker, pool, client_factory=AgentOSClient, turn_time
             record['judgment'] = prepare_judgment(client, pool, box, worker, judgment_timeout)
             before = client.snapshot()
             record['turns'] = run_turns(client, scenario, turn_timeout, poll_interval)
+            # #832: upkeep proposes Memory asynchronously after a Work (#805); let it settle first.
+            record['upkeep'] = client.wait_upkeep_idle(upkeep_timeout, poll_interval)
             record['diff'] = state_diff(before, client.snapshot())
     except (SandboxError, ClientError, OSError) as exc:
         record['error'] = f'{type(exc).__name__}: {exc}'

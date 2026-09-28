@@ -48,7 +48,7 @@ from personal_agent.bounded_execution import ExecutionError, ExecutionResult
 from personal_agent.calendar import CALENDAR_SPEC, CALENDAR_WRITE_SPEC, CalendarConnector
 from personal_agent.calendar_conversation import CREATED, OUTCOME_UNKNOWN, PREVIEW_HEADER
 from personal_agent.connector_contract import ConnectorRegistry, ConnectorState
-from personal_agent.conversation_handoff import FOLLOWUP_RETRY, LOCAL_AUTHORITY_PREVIEWS, LOCAL_FOLDER_READ
+from personal_agent.conversation_handoff import ConnectorHandoff, FOLLOWUP_RETRY, LOCAL_AUTHORITY_PREVIEWS, LOCAL_FOLDER_READ
 from personal_agent.conversation_projection import (TERMINAL_ANSWER_LABEL, TERMINAL_FAILED_HEADER,
                                                     TERMINAL_PARTIAL_HEADER)
 from personal_agent.decision import (OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, SelectionDecision,
@@ -811,9 +811,13 @@ class D_MissingGmail(LocalHttp, PresenceEval):
                 self.assertEqual(job['status'], 'succeeded')
                 self.assertEqual(self.texts(start), [self.text], 'the ordinary answer, no Gmail guidance')
                 self.assertEqual(self.searches(), 0)
-        # Opposing: a judged unsupported send is refused truthfully; nothing is sent or searched.
+        # Opposing: a judged unsupported send reaches the worker with the fact as a
+        # note (#832); nothing is sent or searched and no handoff is invented.
+        bodies = len(self.model_bodies)
         job, _ = self.turn('tell the landlord I agree')
-        self.assertIn('메일 보내기나 답장은 제공하지 않습니다', job['response'])
+        sent = self.model_bodies[bodies]['messages'][-1]['content']
+        self.assertTrue(sent.startswith('tell the landlord I agree'))
+        self.assertIn('메일 보내기나 답장은 제공하지 않습니다', sent)
         self.assertNotEqual(job['status'], 'awaiting_connection')
         self.assertEqual(self.searches(), 0)
         # Positive: every phrasing parks with one contextual next action.
@@ -1086,24 +1090,24 @@ class F_CalendarApproval(CalendarEval):
         self.assertEqual(self.provider.calls, [])
         self.assertNotEqual(self.store.job(web)['response'], CREATED)
 
-    def test_missing_write_grant_is_a_contextual_handoff_and_the_resumed_work_only_previews(self):
+    def test_missing_write_grant_reaches_the_worker_with_a_connection_note(self):
+        """#832 (ARCH-THIN-02): the rule's calendar reading is a note, not a park or a failure.
+
+        The worker has its own calendar and preparation tools; it receives the
+        owner's verbatim words and the fact that Google Calendar is not
+        connected.  Nothing is drafted and nothing reaches the provider.
+        """
         self.registry.transition(OWNER, CALENDAR_WRITE_SPEC.connector_id, ConnectorState.DISCONNECTED)
-        start = len(self.wire)
-        job, _ = self.turn('다음 주 화요일 10시 반 병원 예약 일정 추가해줘')
-        self.assertEqual(job['status'], 'awaiting_connection')
-        [guidance] = self.texts(start)
-        self.assertIn('Google Calendar', guidance)
-        self.assertIn('실행하지 않았습니다', guidance)
-        self.assert_no_raw_ids(guidance)
-        self.connect_write()
-        self.service.resume_connector_work(CALENDAR_WRITE_SPEC.connector_id, OWNER, (CALENDAR_WRITE_SCOPE,))
-        resumed_at = len(self.wire)
-        self.assertTrue(self.service.run_one())
-        self.service.deliver_one()
-        self.assertFalse(self.service.run_one(), 'resumes exactly once')
-        [preview] = self.texts(resumed_at)
-        self.assertTrue(preview.startswith(PREVIEW_HEADER))
-        self.assertEqual(self.provider.calls, [], 'resuming reaches a preview, never the effect')
+        request = '다음 주 화요일 10시 반 병원 예약 일정 추가해줘'
+        job, _ = self.turn(request)
+        self.assertNotEqual(job['status'], 'awaiting_connection')
+        self.assertNotEqual(job['status'], 'failed')
+        sent = self.model_bodies[0]['messages'][-1]['content']
+        self.assertTrue(sent.startswith(request), 'the owner words reach the worker verbatim')
+        self.assertIn('Google Calendar is not connected in this install', sent)
+        self.assertIn('schedule_preparation', [tool['function']['name'] for tool in self.model_bodies[0]['tools']])
+        self.assertEqual(self.drafts(), {})
+        self.assertEqual(self.provider.calls, [])
 
 
 class _Conflict409:
@@ -1204,11 +1208,11 @@ class CalendarParticleFinding(CalendarEval):
     """Observation (#512, fixed by #598): the Calendar handoff read "만들기을(를)"."""
 
     def test_finding_particle_the_calendar_handoff_uses_the_matching_object_particle(self):
+        # #832: a natural-language turn no longer parks on this handoff; the
+        # guidance text itself (still used by a Work with no AI route) is checked.
         self.registry.transition(OWNER, CALENDAR_WRITE_SPEC.connector_id, ConnectorState.DISCONNECTED)
-        start = len(self.wire)
-        job, _ = self.turn('다음 주 화요일 10시 반 병원 예약 일정 추가해줘')
-        self.assertEqual(job['status'], 'awaiting_connection')
-        [guidance] = self.texts(start)
+        result = self.service.connector_handoff.prerequisite(OWNER, CALENDAR_WRITE_SPEC.connector_id)
+        guidance = ConnectorHandoff.guidance(result)
         self.assertNotIn('을(를)', guidance)
         self.assertIn('Google Calendar 일정 만들기를 연결해 주세요', guidance)
         self.assertIn('실행하지 않았습니다', guidance, 'the truthful not-executed statement is unchanged')
@@ -1638,14 +1642,21 @@ class SettingsLanguage(LocalHttp, PresenceEval):
         self.serve(self.service)
 
     def test_conversation_settings_read_uses_owner_names_not_internal_ids(self):
+        # #832: the settings rule is a note; the worker reads settings with its own
+        # tool, whose result (what it relays) uses owner names, never raw ids.
+        self.plain_reply_served = True
         for phrase in ('연결 상태 보여줘', "what's connected?"):
             with self.subTest(phrase=phrase):
-                start = len(self.wire)
+                bodies = len(self.model_bodies)
+                self.script += [('tool', 'settings_read', {'category': 'connections'}), ('text', '연결 상태입니다.')]
                 job, _ = self.turn(phrase)
-                [reply] = self.texts(start)
-                self.assertIn('Telegram', reply)
-                self.assertIn('Gmail', reply)
-                self.assert_no_raw_ids(reply)
+                sent = self.model_bodies[bodies]['messages'][-1]['content']
+                self.assertTrue(sent.startswith(phrase), 'the owner words reach the worker verbatim')
+                [result] = [json.loads(message['content'])['response']
+                            for message in self.model_bodies[bodies + 1]['messages'] if message.get('role') == 'tool']
+                self.assertIn('Telegram', result)
+                self.assertIn('Gmail', result)
+                self.assert_no_raw_ids(result)
                 self.assertEqual(job['status'], 'succeeded')
 
     def test_settings_read_distinguishes_states_without_raw_ids_in_the_owner_summary(self):

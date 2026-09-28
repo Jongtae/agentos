@@ -837,6 +837,19 @@ class BrowserThroughTheBridge(_BridgeHarness):
         # The Work now carries the browser-session source (read through the bridge).
         self.assertIn('owner-browser-session', mcp_bridge._recorded_private_sources(self.store, self.job))
 
+    def test_the_bridge_records_each_browser_calls_declared_effect(self):
+        """#787: the real bridge keeps the model's declared effect on every event of a browser call."""
+        self.wire(_call(2, 'browser_open', url=ORIGIN + '/product', effect='navigate'),
+                  _call(3, 'browser_find', text='12,900'),
+                  _call(4, 'browser_click', target='장바구니', effect='mutate'),
+                  _call(5, 'browser_open', url=ORIGIN + '/checkout', effect='payment'))
+        declared = [(tool, status, detail.get('declared_effect')) for tool, status, detail in self.events()
+                    if tool in BROWSER_ACTIONS]
+        self.assertEqual(declared, [('browser_open', 'running', 'navigate'), ('browser_open', 'succeeded', 'navigate'),
+                                    ('browser_find', 'running', None), ('browser_find', 'succeeded', None),
+                                    ('browser_click', 'running', 'mutate'), ('browser_click', 'succeeded', 'mutate'),
+                                    ('browser_open', 'running', 'payment'), ('browser_open', 'failed', 'payment')])
+
     def test_mediation_never_returns_credentials_or_saved_values(self):
         replies = self.wire(_call(2, 'browser_open', url=ORIGIN + '/account', effect='read'))
         account = _value(replies[2])

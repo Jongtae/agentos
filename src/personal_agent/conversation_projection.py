@@ -215,6 +215,35 @@ def report_statement(report):
     return clip_keeping_links('\n'.join(lines), REPORT_STATEMENT_CHARS) if lines else None
 
 
+#: #787: the steps a failed Work's workers tried, from its recorded tool events.
+REPORT_TRIED_LABEL = '시도한 단계:'
+REPORT_TRIED_STATES = {'succeeded': '완료', 'failed': '실패'}
+REPORT_TRIED_ITEMS = 5
+
+
+def tried_statement(steps):
+    """``시도한 단계: ...`` of a Work's observed steps (#787), or ``None``.
+
+    ``steps`` are ``(tool_id, host, status)`` of the Work's own completed
+    tool events, in order; ``host`` is what the event itself recorded (or
+    empty).  One generic rendering in the same owner words as ``owner_cause``:
+    what kind of step, where, and whether it was observed to complete.
+    """
+    entries = []
+    for tool, host, status in steps:
+        state = REPORT_TRIED_STATES.get(status)
+        if not state:
+            continue
+        where = f' ({host})' if host else ''
+        entry = f'{tool_label(tool)}{where} {state}'
+        if entry not in entries:
+            entries.append(entry)
+    if not entries:
+        return None
+    more = f' 외 {len(entries) - REPORT_TRIED_ITEMS}건' if len(entries) > REPORT_TRIED_ITEMS else ''
+    return (REPORT_TRIED_LABEL + ' ' + ' · '.join(entries[:REPORT_TRIED_ITEMS]) + more)[:600]
+
+
 def verified_portion(parts):
     """Join AgentOS-rendered verified parts into one bounded block, or ``None``."""
     text = '\n\n'.join(part.strip() for part in parts or () if isinstance(part, str) and part.strip())

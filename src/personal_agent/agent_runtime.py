@@ -2752,6 +2752,10 @@ GOAL_FAILURE_CHARS=600
 #: whole: this is the delivered answer's own cap, so no claim is hidden from the judgment.
 GOAL_REPLY_CHARS=24000
 GOAL_CONVERSATION_CHARS=1500
+#: #804/#829/#833: the owner model the plan call and the outcome judgment read (redacted, then cut):
+#: the profile and current-context sections the worker was given in this run.
+PROFILE_FACT_CHARS=1200
+CURRENT_CONTEXT_FACT_CHARS=1200
 REPORT_ITEM_CHARS=200
 REPORT_ITEMS=3
 
@@ -2868,13 +2872,27 @@ def _observation_text(ref,name,result):
  except (TypeError,ValueError):body=str(result)
  return f'[{ref}] {name}:\n{body}'
 
-def goal_judgment(judgments,goal,claim,observations,failures,work_id=None,redact=None,conversation=''):
+def owner_context_fact(sections,clean):
+ """The ``owner_context`` fact of the outcome judgment (#829, #833): the owner profile and
+ current-context snapshot the worker was given in this run, each passed through ``clean``
+ (secrets redacted) and then cut to its fact bound.  ``sections`` is any mapping with
+ ``profile`` / ``current_context`` text (a turn context or the orchestration sections);
+ a missing section reads ``none``.  Shared by the direct route and the orchestrator so
+ both judgments see the same owner model."""
+ sections=sections if isinstance(sections,dict) else {}
+ def fact(name,limit):return str(clean(sections.get(name) or '') or '')[:limit] or 'none'
+ return (f"owner_profile: {fact('profile',PROFILE_FACT_CHARS)}\n"
+         f"current_context: {fact('current_context',CURRENT_CONTEXT_FACT_CHARS)}")
+
+def goal_judgment(judgments,goal,claim,observations,failures,work_id=None,redact=None,conversation='',owner_context=None):
  """``yes`` / ``no`` / ``unavailable``: did the reply serve the owner's message ``goal``?
 
  The one outcome judgment (#657, #820): one ``ConversationJudgments.goal_reached``
  call over the owner's message, the recent ``conversation``, the reply
  (``claim['summary']``, model-stated, never evidence), the referenced
- observed results and the Work's failed steps.  No judgments, an engine error or a non-answer is
+ observed results, the Work's failed steps and (#833) the owner context the
+ worker was given - ``owner_context`` is the turn context's ``profile`` /
+ ``current_context`` sections, rendered by ``owner_context_fact``.  No judgments, an engine error or a non-answer is
  ``unavailable``, which never yields ``succeeded``.  ``redact(text,
  private)`` (``Capabilities.judgment_text``) runs on every fact before it is
  bounded, so a cut can never leave part of a secret; the owner's request is
@@ -2890,7 +2908,9 @@ def goal_judgment(judgments,goal,claim,observations,failures,work_id=None,redact
  failed=clean('; '.join(f'{tool}: {reason or "failed"}' for tool,reason in failures))[:GOAL_FAILURE_CHARS]
  reply=clean(claim.get('summary') or '')[:GOAL_REPLY_CHARS]
  recent=clean(conversation or '')[-GOAL_CONVERSATION_CHARS:]
- try:judged=judgments.goal_reached(clean(goal,private=False),observed,failed,work_id=work_id,answer=reply,conversation=recent)
+ owner=owner_context_fact(owner_context,clean)
+ try:judged=judgments.goal_reached(clean(goal,private=False),observed,failed,work_id=work_id,answer=reply,conversation=recent,
+                                   owner_context=owner)
  except Exception:return 'unavailable'
  outcome=getattr(judged,'outcome',None)
  return outcome if outcome in ('yes','no') else 'unavailable'
@@ -2933,7 +2953,10 @@ def _external(trail):
  # #818: a memory proposal concludes like internal bookkeeping too.
  return [row for row in trail if row[0] not in INTERNAL_STATE_ACTIONS and row[1]!='proposed']
 
-def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'):
+def run_agent(adapter,config,key,history,system,capabilities,record,scope='main',owner_context=None):
+ """The direct-API tool loop.  ``owner_context`` (#833) is the turn context whose
+ ``profile`` / ``current_context`` sections ``system`` already carries, so the outcome
+ judgment reads the same owner model the worker was given; None reads ``none``."""
  messages=[{'role':'system','content':POLICY+'\n'+system},*history]
  definitions=capabilities.definitions();specs={d['function']['name']:d['function']['parameters'] for d in definitions}
  # #657: the loop-internal completion claim, offered beside the host tools.
@@ -2975,7 +2998,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
    # the model also called ``finish`` is bookkeeping, not the outcome.
    refs=[ref for ref,row in observations.items() if row[2]=='succeeded' and row[1] not in INTERNAL_STATE_ACTIONS]
    judgment=goal_judgment(capabilities.judgments,goal,{'evidence_refs':refs,'summary':content},observations,failures,
-                          capabilities.job_id,getattr(capabilities,'judgment_text',None),conversation)
+                          capabilities.job_id,getattr(capabilities,'judgment_text',None),conversation,owner_context)
   if not _external(trail) and not invalid_calls:
    # Ordinary conversation: no tool ran (or only internal current-state
    # bookkeeping, #627), so there is nothing to observe.
@@ -3085,7 +3108,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     if reason is None and claim['status']=='done':
      judged+=1
      judgment=goal_judgment(capabilities.judgments,goal,claim,observations,failures,capabilities.job_id,
-                            getattr(capabilities,'judgment_text',None),conversation)
+                            getattr(capabilities,'judgment_text',None),conversation,owner_context)
      # A "not shown" answer returns the claim once, so the model can take
      # another path; a second one, or no engine, ends the run below.
      if judgment=='no' and judged<GOAL_JUDGMENTS:reason='goal_not_observed'

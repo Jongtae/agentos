@@ -7439,7 +7439,8 @@ class AgentService:
                                 # #658/#627: the direct route carries the owner profile and
                                 # current-context sections in its system text, the same
                                 # sections the CLI envelope renders.
-                                result=run_agent(self.adapter,runtime_config,key,[*api_context['conversation'],{'role':'user','content':api_context['request']}],context_sections(api_context),capabilities,record)
+                                # #833: the outcome judgment reads the same profile / current-context sections.
+                                result=run_agent(self.adapter,runtime_config,key,[*api_context['conversation'],{'role':'user','content':api_context['request']}],context_sections(api_context),capabilities,record,owner_context=api_context)
                             except Exception as exc:
                                 self.record_turn_provenance(job['id'],status='failed',failure_class=type(exc).__name__,egress_taint=sorted(capabilities.private_provenance))
                                 # #710: a failed worker may be re-delegated within the Work's bounds.

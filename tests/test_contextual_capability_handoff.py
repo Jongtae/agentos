@@ -986,6 +986,33 @@ class HttpSurfaceTests(HandoffTestCase):
         self.assertEqual(status, 200, reply)
         self.assertEqual(FileWorkspace(self.store).status()['workspace'], str(notes.resolve()))
 
+    def test_an_off_mac_removal_keeps_a_blocked_result_folder_as_stored(self):
+        # #785 review P2-1: after the grant, a parent of the result folder is
+        # replaced by a symlink.  An off-Mac "keep" must not re-resolve the
+        # stored path and move the result-write grant to the symlink's target.
+        base, session = self.serve()
+        research, notes = self.folder('research'), self.folder('notes')
+        parent = self.folder('parent')
+        (parent / 'out').mkdir()
+        status, reply = self.call(base, '/api/file-workspace', session,
+                                  {'references': [str(research), str(notes)], 'workspace': str(parent / 'out')})
+        self.assertEqual(status, 200, reply)
+        before = FileWorkspace(self.store).status()
+        parent.rename(self.root / 'parent-granted')
+        other = self.folder('other')
+        (other / 'out').mkdir()
+        parent.symlink_to(other, target_is_directory=True)
+        self.assertTrue(FileWorkspace(self.store).projection()['workspace_blocked'])
+        mobile = {**session, 'Host': MOBILE_HOST}
+        status, reply = self.call(base, '/api/file-workspace', mobile,
+                                  {'references': [before['references'][1]['path']], 'workspace': before['workspace']})
+        self.assertEqual(status, 200, reply)
+        after = FileWorkspace(self.store).status()
+        self.assertEqual([ref['path'] for ref in after['references']], [before['references'][1]['path']])
+        self.assertEqual((after['workspace'], after['workspace_id']), (before['workspace'], before['workspace_id']))
+        self.assertTrue(reply['workspace_blocked'])
+        self.assertIsNone(FileWorkspace(self.store).active()['workspace'])
+
     def test_a_non_loopback_deployment_keeps_settings_folders_but_not_the_public_host(self):
         # compose/VPS/K8s bind 0.0.0.0: there is no "this Mac", and a reverse
         # proxy adds forwarding headers to every request.  As with tunneled(),

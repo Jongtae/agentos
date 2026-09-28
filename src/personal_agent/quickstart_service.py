@@ -2204,7 +2204,10 @@ class AgentService:
                 if not (isinstance(references,list) and all(isinstance(p,str) and p in stored for p in references)
                         and status.get('workspace') and body.get('workspace')==status.get('workspace')):
                     raise OwnerLocalRequired()
-            files.configure(body.get('references',[]),body.get('workspace',''))
+            # Off this Mac the result folder is kept, never re-chosen: a stored
+            # folder the rules now block (e.g. a parent replaced by a symlink)
+            # stays as stored instead of being re-resolved to a new target.
+            files.configure(body.get('references',[]),body.get('workspace',''),keep_blocked_workspace=not local_surface)
             self.store.put('document_sharing',{})
             return files.projection()
 
@@ -3157,7 +3160,11 @@ class AgentService:
         def schedule(work_id):
             # Reached only after a successful single-use claim: the grant is
             # written, then the parked Work is re-queued by compare-and-set.
-            if not kept_existing:commit()
+            # #779 review: the commit reads the current folders and writes them
+            # under the service lock that Settings writes use, so a Mac approval
+            # and a phone removal cannot lose each other's update.
+            if not kept_existing:
+                with self.lock:commit()
             scheduled=self._schedule_resumed_work(work_id)
             if scheduled:self._remember_work(LOCAL_RESUMED_KEY,work_id)
             return scheduled

@@ -47,10 +47,11 @@ SRC = Path(__file__).resolve().parents[1] / 'src' / 'personal_agent'
 
 #: Decision and runtime modules.  ``decision*.py`` is globbed; ``preparations.py``
 #: is scanned once it exists (SEC-ATTN-01 #659); ``orchestrator.py`` is the
-#: ORCH-01 (#710) orchestration step and its worker catalogue.
+#: ORCH-01 (#710) orchestration step and its worker catalogue; ``owner_model.py`` the
+#: #805 owner-model upkeep.
 SCANNED_MODULES = ('agent_runtime.py', 'conversation_handoff.py', 'current_context.py', 'browser_session.py',
                    'browser_worker.py', 'browser_jar.py',
-                   'preparations.py', 'local_tools.py', 'quickstart_service.py', 'orchestrator.py')
+                   'preparations.py', 'local_tools.py', 'quickstart_service.py', 'orchestrator.py', 'owner_model.py')
 
 #: Modules whose job is to name providers.  Not scanned.
 ALLOWED_MODULES = {

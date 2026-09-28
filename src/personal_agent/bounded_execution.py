@@ -796,7 +796,8 @@ def cli_metadata(engine_id, raw):
         error = record.get('error') if record.get('type') in ('turn.failed', 'error') else None
         text = error.get('message') if isinstance(error, dict) else (error if isinstance(error, str) else record.get('message') if record.get('type') == 'error' else None)
         if isinstance(text, str) and text.strip():
-            errors.append(' '.join(text.split())[:300])
+            # The same redaction ``failure_details`` applies to this text (secrets, control characters).
+            errors.append(' '.join(redact_reason(text).split())[:300])
     if errors:
         meta['stream_errors'] = errors[-3:]
     return meta

@@ -488,7 +488,9 @@ def subset_or_default(worker, requested, reason):
     else:
         return requested, None
     private = offered & frozenset(worker.get('private_tools') or ())
-    if requested & private and offered & search_tools():
+    # #795 review: only where the worker's own web search would hide the reads (#678), and
+    # never when the plan asked for a search tool itself (that mix is the full toolset's).
+    if worker.get('native_search') and requested & private and not requested & search_tools() and offered & search_tools():
         return offered - search_tools(), {'requested': sorted(requested), 'why': why, 'kept': 'private_reads'}
     return None, {'requested': sorted(requested), 'why': why}
 

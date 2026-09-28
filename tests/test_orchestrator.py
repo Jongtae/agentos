@@ -717,7 +717,7 @@ class SubsetCategories(unittest.TestCase):
     """#735 review: a subset removes a whole category or it is replaced."""
 
     WORKER = {'tools': ['bounded_public_research', 'list_memory', 'list_notes', 'weather', 'web_search'],
-              'private_tools': ['list_memory', 'list_notes']}
+              'private_tools': ['list_memory', 'list_notes'], 'native_search': True}
 
     def keep(self, removed, reason='keep them apart'):
         from personal_agent.orchestrator import subset_or_default
@@ -727,12 +727,17 @@ class SubsetCategories(unittest.TestCase):
         self.assertEqual(self.keep({'list_memory', 'list_notes'})[1], None)
         self.assertEqual(self.keep({'web_search', 'bounded_public_research'})[1], None)
 
-    def test_a_partial_private_category_keeps_the_private_reads(self):
-        """#795: the subset asked for list_memory, so the private reads stay and web search goes."""
-        self.assertEqual(self.keep({'list_notes'}), (frozenset({'list_memory', 'list_notes', 'weather'}),
-                                                    {'requested': ['bounded_public_research', 'list_memory', 'weather',
-                                                                   'web_search'], 'why': 'shape',
-                                                     'kept': 'private_reads'}))
+    def test_a_partial_private_category_with_search_asked_for_is_replaced(self):
+        """The plan asked for web search too, so the mix is the full toolset's (#795 review)."""
+        self.assertEqual(self.keep({'list_notes'}), (None, {'requested': ['bounded_public_research', 'list_memory',
+                                                                         'weather', 'web_search'], 'why': 'shape'}))
+
+    def test_a_worker_without_its_own_search_or_a_plan_asking_for_search_keeps_the_old_rule(self):
+        """#795 review: only a native-search worker hides private reads; a requested search is honoured."""
+        from personal_agent.orchestrator import subset_or_default
+        api = {**self.WORKER, 'native_search': False}
+        self.assertIsNone(subset_or_default(api, ['list_memory', 'weather'], 'why')[0])
+        self.assertIsNone(self.keep({'bounded_public_research', 'list_notes'})[0], 'web_search was asked for')
 
     def test_a_single_private_read_request_keeps_every_private_read(self):
         """The 2026-09-28 live case: the plan asked for calendar_query alone; it must not become the default set."""
@@ -1643,6 +1648,20 @@ class DeclaredPageReads(Harness):
                 self.assertEqual((first['next'], first['stop']), ('stop', 'effect'))
 
 
+    def test_a_later_mutating_open_still_stops_re_delegation(self):
+        def work(tools):
+            for declared in ('read', 'mutate'):
+                tools.capabilities.record('browser_open', 'running', json.dumps(
+                    {'scope': 'subscription-mcp-bridge', 'host_action': 'browser_open', 'declared_effect': declared}))
+                tools.capabilities.record('browser_open', 'succeeded', json.dumps(
+                    {'scope': 'subscription-mcp-bridge', 'host_action': 'browser_open', 'evidence': {}}))
+        self.engine.before = work
+        self.engine.fail = [ExecutionError('no answer', failure_class='invalid-output')]
+        self.script([plan('codex', 'Answer.'), plan('openai', 'Other path.')], goals=[True])
+        job, _row = self.run_work('알려줘', key='read-then-mutate')
+        self.assertEqual(self.events(job, 'evaluated')[0][1]['stop'], 'effect')
+
+
 class StreamDiagnostics(unittest.TestCase):
     def test_the_end_of_a_codex_stream_is_recorded_without_content(self):
         from personal_agent.bounded_execution import cli_metadata
@@ -1653,3 +1672,11 @@ class StreamDiagnostics(unittest.TestCase):
         meta = cli_metadata('codex', raw)
         self.assertEqual(meta['stream_tail'], ['thread.started', 'item.started', 'error', 'turn.failed'])
         self.assertEqual(meta['stream_errors'], ['stream disconnected before completion', 'model stream ended'])
+
+class StreamRedaction(unittest.TestCase):
+    def test_stream_errors_are_redacted_like_failure_details(self):
+        from personal_agent.bounded_execution import cli_metadata
+        raw = json.dumps({'type': 'error', 'message': 'bad key sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX1234 \x07 rejected'})
+        [error] = cli_metadata('codex', raw)['stream_errors']
+        self.assertNotIn('ABCDEFGHIJKLMNOPQRSTUVWX1234', error)
+

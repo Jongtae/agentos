@@ -223,6 +223,7 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                         # #795: a browser step's declared effect (read/navigate/mutate/payment), so a
                         # re-plan can tell a page read from an action; AgentOS's own guard still decides.
                         declared = arguments.get('effect') if action in BROWSER_ACTIONS else None
+                        declared = declared if declared in ('read', 'navigate', 'mutate', 'payment') else None
                         record(listed, 'running', json.dumps({'scope':'subscription-mcp-bridge','host_action':action,
                                                               'step':progress_step(action, arguments, status, capabilities.judgment_text),
                                                               **({'declared_effect':declared} if isinstance(declared, str) else {})},

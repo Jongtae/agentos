@@ -4322,8 +4322,14 @@ class AgentService:
                 previous_work_id=self.current_work_id
                 self.current_work_id=job['id']
                 try:
-                    chosen=self.decision_judge.closing_reaction(job.get('message'),job.get('response'),CLOSING_CANDIDATES,
-                                                                wrote=emoji==WROTE_REACTION)
+                    try:
+                        chosen=self.decision_judge.closing_reaction(job.get('message'),CLOSING_CANDIDATES,
+                                                                  wrote=emoji==WROTE_REACTION)
+                    except Exception as exc:
+                        # A failed optional judgment keeps the truth-gated,
+                        # deterministic completion reaction.
+                        LOG.info('telegram closing reaction judgment skipped: %s',type(exc).__name__)
+                        chosen=None
                 finally:
                     self.current_work_id=previous_work_id
                 if chosen in CLOSING_CANDIDATES:emoji=chosen
@@ -7765,10 +7771,6 @@ class AgentService:
                 status='unknown'
             with self.store.db() as db:
                 db.execute('UPDATE jobs SET delivery=? WHERE id=?',(status,job['id']))
-            # #835/#858: only now, with the outcome decided and the reply sent, may the truth gate
-            # clear the reaction or allow a Judgment AI closing choice.
-            self._present_outcome(job,delivered=status=='sent',blocked=bool(blocked),awaiting_owner=memory_pending)
-            self.presence.pop(job['id'],None)
             if markup and isinstance(message_id,int):
                 self.telegram_turns.record_reply(job['id'],job['chat_id'],message_id)
             # #818/#836: after a reply confirmed sent (never 'unknown'), the Work's
@@ -7777,6 +7779,11 @@ class AgentService:
                 if memory_pending and status=='sent':self.queue_memory_candidates(job)
             except Exception as exc:
                 LOG.warning('memory candidate offer failed work=%s kind=%s',job['id'],type(exc).__name__)
+        # #835/#858: delivery is durable before the truth-gated outcome
+        # presentation. This optional remote Judgment call runs outside the
+        # service lock, so it cannot stall polling, Stop updates or work.
+        self._present_outcome(job,delivered=status=='sent',blocked=bool(blocked),awaiting_owner=memory_pending)
+        self.presence.pop(job['id'],None)
 
     def mark_telegram_connected(self):
         cfg=self.store.config('telegram',{})

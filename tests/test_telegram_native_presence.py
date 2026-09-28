@@ -17,6 +17,7 @@ import re
 import urllib.error
 from unittest import mock
 import tempfile
+import threading
 import time
 import traceback
 import unittest
@@ -228,6 +229,10 @@ class JudgmentReactionTests(NativePresenceTestCase):
         self.assertEqual(self.judgment_calls[0][0].facts,
                          {'owner_message': '고마워, 이 계획은 [redacted] 괜찮을까?'})
         self.assertEqual(self.judgment_calls[1][0].facts['owner_message'], '고마워, 이 계획은 [redacted] 괜찮을까?')
+        self.assertEqual(self.judgment_calls[1][0].facts,
+                         {'owner_message': '고마워, 이 계획은 [redacted] 괜찮을까?',
+                          'answer_delivered': 'yes', 'saved_a_note_or_memory': 'no'})
+        self.assertNotIn(job['response'], repr(self.judgment_calls[1][0].facts))
         self.assertEqual(self.judgment_calls[0][1], RECEIVED_CANDIDATES)
         self.assertEqual(self.judgment_calls[1][1], CLOSING_CANDIDATES)
         self.assertEqual([call[3] for call in self.judgment_calls], [job['id'], job['id']],
@@ -269,6 +274,44 @@ class JudgmentReactionTests(NativePresenceTestCase):
         self.assertEqual(job['status'], 'failed')
         self.assertEqual(self.emojis(), [RECEIVED_REACTION, '🤗', CLEAR_REACTION])
         self.assertEqual([call[0].purpose for call in self.judgment_calls], ['turn-reaction'])
+
+    def test_closing_judgment_failure_keeps_deterministic_completion_reaction(self):
+        self.connect_model()
+        self.install_reaction_judgment({'turn-reaction': '🤗'})
+
+        def fail_closing(*args, **kwargs):
+            raise RuntimeError('fixture judgment failure')
+
+        self.service.decision_judge.closing_reaction = fail_closing
+        job, _ = self.turn('질문')
+
+        self.assertEqual(job['status'], 'succeeded')
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, '🤗', DONE_REACTION])
+
+    def test_closing_judgment_runs_without_the_service_lock(self):
+        self.connect_model()
+        lock_was_available = []
+        self.judgment_calls = []
+
+        def choose(context, candidates, question):
+            if context.purpose == 'closing-reaction':
+                acquired = threading.Event()
+
+                def acquire_service_lock():
+                    with self.service.lock:
+                        acquired.set()
+
+                thread = threading.Thread(target=acquire_service_lock)
+                thread.start()
+                thread.join(timeout=1)
+                lock_was_available.append(acquired.is_set())
+            return SelectionDecision(OUTCOME_DECIDED, 'none-of-these', tuple(candidates), fixture_confidence())
+
+        self.service.decision_judge = ConversationJudgments(FixtureDecisionEngine(choose=choose),
+                                                            redactor=self.service.redact_judgment_text)
+        self.turn('질문')
+
+        self.assertEqual(lock_was_available, [True])
 
 
 class DraftCompositionTests(unittest.TestCase):

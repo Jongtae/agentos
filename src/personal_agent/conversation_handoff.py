@@ -542,12 +542,11 @@ TURN_REACTION_QUESTION = ('The owner just sent this message to their personal as
                           'emoji fits. This judgment is presentation only and does not authorize any action.')
 CLOSING_REACTION_QUESTION = ('The assistant has answered the owner\'s message; the answer was delivered and the work '
                              'succeeded. Choose the one reaction emoji that best closes this exchange, fitting the '
-                             'message and the answer, as a warm secretary would tap on the request once it is done. '
+                             'owner\'s message and the content-free fact that it received a successful answer, '
+                             'as a warm secretary would tap on the request once it is done. '
                              'Vary with the exchange; do not default to the same emoji. Choose none-of-these only if '
                              'no listed emoji fits. This judgment is presentation only and never claims more than '
-                             'the answer itself.')
-#: At most this much of the delivered answer reaches the closing-reaction judgment.
-CLOSING_REACTION_REPLY_CHARS = 1200
+                             'the observed Work outcome.')
 #: Recipient/source endings trimmed from a query-term candidate so a Gmail
 #: search gets the bare name ("집주인한테" -> "집주인").  Query formatting only;
 #: which term is used is the DecisionEngine's selection.
@@ -775,20 +774,21 @@ class ConversationJudgments:
         decision = self.engine.choose(context, candidates, TURN_REACTION_QUESTION)
         return self.policy.selection(decision)
 
-    def closing_reaction(self, utterance, reply, candidates, wrote=False):
+    def closing_reaction(self, utterance, candidates, wrote=False):
         """The reaction emoji that closes a succeeded, delivered answer (#858).
 
         Asked only when ``outcome_reaction`` already allows a closing emoji;
-        the context is the owner message and a bounded prefix of the reply.
+        the context contains the owner message and content-free delivery facts,
+        never the answer text, which may contain private source material.
         ``wrote`` says the Work observably saved a note or Memory item.
         """
         candidates = tuple(candidates)
         if not candidates:
             return None
         facts = {'owner_message': utterance,
-                 'reply': str(reply or '')[:CLOSING_REACTION_REPLY_CHARS],
+                 'answer_delivered': 'yes',
                  'saved_a_note_or_memory': 'yes' if wrote else 'no'}
-        context = self._context('closing-reaction', facts, uncut=('owner_message', 'reply'))
+        context = self._context('closing-reaction', facts, uncut='owner_message')
         decision = self.engine.choose(context, candidates, CLOSING_REACTION_QUESTION)
         return self.policy.selection(decision)
 

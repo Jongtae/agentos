@@ -64,6 +64,9 @@ def prepare(root: Path, port: int, environ: dict[str, str]) -> dict:
 # privately), ``redact_known_secrets`` (stored secret values and credential
 # shapes) and ``AgentService._redact_reason`` (bearer tokens, home paths).
 # Keys that name session or credential material are dropped outright.
+# A subscription CLI-route Work (#786) adds ``bridge_steps`` (its MCP bridge
+# calls) and ``orchestration`` (attempts and the goal verdict); a Work without
+# those events keeps the direct-route shape exactly.
 
 PROBES = ("A", "B", "C", "D")
 RECORD_SCHEMA = "secretary-01-probe/1"
@@ -91,6 +94,89 @@ STRUCTURAL_EVIDENCE_KEYS = frozenset({"id", "ref", "state_ref", "draft_id", "age
                                       "provider", "locale", "kind", "predicate", "action", "composed_by", "qualifiers",
                                       "freshness", "reason", "refused_because", "supersedes", "superseded", "model",
                                       "retrieved_at"})
+#: #786: the subscription CLI route.  Its AgentOS tool calls arrive through the
+#: MCP bridge (no ``call_id``: a ``running`` event with the bounded display
+#: ``step``, then the call's ``succeeded``/``failed`` event of the same tool),
+#: and its goal verdict is the orchestrator's ``planned``/``evaluated`` events.
+BRIDGE_SCOPE = "subscription-mcp-bridge"
+ORCHESTRATOR_TOOL = "orchestrator"
+#: Typed, structural fields of a bridge result or an orchestrator event.
+BRIDGE_TYPED_FIELDS = ("code", "retry", "effect", "requires")
+ORCHESTRATOR_FIELDS = ("worker", "model", "brief_digest", "sections", "tools", "tools_replaced")
+EVALUATION_FIELDS = ("outcome", "next", "stop", "invalid")
+
+
+def _bridge_steps(events, text, evidence_tree):
+    """Ordered bridge steps of a CLI-route Work, and the orchestrator attempts.
+
+    A result pairs with the oldest open ``running`` step of the same tool, as
+    ``bounded_execution.incomplete_bridge_calls`` pairs them; a result with no
+    open step (an unknown tool, invalid arguments) is a step of its own.
+    """
+    steps, open_steps, attempts, current = [], [], {}, None
+    for event in events:
+        tool, status, detail = event["tool"], event["status"], event["detail"]
+        if tool == ORCHESTRATOR_TOOL:
+            number = detail.get("attempt")
+            if not isinstance(number, int):
+                continue
+            row = attempts.setdefault(number, {"attempt": number})
+            if status in ("planned", "fallback"):
+                current = number
+                for field in ORCHESTRATOR_FIELDS:
+                    if detail.get(field) is not None:
+                        row[field] = detail[field]
+                for field in ("reason", "tools_reason"):
+                    if detail.get(field):
+                        row[field] = text(detail[field], True)
+                if status == "fallback":
+                    row["fallback"] = detail.get("code")
+                    if detail.get("invalid"):
+                        row["invalid"] = detail["invalid"]
+            elif status == "evaluated":
+                for field in ("worker", "model", "brief_digest"):
+                    if detail.get(field) is not None and field not in row:
+                        row[field] = detail[field]
+                for field in EVALUATION_FIELDS:
+                    if detail.get(field) is not None:
+                        row[field] = detail[field]
+            continue
+        if status == "running":
+            step = detail.get("step") if isinstance(detail.get("step"), dict) else {}
+            row = {"step": len(steps) + 1, "tool": tool, "host_action": detail.get("host_action") or tool,
+                   "status": "running"}
+            if current is not None:
+                row["attempt"] = current
+            if step.get("host"):
+                row["host"] = text(step["host"])
+            if step.get("query"):
+                row["query"] = text(step["query"], True)
+            if step.get("status"):
+                row["status_text"] = text(step["status"], True)
+            if step.get("approval"):
+                row["approval"] = True
+            steps.append(row)
+            open_steps.append(row)
+            continue
+        row = next((item for item in open_steps if item["tool"] == tool), None)
+        if row is None:
+            row = {"step": len(steps) + 1, "tool": tool}
+            if detail.get("host_action"):
+                row["host_action"] = detail["host_action"]
+            if current is not None:
+                row["attempt"] = current
+            steps.append(row)
+        else:
+            open_steps.remove(row)
+        row["status"] = status
+        for field in BRIDGE_TYPED_FIELDS:
+            if detail.get(field):
+                row[field] = detail[field]
+        if isinstance(detail.get("evidence"), dict):
+            row["evidence"] = evidence_tree(detail["evidence"])
+        if detail.get("error"):
+            row["error"] = text(detail["error"], True)
+    return steps, [attempts[number] for number in sorted(attempts)]
 
 
 def _import_runtime():
@@ -246,8 +332,15 @@ def record_probe(data: Path, work: str, probe: str, recorded_at: datetime.dateti
         events = [dict(row) for row in db.execute(
             "SELECT tool,status,detail,created FROM tool_events WHERE job_id=? ORDER BY id", (job_id,))]
     calls, order, rejections, conclusions, stops, others, models = {}, [], [], [], [], [], []
+    cli_events, cli_others = [], []
     for event in events:
         tool, status, detail = event["tool"], event["status"], _detail(event["detail"])
+        if tool == ORCHESTRATOR_TOOL or (detail.get("scope") == BRIDGE_SCOPE and not detail.get("call_id")):
+            cli_events.append({"tool": tool, "status": status, "detail": detail})
+            # Kept as before unless the Work turns out to be a CLI-route Work.
+            others.append({"tool": tool, "status": status})
+            cli_others.append(others[-1])
+            continue
         if tool == "model":
             if status == "responded":
                 model = {"model": detail.get("model"), "requested_model": detail.get("requested_model")}
@@ -315,6 +408,36 @@ def record_probe(data: Path, work: str, probe: str, recorded_at: datetime.dateti
     cited_ok = finish is not None and all(row.get("status") == "succeeded" for row in finish["cited"]) \
         and len(finish["cited"]) == len(finish["evidence_refs"])
     judged_done = finish is not None and finish["status"] == "done" and (main or {}).get("judgment") == "yes"
+    bridge_steps, attempts = _bridge_steps(cli_events, text, evidence_tree)
+    evaluated = [row for row in attempts if row.get("outcome")]
+    verdict = ({"outcome": evaluated[-1]["outcome"], "stop": evaluated[-1].get("stop"), "attempts": len(attempts)}
+               if evaluated else None)
+    # #786: a CLI-route Work has no direct-route finish claim; its goal
+    # judgment is the orchestrator's last evaluation.
+    cli_route = bool(bridge_steps) or (bool(attempts) and main is None)
+    if cli_route:
+        moved = {id(row) for row in cli_others}
+        others = [row for row in others if id(row) not in moved]
+    else:
+        # A direct-route Work keeps its exact shape (orchestrator rows stay in other_events).
+        bridge_steps, attempts, verdict = [], [], None
+    goal_judgment = (main or {}).get("judgment")
+    if cli_route and goal_judgment is None and verdict:
+        goal_judgment = verdict["outcome"]
+    checks = {
+        "succeeded_iff_judged_done_claim": (None if cli_route and not tool_calls
+                                            else (outcome == "succeeded") == judged_done or not tool_calls),
+        "cited_refs_all_succeeded": cited_ok if finish and finish["status"] == "done" else None,
+        "repeat_paths_refused": sum(1 for row in tool_calls + bridge_steps if row.get("code") == "repeat_path"),
+    }
+    if cli_route:
+        checks.update({
+            "succeeded_iff_verdict_reached": (outcome == "succeeded") == (verdict["outcome"] == "reached")
+                                             if verdict else None,
+            "bridge_steps_failed": sum(1 for row in bridge_steps if row.get("status") == "failed"),
+            "bridge_steps_unfinished": sum(1 for row in bridge_steps if row.get("status") == "running"
+                                           or row.get("code") == "tool_incomplete"),
+        })
     record = {
         "record": RECORD_SCHEMA, "probe": probe, "date": recorded_at.date().isoformat(),
         "recorded_at": recorded_at.strftime("%Y-%m-%dT%H%MZ"), "evidence_class": EVIDENCE_CLASS,
@@ -323,11 +446,13 @@ def record_probe(data: Path, work: str, probe: str, recorded_at: datetime.dateti
         "requested": text(job.get("message"), True),
         "models": models,
         "tool_calls": tool_calls,
+        **({"bridge_steps": bridge_steps} if bridge_steps else {}),
+        **({"orchestration": {"attempts": attempts, "verdict": verdict}} if attempts else {}),
         "alternatives_tried": (main or {}).get("alternatives_tried"),
         "nudges": (main or {}).get("nudges"),
         "claim_rejections": rejections,
         "finish": finish,
-        "goal_judgment": (main or {}).get("judgment"),
+        "goal_judgment": goal_judgment,
         "final_outcome": outcome,
         "report": {"reply": text(job.get("response"), True), "observed": text(job.get("owner_verified"), True),
                    **_report_sections(job.get("owner_cause"), runtime["labels"], text),
@@ -337,17 +462,15 @@ def record_probe(data: Path, work: str, probe: str, recorded_at: datetime.dateti
                             if key != "goal" and provenance.get(key) is not None}),
         "other_events": others,
         "stops": stops,
-        "checks": {
-            "succeeded_iff_judged_done_claim": (outcome == "succeeded") == judged_done or not tool_calls,
-            "cited_refs_all_succeeded": cited_ok if finish and finish["status"] == "done" else None,
-            "repeat_paths_refused": sum(1 for row in tool_calls if row.get("code") == "repeat_path"),
-        },
+        "checks": checks,
         "redaction": ["typed browser text and proposed state values as length placeholders",
                       "values this Work saved to Memory candidates or notes",
                       "stored secret values and credential-shaped tokens", "bearer tokens and home paths",
                       "keys naming cookies, storage, sessions, passwords, secrets, tokens or credentials"]
                      + (["free text (request, queries, reply, report, errors, evidence titles, text and URL paths) "
-                         "replaced by length and digest; URLs keep scheme and host (--omit-text)"] if omit_text else []),
+                         "replaced by length and digest; URLs keep scheme and host (--omit-text)"] if omit_text else [])
+                     + (["CLI route: bridge step status text and queries, and orchestrator reasons, are free text "
+                         "(--omit-text)"] if omit_text and cli_route else []),
     }
     return record
 

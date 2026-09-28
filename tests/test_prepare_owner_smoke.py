@@ -308,6 +308,150 @@ class ProbeRecordTests(unittest.TestCase):
         self.assertEqual(json.loads(stdout.getvalue())['evidence'], 'synthetic_setup_only')
 
 
+BRIDGE = 'subscription-mcp-bridge'
+CLI_TITLE = '리더는 언제 차이를 만들어내는가 : 검색결과'
+CLI_REASON = '책 검색과 장바구니 담기는 브라우저 도구가 있는 Codex가 맡습니다'
+
+
+def _bridge_running(store, job, tool, arguments, status=None):
+    from personal_agent.agent_runtime import progress_step
+    _event(store, job, tool, 'running', {'scope': BRIDGE, 'host_action': tool,
+                                          'step': progress_step(tool, arguments, status)})
+
+
+def _synthetic_cli_work(root):
+    """One Work shaped like a subscription CLI-route run (#786): an orchestrated
+    Codex attempt whose bridge steps stop at an effect, a re-delegated second
+    attempt that reaches the goal, and bridge rows that carry no call_id."""
+    store = QuickStore(root)
+    store.secret('telegram_token', TOKEN)
+    job = store.enqueue('《리더는 언제 차이를 만들어내는가》 장바구니에 넣어줘', 'probe-a-cli', channel='telegram:g', chat_id=7)
+    _event(store, job, 'orchestrator', 'planned', {'attempt': 1, 'worker': 'codex', 'model': None, 'brief_digest': 'd1',
+                                                   'sections': ['goal'], 'tools': ['browser_open', 'browser_click'],
+                                                   'tools_reason': None, 'tools_replaced': False, 'reason': CLI_REASON,
+                                                   'text': f'1번째 시도: Codex · 기본 모델 — {CLI_REASON}'})
+    _event(store, job, 'subscription_engine', 'running', {'engine': 'codex', 'mode': 'exec'})
+    _bridge_running(store, job, 'browser_open', {'url': 'https://m.yes24.com/Search?query=리더'}, '책을 검색합니다')
+    _event(store, job, 'browser_open', 'succeeded', {'scope': BRIDGE, 'host_action': 'browser_open', 'evidence': {
+        'state': 'page', 'url': 'https://m.yes24.com/Search?query=리더', 'title': CLI_TITLE, 'element_count': 65,
+        'characters': 822, 'redacted_values': 0, 'found': None, 'cookies': 'sid=abc'}})
+    _bridge_running(store, job, 'browser_click', {'target': '12', 'effect': 'mutate'}, '장바구니 버튼을 누릅니다')
+    _event(store, job, 'browser_click', 'failed', {'scope': BRIDGE, 'host_action': 'browser_click',
+                                                   'code': 'target_not_found', 'retry': 'permanent', 'effect': 'none',
+                                                   'error': f'대상 12를 찾지 못했습니다 Bearer {TOKEN}'})
+    # A tool the bridge refused before it ran: a result with no running step.
+    _event(store, job, 'unlisted', 'failed', {'scope': BRIDGE, 'code': 'unknown_tool', 'retry': 'permanent',
+                                              'effect': 'none', 'error': 'Unknown AgentOS MCP tool.'})
+    _event(store, job, 'subscription_engine', 'succeeded', {'engine': 'codex', 'exit_code': 0})
+    _event(store, job, 'orchestrator', 'evaluated', {'attempt': 1, 'worker': 'codex', 'model': None, 'brief_digest': 'd1',
+                                                     'outcome': 'not_reached', 'next': 'redelegate', 'stop': None,
+                                                     'invalid': None, 'text': '목표에 닿지 못했습니다'})
+    _event(store, job, 'orchestrator', 'planned', {'attempt': 2, 'worker': 'claude', 'model': 'sonnet',
+                                                   'brief_digest': 'd2', 'sections': ['goal', 'criteria'],
+                                                   'tools': None, 'tools_reason': None, 'tools_replaced': False,
+                                                   'reason': '다른 작업자가 상품 페이지에서 다시 시도합니다', 'text': '2번째 시도'})
+    _bridge_running(store, job, 'browser_open', {'url': 'https://m.yes24.com/Product/Goods/42'})
+    _event(store, job, 'browser_open', 'succeeded', {'scope': BRIDGE, 'host_action': 'browser_open', 'evidence': {
+        'state': 'page', 'url': 'https://m.yes24.com/Product/Goods/42', 'title': '리더는 언제 차이를 만들어내는가',
+        'element_count': 80, 'found': '장바구니 담기', 'qualifiers': ['partial']}})
+    # A call the CLI started and never saw completed (#729).
+    _bridge_running(store, job, 'browser_click', {'target': '3', 'effect': 'mutate'})
+    _event(store, job, 'orchestrator', 'evaluated', {'attempt': 2, 'worker': 'claude', 'model': 'sonnet',
+                                                     'brief_digest': 'd2', 'outcome': 'reached', 'next': 'stop',
+                                                     'stop': 'reached', 'invalid': None, 'text': '목표에 닿았습니다'})
+    with store.db() as db:
+        db.execute('UPDATE jobs SET status=?,response=? WHERE id=?', ('succeeded', '장바구니에 담았습니다.', job))
+    store.put_turn_provenance(job, {'route': 'subscription', 'provider': 'codex', 'status': 'answered'})
+    return store, job
+
+
+class ProbeRecordCliRouteTests(unittest.TestCase):
+    """#786: a subscription CLI-route Work records its bridge steps, its
+    orchestrator attempts and the goal verdict."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.data = Path(self.tmp.name) / 'data'
+        self.store, self.job = _synthetic_cli_work(self.data)
+
+    def record(self, **kwargs):
+        return smoke.record_probe(self.data, self.job, 'A', AT, **kwargs)
+
+    def test_bridge_steps_attempts_and_verdict_are_recorded(self):
+        record = self.record()
+        self.assertEqual(record['tool_calls'], [])
+        steps = record['bridge_steps']
+        self.assertEqual([(row['step'], row['tool'], row.get('attempt'), row['status']) for row in steps],
+                         [(1, 'browser_open', 1, 'succeeded'), (2, 'browser_click', 1, 'failed'),
+                          (3, 'unlisted', 1, 'failed'), (4, 'browser_open', 2, 'succeeded'),
+                          (5, 'browser_click', 2, 'running')])
+        self.assertEqual((steps[0]['host_action'], steps[0]['host'], steps[0]['status_text']),
+                         ('browser_open', 'm.yes24.com', '책을 검색합니다'))
+        self.assertEqual(steps[0]['evidence'], {'state': 'page', 'url': 'https://m.yes24.com/Search?query=리더',
+                                                'title': CLI_TITLE, 'element_count': 65, 'characters': 822,
+                                                'redacted_values': 0, 'found': None})
+        self.assertEqual((steps[1]['code'], steps[1]['retry'], steps[1]['effect']),
+                         ('target_not_found', 'permanent', 'none'))
+        self.assertEqual(steps[1]['error'], '대상 12를 찾지 못했습니다 [redacted]')
+        self.assertEqual((steps[2]['code'], 'host_action' in steps[2]), ('unknown_tool', False))
+        self.assertEqual(steps[3]['evidence']['qualifiers'], ['partial'])
+        attempts = record['orchestration']['attempts']
+        self.assertEqual([(row['attempt'], row['worker'], row.get('model'), row['outcome'], row['next'], row.get('stop'))
+                          for row in attempts],
+                         [(1, 'codex', None, 'not_reached', 'redelegate', None),
+                          (2, 'claude', 'sonnet', 'reached', 'stop', 'reached')])
+        self.assertEqual((attempts[0]['reason'], attempts[0]['tools']), (CLI_REASON, ['browser_open', 'browser_click']))
+        self.assertNotIn('text', attempts[0])
+        self.assertEqual(record['orchestration']['verdict'], {'outcome': 'reached', 'stop': 'reached', 'attempts': 2})
+        self.assertEqual((record['goal_judgment'], record['final_outcome']), ('reached', 'succeeded'))
+        self.assertEqual(record['other_events'], [{'tool': 'subscription_engine', 'status': 'running'},
+                                                  {'tool': 'subscription_engine', 'status': 'succeeded'}])
+        self.assertEqual(record['checks'], {'succeeded_iff_judged_done_claim': None, 'cited_refs_all_succeeded': None,
+                                            'repeat_paths_refused': 0, 'succeeded_iff_verdict_reached': True,
+                                            'bridge_steps_failed': 2, 'bridge_steps_unfinished': 1})
+
+    def test_a_succeeded_work_whose_verdict_was_not_reached_is_flagged(self):
+        with self.store.db() as db:
+            db.execute("UPDATE tool_events SET detail=replace(detail,'\"outcome\": \"reached\"','\"outcome\": \"not_reached\"')"
+                       " WHERE job_id=? AND tool='orchestrator'", (self.job,))
+        record = self.record()
+        self.assertEqual(record['goal_judgment'], 'not_reached')
+        self.assertFalse(record['checks']['succeeded_iff_verdict_reached'])
+
+    def test_omit_text_hashes_step_titles_url_paths_status_text_and_reasons(self):
+        record = self.record(omit_text=True)
+        text = json.dumps(record, ensure_ascii=False)
+        for leaked in (CLI_TITLE, 'Search?query', 'Goods/42', '책을 검색합니다', '장바구니 버튼', CLI_REASON,
+                       '다른 작업자', '장바구니 담기', '대상 12', TOKEN, 'sid=abc', '"cookies"'):
+            self.assertNotIn(leaked, text)
+        step = record['bridge_steps'][0]
+        self.assertTrue(step['evidence']['title'].startswith('[omitted: '))
+        self.assertTrue(step['evidence']['url'].startswith('https://m.yes24.com/[omitted: '))
+        self.assertTrue(step['status_text'].startswith('[omitted: '))
+        self.assertTrue(record['bridge_steps'][1]['error'].startswith('[omitted: '))
+        self.assertTrue(record['bridge_steps'][3]['evidence']['found'].startswith('[omitted: '))
+        self.assertTrue(record['orchestration']['attempts'][0]['reason'].startswith('[omitted: '))
+        # Structure stays readable.
+        self.assertEqual((step['host'], step['evidence']['state'], step['evidence']['element_count']),
+                         ('m.yes24.com', 'page', 65))
+        self.assertEqual(record['bridge_steps'][1]['code'], 'target_not_found')
+        self.assertEqual(record['orchestration']['verdict']['outcome'], 'reached')
+        self.assertTrue(record['redaction'][-1].startswith('CLI route: '))
+
+    def test_a_direct_route_work_keeps_its_exact_shape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp) / 'data'
+            _store, job = _synthetic_probe_work(data)
+            for omit in (False, True):
+                record = smoke.record_probe(data, job, 'A', AT, omit_text=omit)
+                self.assertNotIn('bridge_steps', record)
+                self.assertNotIn('orchestration', record)
+                self.assertEqual(list(record['checks']), ['succeeded_iff_judged_done_claim', 'cited_refs_all_succeeded',
+                                                          'repeat_paths_refused'])
+                self.assertEqual(len(record['redaction']), 6 if omit else 5)
+
+
 class ProbeRecordLoopIntegrationTests(unittest.TestCase):
     """Model-free: a real `run_agent` turn through `AgentService.run_one`
     writes the rows the recorder reads, so a format drift fails here."""

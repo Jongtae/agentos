@@ -170,12 +170,12 @@ The `note` field is for the judge only. The sandbox runs on the real clock, so w
 
 | Measurement | Value |
 | --- | --- |
-| One AgentOS turn (observed) | about 15–60 s |
-| Scenario average | 2 turns |
-| Per-run overhead | about 10 s start, plus a one-time Judgment AI qualification per slot, worker and seed |
-| Throughput with 3 instances | about 60–100 scenario runs an hour |
+| One AgentOS turn (first smoke runs) | 15 s to about 7 minutes; answers that need web lookups take several minutes |
+| Scenario average | 2 turns, so roughly 2–6 minutes per scenario run |
+| Per-run overhead | about 10 s start, plus a one-time Judgment AI qualification per slot, worker and seed (60–80 s observed) |
+| Throughput with 3 instances | about 30–90 scenario runs an hour |
 
-A 21-scenario × 2-worker × 3-epoch sweep (126 runs) therefore takes roughly 1.5–2 hours. Two sweeps a day plus PR-targeted re-runs gives about **250–400 runs a day**, and 4 instances reach the 400–500 target. The real ceiling is the subscriptions' own rate limits, and that is a separate budget from the judge.
+A 21-scenario × 2-worker × 3-epoch sweep (126 runs) therefore takes roughly 1.5–4 hours. The 400–500 runs a day target needs 4–6 instances running most of the day, or fewer epochs per sweep. The real ceiling is the subscriptions' own rate limits, and that is a separate budget from the judge. Measure the first full sweep and adjust `--instances`.
 
 A suggested schedule (not installed by this change) is a morning and an evening sweep via `launchd` or `cron`:
 

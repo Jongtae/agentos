@@ -83,6 +83,9 @@ class QuickStore:
             if 'source_edited_at' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN source_edited_at REAL')
             if 'source_message_key' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN source_message_key TEXT')
             db.execute('CREATE INDEX IF NOT EXISTS jobs_source_message_key ON jobs(source_message_key)')
+            # #814: 1 only for a Work whose message the owner typed (web chat, Telegram text);
+            # NULL for everything AgentOS enqueues (preparations, continuations, retries, checks).
+            if 'owner_typed' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN owner_typed INTEGER')
             memory_columns={row['name'] for row in db.execute('PRAGMA table_info(memories)')}
             for name,kind in (('owner_key','TEXT'),('work_key','TEXT'),('content_digest','TEXT'),('candidate_id','TEXT')):
                 if name not in memory_columns: db.execute(f'ALTER TABLE memories ADD COLUMN {name} {kind}')
@@ -237,7 +240,7 @@ class QuickStore:
                 fcntl.flock(lock_fd,fcntl.LOCK_UN)
                 os.close(lock_fd)
 
-    def enqueue(self, message, request_key, channel='web', chat_id=None, workspace_id=None, db=None):
+    def enqueue(self, message, request_key, channel='web', chat_id=None, workspace_id=None, db=None, owner_typed=False):
         if not isinstance(message,str) or not message.strip() or len(message)>12000:
             raise ValueError('메시지는 1~12,000자로 입력하세요.')
         if not isinstance(request_key,str) or not 1<=len(request_key)<=160:
@@ -245,7 +248,7 @@ class QuickStore:
         if db is None:
             with self.db() as conn:
                 conn.execute('BEGIN IMMEDIATE')
-                return self.enqueue(message,request_key,channel,chat_id,workspace_id,conn)
+                return self.enqueue(message,request_key,channel,chat_id,workspace_id,conn,owner_typed)
         if workspace_id is not None and not self.workspace(workspace_id, db=db):
             raise ValueError('작업공간을 찾을 수 없습니다.')
         old=db.execute('SELECT * FROM jobs WHERE request_key=?',(request_key,)).fetchone()
@@ -256,7 +259,7 @@ class QuickStore:
         if db.execute("SELECT count(*) FROM jobs WHERE status IN ('queued','running')").fetchone()[0]>=100:
             raise ValueError('대기 중인 작업이 많습니다. 잠시 후 다시 시도하세요.')
         task_id=str(uuid.uuid4())
-        db.execute('INSERT INTO jobs(id,request_key,message,channel,chat_id,status,response,error,delivery,provider,model,created,workspace_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',(task_id,request_key,message,channel,chat_id,'queued',None,None,'none',None,None,time.time(),workspace_id))
+        db.execute('INSERT INTO jobs(id,request_key,message,channel,chat_id,status,response,error,delivery,provider,model,created,workspace_id,owner_typed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(task_id,request_key,message,channel,chat_id,'queued',None,None,'none',None,None,time.time(),workspace_id,1 if owner_typed is True else None))
         return task_id
 
     #: Stored turns joined with the outcome of the Work that produced them, so

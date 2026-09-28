@@ -41,8 +41,8 @@ REDACTED_ARGUMENTS={'browser_type':'text','propose_current_state':'value'}
 SCRUBBED_ARGUMENTS={'schedule_preparation':'goal',
                     # #774: the reason the owner reads in the Telegram prompt.
                     'ask_location':'reason',
-                    # #814: a proposed setting value (a credential is refused, never recorded).
-                    'settings_change':'value'}
+                    # #814: a proposed setting value and its reason (a credential is refused, never recorded).
+                    'settings_change':('value','reason')}
 def recorded_arguments(action,args,redact=None):
  """Tool-call arguments as AgentOS may record or project them (#656).
 
@@ -51,13 +51,18 @@ def recorded_arguments(action,args,redact=None):
  length placeholder at every recording point; nothing else changes.
  ``redact`` (#659) scrubs a ``SCRUBBED_ARGUMENTS`` field instead.
  """
- field=REDACTED_ARGUMENTS.get(action) or SCRUBBED_ARGUMENTS.get(action)
- if field is None or not isinstance(args,dict) or field not in args:return args
- text=args.get(field)
- if action in SCRUBBED_ARGUMENTS and redact is not None and isinstance(text,str):
-  try:return {**args,field:str(redact(text))}
-  except Exception:pass
- return {**args,field:f'[가림: {len(text)}자]' if isinstance(text,str) else '[가림]'}
+ #814: a ``SCRUBBED_ARGUMENTS`` entry may name several fields.
+ fields=REDACTED_ARGUMENTS.get(action) or SCRUBBED_ARGUMENTS.get(action)
+ if fields is None or not isinstance(args,dict):return args
+ for field in (fields,) if isinstance(fields,str) else fields:
+  if field not in args:continue
+  text=args.get(field)
+  if action in SCRUBBED_ARGUMENTS and redact is not None and isinstance(text,str):
+   try:
+    args={**args,field:str(redact(text))};continue
+   except Exception:pass
+  args={**args,field:f'[가림: {len(text)}자]' if isinstance(text,str) else '[가림]'}
+ return args
 
 def recorded_calls(calls,tools,redact=None):
  """The model's tool calls with ``recorded_arguments`` applied to each (#656).

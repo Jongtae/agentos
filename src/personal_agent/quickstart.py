@@ -929,7 +929,8 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     return self.reply(200,service.save_workspace_result(path.split('/')[3],body))
                 if path.startswith('/api/workspaces/'):
                     return self.reply(200,service.update_workspace(path.rsplit('/',1)[-1],body))
-                if path=='/api/chat':return self.reply(202,{'id':store.enqueue(body.get('message'),body.get('request_key'),workspace_id=body.get('workspace_id'))})
+                # #814: the owner's own typed message (it may confirm a settings draft).
+                if path=='/api/chat':return self.reply(202,{'id':store.enqueue(body.get('message'),body.get('request_key'),workspace_id=body.get('workspace_id'),owner_typed=True)})
                 self.reply(404,{'error':'경로를 찾을 수 없습니다.'})
             except (ValueError,UnicodeDecodeError) as exc:self.reply(400,{'error':str(exc)})
             except ProviderError as exc:self.reply(502,{'error':str(exc)})

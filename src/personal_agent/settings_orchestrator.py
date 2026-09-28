@@ -98,6 +98,24 @@ CREDENTIAL_VALUE_MESSAGE = ("자격 증명처럼 보이는 값은 대화로 설�
 UNAVAILABLE_MESSAGE = "이 설정의 현재 상태를 확인하지 못해 바꾸지 않았습니다. 설정 화면에서 확인하세요."
 MAX_VALUE_CHARS = 200
 MAX_REASON_CHARS = 300
+#: #814 review: settings whose setter probes or qualifies an AI (seconds to minutes).
+#: With a follow-up channel they are applied off the caller's thread, one at a time.
+SLOW_SETTINGS = frozenset({("judgment_ai", "model"), ("main_ai", "route"), ("main_ai", "model")})
+#: A draft still ``applying`` this long after it started (a crash or a lost thread) is failed.
+STUCK_APPLYING_SECONDS = 30 * 60
+#: #814 review P1: text confirmation needs a message the owner typed, not one AgentOS ran.
+NOT_OWNER_TYPED_MESSAGE = ("설정 변경은 소유자가 직접 보낸 메시지나 확인 버튼으로만 확인하거나 취소할 수 있습니다. "
+                           "아무것도 바꾸지 않았습니다.")
+BUSY_MESSAGE = "다른 설정을 적용하는 중입니다. 끝난 뒤 다시 확인하세요. 아직 아무것도 바꾸지 않았습니다."
+FOLLOW_REQUESTED_MESSAGE = "판단 AI를 기본 AI 따라가기로 요청했어요. 확인이 끝나면 적용돼요."
+
+
+def canonical_timezone(name):
+    """The IANA spelling of a zone ``valid_timezone`` accepted (#814 review): ``asia/seoul`` -> ``Asia/Seoul``."""
+    from zoneinfo import available_timezones
+    if not name:
+        return name
+    return next((zone for zone in sorted(available_timezones()) if zone.lower() == name.lower()), name)
 
 
 class SettingsOrchestrator:
@@ -115,8 +133,13 @@ class SettingsOrchestrator:
         self.service = service
         if service is not None:
             self._CATEGORIES = ("connections", *SETTINGS)
-        # One confirmation moves a draft out of awaiting at a time (exactly once).
-        self._confirming = threading.Lock()
+        # One confirmation moves a draft out of awaiting at a time (exactly once);
+        # every read-modify-write of the draft rows holds it (re-entrant).
+        self._confirming = threading.RLock()
+        # #814 review P2-3: at most one slow apply runs off-thread at a time.
+        self._background = threading.Lock()
+        self._background_draft = None
+        self.thread = None
 
     def _drafts(self):
         rows = self.store.config("settings_change_drafts", {})
@@ -156,6 +179,7 @@ class SettingsOrchestrator:
             raise SettingsError("설정 소유자를 확인하세요.")
         if category is not None and category not in self._CATEGORIES:
             raise SettingsError("검토된 설정 범주를 선택하세요.")
+        self.fail_stuck()
         rows = self._rows() if category in (None, "connections") else []
         result = {"state": "read", "category": category or "all", "connections": rows,
                   "response": self._summary(rows), "activity": self._activity()}
@@ -246,6 +270,8 @@ class SettingsOrchestrator:
 
     def _normalized(self, category, setting, value):
         """The canonical allowed value, or a fail-closed ``SettingsError`` (#814)."""
+        if not isinstance(category, str) or not isinstance(setting, str):
+            raise SettingsError(UNKNOWN_SETTING_MESSAGE)
         if category == "connections":
             raise SettingsError(RETIRED_CONTROL_MESSAGE)
         if category not in SETTINGS or setting not in SETTINGS[category] or self.service is None:
@@ -264,7 +290,7 @@ class SettingsOrchestrator:
         if (category, setting) == ("current_context", "timezone"):
             from .context_observations import valid_timezone
             try:
-                return valid_timezone(value), row
+                return valid_timezone(canonical_timezone(value)), row
             except ValueError as exc:
                 raise SettingsError(f"{exc} 아무것도 바꾸지 않았습니다.") from None
         allowed = [option["value"] for option in row[setting]["options"] or ()]
@@ -287,6 +313,8 @@ class SettingsOrchestrator:
         """A digest-bound draft of one owner setting change; applies nothing (#814)."""
         if not isinstance(owner, str) or not owner or not isinstance(channel, str) or not channel:
             raise SettingsError("설정 요청의 소유자와 채널을 확인하세요.")
+        if reason is not None and not isinstance(reason, str):
+            raise SettingsError("변경 이유는 짧은 글자로 주세요. 아무것도 바꾸지 않았습니다.")
         after, row = self._normalized(category, setting, value)
         before = row[setting]["value"]
         if after == before:
@@ -310,18 +338,23 @@ class SettingsOrchestrator:
             rows = self._drafts()
             rows[draft["id"]] = draft
             self._put_drafts(rows)
-        self._audit(draft, "drafted")
+            self._audit(draft, "drafted")
         return {"state": "awaiting-confirmation", "draft_id": draft["id"], "digest": draft["digest"],
                 "category": category, "setting": setting, "before": before, "after": after, "summary": summary,
                 "note": note, "expires_at": draft["expires_at"], "requires_owner_confirmation": True, "applied": False,
                 "response": summary + (f"\n{note}" if note else "") + "\n확인해야 적용됩니다. 아직 아무것도 바꾸지 않았습니다."}
 
     def _apply(self, row):
+        """Run the service's own setter; ``applied``, or ``requested`` when it only queued the change."""
         category, setting, after = row["category"], row["setting"], row["after"]
         if category == "current_context":
             self.service.set_current_context({"enabled": after == "on"} if setting == "enabled" else {"timezone": after})
         elif (category, setting) == ("judgment_ai", "mode"):
             self.service.activate_decision_route({"transport": after})
+            # #814 review P2-1: following the Main AI queues a background qualification
+            # (#685/#760); the Judgment AI changes only when it passes.
+            if after == "follow_main":
+                return "requested"
         elif category == "judgment_ai":
             active = self.service.decision_routes.status().get("active") or {}
             if active.get("transport") == "subscription_cli":
@@ -333,23 +366,66 @@ class SettingsOrchestrator:
             self.service.activate_main_ai({"route": after})
         else:
             self.service.activate_main_ai({"route": self.service.main_ai.current(), "model": after})
+        return "applied"
 
-    def _settle(self, draft_id, state, terminal, error_class=None):
-        rows = self._drafts()
-        row = rows.get(draft_id)
-        if row:
-            row["state"] = state
-            rows[draft_id] = row
-            self._put_drafts(rows)
-            if terminal:
-                self._audit(row, terminal, error_class)
-        return row
+    def _settle(self, draft_id, state, terminal, error_class=None, **fields):
+        with self._confirming:
+            rows = self._drafts()
+            row = rows.get(draft_id)
+            if row:
+                row.update(state=state, **fields)
+                rows[draft_id] = row
+                self._put_drafts(rows)
+                if terminal:
+                    self._audit(row, terminal, error_class)
+            return row
 
-    def _confirm_owner_setting(self, row, digest):
-        """Apply one awaiting draft exactly once, after re-checking it is still current (#814)."""
+    def fail_stuck(self):
+        """A draft left ``applying`` past ``STUCK_APPLYING_SECONDS`` (a crash, a lost thread) is failed once."""
+        now = self.now()
+        for row in list(self._drafts().values()):
+            if (isinstance(row, dict) and row.get("state") == "applying" and row.get("id") != self._background_draft
+                    and now - float(row.get("applying_at") or row.get("created_at") or 0) > STUCK_APPLYING_SECONDS):
+                self._settle(row["id"], "failed", "failed", "stuck-applying")
+
+    def _finish(self, row):
+        """Apply one checked draft and settle it; the owner-facing result, or ``SettingsError``."""
+        try:
+            outcome = self._apply(row)
+        except Exception as exc:
+            self._settle(row["id"], "failed", "failed", type(exc).__name__)
+            message = str(exc) if isinstance(exc, ValueError) and str(exc) else "설정을 적용하지 못했습니다."
+            raise SettingsError(message) from None
+        self._settle(row["id"], outcome, outcome)
+        response = (FOLLOW_REQUESTED_MESSAGE if outcome == "requested" else f"{row['effect']}(으)로 바꿨습니다.")
+        return {"state": outcome, "draft_id": row["id"], "target": row["target"], "before": row["before"],
+                "after": row["after"], "response": response}
+
+    def _run_background(self, row, notify):
+        try:
+            try:
+                text = self._finish(row)["response"]
+            except SettingsError as exc:
+                text = f"{row['effect']} 변경을 적용하지 못했습니다: {exc}"
+            try:
+                notify(text)
+            except Exception:
+                pass
+        finally:
+            self._background_draft = None
+            self._background.release()
+
+    def _confirm_owner_setting(self, row, digest, notify=None):
+        """Apply one awaiting draft exactly once, after re-checking it is still current (#814).
+
+        With ``notify`` (a follow-up to the confirming conversation) a slow
+        setter runs off the caller's thread, single-flight, and ``notify``
+        gets its result; the caller is answered at once.
+        """
+        slow = notify is not None and (row.get("category"), row.get("setting")) in SLOW_SETTINGS
         with self._confirming:
             row = self._drafts().get(row["id"]) or row
-            if row.get("state") == "applied":
+            if row.get("state") in ("applied", "requested"):
                 raise SettingsError("이미 적용한 설정 초안입니다.")
             if row.get("state") != "awaiting-confirmation":
                 raise SettingsError("이 설정 초안은 더 이상 확인할 수 없습니다. 필요하면 다시 요청하세요.")
@@ -358,19 +434,30 @@ class SettingsOrchestrator:
             if self.now() > float(row.get("expires_at") or 0):
                 self._settle(row["id"], "expired", "expired")
                 raise SettingsError("설정 초안이 만료되어 적용하지 않았습니다. 필요하면 다시 요청하세요.")
-            self._settle(row["id"], "applying", None)
+            if slow and not self._background.acquire(blocking=False):
+                raise SettingsError(BUSY_MESSAGE)
+            row = self._settle(row["id"], "applying", None, applying_at=self.now())
+            if slow:
+                self._background_draft = row["id"]
         try:
             after, current = self._normalized(row["category"], row["setting"], row["after"])
             if after != row["after"] or current[row["setting"]]["value"] != row["before"]:
                 raise SettingsError("초안을 만든 뒤 설정이 바뀌었거나 이 값을 더 이상 고를 수 없어 적용하지 않았습니다. 다시 요청하세요.")
-            self._apply(row)
         except Exception as exc:
             self._settle(row["id"], "failed", "failed", type(exc).__name__)
+            if slow:
+                self._background_draft = None
+                self._background.release()
             message = str(exc) if isinstance(exc, ValueError) and str(exc) else "설정을 적용하지 못했습니다."
             raise SettingsError(message) from None
-        self._settle(row["id"], "applied", "applied")
-        return {"state": "applied", "draft_id": row["id"], "target": row["target"], "before": row["before"],
-                "after": row["after"], "response": f"{row['effect']}(으)로 바꿨습니다."}
+        if not slow:
+            return self._finish(row)
+        self.thread = threading.Thread(target=self._run_background, args=(row, notify), daemon=True,
+                                       name="agentos-settings-apply")
+        self.thread.start()
+        return {"state": "applying", "draft_id": row["id"], "target": row["target"], "before": row["before"],
+                "after": row["after"],
+                "response": f"{row['effect']} 변경을 확인하고 있어요. 끝나면 결과를 알려드릴게요."}
 
     def pending_for_work(self, work_id):
         """This Work's drafts still awaiting the owner, oldest first (#814)."""
@@ -418,12 +505,13 @@ class SettingsOrchestrator:
         return call
 
     def _audit(self, row, terminal, error_class=None):
-        audit = self.store.config("settings_audit", [])
-        audit = audit if isinstance(audit, list) else []
-        event = {"at": self.now(), "draft_ref": row["id"], "target": row.get("target"),
-                 "before": row.get("before"), "after": row.get("after"), "terminal": terminal}
-        if error_class: event["error_class"] = error_class
-        self.store.put("settings_audit", [*audit, event][-100:])
+        with self._confirming:
+            audit = self.store.config("settings_audit", [])
+            audit = audit if isinstance(audit, list) else []
+            event = {"at": self.now(), "draft_ref": row["id"], "target": row.get("target"),
+                     "before": row.get("before"), "after": row.get("after"), "terminal": terminal}
+            if error_class: event["error_class"] = error_class
+            self.store.put("settings_audit", [*audit, event][-100:])
 
     def draft(self, owner, channel, intent):
         """No lifecycle draft exists any more: say so and change nothing.
@@ -446,13 +534,14 @@ class SettingsOrchestrator:
             raise SettingsError("확인할 설정 초안을 찾지 못했습니다.")
         return row
 
-    def confirm(self, owner, channel, draft_id, digest):
+    def confirm(self, owner, channel, draft_id, digest, notify=None):
         """A draft made by the retired control plane can never apply."""
         if not isinstance(draft_id, str) or not isinstance(digest, str):
             raise SettingsError("초안 ID와 정확한 확인 정보를 제공하세요.")
         row = self._owned(owner, channel, draft_id)
         if row.get("category") in SETTINGS and self.service is not None:
-            return self._confirm_owner_setting(row, digest)
+            self.fail_stuck()
+            return self._confirm_owner_setting(row, digest, notify)
         if row.get("state") == "awaiting-confirmation":
             row["state"] = "failed"
             rows = self._drafts(); rows[draft_id] = row; self._put_drafts(rows)
@@ -476,15 +565,20 @@ class SettingsOrchestrator:
             raise SettingsError("복구할 연결을 선택하세요.")
         return {"state": "recovery", "target": subject, "action": next_action(row)}
 
-    def handle_text(self, owner, channel, text):
+    def handle_text(self, owner, channel, text, owner_typed=True, notify=None):
+        """``owner_typed`` (#814 review P1): False for a message AgentOS ran on the owner's
+        behalf (a preparation goal, a continuation, a retry); it can never confirm or cancel."""
         if not isinstance(text, str): raise SettingsError("설정 요청을 확인하세요.")
         value = text.strip()
         match = re.fullmatch(r"(?:confirm|확인)\s+([A-Za-z0-9_-]+)", value, re.I)
         if match:
+            if owner_typed is not True: raise SettingsError(NOT_OWNER_TYPED_MESSAGE)
             row = self._owned(owner, channel, match.group(1))
-            return self.confirm(owner, channel, row["id"], row.get("digest", ""))
+            return self.confirm(owner, channel, row["id"], row.get("digest", ""), notify)
         match = re.fullmatch(r"(?:cancel|취소)\s+([A-Za-z0-9_-]+)", value, re.I)
-        if match: return self.cancel(owner, channel, match.group(1))
+        if match:
+            if owner_typed is not True: raise SettingsError(NOT_OWNER_TYPED_MESSAGE)
+            return self.cancel(owner, channel, match.group(1))
         if value.lower() in ("settings", "/settings", "무엇이 연결되어 있어?", "무엇을 바꿀 수 있어?") or "상태 보여" in value:
             return self.read(owner)
         if "어떻게 복구" in value:

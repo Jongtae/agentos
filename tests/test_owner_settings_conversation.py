@@ -10,6 +10,7 @@ live model or Telegram is contacted, and none is claimed.
 """
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -19,7 +20,10 @@ from personal_agent.bounded_execution import (BOUNDED_PROFILE, ISOLATED_PROFILE,
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
-from personal_agent.settings_orchestrator import CREDENTIAL_VALUE_MESSAGE, SettingsError
+from personal_agent import preparations as prep
+from personal_agent.settings_orchestrator import (BUSY_MESSAGE, CREDENTIAL_VALUE_MESSAGE, FOLLOW_REQUESTED_MESSAGE,
+                                                  NOT_OWNER_TYPED_MESSAGE, STUCK_APPLYING_SECONDS, SettingsError,
+                                                  canonical_timezone)
 
 CHAT, GENERATION = 77, 'gen-1'
 TELEGRAM_SECRET = 'bot-token-value-1234-abcdef'
@@ -248,7 +252,8 @@ class ConversationConfirmation(_Case):
         self.assertFalse(self.context()['enabled'])
         [draft] = self.settings.pending_for_work(work)
         self.assertIn(f"/settings 확인 {draft['id']}", json.dumps(self.store.task_events(work), ensure_ascii=False))
-        self.assertTrue(self.store.enqueue(f"/settings 확인 {draft['id']}", 'web-2'))
+        # The web chat route (``/api/chat``) enqueues the owner's typed message with ``owner_typed``.
+        self.assertTrue(self.store.enqueue(f"/settings 확인 {draft['id']}", 'web-2', owner_typed=True))
         self.assertTrue(self.service.run_one())
         self.assertEqual(self.applies, [{'enabled': True}])
         self.assertTrue(self.context()['enabled'])
@@ -276,6 +281,7 @@ class ConversationConfirmation(_Case):
     def test_telegram_button_applies_exactly_once_and_only_for_the_exact_message(self):
         self.change_turn()
         work = self.receive('현재 맥락 켜 줘')
+        self.assertEqual(self.store.job(work)['owner_typed'], 1, 'Telegram text ingress marks the owner-typed message')
         self.service.deliver_one()
         self.assertTrue(self.service.deliver_notification())
         sent = [body for method, body in self.telegram if method == 'sendMessage'][-1]
@@ -311,6 +317,205 @@ class ConversationConfirmation(_Case):
         self.assertFalse(self.context()['enabled'])
         [row] = [row for row in self.store.config('settings_change_drafts').values() if row.get('work_id') == work]
         self.assertEqual(row['state'], 'canceled')
+
+
+class ReviewRemediation(ConversationConfirmation):
+    """#814 review: P1 owner-typed confirmation, P2 receipts/scrub/off-thread apply, P3 hardening."""
+
+    def web_draft(self, reason='현재 맥락을 켜 달라고 하셨습니다.'):
+        self.script = [{'content': None, 'tool_calls': [call('1', 'settings_change', category='current_context',
+                                                             setting='enabled', value='on', reason=reason)]},
+                       {'content': '확인해 주세요.'}]
+        work = self.store.enqueue('현재 맥락 켜 줘', 'web-1', owner_typed=True)
+        self.assertTrue(self.service.run_one())
+        [draft] = self.settings.pending_for_work(work)
+        return work, draft
+
+    def test_p1_a_model_authored_preparation_cannot_confirm_or_cancel(self):
+        """The reviewer's scenario: a preparation whose goal is the confirm command."""
+        work, draft = self.web_draft()
+        for command in (f"/settings 확인 {draft['id']}", f"/settings 취소 {draft['id']}"):
+            with self.subTest(command=command):
+                now = self.service.preparations.clock()
+                self.service.preparations.create(kind=prep.KIND_PREPARE, goal=command, due_at=now - 1, timezone='UTC',
+                                                 recurrence=None, channel=prep.CHANNEL_WEB, created_from=work,
+                                                 state=prep.STATE_SCHEDULED, accepted_by=prep.ACCEPTED_OWNER_REQUEST,
+                                                 window=None, delivery_mode=None)
+                self.assertTrue(self.service.run_due_preparation())
+                self.assertTrue(self.service.run_one())
+                ran = self.store.jobs()[0]
+                self.assertIsNone(ran['owner_typed'])
+                self.assertIn(NOT_OWNER_TYPED_MESSAGE, str(ran['response']) + str(ran['error']))
+        self.assertEqual(self.applies, [])
+        self.assertFalse(self.context()['enabled'])
+        self.assertEqual(self.store.config('settings_change_drafts')[draft['id']]['state'], 'awaiting-confirmation')
+        # Any other AgentOS-enqueued message (no owner_typed) is refused the same way.
+        self.store.enqueue(f"/settings 확인 {draft['id']}", 'agentos-internal')
+        self.assertTrue(self.service.run_one())
+        self.assertEqual(self.applies, [])
+
+    def test_p1_the_web_chat_route_marks_the_owner_typed_message(self):
+        from http.cookiejar import CookieJar
+        from http.server import ThreadingHTTPServer
+        from urllib.request import HTTPCookieProcessor, Request, build_opener
+        from personal_agent.quickstart import make_handler
+        self.store.claim(self.store.bootstrap.read_text(), 'long-password-test')
+        server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(self.service))
+        thread = threading.Thread(target=server.serve_forever); thread.start()
+        client = build_opener(HTTPCookieProcessor(CookieJar())); base = 'http://127.0.0.1:' + str(server.server_port)
+        def post(path, body):
+            with client.open(Request(base + path, data=json.dumps(body).encode(),
+                                     headers={'Content-Type': 'application/json'}), timeout=3) as response:
+                return json.load(response)
+        try:
+            post('/api/login', {'password': 'long-password-test'})
+            work = post('/api/chat', {'message': '/settings 확인 abc', 'request_key': 'web-typed'})['id']
+        finally:
+            server.shutdown(); thread.join(); server.server_close()
+        self.assertEqual(self.store.job(work)['owner_typed'], 1)
+
+    def test_p2_1_follow_main_is_requested_not_applied(self):
+        self.service.main_ai.save_key({'provider': 'openai', 'key': OPENAI_KEY})
+        self.service.activate_main_ai({'route': 'openai'})
+        off = self.draft('judgment_ai', 'mode', 'off')
+        self.assertEqual(self.settings.confirm('owner', 'http', off['draft_id'], off['digest'])['state'], 'applied')
+        follow = self.draft('judgment_ai', 'mode', 'follow_main')
+        result = self.settings.confirm('owner', 'http', follow['draft_id'], follow['digest'])
+        self.assertEqual((result['state'], result['response']), ('requested', FOLLOW_REQUESTED_MESSAGE))
+        self.assertNotIn('바꿨습니다', result['response'])
+        self.assertEqual(self.store.config('settings_change_drafts')[follow['draft_id']]['state'], 'requested')
+        self.assertEqual(self.store.config('settings_audit')[-1]['terminal'], 'requested')
+        self.assertIsNotNone(self.service.decision_routes.qualification('openai'), 'only a qualification was queued')
+
+    def test_p2_2_reason_is_scrubbed_where_arguments_are_recorded(self):
+        work, _draft = self.web_draft(reason=f'토큰 {TELEGRAM_SECRET} 로 바꿔 달라고 하셨습니다.')
+        recorded = recorded_arguments('settings_change', {'value': 'on', 'reason': f'x {TELEGRAM_SECRET}'},
+                                      redact=self.service._redact_known_secrets)
+        self.assertNotIn(TELEGRAM_SECRET, json.dumps(recorded))
+        with self.store.db() as db:
+            details = [row['detail'] for row in db.execute('SELECT detail FROM tool_events WHERE job_id=?', (work,))]
+        self.assertTrue(any('settings_change' in str(detail) for detail in details))
+        self.assertNotIn(TELEGRAM_SECRET, json.dumps(details))
+
+    def slow_openai_probe(self):
+        """The OpenAI probe waits until released, as a slow provider check would."""
+        started, release, original = threading.Event(), threading.Event(), self._model
+        def model(url, body, headers=None, timeout=60):
+            if 'api.openai.com' in url:
+                started.set(); release.wait(5)
+            return original(url, body, headers, timeout)
+        self.service.adapter.transport = model
+        return started, release
+
+    def test_p2_3_a_slow_setter_runs_off_the_callers_thread_single_flight(self):
+        self.service.main_ai.save_key({'provider': 'openai', 'key': OPENAI_KEY})
+        self.service.activate_main_ai({'route': 'openai'})
+        self.service.main_ai.save_key({'provider': 'openrouter', 'key': OPENROUTER_KEY})
+        self.service.activate_main_ai({'route': 'openrouter'})
+        started, release = self.slow_openai_probe()
+        told = []
+        route = self.draft('main_ai', 'route', 'openai')
+        result = self.settings.confirm('owner', 'http', route['draft_id'], route['digest'], notify=told.append)
+        self.assertEqual(result['state'], 'applying', 'answered before the probe finished')
+        self.assertTrue(started.wait(5))
+        self.assertEqual(self.service.main_ai.current(), 'openrouter')
+        timezone = self.draft('current_context', 'timezone', 'Asia/Seoul')
+        self.settings.confirm('owner', 'http', timezone['draft_id'], timezone['digest'], notify=told.append)
+        self.assertEqual(self.context()['timezone'], 'Asia/Seoul', 'a fast setter is not held behind a slow one')
+        release.set(); self.settings.thread.join(5)
+        self.assertEqual(self.service.main_ai.current(), 'openai')
+        self.assertEqual(len(told), 1)
+        self.assertIn('바꿨습니다', told[0])
+        self.assertEqual(self.store.config('settings_change_drafts')[route['draft_id']]['state'], 'applied')
+
+    def test_p2_3_only_one_slow_apply_at_a_time(self):
+        self.service.main_ai.save_key({'provider': 'openai', 'key': OPENAI_KEY})
+        self.service.activate_main_ai({'route': 'openai'})
+        self.service.main_ai.save_key({'provider': 'openrouter', 'key': OPENROUTER_KEY})
+        self.service.activate_main_ai({'route': 'openrouter'})
+        started, release = self.slow_openai_probe()
+        first = self.draft('main_ai', 'route', 'openai')
+        self.settings.confirm('owner', 'http', first['draft_id'], first['digest'], notify=lambda text: None)
+        self.assertTrue(started.wait(5))
+        second = self.draft('main_ai', 'route', 'openai')
+        with self.assertRaisesRegex(SettingsError, BUSY_MESSAGE[:10]):
+            self.settings.confirm('owner', 'http', second['draft_id'], second['digest'], notify=lambda text: None)
+        self.assertEqual(self.store.config('settings_change_drafts')[second['draft_id']]['state'], 'awaiting-confirmation')
+        release.set(); self.settings.thread.join(5)
+
+    def test_p2_3_the_telegram_tap_is_answered_before_a_slow_apply(self):
+        self.service.main_ai.save_key({'provider': 'openai', 'key': OPENAI_KEY})
+        self.service.activate_main_ai({'route': 'openai'})
+        self.service.main_ai.save_key({'provider': 'openrouter', 'key': OPENROUTER_KEY})
+        self.service.activate_main_ai({'route': 'openrouter'})
+        self.script = [{'content': '알겠습니다.'}]
+        work = self.receive('기본 AI를 OpenAI로 바꿔 줘')
+        job = self.store.job(work)
+        self.settings.propose(self.service.settings_owner(job), job['channel'], 'main_ai', 'route', 'openai', work_id=work)
+        self.service.queue_settings_confirmation(job)
+        self.service.deliver_one()
+        self.assertTrue(self.service.deliver_notification())
+        notification = self.notification(work)
+        started, release = self.slow_openai_probe()
+        self.telegram.clear()
+        self.tap(f"p7s:{notification['id']}:confirm", notification['message_id'])
+        self.assertTrue(started.wait(5))
+        methods = [method for method, _body in self.telegram]
+        self.assertEqual(methods[:2], ['answerCallbackQuery', 'editMessageText'], 'the tap is answered at once')
+        self.assertIn('확인하고 있어요', self.telegram[1][1]['text'])
+        release.set(); self.settings.thread.join(5)
+        self.assertEqual(self.service.main_ai.current(), 'openai')
+        followup = [body for method, body in self.telegram if method == 'sendMessage']
+        self.assertEqual(len(followup), 1)
+        self.assertIn('바꿨습니다', followup[0]['text'])
+
+    def test_p3_stuck_applying_is_failed_with_an_audit_row(self):
+        draft = self.draft('current_context', 'enabled', 'on')
+        rows = self.store.config('settings_change_drafts')
+        rows[draft['draft_id']].update(state='applying', applying_at=self.clock[0])
+        self.store.put('settings_change_drafts', rows)
+        self.settings.read('owner')
+        self.assertEqual(self.store.config('settings_change_drafts')[draft['draft_id']]['state'], 'applying')
+        self.clock[0] += STUCK_APPLYING_SECONDS + 1
+        self.settings.read('owner')
+        self.assertEqual(self.store.config('settings_change_drafts')[draft['draft_id']]['state'], 'failed')
+        audit = self.store.config('settings_audit')[-1]
+        self.assertEqual((audit['terminal'], audit['error_class']), ('failed', 'stuck-applying'))
+
+    def test_p3_non_string_fields_are_settings_errors(self):
+        for intent in ({'category': ['main_ai'], 'setting': 'route', 'value': 'openai'},
+                       {'category': 'main_ai', 'setting': {'x': 1}, 'value': 'openai'},
+                       {'category': 'current_context', 'setting': 'timezone', 'value': ['Asia/Seoul']},
+                       {'category': 'current_context', 'setting': 'timezone', 'value': 'Asia/Seoul', 'reason': 7}):
+            with self.subTest(intent=intent), self.assertRaises(SettingsError):
+                self.settings.draft('owner', 'http', intent)
+        with self.assertRaises(ValueError):
+            self.service.conversation_settings_request({'operation': 'draft', 'intent': {'category': 1, 'setting': 2, 'value': 3}})
+
+    def test_p3_timezone_is_stored_in_its_canonical_spelling(self):
+        self.assertEqual(canonical_timezone('asia/seoul'), 'Asia/Seoul')
+        draft = self.draft('current_context', 'timezone', 'asia/SEOUL')
+        self.assertEqual(draft['after'], 'Asia/Seoul')
+        self.settings.confirm('owner', 'http', draft['draft_id'], draft['digest'])
+        self.assertEqual(self.context()['timezone'], 'Asia/Seoul')
+
+    def test_p3_concurrent_drafts_and_settles_lose_nothing(self):
+        drafts = [self.draft('current_context', 'timezone', zone) for zone in ('Asia/Seoul', 'Europe/Paris')]
+        errors = []
+        def propose(index):
+            try:self.draft('current_context', 'timezone', 'America/New_York' if index % 2 else 'Asia/Tokyo')
+            except Exception as exc:errors.append(exc)
+        def cancel(draft):
+            try:self.settings.cancel('owner', 'http', draft['draft_id'])
+            except Exception as exc:errors.append(exc)
+        threads = [threading.Thread(target=propose, args=(i,)) for i in range(20)]
+        threads += [threading.Thread(target=cancel, args=(draft,)) for draft in drafts]
+        for thread in threads:thread.start()
+        for thread in threads:thread.join(5)
+        self.assertEqual(errors, [])
+        rows = self.store.config('settings_change_drafts')
+        self.assertEqual(len(rows), 22)
+        self.assertEqual([rows[d['draft_id']]['state'] for d in drafts], ['canceled', 'canceled'])
 
 
 if __name__ == '__main__':

@@ -464,8 +464,13 @@ class AgentService:
         self._local_selections={}
         self._local_approve_lock=threading.Lock()
 
-    def conversation_settings_request(self, body, owner_id='local-owner', channel='http'):
-        """The only settings policy entry point for every local channel."""
+    def conversation_settings_request(self, body, owner_id='local-owner', channel='http', owner_typed=True, notify=None):
+        """The only settings policy entry point for every local channel.
+
+        #814 review: ``owner_typed`` is False for a Work whose message AgentOS
+        ran (it can never confirm or cancel a draft by text); ``notify`` is the
+        follow-up to that conversation for a setter applied off-thread.
+        """
         if not isinstance(body, dict):
             raise ValueError('설정 요청을 확인하세요.')
         operation=body.get('operation', 'text')
@@ -480,7 +485,7 @@ class AgentService:
         if operation == 'recovery':
             return self.settings_orchestrator.recovery(owner_id, body.get('subject'))
         if operation == 'text':
-            return self.settings_orchestrator.handle_text(owner_id, channel, body.get('text'))
+            return self.settings_orchestrator.handle_text(owner_id, channel, body.get('text'), owner_typed=owner_typed, notify=notify)
         raise ValueError('검토된 설정 요청을 확인하세요.')
 
     @staticmethod
@@ -496,6 +501,21 @@ class AgentService:
         """
         return self.settings_orchestrator.work_tools(self.settings_owner(job),job['channel'],job['id'],
                                                      telegram=answerable_work(job))
+
+    def settings_followup(self, job, text):
+        """#814 review P2-3: the result of a setter applied off-thread, told to the confirming conversation.
+
+        One assistant transcript row on the Work's channel, and the same text
+        to the paired Telegram chat when the Work came from it (best effort).
+        """
+        with self.store.db() as db:
+            db.execute('INSERT INTO messages(role,content,channel,created,workspace_id) VALUES (?,?,?,?,?)',
+                       ('assistant',text,job['channel'],time.time(),job.get('workspace_id')))
+        cfg=self.store.config('telegram',{})
+        if (cfg.get('enabled') and job.get('channel')==f"telegram:{cfg.get('generation')}"
+                and job.get('chat_id')==cfg.get('user_id')):
+            try:self.telegram.send_message(job['chat_id'],text)
+            except ProviderError:LOG.warning('settings follow-up not delivered work=%s',job.get('id'))
 
     def queue_settings_confirmation(self, job):
         """Offer this Work's settings drafts to the paired owner once, with buttons (#814)."""
@@ -5330,24 +5350,26 @@ class AgentService:
                 rows=self.offered_settings_drafts(notification) if exact else []
                 if rows:self.store.update_notification(notification['id'],'settings_'+parts[2]+'ing')
         if not authorized:return
-        lines=[]
-        if rows:
-            owner,channel=self.settings_owner(job),job['channel']
-            for row in rows:
-                try:
-                    result=(self.settings_orchestrator.confirm(owner,channel,row['id'],row['digest']) if parts[2]=='confirm'
-                            else self.settings_orchestrator.cancel(owner,channel,row['id']))
-                    lines.append(result.get('response') or '처리했습니다.')
-                except ValueError as exc:
-                    lines.append(f"{row['effect']}: {exc}")
-            LOG.info('settings drafts %s by owner button work=%s count=%s',parts[2],job['id'],len(rows))
-            self.store.update_notification(notification['id'],'settings_confirmed' if parts[2]=='confirm' else 'settings_canceled')
-            try:self.telegram.edit_message_text(sender,notification['message_id'],'\n'.join(lines),{'inline_keyboard':[]})
-            except ProviderError:pass
+        # #814 review P2-3: the tap is answered first; a slow setter then runs off this poll thread.
         if isinstance(callback_id,str):
-            text=('처리했습니다.' if rows else '처리할 수 있는 요청이 아닙니다.')
+            text=('적용을 시작했습니다.' if rows and parts[2]=='confirm' else '처리했습니다.' if rows else '처리할 수 있는 요청이 아닙니다.')
             try:self.telegram.answer_callback_query(callback_id,text,show_alert=False)
             except ProviderError:pass
+        if not rows:return
+        lines=[]
+        owner,channel=self.settings_owner(job),job['channel']
+        for row in rows:
+            try:
+                result=(self.settings_orchestrator.confirm(owner,channel,row['id'],row['digest'],
+                                                           notify=lambda text,job=job:self.settings_followup(job,text))
+                        if parts[2]=='confirm' else self.settings_orchestrator.cancel(owner,channel,row['id']))
+                lines.append(result.get('response') or '처리했습니다.')
+            except ValueError as exc:
+                lines.append(f"{row['effect']}: {exc}")
+        LOG.info('settings drafts %s by owner button work=%s count=%s',parts[2],job['id'],len(rows))
+        self.store.update_notification(notification['id'],'settings_confirmed' if parts[2]=='confirm' else 'settings_canceled')
+        try:self.telegram.edit_message_text(sender,notification['message_id'],'\n'.join(lines),{'inline_keyboard':[]})
+        except ProviderError:pass
 
     def ingest_callback(self, callback, generation):
         """Accept only paired-owner, exact-message task and approval callbacks."""
@@ -5728,10 +5750,10 @@ class AgentService:
                     parsed=self.parse_context_request(text)
                     if parsed:
                         event_ids,text=parsed
-                        task_id=self.store.enqueue(text,f'tg:{generation}:{update_id}',f'telegram:{generation}',sender,db=db)
+                        task_id=self.store.enqueue(text,f'tg:{generation}:{update_id}',f'telegram:{generation}',sender,db=db,owner_typed=True)
                         self.store.attach_context(task_id,event_ids,self.context_assistant_id(),db)
                     else:
-                        task_id=self.store.enqueue(text,f'tg:{generation}:{update_id}',f'telegram:{generation}',sender,db=db)
+                        task_id=self.store.enqueue(text,f'tg:{generation}:{update_id}',f'telegram:{generation}',sender,db=db,owner_typed=True)
                         if guided_context_requested:
                             db.execute("UPDATE jobs SET status='awaiting_context' WHERE id=?",(task_id,))
                             guided_context=True
@@ -5995,8 +6017,11 @@ class AgentService:
                             label=INTENT_LABELS[INTENT_KNOWLEDGE],what='found no matching saved item')
                 elif decision.intent==INTENT_SETTINGS:
                     work_sources.add('owner-settings')
+                    # #814 review P1: only a message the owner typed confirms or cancels a draft.
                     result=self.conversation_settings_request({'operation':'text','text':decision.argument},
-                                                              owner_id=owner, channel=job['channel'])
+                                                              owner_id=owner, channel=job['channel'],
+                                                              owner_typed=job.get('owner_typed')==1,
+                                                              notify=lambda text,job=job:self.settings_followup(job,text))
                     response=self.settings_response(result)
                 elif decision.intent==INTENT_CALENDAR_CREATE:
                     work_sources.add('owner-calendar')

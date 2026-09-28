@@ -571,9 +571,47 @@ def _spans(text, in_bold=False):
     return _bold(text, spans, ('b',) if in_bold else ())
 
 
+#: #848: a Markdown table row and its header/body separator (``|---|:--:|---:|``).
+#: Telegram has no tables; each data row becomes one line of cells joined
+#: with ``TABLE_CELL_JOIN`` and the header row is kept as one bold line.
+_TABLE_ROW = re.compile(r'^[ \t]*\|.*\|[ \t]*$')
+_TABLE_SEPARATOR = re.compile(r'^[ \t]*\|(?:[ \t]*:?-+:?[ \t]*\|)+[ \t]*$')
+_TABLE_SPLIT = re.compile(r'(?<!\\)\|')
+TABLE_CELL_JOIN = ' · '
+
+
+def _table_cells(line):
+    cells = [cell.strip().replace('\\|', '|') for cell in _TABLE_SPLIT.split(line.strip())]
+    return cells[1:-1]
+
+
+def _table_lines(rows):
+    """One line per row: the header in bold, then each data row's cells joined."""
+    rendered = []
+    header = _table_cells(rows[0])
+    if any(header):
+        rendered.append('<b>' + _spans(TABLE_CELL_JOIN.join(cell for cell in header if cell), in_bold=True) + '</b>')
+    for row in rows[2:]:
+        cells = [cell for cell in _table_cells(row) if cell]
+        if cells:
+            rendered.append(_spans(TABLE_CELL_JOIN.join(cells)))
+    return rendered
+
+
 def _lines(text):
     rendered = []
-    for line in text.split('\n'):
+    lines = text.split('\n')
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if _TABLE_ROW.match(line) and index + 1 < len(lines) and _TABLE_SEPARATOR.match(lines[index + 1]):
+            end = index + 2
+            while end < len(lines) and _TABLE_ROW.match(lines[end]):
+                end += 1
+            rendered.extend(_table_lines(lines[index:end]))
+            index = end
+            continue
+        index += 1
         heading = _HEADING.match(line)
         if heading:
             rendered.append('<b>' + _spans(heading.group(1), in_bold=True) + '</b>')
@@ -589,7 +627,8 @@ def render_telegram_html(text):
     """Render reply text for Telegram ``parse_mode='HTML'``.
 
     Handles the Markdown a model commonly emits - ``**bold**``, ``*italic*``, inline code,
-    fenced code, headings, bullets and http(s) links.  Every text leaf is
+    fenced code, headings, bullets, http(s) links and tables (one line per
+    row, #848).  Every text leaf is
     HTML-escaped and every tag is emitted as a balanced, properly nested
     pair, so the result is always valid Telegram HTML: a send rejected for
     bad entities cannot be told apart from a lost response and would leave

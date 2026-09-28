@@ -45,7 +45,7 @@ PRESENCE_METHODS = ('setMessageReaction', 'sendChatAction', 'sendMessageDraft')
 
 class NativePresenceTestCase(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir=str(Path(__file__).resolve().parent))
+        self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.store = QuickStore(Path(self.temp.name) / 'data')
         self.calls = []            # (method, body) in wire order
@@ -835,6 +835,29 @@ class RenderTests(unittest.TestCase):
         self.assertNotIn('<a', render_telegram_html('[x](javascript:alert(1))'))
         self.assertEqual(render_telegram_html('<b>raw</b>'), '&lt;b&gt;raw&lt;/b&gt;')
 
+    def test_a_markdown_table_becomes_one_line_per_row(self):
+        """#848: Telegram has no tables; a raw ``| a | b |`` block reached the owner."""
+        table = '| 출발 코스 | 티타임 | 표시 가격 |\n|---|---|---:|\n| A | 06:30 | 218,500원 |\n| B | 07:12 | 219,000원 |\n| C | 07:54 | 221,000원 |'
+        self.assertEqual(render_telegram_html(table),
+                         '<b>출발 코스 · 티타임 · 표시 가격</b>\nA · 06:30 · 218,500원\nB · 07:12 · 219,000원\nC · 07:54 · 221,000원')
+        self.assertNotIn('|', visible(render_telegram_html(table)))
+        self.assertNotIn('---', visible(render_telegram_html(table)))
+
+    def test_table_alignment_separators_cells_and_surrounding_text(self):
+        # Alignment colons are separator syntax; bold and links inside cells are kept; text around the table is untouched.
+        text = ('정리했어요.\n\n| 항목 | 값 |\n| :--- | ---: |\n| **가격** | [보기](https://x.test/a) |\n| 재고 | 3개 |\n\n'
+                '더 필요하면 말씀해 주세요.')
+        self.assertEqual(render_telegram_html(text),
+                         '정리했어요.\n\n<b>항목 · 값</b>\n<b>가격</b> · <a href="https://x.test/a">보기</a>\n재고 · 3개\n\n'
+                         '더 필요하면 말씀해 주세요.')
+        # A pipe in prose or a lone row without a separator line is not a table.
+        for plain in ('a | b', '| x |', '| a | b |\n| c | d |', '|---|'):
+            with self.subTest(plain=plain):
+                self.assertEqual(visible(render_telegram_html(plain)), plain)
+        # An escaped pipe is cell content; an empty cell is dropped from the line.
+        self.assertEqual(render_telegram_html('| a \\| b | c |\n|--|--|\n| 1 |  |'), '<b>a | b · c</b>\n1')
+        self.valid(text)
+
 
 def visible(rendered):
     """What the owner reads: tags removed, entities decoded."""
@@ -1031,7 +1054,7 @@ class EmphasisAroundSpansWireTests(unittest.TestCase):
     )
 
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir=str(Path(__file__).resolve().parent))
+        self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.store = QuickStore(Path(self.temp.name) / 'data')
         self.answer = 'ok'  # the connection check needs a text reply

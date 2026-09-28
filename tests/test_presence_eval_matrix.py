@@ -49,8 +49,7 @@ from personal_agent.calendar import CALENDAR_SPEC, CALENDAR_WRITE_SPEC, Calendar
 from personal_agent.calendar_conversation import CREATED, OUTCOME_UNKNOWN, PREVIEW_HEADER
 from personal_agent.connector_contract import ConnectorRegistry, ConnectorState
 from personal_agent.conversation_handoff import ConnectorHandoff, FOLLOWUP_RETRY, LOCAL_AUTHORITY_PREVIEWS, LOCAL_FOLDER_READ
-from personal_agent.conversation_projection import (TERMINAL_ANSWER_LABEL, TERMINAL_FAILED_HEADER,
-                                                    TERMINAL_PARTIAL_HEADER)
+from personal_agent.conversation_projection import TERMINAL_FAILED_HEADER, TERMINAL_PARTIAL_HEADER
 from personal_agent.decision import (OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, SelectionDecision,
                                      UnavailableDecisionEngine, fixture_confidence)
 from personal_agent.gmail import (GMAIL_CONNECTOR, GMAIL_CONNECTOR_ID, GMAIL_READONLY_SCOPE,
@@ -131,7 +130,7 @@ class PresenceEval(unittest.TestCase):
     """One paired Telegram owner, recorded Telegram wire, scripted model/decisions."""
 
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir=str(Path(__file__).resolve().parent))
+        self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.store = QuickStore(self.root / 'data')
@@ -1257,13 +1256,12 @@ class H_PartialResult(PresenceEval):
         self.assertEqual(self.methods(), ['setMessageReaction', 'sendMessage', 'setMessageReaction'])
         self.assertEqual(self.reactions(), [RECEIVED_REACTION, CLEAR_REACTION], 'partial is never done')
         [bubble] = self.bubbles()
-        self.assertTrue(bubble['text'].startswith(TERMINAL_PARTIAL_HEADER))
-        self.assertIn('일부 자료는 읽지 못했습니다', bubble['text'], 'the failed portion is named')
-        # #752: the AI's answer is delivered, labelled, after the truth header and the failed portion.
         text = bubble['text']
-        self.assertIn(TERMINAL_ANSWER_LABEL, text)
-        self.assertLess(text.index('일부 자료는 읽지 못했습니다'), text.index(TERMINAL_ANSWER_LABEL))
-        self.assertLess(text.index(TERMINAL_ANSWER_LABEL), text.index('모두 비교했습니다'))
+        # #847: the AI's answer is delivered first; one note says a step was not confirmed.
+        self.assertTrue(text.startswith('두 제품을 모두 비교했습니다.'), text)
+        self.assertTrue(text.endswith('\n\n한 단계는 확인하지 못했어요.'), text)
+        self.assertNotIn(TERMINAL_PARTIAL_HEADER, text)
+        self.assertIn('일부 자료는 읽지 못했습니다', self.store.job(job['id'])['owner_cause'], 'the failed portion is recorded')
         self.assertEqual([b['text'] for b in bubble['reply_markup']['inline_keyboard'][0]], ['상세'])
         self.assertEqual(bubble['reply_parameters']['message_id'], message_id)
         # Claim <-> Evidence: the call ran; its evidence is qualified partial.
@@ -1291,7 +1289,9 @@ class H_PartialResult(PresenceEval):
                                             RECEIVED_REACTION, CLEAR_REACTION])
         self.assertEqual([job['status'] for job in outcomes.values()], ['succeeded', 'failed', 'partial'])
         heads = [body['text'].split('\n')[0] for body in bubbles]
-        self.assertEqual(heads[1:], [TERMINAL_FAILED_HEADER, TERMINAL_PARTIAL_HEADER])
+        # #847: the failed turn has no answer (header); the partial one leads with its answer.
+        self.assertEqual(heads[1:], [TERMINAL_FAILED_HEADER, '확인된 답입니다.'])
+        self.assertTrue(bubbles[2]['text'].endswith('한 단계는 확인하지 못했어요.'), bubbles[2]['text'])
         self.assertEqual(bubbles[0]['text'], '확인된 답입니다.')
         controls = [[b['text'] for b in body.get('reply_markup', {}).get('inline_keyboard', [[]])[0]] for body in bubbles]
         self.assertEqual(controls, [[], ['다시 시도', '상세'], ['상세']])
@@ -1300,21 +1300,20 @@ class H_PartialResult(PresenceEval):
         """FINDING H1 (#598, re-scoped by #752): the partial bubble with an AI answer.
 
         Page A was read and supports "ships for 3,000 KRW"; page B failed.
-        With an AI answer the bubble is the truth header, the failed portion,
-        then the AI's answer under ``TERMINAL_ANSWER_LABEL``; the AgentOS
-        verified portion is not added (the answer replaces it) and the record
-        still keeps it.  Opposing cases: nothing from the unread page, the
-        model's claim appears only after the label, and the outcome stays
-        ``partial`` everywhere.
+        With an AI answer the bubble is the answer, then one note (#847); the
+        AgentOS verified portion is not added (the answer replaces it) and
+        the record still keeps it, with the failed portion.  Opposing cases:
+        nothing from the unread page, and the outcome stays ``partial``
+        everywhere.
         """
         from personal_agent.conversation_projection import TERMINAL_VERIFIED_LABEL
         job, _ = self.partial_research()
         [bubble] = self.bubbles()
         text = bubble['text']
-        self.assertTrue(text.startswith(TERMINAL_PARTIAL_HEADER))
-        failed_at, label_at = text.index('일부 자료는 읽지 못했습니다'), text.index(TERMINAL_ANSWER_LABEL)
-        self.assertLess(failed_at, label_at, 'the failed portion precedes the answer')
-        self.assertLess(label_at, text.index('모두 비교했습니다'), 'the claim appears only under the label')
+        self.assertTrue(text.startswith('두 제품을 모두 비교했습니다.'), text)
+        self.assertTrue(text.endswith('\n\n한 단계는 확인하지 못했어요.'), text)
+        self.assertNotIn(TERMINAL_PARTIAL_HEADER, text)
+        self.assertIn('일부 자료는 읽지 못했습니다', self.store.job(job['id'])['owner_cause'])
         self.assertNotIn(TERMINAL_VERIFIED_LABEL, text)
         self.assertNotIn('3,000', text)
         # Opposing: nothing from the unread page, no upgrade.
@@ -1337,7 +1336,8 @@ class H_PartialResult(PresenceEval):
         self.text = '확인된 답입니다.'
         succeeded, _ = self.turn('차 한 잔 추천해줘')
         failed_text, succeeded_text = self.texts()
-        self.assertTrue(failed_text.startswith(TERMINAL_FAILED_HEADER))
+        # #847: the failed turn carries its answer first, then the failed note.
+        self.assertEqual(failed_text, '두 제품을 모두 비교했습니다.\n\n요청하신 작업은 끝내지 못했어요.')
         for text in (failed_text, succeeded_text):
             self.assertNotIn(TERMINAL_VERIFIED_LABEL, text)
         self.assertEqual(succeeded_text, '확인된 답입니다.')
@@ -1397,7 +1397,11 @@ class OwnerLanguageFindings(PresenceEval):
         for text in texts:
             for tool in ('bounded_public_research', 'save_memory', 'find_files'):
                 self.assertNotIn(tool, text)
-        self.assertIn('공개 자료 조사', texts[0], 'the step is named in owner words')
+        # #847: with an answer delivered, the bubble counts the step; the owner
+        # words for it stay on the record (owner_cause) for 상세.
+        self.assertTrue(texts[0].endswith('한 단계는 확인하지 못했어요.'), texts[0])
+        self.assertNotIn('공개 자료 조사', texts[0])
+        self.assertIn('공개 자료 조사', self.store.job(research['id'])['owner_cause'], 'the step is named in owner words')
         # Technical detail keeps the exact ids.
         for job, tool in ((research, 'bounded_public_research'), (memory, 'save_memory')):
             record = self.store.job(job['id'])
@@ -1736,7 +1740,8 @@ class ExtendedRegressions(PresenceEval):
         self.script = [('tool', 'find_files', {'query': '급여'})]
         capped, _ = self.turn('급여 명세 파일 찾아봐')
         self.assertEqual(capped['status'], 'partial', 'a capped search that found nothing is not "none exist"')
-        self.assertTrue(self.texts()[-1].startswith(TERMINAL_PARTIAL_HEADER))
+        self.assertTrue(self.texts()[-1].endswith('단계는 확인하지 못했어요.'), self.texts()[-1])
+        self.assertNotIn('파일 찾기', self.texts()[-1])
 
     def test_481_a_reference_to_the_previous_result_does_not_replay_it(self):
         self.connect_model()

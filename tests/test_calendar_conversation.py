@@ -126,7 +126,7 @@ class ParseTests(unittest.TestCase):
             self.assertFalse(is_cancel(text), text)
 
     def test_the_timezone_comes_from_owner_config_before_the_host(self):
-        temp = tempfile.TemporaryDirectory(dir=str(Path(__file__).resolve().parent))
+        temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         store = QuickStore(Path(temp.name) / 'data')
         store.put('calendar_timezone', 'Europe/Berlin')
@@ -142,7 +142,7 @@ class ConversationTestCase(unittest.TestCase):
     OWNER = 'local-owner'
 
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir=str(Path(__file__).resolve().parent))
+        self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.store = QuickStore(Path(self.temp.name) / 'data')
         self.clock = [NOW.timestamp()]

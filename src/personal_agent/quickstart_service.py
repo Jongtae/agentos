@@ -28,7 +28,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       TELEGRAM_RESULT_PREVIEW_CHARS, TERMINAL_FAILED_HEADER,
                                       TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
                                       BlockedTurn, ConversationProjection, context_message,
-                                      owner_cause, report_statement, terminal_text, tried_statement, turn_qualifier,
+                                      answer_note, owner_cause, report_statement, terminal_text, tried_statement, turn_qualifier,
                                       verified_portion)
 from .subscription_engines import SubscriptionEngines
 from .bounded_execution import TOOL_INCOMPLETE, TOOL_INCOMPLETE_TEXT, incomplete_bridge_calls
@@ -930,7 +930,7 @@ class AgentService:
         goal=str(row['goal_text'])
         body=self.telegram_result_text(job['response'],
                                        job.get('owner_cause') or job.get('error'),job.get('status'),
-                                       verified=job.get('owner_verified'))
+                                       verified=job.get('owner_verified'),note=job.get('owner_note'))
         return (f"지켜보던 일에서 알려 드립니다 ({goal[:120]}{'…' if len(goal)>120 else ''}).\n\n"+body+
                 '\n\n더 알릴 필요가 없으면 아래 버튼으로 지켜보기를 멈출 수 있습니다.')
 
@@ -6633,7 +6633,7 @@ class AgentService:
             resolved_blocker=False
             approval_needed=[False]
             context_approval_needed=[False]
-            refusals=[]
+            refusals=[];owner_steps=[]
             verified_parts=[]
             #: #657: the direct route's typed requested/observed/failed/unknown/next report.
             agency_report=None
@@ -7020,9 +7020,13 @@ class AgentService:
                     def record(tool,status,detail):
                         if (tool in ('find_files','read_file') and status=='failed' and boundary['requires_approval']):approval_needed[0]=True
                         if status=='failed' and tool!='model':
-                            try:reason=json.loads(detail).get('error')
-                            except (TypeError,ValueError):reason=None
+                            try:failure=json.loads(detail)
+                            except (TypeError,ValueError):failure={}
+                            reason=failure.get('error') if isinstance(failure,dict) else None
                             refusals.append((tool,reason if isinstance(reason,str) else None))
+                            # #847: a withheld effect's reason is the step's own owner-facing
+                            # next step (approve, log in, confirm); a tool error is not spoken.
+                            if isinstance(reason,str) and isinstance(failure,dict) and failure.get('state')=='withheld':owner_steps.append(reason)
                         original_record(tool,status,detail)
                     # #710 (ORCH-01): the owner's Judgment AI orchestrates this Work.  It picks
                     # the worker (a configured Main AI route) and model, writes the brief and
@@ -7276,7 +7280,7 @@ class AgentService:
                                 following=self.orchestration_step(orchestration,attempt,job['id'],attempt_start,failed=str(exc),
                                                                   unmediated=unmediated_turn,engine_meta=getattr(exc,'meta',None))
                                 if following is not None:
-                                    refusals.clear();verified_parts.clear()
+                                    refusals.clear();owner_steps.clear();verified_parts.clear()
                                     attempt=following
                                     continue
                                 raise
@@ -7395,7 +7399,7 @@ class AgentService:
                                 following=(self.orchestration_step(orchestration,attempt,job['id'],attempt_start,failed=str(exc))
                                            if isinstance(exc,ProviderError) else None)
                                 if following is not None:
-                                    refusals.clear();verified_parts.clear()
+                                    refusals.clear();owner_steps.clear();verified_parts.clear()
                                     attempt=following
                                     continue
                                 raise
@@ -7443,14 +7447,14 @@ class AgentService:
                                                           unmediated=unmediated_turn,engine_meta=engine_meta)
                         if following is None:break
                         attempt=following
-                        refusals.clear();verified_parts.clear();agency_report=None;unknown_statement=None
+                        refusals.clear();owner_steps.clear();verified_parts.clear();agency_report=None;unknown_statement=None
                     # #752: the goal decides, not the steps.  A CLI attempt whose steps left it
                     # partial or failed (a truncated read, a failure it worked around) succeeded
                     # when the goal judgment saw the request met; the steps stay in Evidence.
                     if subscription.get('id') and outcome in ('partial','failed') and orchestration is not None \
                             and orchestration.terminal==REACHED and not (approval_needed[0] or context_approval_needed[0]) \
                             and self.goal_upgrade_allowed(job['id']):
-                        outcome='succeeded';refusals.clear();resolved_blocker=True
+                        outcome='succeeded';refusals.clear();owner_steps.clear();resolved_blocker=True
                     # #710 review P1 (#767: either route): an attempt the one outcome judgment found short and
                     # that was not re-delegated (limit, budget, no new plan) is never stored as succeeded.
                     # #820: its reply is still delivered, under the truthful header.
@@ -7488,12 +7492,16 @@ class AgentService:
                     if outcome=='succeeded' and (self._browser_login(job['id']) or {}).get('state')=='requested' \
                             and not (orchestration is not None and orchestration.terminal==REACHED):
                         outcome='partial';resolved_blocker=False
-                        refusals.append(('browser_open','이 페이지는 로그인이 필요합니다.'))
+                        refusals.append(('browser_open','이 페이지는 로그인이 필요합니다.'));owner_steps.append('이 페이지는 로그인이 필요합니다.')
                     cause=self._failure_cause(refusals) if outcome in ('failed','partial') else None
                     # #598: the conversation reads the cause in owner words and,
                     # for a partial Work, the portion its typed Evidence supports.
                     # #752 review: scrubbed before owner_cause cuts each reason, so no cut splits a value.
                     spoken=owner_cause([(tool,scrub(self._redact_reason(reason))) for tool,reason in refusals]) if outcome in ('failed','partial') else None
+                    # #847: what follows the answer when there is one - no tool names or errors.
+                    note=answer_note([(tool,scrub(self._redact_reason(reason))) for tool,reason in refusals],outcome,
+                                     kept={scrub(self._redact_reason(reason)) for reason in owner_steps},
+                                     report=agency_report) if outcome in ('failed','partial') else None
                     # #657: what stayed unverified and the proposed next step follow the failed steps.
                     statement=report_statement(agency_report) if outcome in ('failed','partial') else None
                     if statement:
@@ -7502,9 +7510,9 @@ class AgentService:
                     if outcome=='unknown':
                         cause=spoken=unknown_statement or None
                     observed=verified_portion(verified_parts) if outcome=='partial' else None
-                    cause,spoken,observed=scrub(cause),scrub(spoken),scrub(observed)
-                    db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=?,owner_cause=?,owner_verified=? WHERE id=?",
-                               (outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',spoken,observed,job['id']))
+                    cause,spoken,observed,note=scrub(cause),scrub(spoken),scrub(observed),scrub(self._redact_reason(note) if note else None)
+                    db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=?,owner_cause=?,owner_verified=?,owner_note=? WHERE id=?",
+                               (outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',spoken,observed,note,job['id']))
                     # #805: one pending owner-model upkeep, settled with the Work.
                     if self.owner_model_eligible(job,outcome,provider):self.owner_model.enqueue(db,job['id'])
                 self.record_turn_provenance(job['id'],goal=self.work_goal(job['id'],work_capabilities[0],outcome))
@@ -7577,9 +7585,9 @@ class AgentService:
             return True
 
     @staticmethod
-    def telegram_result_text(response, error=None, outcome=None, verified=None):
-        """The one terminal bubble; the truth rules live in conversation_projection (#476/#488/#510/#598)."""
-        return terminal_text(response,error,outcome,verified=verified)
+    def telegram_result_text(response, error=None, outcome=None, verified=None, note=None):
+        """The one terminal bubble; the truth rules live in conversation_projection (#476/#488/#510/#598/#847)."""
+        return terminal_text(response,error,outcome,verified=verified,note=note)
 
     def deliver_one(self):
         # Mark before send. A lost response may mean delivered; never auto-resend.
@@ -7598,7 +7606,7 @@ class AgentService:
             # technical ``error`` remains the Task-detail record.
             text=blocked or self.telegram_result_text(job['response'],
                                                       job.get('owner_cause') or job['error'],job.get('status'),
-                                                      verified=job.get('owner_verified'))
+                                                      verified=job.get('owner_verified'),note=job.get('owner_note'))
             # #659: a prepared answer arrives without an owner turn; say what it is for.
             text=self.preparation_reply_prefix(job)+text
             # #818: whether this Work left pending memory candidates; its one ask

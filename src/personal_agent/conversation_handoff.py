@@ -798,11 +798,13 @@ class ConversationJudgments:
         return self.policy.structured(decision), decision
 
     def explicit_memory_fact(self, utterance, memory_key, content, work_id=None, cancelled=None):
-        """Does ``utterance`` itself ask to keep, or assert, this one proposed fact (#597, #805 review)?
+        """``(judgment, decision)``: does ``utterance`` itself ask to keep, or assert, this one
+        proposed fact (#597, #805 review)?
 
         Asked per fact, so one yes never covers another proposal.  A yes lets
         AgentOS issue the owner-request memory approval for that fact; the
-        value-coverage and key-replacement checks still decide.
+        value-coverage and key-replacement checks still decide.  The decision
+        says whether a call reached the engine's transport (the call budget).
         """
         context = self._context('explicit-memory-fact', {'owner_message': utterance,
                                                          'proposed_memory': f'{memory_key} = {content}'},
@@ -810,7 +812,7 @@ class ConversationJudgments:
         decision = self.engine.judge(context, MEMORY_FACT_PROPOSITION)
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
-                        source=decision.confidence.provider or decision.outcome)
+                        source=decision.confidence.provider or decision.outcome), decision
 
     def explicit_preparation_request(self, utterance, proposal):
         """Is ``utterance`` the owner's own request for ``proposal`` (#659)?

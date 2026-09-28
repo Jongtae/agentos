@@ -74,6 +74,24 @@ EVENT_RECORDED, EVENT_UNAVAILABLE, EVENT_EXPIRED = 'recorded', 'unavailable', 'e
 APPLIED_MEMORY, APPLIED_CANDIDATE = 'memory', 'candidate'
 REFUSED_INFERRED = 'inferred-stays-candidate'
 REFUSED_BUDGET = 'no-call-budget'
+REFUSED_DEADLINE = 'deadline'
+#: Why a run stopped before its last proposal (recorded as ``stopped``).
+STOPPED_PAUSED, STOPPED_CAP, STOPPED_DEADLINE = 'paused', 'cap', 'deadline'
+
+
+def call_sent(decision):
+    """Whether one decision reached its engine's transport (#805 review).
+
+    An adapter reports ``sent``; an answer given before any transport (no
+    route configured, invalid configuration, cancelled, too large, a
+    structured-unsupported route) is not a call.  An engine that does not
+    report it is counted, so the cap never undercounts.
+    """
+    confidence = decision.confidence
+    return confidence.sent is not False and confidence.engine != STRUCTURED_UNSUPPORTED_ENGINE
+
+#: ``decision.STRUCTURED_UNSUPPORTED`` (kept stdlib-only here; a test pins the two equal).
+STRUCTURED_UNSUPPORTED_ENGINE = 'structured-unsupported'
 
 TABLE_SQL = '''
 CREATE TABLE IF NOT EXISTS owner_model_upkeep(job_id TEXT PRIMARY KEY, state TEXT NOT NULL, created REAL NOT NULL,
@@ -231,10 +249,18 @@ class Upkeep:
                          (now - WINDOW_SECONDS,)).fetchone()
         return int(row[0] or 0)
 
-    def remaining(self, now):
-        """How many more model calls the rolling cap allows now."""
+    def allowance(self, now):
+        """``(calls the owner's current settings allow now, why none)``: re-read before every call.
+
+        ``why`` is ``paused`` when the owner paused upkeep, ``cap`` when the
+        rolling cap is spent (this run's calls so far included), else None.
+        """
         with self.store.db() as db:
-            return max(0, self.settings(db)['daily_calls'] - self.calls_used(now, db))
+            settings = self.settings(db)
+            if not settings['enabled']:
+                return 0, STOPPED_PAUSED
+            left = max(0, settings['daily_calls'] - self.calls_used(now, db))
+        return left, (None if left else STOPPED_CAP)
 
     def status(self, now=None):
         now = self.clock() if now is None else now
@@ -269,7 +295,8 @@ class Upkeep:
         upkeep never starts beside a Work that was already claimed.  A
         claimed row is never run again, even after a restart; it counts one
         call until the run records its real number.  ``remaining`` is the
-        call budget the run may spend.
+        budget at claim time, for the record: the run re-reads it before each
+        later call (``allowance``).
         """
         with self.store.db() as db:
             row = db.execute('SELECT job_id,created FROM owner_model_upkeep WHERE state=? ORDER BY created LIMIT 1',
@@ -329,46 +356,58 @@ class Upkeep:
         return known, pending
 
     # -- one run ------------------------------------------------------------
-    def run(self, job, judgments, *, answer, profile, clock, remaining, cancelled=None):
+    def run(self, job, judgments, *, answer, profile, clock, cancelled=None):
         """Ask, validate and apply for one finished Work; returns ``(state, calls, event_status, detail)``.
 
         ``judgments`` is a ``ConversationJudgments`` whose redactor is scoped
-        to this Work.  Only a confident structured answer is applied.  Every
-        model call is counted, and none starts beyond ``remaining`` or once
-        ``cancelled()`` (the run's deadline) is true.
+        to this Work.  Only a confident structured answer is applied.  Only a
+        call that reached a transport is counted.  Before every later call,
+        and before each write, the owner's pause switch and the rolling cap
+        are read again; a pause stops the run, a spent cap or the deadline
+        (``cancelled()``) stops further calls, and ``stopped`` says which.
         """
         from .agent_runtime import MEMORY_OWNER, memory_write_refusal
         from .conversation_handoff import JUDGMENT_YES
-        from .decision import STRUCTURED_UNSUPPORTED
         stop = cancelled or (lambda: False)
         request = str(job.get('message') or '')
         data, decision = judgments.owner_model_proposals(request, answer, profile, clock, work_id=job['id'],
                                                          cancelled=cancelled)
         confidence = decision.confidence
-        calls = 0 if confidence.engine == STRUCTURED_UNSUPPORTED else 1
+        calls = 1 if call_sent(decision) else 0
         self.count(job['id'], calls)
         detail = {'decision': decision.outcome, 'route': confidence.route or None, 'provider': confidence.provider or None,
                   'model': confidence.model or None, 'observed_model': confidence.observed_model or None,
-                  'confidence': confidence.probability,
+                  'confidence': confidence.probability, 'sent': bool(calls),
                   'inputs': {'owner_request_chars': len(request), 'answer_chars': len(answer or ''),
                              'profile_chars': len(profile or ''), 'clock': bool(clock)}}
         if data is None:
             return STATE_UNAVAILABLE, calls, EVENT_UNAVAILABLE, detail
         known, pending = self.known_values(MEMORY_OWNER, job['id'])
         kept, dropped = validate(data.get('proposals'), known, pending)
-        applied, verdicts = [], []
-        for item in kept:
+        applied, verdicts, stopped = [], [], None
+        for index, item in enumerate(kept):
             key, content = item['memory_key'], item['content']
+            _left, why = self.allowance(self.clock())
+            if why == STOPPED_PAUSED:
+                # The owner paused learning: nothing more is written for this run.
+                stopped = STOPPED_PAUSED
+                dropped.extend({'key_digest': key_digest(rest['memory_key']), 'reason': STOPPED_PAUSED}
+                               for rest in kept[index:])
+                break
             refusal = REFUSED_INFERRED
             if item['kind'] == KIND_STATED:
-                if calls >= remaining or stop():
-                    refusal = REFUSED_BUDGET
+                if stop():
+                    refusal, stopped = REFUSED_DEADLINE, stopped or STOPPED_DEADLINE
+                elif why == STOPPED_CAP:
+                    refusal, stopped = REFUSED_BUDGET, stopped or STOPPED_CAP
                 else:
                     # #597, asked per fact: one yes never covers another proposal.
-                    verdict = judgments.explicit_memory_fact(request, key, content, work_id=job['id'],
-                                                             cancelled=cancelled).outcome
-                    calls += 1
-                    self.count(job['id'], calls)
+                    judged, fact_decision = judgments.explicit_memory_fact(request, key, content, work_id=job['id'],
+                                                                           cancelled=cancelled)
+                    if call_sent(fact_decision):
+                        calls += 1
+                        self.count(job['id'], calls)
+                    verdict = judged.outcome
                     verdicts.append(verdict)
                     approval = (self.store.issue_memory_approval(job['id'], request) if verdict == JUDGMENT_YES
                                 and request.strip() else None)
@@ -396,5 +435,5 @@ class Upkeep:
                 row.update(outcome=APPLIED_CANDIDATE, refused_because=refusal)
             applied.append(row)
         detail.update(proposed=len(data.get('proposals') or []), applied=applied, dropped=dropped,
-                      memory_requests=verdicts)
+                      memory_requests=verdicts, stopped=stopped)
         return STATE_DONE, calls, EVENT_RECORDED, detail

@@ -240,10 +240,10 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
         identity = self._identity()
         self.last_failure = ''
 
-        def done(outcome, data=None, confidence=None, failure='', diagnostics=None):
+        def done(outcome, data=None, confidence=None, failure='', diagnostics=None, sent=False):
             self.last_failure = failure
             return self._done(context, kind, outcome, data or {}, confidence or DecisionConfidence(**identity),
-                              started, failure, diagnostics)
+                              started, failure, diagnostics, sent=sent)
 
         if self.guard:
             blocked = self.guard()
@@ -282,7 +282,7 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
             try:
                 completed = bounded_run(self.execution.runner, argv, cwd=run_dir, env=env, timeout=self.timeout)
             except subprocess.TimeoutExpired:
-                return done(OUTCOME_TIMEOUT, failure='timeout')
+                return done(OUTCOME_TIMEOUT, failure='timeout', sent=True)
             except OSError:
                 return done(OUTCOME_UNAVAILABLE, failure='start-failed')
         stdout = (completed.stdout or '')[-MAX_CLI_OUTPUT_BYTES:]
@@ -308,15 +308,15 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
                         'source=%s duration=%.1fs reason=%s', self.engine_id, kind, context.purpose,
                         completed.returncode, failure, status, diagnostics['error_source'], self.now() - started,
                         diagnostics.pop('reason') or '-')
-            return done(OUTCOME_UNAVAILABLE, confidence=identity_seen, failure=failure, diagnostics=diagnostics)
+            return done(OUTCOME_UNAVAILABLE, confidence=identity_seen, failure=failure, diagnostics=diagnostics, sent=True)
         data = self._structured(stdout)
         if data is None:
-            return done(OUTCOME_MALFORMED, confidence=identity_seen, failure='invalid-output')
+            return done(OUTCOME_MALFORMED, confidence=identity_seen, failure='invalid-output', sent=True)
         confidence = DecisionConfidence(data.get('confidence') if isinstance(data, dict) else None,
                                         observed_model=observed, **identity)
         outcome = self._checked(data, confidence, valid)
         return done(outcome, data if outcome == OUTCOME_DECIDED else {}, confidence,
-                    '' if outcome == OUTCOME_DECIDED else 'invalid-output')
+                    '' if outcome == OUTCOME_DECIDED else 'invalid-output', sent=True)
 
     def _failure_diagnostics(self, exit_code, status, stdout, stderr, env, prompt):
         """#797: why a decision CLI exited non-zero, for the audit and one log line.
@@ -486,9 +486,10 @@ class JevDecisionEngine(DecisionEngine):
         identity = dict(provider='typesafe', engine='jev', model=self.model, route=self.route_label)
         self.last_failure = ''
 
-        def done(outcome, data=None, confidence=None, failure=''):
+        def done(outcome, data=None, confidence=None, failure='', sent=False):
             confidence = confidence or DecisionConfidence(**identity)
             confidence.elapsed_seconds = round(self.now() - started, 3)
+            confidence.sent = sent
             self.last_failure = failure
             if self.audit:
                 self.audit(audit_record(context, kind, outcome, data or {}, confidence, self.now(), failure))
@@ -507,24 +508,24 @@ class JevDecisionEngine(DecisionEngine):
             reply = self.transport(JEV_ENDPOINT, body, {'Authorization': 'Bearer ' + key}, self.timeout)
         except ProviderError as exc:
             if exc.status == 'timeout':
-                return done(OUTCOME_TIMEOUT, failure='timeout')
+                return done(OUTCOME_TIMEOUT, failure='timeout', sent=True)
             if exc.status in (401, 403):
-                return done(OUTCOME_UNAVAILABLE, failure='auth')
+                return done(OUTCOME_UNAVAILABLE, failure='auth', sent=True)
             if exc.status in (413, 422):
-                return done(OUTCOME_REJECTED, failure='request-rejected')
+                return done(OUTCOME_REJECTED, failure='request-rejected', sent=True)
             if exc.status in (429, 529):
-                return done(OUTCOME_UNAVAILABLE, failure='usage-limit')
-            return done(OUTCOME_UNAVAILABLE, failure='provider-error')
+                return done(OUTCOME_UNAVAILABLE, failure='usage-limit', sent=True)
+            return done(OUTCOME_UNAVAILABLE, failure='provider-error', sent=True)
         observed = reply.get('model') if isinstance(reply, dict) else None
         seen = DecisionConfidence(observed_model=observed[:120] if isinstance(observed, str) else '', **identity)
         answers = reply.get('answers') if isinstance(reply, dict) else None
         answer = answers.get(_QUESTION) if isinstance(answers, dict) else None
         parsed = parse(answer) if isinstance(answer, dict) else None
         if not parsed:
-            return done(OUTCOME_MALFORMED, confidence=seen, failure='invalid-output')
+            return done(OUTCOME_MALFORMED, confidence=seen, failure='invalid-output', sent=True)
         data, probability = parsed
         seen.probability = probability
-        return done(OUTCOME_DECIDED, data, seen)
+        return done(OUTCOME_DECIDED, data, seen, sent=True)
 
 
 def cli_fingerprint(binary):

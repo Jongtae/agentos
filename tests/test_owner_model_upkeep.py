@@ -511,6 +511,112 @@ class Review(Upkeep):
         self.assertEqual(self.store.memories(MEMORY_OWNER), [])
 
 
+class PrReview(Upkeep):
+    """PR #811 review threads."""
+
+    def test_an_unconfigured_judgment_route_counts_no_call(self):
+        # Thread 1: ModelDecisionEngine answers unavailable before its transport; nothing was sent.
+        from personal_agent.decision import ModelDecisionEngine
+
+        class Adapter:
+            sent = 0
+
+            def tool_turn(self, *args, **kwargs):
+                Adapter.sent += 1
+                raise AssertionError('no transport call')
+        self.service.use_decision_engine(ModelDecisionEngine(Adapter(), lambda: None))
+        job = self.finished('나는 판교에서 일해')
+        self.assertTrue(self.service.run_owner_model_upkeep())
+        self.assertEqual((Adapter.sent, self.upkeep_rows()[job]['calls']), (0, 0))
+        self.assertEqual(self.service.owner_model_request()['calls_last_24h'], 0)
+        [(status, detail)] = self.evidence(job)
+        self.assertEqual((status, detail['sent']), (om.EVENT_UNAVAILABLE, False))
+
+    def test_a_call_that_reached_the_transport_counts_even_when_it_failed(self):
+        from personal_agent.decision import ModelDecisionEngine
+        from personal_agent.providers import ProviderError
+
+        class Adapter:
+            def tool_turn(self, *args, **kwargs):
+                raise ProviderError('down', status=500)
+        config = ({'provider': 'openai', 'endpoint': 'https://api.openai.com/v1', 'model': 'gpt-4o-mini'}, 'k')
+        self.service.use_decision_engine(ModelDecisionEngine(Adapter(), lambda: config))
+        job = self.finished('나는 판교에서 일해')
+        self.service.run_owner_model_upkeep()
+        self.assertEqual(self.upkeep_rows()[job]['calls'], 1)
+
+    def test_adapters_report_whether_they_sent(self):
+        from personal_agent.decision import STRUCTURED_UNSUPPORTED, DecisionContext, DecisionEngine
+        from personal_agent.decision_adapters import JevDecisionEngine
+        self.assertEqual(om.STRUCTURED_UNSUPPORTED_ENGINE, STRUCTURED_UNSUPPORTED)
+        context = DecisionContext('p', {'a': 'b'})
+        self.assertIs(DecisionEngine().structured(context, 'q', {'properties': {}}).confidence.sent, False)
+        self.assertIs(JevDecisionEngine(lambda: '').judge(context, 'q').confidence.sent, False)
+        replies = JevDecisionEngine(lambda: 'k', transport=lambda *a: {'answers': {}}).judge(context, 'q')
+        self.assertIs(replies.confidence.sent, True)
+        self.assertFalse(om.call_sent(DecisionEngine().structured(context, 'q', {'properties': {}})))
+
+    def test_a_pause_during_the_run_stops_it_and_says_so(self):
+        # Thread 2: the owner pauses while the proposal call is in flight.
+        job = self.finished('나는 판교에서 일하고 분당에 살아')
+
+        def pausing(context, question, schema):
+            self.service.owner_model_request({'operation': 'set', 'enabled': False})
+            return StructuredDecision(OUTCOME_DECIDED, {'proposals': [proposal('profile.place.work', '판교'),
+                                                                      proposal('profile.place.home', '분당')]},
+                                      fixture_confidence(0.9))
+        judged = []
+        self.service.use_decision_engine(FixtureDecisionEngine(structured=pausing,
+                                                               judge=lambda c, p: judged.append(c) or None))
+        self.service.run_owner_model_upkeep()
+        self.assertEqual(judged, [], 'no call after the pause')
+        self.assertEqual(self.store.memory_candidates(MEMORY_OWNER), [])
+        [(_status, detail)] = self.evidence(job)
+        self.assertEqual(detail['stopped'], om.STOPPED_PAUSED)
+        self.assertEqual([item['reason'] for item in detail['dropped']], ['paused', 'paused'])
+
+    def test_a_cap_spent_during_the_run_stops_further_calls(self):
+        # Thread 2: the rolling allowance is re-read before each judgment, not taken from claim time.
+        self.service.owner_model_request({'operation': 'set', 'daily_calls': 3})
+        job = self.finished('나는 판교에서 일하고 분당에 살아')
+
+        def spending(context, question, schema):
+            with self.store.db() as db:
+                db.execute("INSERT INTO owner_model_upkeep(job_id,state,created,claimed,calls) VALUES ('other','done',?,?,2)",
+                           (time.time(), time.time()))
+            return StructuredDecision(OUTCOME_DECIDED, {'proposals': [proposal('profile.place.work', '판교')]},
+                                      fixture_confidence(0.9))
+        judged = []
+        self.service.use_decision_engine(FixtureDecisionEngine(structured=spending,
+                                                               judge=lambda c, p: judged.append(c) or None))
+        self.service.run_owner_model_upkeep()
+        self.assertEqual(judged, [])
+        [(_status, detail)] = self.evidence(job)
+        self.assertEqual(detail['stopped'], om.STOPPED_CAP)
+        self.assertEqual(detail['applied'][0]['refused_because'], om.REFUSED_BUDGET)
+
+    def test_judgment_audit_rows_carry_the_source_work(self):
+        # Thread 3: record_decision links the background run's judgments to their Work.
+        threads = []
+
+        def audited(context, question, schema):
+            self.service.record_decision({'purpose': context.purpose, 'kind': 'structured'})
+            return StructuredDecision(OUTCOME_DECIDED, {'proposals': []}, fixture_confidence(0.9))
+        self.service.use_decision_engine(FixtureDecisionEngine(structured=audited))
+
+        def spawn(target):
+            thread = threading.Thread(target=target, daemon=True)
+            threads.append(thread)
+            thread.start()
+        self.service.owner_model_spawn = spawn
+        job = self.finished('나는 판교에서 일해')
+        self.service.run_owner_model_upkeep()
+        threads[0].join(5)
+        audit = [row for row in self.store.config('decision_audit', []) if row.get('purpose') == om.PURPOSE]
+        self.assertEqual([row.get('work_id') for row in audit], [job])
+        self.assertIsNone(self.service.current_work_id, 'the work loop thread is untouched')
+
+
 class Unit(unittest.TestCase):
     def test_validate_bounds_and_duplicates(self):
         kept, dropped = om.validate([proposal('profile.a', 'v'), proposal('profile.a', 'w'),

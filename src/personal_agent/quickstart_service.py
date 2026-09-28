@@ -727,6 +727,9 @@ class AgentService:
         """One claimed upkeep, off the work thread; it releases the single-flight lock."""
         upkeep=self.owner_model
         work_id=row['job_id']
+        # #805 review: the judgments' audit rows (``record_decision``) belong to the
+        # source Work; ``current_work_id`` is per thread, so the work loop's is untouched.
+        self.current_work_id=work_id
         try:
             job=self.store.job(work_id)
             if row['expired']:
@@ -751,7 +754,7 @@ class AgentService:
             cancelled=lambda:self.stop.is_set() or upkeep.clock()>deadline
             state,calls,status,detail=upkeep.run(job,judgments,answer=job.get('response') or '',
                                                  profile=self.owner_profile_snapshot(),clock=clock,
-                                                 remaining=row['remaining'],cancelled=cancelled)
+                                                 cancelled=cancelled)
             upkeep.finish(work_id,state,calls,status,detail,upkeep.clock())
             LOG.info('owner-model upkeep work=%s state=%s calls=%s applied=%s',work_id,state,calls,len(detail.get('applied') or ()))
         except Exception as exc:  # noqa: BLE001 - a background run never raises
@@ -759,6 +762,7 @@ class AgentService:
             try:upkeep.finish(work_id,om.STATE_UNAVAILABLE,None,om.EVENT_UNAVAILABLE,{'reason':'run-failed'},upkeep.clock())
             except Exception:pass
         finally:
+            self.current_work_id=None
             self._release_owner_model_flight()
 
     def owner_model_request(self, body=None):

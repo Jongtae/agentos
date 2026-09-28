@@ -1063,16 +1063,21 @@ class AgentService:
         complete=shown==text and len(shown)<=limit
         return (shown if len(shown)<=limit else shown[:limit-1]+'…'),complete
 
-    def memory_fact(self, text, limit):
+    def memory_fact(self, text, limit, key=None):
         """``(shown, complete)``: one fact as the owner reads it in the ask, never a memory key (#836).
 
-        The ask shows the value only.  A value written like a key
-        (``food_preference.rolls_and_rolls_sushi``) is shown as its words;
-        anything else as ``memory_display``.  Presentation only.
+        The ask shows the value only.  A value that *is* the candidate's own
+        memory key (``food_preference.rolls_and_rolls_sushi``) is shown as its
+        words and is never complete, so it cannot be tapped: the owner would
+        otherwise accept a stored value they were not shown (#838 review).
+        Anything else - including ordinary dotted values such as
+        ``amazon.com`` - is shown as ``memory_display``.  Presentation only.
         """
         text=str(text or '')
-        if MEMORY_KEY_SHAPED.fullmatch(text.strip()):
-            text=text.strip().rsplit('.',1)[-1].replace('_',' ')
+        stripped=text.strip()
+        keys={str(key or ''),str(key or '').removeprefix('profile.')}-{''}
+        if stripped in keys and MEMORY_KEY_SHAPED.fullmatch(stripped):
+            return self.memory_display(stripped.rsplit('.',1)[-1].replace('_',' '),limit)[0],False
         return self.memory_display(text,limit)
 
     def memory_prompt_item(self, row):
@@ -1084,7 +1089,7 @@ class AgentService:
         """
         return {'id':row['id'],'digest':row['content_digest'],'key':row['memory_key'],
                 'current':self.current_memory_ref(row['memory_key']),
-                'tap':bool(self.memory_fact(row['content'],MEMORY_CANDIDATE_CHARS)[1])}
+                'tap':bool(self.memory_fact(row['content'],MEMORY_CANDIDATE_CHARS,row['memory_key'])[1])}
 
     def bind_memory_prompt(self, notification, now):
         """What a memory ask shows, bound at send time; None when nothing is pending (#818, #836).
@@ -1115,7 +1120,9 @@ class AgentService:
         ``accepted`` or ``rejected`` when every decision was the same; None
         while a fact is open, when nothing was decided, or for mixed answers.
         """
-        if not binding['done'] or AgentService.memory_open(binding):return None
+        # #838 review: every bound fact must be decided, tappable or not, before the answer
+        # can settle what follows; an untappable fact left open keeps the ask open.
+        if not binding['done'] or any(item['id'] not in binding['done'] for item in binding['candidates']):return None
         answers={status for status in binding['done'].values() if status in MEMORY_CANDIDATES_SETTLED}
         return answers.pop() if len(answers)==1 else None
 
@@ -1143,13 +1150,13 @@ class AgentService:
                 if numbered:lines.append(prefix+MEMORY_CANDIDATE_STATUS['rejected'])
                 continue
             row=self.store.memory_candidate(item['id'],MEMORY_OWNER,job_id) or {}
-            line=prefix+self.memory_fact(row.get('content'),MEMORY_CANDIDATE_CHARS)[0]
+            line=prefix+self.memory_fact(row.get('content'),MEMORY_CANDIDATE_CHARS,row.get('memory_key'))[0]
             if status=='accepted':
                 if numbered:line+=' → '+MEMORY_CANDIDATE_STATUS['accepted']
             elif status:line+=' → '+MEMORY_CANDIDATE_STATUS[status]
             else:
                 old=self.store.memory(item['current'][0],MEMORY_OWNER,current_only=False) if item.get('current') else None
-                if old:line+=f" (지금은 {self.memory_fact(old['content'],60)[0]})"
+                if old:line+=f" (지금은 {self.memory_fact(old['content'],60,old.get('memory_key'))[0]})"
                 if not item.get('tap'):line+=' → '+MEMORY_CANDIDATE_IN_RECORDS
             lines.append(line)
         if binding.get('more'):lines.append(f"그 밖의 {binding['more']}가지는 내 기록에서 정할 수 있어요.")
@@ -1235,7 +1242,8 @@ class AgentService:
                 settled.append(item['id'])
             else:
                 opened.append(item)
-        binding['more']=int(binding.get('more') or 0)+beyond
+        # #838 review: ``new`` already holds every unbound candidate, including those hidden before.
+        binding['more']=beyond
         shown={**binding,'candidates':binding['candidates']+opened}
         if binding['done'] and not self.memory_open(binding) and self.memory_open(shown):
             shown['sent']=now   # an answered ask reopened: its buttons get their own time

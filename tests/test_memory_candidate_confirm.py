@@ -526,11 +526,39 @@ class TelegramConfirmTests(unittest.TestCase):
         self.assertTrue(self.service.deliver_notification())
         [row] = self.notification(job_id)
         self.tap(f"p7m:{row['id']}:a:accept", row['message_id'])
-        self.assertEqual(self.sends()[-1]['text'], f'기억해 둘까요?\n1. {VALUE}\n2. rolls and rolls sushi')
+        # #838 review: a value that is its own key is shown as words but never tappable.
+        self.assertEqual(self.sends()[-1]['text'], f'기억해 둘까요?\n1. {VALUE}\n2. rolls and rolls sushi → 내 기록에서 확인해 주세요')
         for text in self.texts()[-2:] + [self.sends()[-1]['text']]:
             for key in ('place.work', 'profile.', 'food_preference', 'rolls_and_rolls'):
                 self.assertNotIn(key, text)
             self.assertNotIn('내 기록에서 고치거나 지울 수 있습니다', text)
+
+    def test_an_ordinary_dotted_value_is_shown_whole_and_tappable(self):
+        """#838 review P1: only a value that is its own key is rewritten; ``amazon.com`` stays as stored."""
+        self.assertEqual(self.service.memory_fact('amazon.com', 80, 'profile.shopping.site'), ('amazon.com', True))
+        self.assertEqual(self.service.memory_fact('resume.pdf', 80), ('resume.pdf', True))
+        shown, complete = self.service.memory_fact('food_preference.sushi', 80, 'profile.food_preference.sushi')
+        self.assertEqual((shown, complete), ('sushi', False))
+
+    def test_an_answer_does_not_settle_later_facts_while_an_untappable_one_is_open(self):
+        """#838 review P1: every bound fact must be decided before the answer carries over."""
+        binding = {'candidates': [{'id': 'a', 'tap': True}, {'id': 'b', 'tap': False}], 'done': {'a': 'accepted'}}
+        self.assertIsNone(self.service.memory_answered(binding))
+        binding['done']['b'] = 'accepted'
+        self.assertEqual(self.service.memory_answered(binding), 'accepted')
+
+    def test_the_hidden_count_is_recomputed_not_added(self):
+        """#838 review P2: facts hidden before are not counted twice when upkeep adds one."""
+        job_id = self.turn()
+        self.service.deliver_one()
+        for index in range(6):
+            self.store.save_memory_candidate(job_id, f'profile.extra.item{index}', f'항목 {index}')
+        self.assertTrue(self.service.deliver_notification())
+        [row] = self.notification(job_id)
+        before = self.binding(row)
+        hidden = before['more']
+        self.upkeep_adds(job_id)
+        self.assertEqual(self.binding(row)['more'], hidden + 1)
 
     # --- P3: the in-process outcome agrees with the event-derived one --------------
 

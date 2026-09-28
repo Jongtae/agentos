@@ -10,10 +10,18 @@ class FileWorkspace:
 
     def __init__(self, store): self.store=store
 
-    def configure(self, references, workspace):
+    def configure(self, references, workspace, keep_blocked_workspace=False):
+        """Replace the references and the result folder.
+
+        ``keep_blocked_workspace`` (#779, an off-Mac Settings removal): an
+        unchanged result folder the rules now block is kept verbatim with its
+        stored identity.  ``validate`` would follow a symlinked parent and move
+        the result-write grant to the symlink's target.
+        """
         if not isinstance(references,list) or not references: raise ValueError('하나 이상의 참고 폴더를 연결하세요.')
         refs=[]; usable=[]
-        previous={ref.get('path'):ref for ref in self.status().get('references',[]) if isinstance(ref,dict)}
+        current=self.status()
+        previous={ref.get('path'):ref for ref in current.get('references',[]) if isinstance(ref,dict)}
         for value in references:
             # Keep a previously stored blocked entry only when the owner leaves it
             # unchanged. This lets the settings editor remove blocked entries one
@@ -26,11 +34,14 @@ class FileWorkspace:
             if any(ref['path']==str(path) for ref in refs): continue
             stat=path.stat(); ref={'id':hashlib.sha256(f'{stat.st_dev}:{stat.st_ino}'.encode()).hexdigest()[:24],'path':str(path)}
             refs.append(ref); usable.append(ref)
-        target=folder_grants.validate(workspace,self.store)
+        kept=(keep_blocked_workspace and isinstance(workspace,str) and workspace==current.get('workspace')
+              and folder_grants.blocked(workspace,self.store))
+        target=Path(workspace) if kept else folder_grants.validate(workspace,self.store)
         # Retained blocked references still count for overlap: if one later
         # becomes available again, active() will expose it without another edit.
         if any(target==Path(ref['path']) or target.is_relative_to(ref['path']) or Path(ref['path']).is_relative_to(target) for ref in refs): raise ValueError('참고 폴더와 관리 작업공간은 겹치지 않게 연결하세요.')
-        target_stat=target.stat(); workspace_id=hashlib.sha256(f'{target_stat.st_dev}:{target_stat.st_ino}'.encode()).hexdigest()[:24]
+        if kept: workspace_id=current.get('workspace_id')
+        else: target_stat=target.stat(); workspace_id=hashlib.sha256(f'{target_stat.st_dev}:{target_stat.st_ino}'.encode()).hexdigest()[:24]
         self.store.put('file_workspace',{'references':refs,'workspace':str(target),'workspace_id':workspace_id})
         self.store.put('document_sharing',{})
         return self.status()

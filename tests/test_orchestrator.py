@@ -1597,6 +1597,21 @@ class SecretaryStandard(Harness):
         self.assertIn('not whether it is perfect', GOAL_REACHED_PROPOSITION)
         self.assertNotIn('when it is unclear', GOAL_REACHED_PROPOSITION)
 
+    def test_the_guidance_puts_the_source_next_to_a_looked_up_fact_and_proposes_a_watch_despite_a_missing_detail(self):
+        """#854: a looked-up changing fact carries its link or is called unsourced; a missing detail never blocks a watch."""
+        from personal_agent.agent_runtime import (CLI_NATIVE_SEARCH_GUIDANCE, CORE_INSTRUCTIONS, DEFINITIONS,
+                                                  SCHEDULE_PREPARATION_DESCRIPTION)
+        from test_no_scenario_code import scenario_tokens
+        self.assertIn('put the source link right next to it in the answer', CORE_INSTRUCTIONS)
+        self.assertIn('if the lookup returned no link, say briefly that the fact is unsourced rather than presenting it as checked',
+                      CORE_INSTRUCTIONS)
+        self.assertIn('next to the facts they support; if it returned no URL for a fact, say so', CLI_NATIVE_SEARCH_GUIDANCE)
+        by_name = {tool['function']['name']: tool['function']['description'] for tool in DEFINITIONS}
+        for text in (CORE_INSTRUCTIONS, SCHEDULE_PREPARATION_DESCRIPTION, by_name['schedule_preparation']):
+            self.assertIn('still propose the watch with what is known and ask for the detail in the same reply', text)
+        for text in (CORE_INSTRUCTIONS, CLI_NATIVE_SEARCH_GUIDANCE, SCHEDULE_PREPARATION_DESCRIPTION):
+            self.assertEqual(scenario_tokens(text), [])
+
     def test_a_tool_less_direct_reply_gets_the_one_judgment_and_is_re_delegated_when_short(self):
         """#820 review P1: a direct run that asked no judgment (no external tool) is judged once, like a CLI attempt."""
         # run_agent's own execution check (#606) asks the model once more; it answers the same.

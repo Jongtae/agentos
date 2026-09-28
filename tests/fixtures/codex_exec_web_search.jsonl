@@ -1,0 +1,7 @@
+{"type": "thread.started", "thread_id": "thread-fixture"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "item_0", "type": "agent_message", "text": "I will verify the current offset from a live web source and provide the direct URL."}}
+{"type": "item.started", "item": {"id": "item_1", "type": "web_search", "query": "", "action": {"type": "other"}}}
+{"type": "item.completed", "item": {"id": "item_1", "type": "web_search", "query": "current UTC offset Asia/Seoul", "action": {"type": "search", "query": "current UTC offset Asia/Seoul"}}}
+{"type": "item.completed", "item": {"id": "item_2", "type": "agent_message", "text": "Asia/Seoul is currently **UTC+09:00 (Korea Standard Time, KST)**, with no daylight-saving adjustment. [Source: example](https://time.example/zone/seoul)"}}
+{"type": "turn.completed", "usage": {"input_tokens": 100, "cached_input_tokens": 0, "cache_write_input_tokens": 0, "output_tokens": 10, "reasoning_output_tokens": 1}}

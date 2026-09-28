@@ -2315,9 +2315,9 @@ def prepared_section(context):
  prepared=context.get('prepared') if isinstance(context,dict) else None
  return PREPARED_HEADING+'\n'+prepared if prepared else ''
 
-#: #710: the orchestrator's brief for one attempt.  Model-written guidance for
-#: the worker; the owner's current request stays the authority.
-BRIEF_HEADING='# Brief for this attempt (from AgentOS orchestration; the current request is the owner\'s own words and takes precedence)'
+#: #710, #820: the orchestrator's optional notes for one attempt.  Supplementary
+#: only: the owner's current request, verbatim, is the whole goal.
+BRIEF_HEADING='# Orchestration notes (supplementary; they never replace or narrow the owner\'s request below, which is the goal in full)'
 
 def brief_section(context):
  """The rendered orchestration brief of a turn context, or '' (#710)."""
@@ -2357,9 +2357,9 @@ def turn_context(history,route,current_context=None,profile=None,prepared=None,n
  the CLI use its own web search in this turn, which the launch arguments
  then enable; without it the guidance is unchanged.
 
- ``brief`` (#710) is the orchestrator's brief for this attempt (goal and
- completion criteria), counted against the same budget; None or empty
- sends nothing and changes nothing.
+ ``brief`` (#710, #820) is the orchestrator's optional notes for this
+ attempt, supplementary to the verbatim request, counted against the same
+ budget; None or empty sends nothing and changes nothing.
  """
  items=[{'role':m['role'],'content':str(m.get('content') or '')} for m in (history or []) if m.get('role') in ('user','assistant')]
  if not items or items[-1]['role']!='user':raise ValueError('turn context needs a current user request')
@@ -2771,6 +2771,10 @@ GOAL_JUDGMENTS=2
 #: owner's request, which is never cut (`goal_reached` widens its bound by it).
 GOAL_OBSERVATION_CHARS=3800
 GOAL_FAILURE_CHARS=600
+#: #820: the reply and the recent conversation the outcome judgment reads.  The reply is
+#: whole: this is the delivered answer's own cap, so no claim is hidden from the judgment.
+GOAL_REPLY_CHARS=24000
+GOAL_CONVERSATION_CHARS=1500
 REPORT_ITEM_CHARS=200
 REPORT_ITEMS=3
 
@@ -2887,12 +2891,13 @@ def _observation_text(ref,name,result):
  except (TypeError,ValueError):body=str(result)
  return f'[{ref}] {name}:\n{body}'
 
-def goal_judgment(judgments,goal,claim,observations,failures,work_id=None,redact=None):
- """``yes`` / ``no`` / ``unavailable``: do the referenced observations satisfy ``goal``?
+def goal_judgment(judgments,goal,claim,observations,failures,work_id=None,redact=None,conversation=''):
+ """``yes`` / ``no`` / ``unavailable``: did the reply serve the owner's message ``goal``?
 
- One ``ConversationJudgments.goal_reached`` call over the owner's request,
- the referenced observed results and the Work's failed steps - never the
- model's own summary.  No judgments, an engine error or a non-answer is
+ The one outcome judgment (#657, #820): one ``ConversationJudgments.goal_reached``
+ call over the owner's message, the recent ``conversation``, the reply
+ (``claim['summary']``, model-stated, never evidence), the referenced
+ observed results and the Work's failed steps.  No judgments, an engine error or a non-answer is
  ``unavailable``, which never yields ``succeeded``.  ``redact(text,
  private)`` (``Capabilities.judgment_text``) runs on every fact before it is
  bounded, so a cut can never leave part of a secret; the owner's request is
@@ -2904,7 +2909,9 @@ def goal_judgment(judgments,goal,claim,observations,failures,work_id=None,redact
  share=max(300,GOAL_OBSERVATION_CHARS//max(1,len(refs)))
  observed='\n'.join(clean(_observation_text(ref,observations[ref][0],observations[ref][3]))[:share] for ref in refs)[:GOAL_OBSERVATION_CHARS]
  failed=clean('; '.join(f'{tool}: {reason or "failed"}' for tool,reason in failures))[:GOAL_FAILURE_CHARS]
- try:judged=judgments.goal_reached(clean(goal,private=False),observed,failed,work_id=work_id)
+ reply=clean(claim.get('summary') or '')[:GOAL_REPLY_CHARS]
+ recent=clean(conversation or '')[-GOAL_CONVERSATION_CHARS:]
+ try:judged=judgments.goal_reached(clean(goal,private=False),observed,failed,work_id=work_id,answer=reply,conversation=recent)
  except Exception:return 'unavailable'
  outcome=getattr(judged,'outcome',None)
  return outcome if outcome in ('yes','no') else 'unavailable'
@@ -2924,14 +2931,15 @@ def agency_report(goal,verified,failures,unknown,next_step,question=None):
          'unknown':list(dict.fromkeys(item for item in unknown if item))[:REPORT_ITEMS+2],
          'next':next_step or None,'question':clip_keeping_links(question or '',600) or None}
 
-def _budget_end(exc,executions,sources,successful,incomplete,verified,config,actual):
+def _budget_end(exc,executions,sources,successful,incomplete,verified,config,actual,draft=None):
  """End a run whose budget, deadline or Stop ran out, keeping what was observed.
 
  Nothing observed: the Work fails with the reason.  Otherwise it is at most
- partial, carrying AgentOS's own rendering of what did complete.
+ partial, carrying the model's own reply when it already wrote one (#820:
+ the AI's answer is delivered), else AgentOS's rendering of what did complete.
  """
  if not successful:raise ProviderError(str(exc))
- text=fallback_response(executions,sources)+'\n\n'+str(exc)
+ text=(draft if isinstance(draft,str) and draft.strip() else fallback_response(executions,sources))+'\n\n'+str(exc)
  result=ModelResult(text[:24000],config['provider'],actual or NOT_REPORTED)
  result.outcome='partial';result.incomplete=[*incomplete,('work',str(exc))];result.verified=verified
  return result
@@ -2971,6 +2979,9 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
  # the alternatives tried; and this run's typed failures as (tool, reason).
  observations={};paths=set();page=None;last_search=None;alternatives=[];failures=[]
  goal=next((m.get('content') for m in reversed(history) if isinstance(m,dict) and m.get('role')=='user' and isinstance(m.get('content'),str)),'')
+ # #820: the recent conversation the one outcome judgment reads (the current request excluded).
+ conversation='\n'.join(f"[{'owner' if m['role']=='user' else 'assistant'}] {m['content']}" for m in history[:-1]
+                         if isinstance(m,dict) and m.get('role') in ('user','assistant') and isinstance(m.get('content'),str))
  judged=0;nudges=0;checked_completion=False;draft=None
  budget=capabilities.budget
  active_config=dict(config);rerouted=False;checked_direct=False;attempts={};actual=None
@@ -2979,17 +2990,24 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
   """The run's result: ``succeeded`` needs an accepted done claim judged yes (#657)."""
   if sources and '조회 출처:' not in content:content+='\n\n조회 출처:\n'+'\n'.join(dict.fromkeys(sources))
   result=ModelResult(content[:24000],config['provider'],actual)
+  if claim is None and _external(trail) and not invalid_calls:
+   # #820: a plain final reply after tools ran is judged once, like a done claim: did
+   # the reply serve the owner's message, given every settled observation?  Whether
+   # the model also called ``finish`` is bookkeeping, not the outcome.
+   refs=[ref for ref,row in observations.items() if row[2]=='succeeded' and row[1] not in INTERNAL_STATE_ACTIONS]
+   judgment=goal_judgment(capabilities.judgments,goal,{'evidence_refs':refs,'summary':content},observations,failures,
+                          capabilities.job_id,getattr(capabilities,'judgment_text',None),conversation)
   if not _external(trail) and not invalid_calls:
    # Ordinary conversation: no tool ran (or only internal current-state
    # bookkeeping, #627), so there is nothing to observe.
    result.outcome='succeeded'
-  elif claim is not None and claim['status']=='done' and judgment=='yes' and not invalid_calls:
+  elif (claim is None or claim['status']=='done') and judgment=='yes' and not invalid_calls:
    result.outcome='succeeded'
   else:result.outcome='partial' if successful else 'failed'
   unknown=[]
   if _external(trail) and result.outcome!='succeeded':
-   if claim is None:unknown.append(GOAL_NOT_CLAIMED)
-   elif judgment=='no':unknown.append(GOAL_NOT_SHOWN)
+   if judgment=='no':unknown.append(GOAL_NOT_SHOWN)
+   elif claim is None:unknown.append(GOAL_NOT_CLAIMED)
    elif judgment=='unavailable':unknown.append(GOAL_UNJUDGED)
   stated=[['assistant',item] for item in (claim or {}).get('failed',())]
   unknown.extend((claim or {}).get('unknown',()))
@@ -3014,7 +3032,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
   try:budget.spend_turn()
   except ToolError as exc:
    record('model','stopped',json.dumps({'scope':scope,'code':exc.code,'reason':str(exc)},ensure_ascii=False))
-   return _budget_end(exc,executions,sources,successful,incomplete,verified,config,actual)
+   return _budget_end(exc,executions,sources,successful,incomplete,verified,config,actual,draft)
   try:
    # report_observed: an unreported response model stays unreported (#598 R1);
    # the configured name is the *requested* model, never the observed one.
@@ -3027,7 +3045,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
    try:budget.spend_turn()
    except ToolError as stop:
     record('model','stopped',json.dumps({'scope':scope,'code':stop.code,'reason':str(stop)},ensure_ascii=False))
-    return _budget_end(stop,executions,sources,successful,incomplete,verified,config,actual)
+    return _budget_end(stop,executions,sources,successful,incomplete,verified,config,actual,draft)
    messages=[{k:v for k,v in m.items() if k!='reasoning_details'} for m in messages]
    message,actual=adapter.tool_turn(active_config,key,messages,definitions,report_observed=True)
   # The model this call was sent with, before free-router pinning below.
@@ -3088,7 +3106,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     if reason is None and claim['status']=='done':
      judged+=1
      judgment=goal_judgment(capabilities.judgments,goal,claim,observations,failures,capabilities.job_id,
-                            getattr(capabilities,'judgment_text',None))
+                            getattr(capabilities,'judgment_text',None),conversation)
      # A "not shown" answer returns the claim once, so the model can take
      # another path; a second one, or no engine, ends the run below.
      if judgment=='no' and judged<GOAL_JUDGMENTS:reason='goal_not_observed'

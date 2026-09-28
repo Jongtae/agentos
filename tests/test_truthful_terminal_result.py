@@ -155,7 +155,6 @@ class FailedTurnTests(TerminalResultTestCase):
         job, bubble = self.ask('내일 일정 뭐 있어?')
         self.assertEqual(job['status'], 'failed', job.get('error'))
         self.assertIsNotNone(bubble)
-        self.assertFalse(self.service.answer_withheld(job), 'a failed read does not withhold the answer')
         self.assertLabelled(bubble, TERMINAL_FAILED_HEADER, job['owner_cause'], '팀 회의 하나입니다')
 
     def test_a_failed_file_read_labels_the_claimed_summary_after_the_failure(self):
@@ -166,7 +165,6 @@ class FailedTurnTests(TerminalResultTestCase):
         self.text = '출장 계획 요약: 9월 3일 출발, 9월 7일 귀국입니다.'
         job, bubble = self.ask('내 출장 계획 파일 요약해줘')
         self.assertEqual(job['status'], 'failed', job.get('error'))
-        self.assertFalse(self.service.answer_withheld(job))
         self.assertLabelled(bubble, TERMINAL_FAILED_HEADER, job['owner_cause'], '9월 3일 출발')
 
     def test_a_refused_research_request_labels_the_comparison_after_the_refusal(self):
@@ -183,7 +181,6 @@ class FailedTurnTests(TerminalResultTestCase):
         self.text = '관찰됨: Model A 30시간 재생. 확인되지 않음: 가격·재고.'
         job, bubble = self.ask('노이즈캔슬링 헤드폰 비교해줘')
         self.assertEqual(job['status'], 'partial', job.get('error'))
-        self.assertFalse(self.service.answer_withheld(job))
         self.assertLabelled(bubble, TERMINAL_PARTIAL_HEADER, job['owner_cause'], '관찰됨')
 
 
@@ -192,7 +189,8 @@ class PartialTurnTests(TerminalResultTestCase):
         """One tool completes, one state-changing action fails without effect -> `partial`.
 
         The calendar draft fails with ``needs_setup`` and ``effect: none``:
-        nothing was changed, so an answer claiming the draft is withheld (#752).
+        nothing was changed; the answer claiming the draft is delivered below
+        what did not complete, under the unverified label (#820).
         """
         self.connect_folder()
         self.plan = [
@@ -210,20 +208,16 @@ class PartialTurnTests(TerminalResultTestCase):
         self.assertNotIn('처리가 끝났습니다', bubble)
         self.assertTrue(bubble.startswith('일부 단계만 완료했습니다.'), bubble[:60])
 
-    def test_a_partial_turn_withholds_a_claim_of_an_action_that_did_not_run(self):
-        """#476 case 2 / #752: the draft action did nothing, so the answer claiming it is withheld.
+    def test_a_partial_turn_delivers_a_claim_of_an_action_that_did_not_run_after_the_truth(self):
+        """#476 case 2 / #820: the draft action did nothing; the answer is still delivered.
 
-        The bubble keeps the verified portion, what did not complete and the
-        next action; the text is preserved on the Work.
+        What did not complete comes first; the answer follows under the
+        unverified label, so the claim never reads as a result.
         """
         claim = '팀 회의 취소 초안을 만들었습니다. 승인해 주세요.'
         job, bubble = self.partial_turn(claim)
         self.assertEqual(job['status'], 'partial')
-        self.assertTrue(self.service.answer_withheld(job))
-        self.assertTrue(bubble.startswith(TERMINAL_PARTIAL_HEADER), bubble[:60])
-        self.assertNotIn(TERMINAL_ANSWER_LABEL, bubble)
-        self.assertNotIn('초안을 만들었습니다', bubble)
-        self.assertTrue(bubble.endswith(TERMINAL_NEXT_ACTION), bubble)
+        self.assertLabelled(bubble, TERMINAL_PARTIAL_HEADER, job['owner_cause'], '초안을 만들었습니다')
         self.assertEqual(job['response'], claim, 'the text must be preserved, not deleted')
 
     def test_a_partial_turn_names_what_did_not_complete(self):
@@ -239,44 +233,36 @@ class PartialTurnTests(TerminalResultTestCase):
         # #752: the tool reason is cut to its first sentence in the bubble.
         self.assertIn('Google Calendar가 로컬에 구성되어 있지 않습니다.', bubble)
         self.assertNotIn('먼저 캘린더를 연결해 주세요', bubble)
-        # With the answer withheld, the verified portion (#598 H1) is stated before what did not complete.
-        self.assertIn(TERMINAL_VERIFIED_LABEL, bubble)
-        self.assertLess(bubble.index('pay.txt'), bubble.index(job['owner_cause']))
+        # #820: with the answer delivered, it follows what did not complete.
+        self.assertLess(bubble.index(job['owner_cause']), bubble.index(TERMINAL_ANSWER_LABEL))
 
 
-class WithheldAnswerTests(TerminalResultTestCase):
-    """#752 / #488: a failed state-changing action keeps the answer withheld on both surfaces.
+class DeliveredAnswerTests(TerminalResultTestCase):
+    """#820: the AI's answer is always delivered, on both surfaces, under the truth header.
 
-    #818: a memory write held as a pending candidate is a proposal, not such a failure.
+    #752 / #488 withheld it after a failed state-changing action; that protected no
+    pilot invariant the header and cause do not.  #818: a memory write held as a
+    pending candidate is a proposal, not a failure.
     """
 
-    def test_a_memory_write_that_errored_withholds_the_answer_on_telegram_and_the_web_card(self):
+    def test_a_memory_write_that_errored_delivers_the_answer_after_the_failure_on_both_surfaces(self):
         self.plan = [('save_memory', {'memory_key': 'inferred-preference', 'content': 'x' * 4001})]
         self.text = '취향을 기억해 두었습니다.'
         job, bubble = self.ask('이건 기억하지 마. 그냥 방금 이야기만 정리해 줘', card=True)
         self.assertEqual(job['status'], 'failed', job.get('error'))
-        self.assertEqual(job['response'], self.text, 'withheld, not deleted')
-        self.assertTrue(self.service.answer_withheld(job))
-        # Telegram: header, cause, next action - no label and no claimed save.
-        self.assertTrue(bubble.startswith(TERMINAL_FAILED_HEADER), bubble[:60])
-        self.assertIn(job['owner_cause'], bubble)
-        self.assertTrue(bubble.endswith(TERMINAL_NEXT_ACTION), bubble)
-        self.assertNotIn(TERMINAL_ANSWER_LABEL, bubble)
-        self.assertNotIn('기억해 두었습니다', bubble)
-        # #752 review: the web reads no withheld answer either - not in the jobs it
-        # renders tasks from, nor in the conversation transcript.
-        from personal_agent.conversation_projection import TERMINAL_ANSWER_WITHHELD
+        self.assertEqual(job['response'], self.text)
+        # Telegram: header and cause first, then the answer under the unverified label.
+        self.assertLabelled(bubble, TERMINAL_FAILED_HEADER, job['owner_cause'], '기억해 두었습니다')
+        # The web serves the same answer, in the jobs and in the transcript.
         [served] = [row for row in self.service.owner_jobs(self.store.jobs()) if row['id'] == job['id']]
-        self.assertIsNone(served['response'])
-        self.assertTrue(served['answer_withheld'])
+        self.assertEqual(served['response'], self.text)
         transcript = [row['content'] for row in self.service.home()['conversation'] if row.get('job_id') == job['id']
                       and row.get('role') == 'assistant']
-        self.assertTrue(transcript)
-        self.assertEqual(set(transcript), {TERMINAL_ANSWER_WITHHELD})
-        # The web card agrees: no result is offered.
+        self.assertEqual(transcript, [self.text])
         card = self.card(job)
         self.assertEqual(card['status_label'], '확인 필요')
-        self.assertFalse(card['result_available'])
+        self.assertTrue(card['result_available'])
+        # Nothing was saved: the failure stays the Work's truthful outcome.
         self.assertEqual(self.store.memories(), [])
 
     def test_a_memory_proposal_does_not_withhold_the_answer(self):
@@ -285,20 +271,17 @@ class WithheldAnswerTests(TerminalResultTestCase):
         self.text = '정리해 드릴게요.'
         job, bubble = self.ask('이건 기억하지 마. 그냥 방금 이야기만 정리해 줘', card=True)
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
-        self.assertFalse(self.service.answer_withheld(job))
         self.assertEqual(bubble, self.text + '\n\n' + MEMORY_PENDING_TELEGRAM_NOTE, 'AgentOS says nothing was saved yet')
         self.assertTrue(self.card(job)['result_available'])
         self.assertEqual(self.store.memories(), [])
         self.assertEqual([row['state'] for row in self.store.memory_candidates()], ['pending'])
 
-    def test_the_same_failed_status_with_only_a_failed_read_is_not_withheld(self):
-        """The opposing pin: the status alone never decides withholding."""
+    def test_the_same_failed_status_with_only_a_failed_read_is_delivered(self):
         self.plan = [('calendar_query', {'start': '2026-09-24T00:00:00+09:00',
                                          'end': '2026-09-25T00:00:00+09:00', 'timezone': 'Asia/Seoul'})]
         self.text = '내일 일정은 팀 회의 하나입니다.'
         job, bubble = self.ask('내일 일정 뭐 있어?')
         self.assertEqual(job['status'], 'failed')
-        self.assertFalse(self.service.answer_withheld(job))
         self.assertTrue(self.card(job)['result_available'])
         self.assertIn(TERMINAL_ANSWER_LABEL, bubble)
         [served] = [row for row in self.service.owner_jobs(self.store.jobs()) if row['id'] == job['id']]
@@ -347,7 +330,7 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
         self.assertNotIn('calendar_query', bubble)
 
     def test_a_partial_turn_agrees_across_both_surfaces(self):
-        """Both surfaces withhold a claim of an action that did not run, and both flag attention (#752)."""
+        """Both surfaces deliver the answer and both flag attention (#752, #820)."""
         self.connect_folder()
         self.plan = [('find_files', {'query': '급여'}),
                      ('calendar_draft_cancel', {'event_id': 'ev1',
@@ -357,10 +340,9 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
         self.assertEqual(job['status'], 'partial')
         card = self.card(job)
         self.assertEqual(card['status_label'], '확인 필요')
-        self.assertFalse(card['result_available'], 'the web withholds it exactly as Telegram does')
+        self.assertTrue(card['result_available'], 'the web offers it exactly as Telegram does')
         self.assertEqual(card['error'], job['error'])
-        self.assertNotIn(self.text, bubble)
-        self.assertNotIn(TERMINAL_ANSWER_LABEL, bubble)
+        self.assertLabelled(bubble, TERMINAL_PARTIAL_HEADER, job['owner_cause'], self.text)
 
     def test_the_card_above_a_partial_bubble_does_not_announce_a_result(self):
         """Independent review of #486 found the bubble alone was not enough.
@@ -381,7 +363,8 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
         # Exact, not a substring: '일부 단계만 완료했습니다. 아래 결과를 확인하세요.'
         # would satisfy a loose assertion while re-making the claim.
         self.assertEqual(self.cards[-1], '일부 단계만 완료했습니다. 아래 안내를 확인하세요.')
-        self.assertNotIn(self.text, bubble)
+        # #820: the answer is delivered below the truth, under the unverified label.
+        self.assertLess(bubble.index(TERMINAL_ANSWER_LABEL), bubble.index(self.text))
 
     def test_the_card_above_a_succeeded_bubble_still_announces_the_result(self):
         """The opposing pin for the card."""
@@ -403,8 +386,11 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
         only, so the bubble must not point the owner at a web result that is
         not there, and must not claim steps completed that may never have run.
         """
+        # #820: an answer it has is delivered, under the interrupted header and the unverified label.
         text = AgentService.telegram_result_text('모두 처리했습니다.', '중단됨', 'interrupted')
-        self.assertNotIn('모두 처리했습니다', text)
+        self.assertEqual(text, '이 요청은 중단되었습니다. 자동으로 다시 실행하지 않았습니다.'
+                         '\n\n중단됨\n\nAI 답변 (위 부분은 확인되지 않았어요):\n모두 처리했습니다.')
+        text = AgentService.telegram_result_text(None, '중단됨', 'interrupted')
         self.assertNotIn('일부 단계만', text)
         # A literal, not the constants: asserting against TERMINAL_* would
         # mutate the expectation along with the code and pin nothing. The whole

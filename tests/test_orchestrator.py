@@ -49,10 +49,10 @@ def reported(calls, end='turn.completed'):
     return {'tool_calls': list(calls), 'stream_tail': ['turn.started', end]}
 
 
-def plan(worker, goal, *, model='', context=SECTIONS, criteria=('the answer states it',), tools=None, reason='fits',
-         tools_reason=None):
+def plan(worker, notes, *, model='', tools=None, reason='fits', tools_reason=None):
+    """One plan (#820): worker, model, tools and optional notes; it never selects context or criteria."""
     return {'worker': worker, 'model': model,
-            'brief': {'goal': goal, 'context': list(context), 'completion_criteria': list(criteria)},
+            'brief': {'notes': notes},
             'tools_mode': 'worker_default' if tools is None else 'subset', 'tools': list(tools or ()),
             'tools_reason': ('only these tools are needed' if tools is not None else '') if tools_reason is None
             else tools_reason,
@@ -194,17 +194,16 @@ class RoutingAndBriefs(Harness):
     def test_different_requests_go_to_different_workers_and_models_with_their_own_briefs(self):
         self.script([plan('codex', 'Find and compare the two options the owner named; cite each source.',
                           model='gpt-5.6-luna'),
-                     plan('openai', 'Rewrite the owner\'s paragraph in a warmer tone, same meaning.',
-                          context=('profile',))],
+                     plan('openai', 'Rewrite the owner\'s paragraph in a warmer tone, same meaning.')],
                     goals=[True])
         first, row = self.run_work('이 두 가지 비교해줘')
         self.assertEqual(row['status'], 'succeeded')
         self.assertEqual(len(self.engine.turns), 1)
         turn = self.engine.turns[0]
         self.assertEqual((turn['engine'], turn['model']), ('codex', 'gpt-5.6-luna'))
-        self.assertIn('# Brief for this attempt', turn['prompt'])
+        self.assertIn('# Orchestration notes', turn['prompt'])
         self.assertIn('Find and compare the two options', turn['prompt'])
-        self.assertIn('Done when:\n- the answer states it', turn['prompt'])
+        self.assertNotIn('Done when:', turn['prompt'], '#820: a plan writes no completion criteria')
         self.assertIn('# Current request\n이 두 가지 비교해줘', turn['prompt'], 'the owner\'s words stay the request')
 
         second, row = self.run_work('이 문단 다정하게 다시 써줘')
@@ -230,23 +229,23 @@ class RoutingAndBriefs(Harness):
         [(_s, evaluated)] = self.events(first, 'evaluated')
         self.assertEqual((evaluated['outcome'], evaluated['next'], evaluated['stop']), ('reached', 'stop', 'reached'))
         [(_s, planned)] = self.events(second, 'planned')
-        # #804: the profile and current context are always given, whatever the brief selects.
+        # #804, #820: every section is always given; a plan selects none.
         self.assertEqual((planned['worker'], planned['model'], planned['sections']),
-                         ('openai', None, ['current_context', 'profile']))
+                         ('openai', None, ['current_context', 'history', 'prepared', 'profile']))
 
-    def test_the_brief_selects_the_context_sections_the_worker_receives(self):
+    def test_a_plan_never_drops_the_conversation_the_worker_receives(self):
+        """#820: the conversation always reaches the worker; the plan's notes only add to it."""
         self.store.put('model', self.store.config('model', {}))
-        self.script([plan('codex', 'Answer from general knowledge.', context=())], goals=[True])
         self.store.enqueue('앞선 질문', 'orch-history')
         self.engine.answers = ['first']
         self.service.use_decision_engine(UnavailableDecisionEngine())
         self.assertTrue(self.service.run_one())
-        self.script([plan('codex', 'Answer from general knowledge.', context=())], goals=[True])
+        self.script([plan('codex', 'Answer from general knowledge.')], goals=[True])
         self.run_work('다음 질문')
         context = self.engine.turns[-1]['context']
-        self.assertEqual(context['conversation'], [], 'history was not selected')
-        self.assertNotIn('profile', context)
-        self.assertEqual(context['brief'].splitlines()[0], 'Goal: Answer from general knowledge.')
+        self.assertEqual([m['content'] for m in context['conversation']], ['앞선 질문', 'first'])
+        self.assertEqual(context['request'], '다음 질문')
+        self.assertEqual(context['brief'], 'Answer from general knowledge.')
 
 
 class Redelegation(Harness):
@@ -258,7 +257,7 @@ class Redelegation(Harness):
         self.assertEqual(row['response'], 'api answer', 'the owner gets the attempt that reached the goal')
         self.assertEqual(len(self.engine.turns), 1)
         self.assertTrue(self.transport.bodies)
-        self.assertIn('An earlier attempt did not meet this goal', self.transport.bodies[0]['messages'][0]['content'])
+        self.assertIn('An earlier attempt\'s reply was judged not to serve', self.transport.bodies[0]['messages'][0]['content'])
         # The re-plan saw the first attempt and its evaluation.
         attempts = self.asked_plans[1][0].facts['previous_attempts']
         self.assertIn('attempt 1: worker=codex', attempts)
@@ -406,7 +405,7 @@ class Fallback(Harness):
 
     def test_an_invalid_plan_runs_the_default_with_the_raw_request(self):
         for bad, what in ((plan('codex', 'x', model='not-a-listed-model'), 'model'),
-                          (plan('codex', '   '), 'brief')):
+                          (plan('not-a-worker', 'x'), 'worker')):
             with self.subTest(what=what):
                 self.engine.turns.clear()
                 self.script([bad])
@@ -614,10 +613,9 @@ class ToolsAndReplan(Harness):
             return BinaryDecision(OUTCOME_DECIDED, False, fixture_confidence())
         self.service.decision_engine._judge = judge
         self.run_work('얼마나 걸려?')
-        observations = seen[0]['observations']
-        self.assertIn("The worker's final answer (model-stated, not an observation):\nabout forty minutes by car",
-                      observations)
-        self.assertIn('"sources": []', observations)
+        # #820: the reply is its own fact, labelled model-stated by the proposition; the observations are tools' results.
+        self.assertEqual(seen[0]['reply'], 'about forty minutes by car')
+        self.assertIn('"sources": []', seen[0]['observations'])
         self.assertIn('own web searches that reported no source URL: 1', self.asked_plans[1][0].facts['previous_attempts'])
 
 
@@ -995,124 +993,66 @@ class PlannerHistory(Harness):
         row = {'role': 'assistant', 'content': 'x', 'job_id': earlier}
         self.assertEqual(self.service.planner_history([row, {'role': 'user', 'content': 'now'}], ()), [row])
 
-    def test_the_question_asks_the_brief_to_resolve_the_conversation(self):
+    def test_the_question_never_lets_a_plan_rewrite_the_owners_message(self):
+        """#820: the plan chooses worker, model and tools; the owner's words reach the worker verbatim."""
         self.assertIn('recent_conversation', QUESTION)
-        self.assertIn('Do not brief the worker to ask the owner for something the conversation or the owner\'s facts '
-                      'already say', QUESTION)
+        self.assertIn('you do not rewrite the owner\'s message', QUESTION)
+        self.assertIn('receives the owner\'s message verbatim', QUESTION)
+        self.assertIn('Notes never restate, replace, narrow or extend the owner\'s message', QUESTION)
+        self.assertIn('never tell the worker to skip looking something up or to skip a tool', QUESTION)
+        self.assertIn('never ask it to ask the owner for something', QUESTION)
 
 
 class OwnerQuestion(Harness):
-    """#740: a worker's question the owner must answer ends the Work with that question."""
+    """#740, #820: a worker's question the owner must answer is judged by the one outcome judgment."""
 
     def test_a_needed_question_is_the_reply_and_is_not_re_delegated(self):
+        """The one judgment reads the reply and the conversation; a needed question serves the message."""
         self.engine.answers = ['출발 위치를 알려 주시겠어요?']
-        self.script([plan('codex', 'Answer.'), plan('openai', 'Other path.')], goals=[False], owner_inputs=[True])
+        self.script([plan('codex', 'Answer.'), plan('openai', 'Other path.')], goals=[True])
         job, row = self.run_work('얼마나 걸려?')
         self.assertEqual(len(self.engine.turns), 1, 'no re-delegation')
         self.assertEqual(row['status'], 'succeeded')
-        self.assertIn('출발 위치를 알려 주시겠어요?', row['response'])
+        self.assertEqual(row['response'], '출발 위치를 알려 주시겠어요?')
         [(_status, evaluated)] = self.events(job, 'evaluated')
-        self.assertEqual((evaluated['outcome'], evaluated['stop']), ('owner_needed', 'owner'))
-        [context] = self.asked_owner_inputs
-        self.assertEqual(context.facts['worker_answer'], '출발 위치를 알려 주시겠어요?')
-        self.assertIn('owner_request', context.facts)
+        self.assertEqual((evaluated['outcome'], evaluated['stop']), ('reached', 'reached'))
+        [context] = self.asked_goals
+        self.assertEqual(context.facts['reply'], '출발 위치를 알려 주시겠어요?')
+        self.assertEqual(context.facts['owner_request'], '얼마나 걸려?')
         self.assertIn('recent_conversation', context.facts)
+        self.assertEqual(self.asked_owner_inputs, [], '#820: one outcome judgment, no second one')
 
     def test_an_unneeded_question_stays_short_and_is_re_delegated(self):
         self.engine.answers = ['어디서 출발하세요?', 'answer']
-        self.script([plan('codex', 'Answer.'), plan('openai', 'Other path.')], goals=[False, True],
-                    owner_inputs=[False])
+        self.script([plan('codex', 'Answer.'), plan('openai', 'Other path.')], goals=[False, True])
         job, _row = self.run_work('얼마나 걸려?')
         outcomes = [detail['outcome'] for _status, detail in self.events(job, 'evaluated')]
         self.assertEqual(outcomes[0], 'not_reached')
         self.assertEqual(len(self.asked_plans), 2, 'the attempt was re-delegated')
 
-    def test_a_question_after_a_tool_ran_is_partial_with_the_question_reported(self):
-        """Review P2: as the direct route's needs_owner finish, not a silent success."""
-        def search(tools):
-            tools.capabilities.record('web_search', 'succeeded',
-                                      json.dumps({'host_action': 'web_search', 'evidence': {'sources': ['https://a.test']}}))
-        self.engine.before = search
-        self.engine.answers = ['두 곳이 있어요. 어느 쪽으로 할까요?']
-        self.script([plan('codex', 'Answer.')], goals=[False], owner_inputs=[True])
+    def test_a_short_attempt_still_delivers_its_reply(self):
+        """#820: a reply judged not to serve the message is delivered under the truthful header."""
+        from personal_agent.conversation_projection import TERMINAL_ANSWER_LABEL
+        self.engine.answers = ['어느 날짜로 할까요?']
+        self.script([plan('codex', 'Answer.')], goals=[False])
         job, row = self.run_work('찾아줘')
-        self.assertEqual(self.events(job, 'evaluated')[-1][1]['outcome'], 'owner_needed')
-        self.assertEqual(row['status'], 'partial')
-        self.assertNotIn(GOAL_NOT_SHOWN, row['owner_cause'] or '')
-        self.assertIn('어느 쪽으로 할까요?', json.dumps(self.store.job(job), ensure_ascii=False))
-
-    def test_a_question_after_a_failed_tool_is_failed_and_still_reaches_the_owner(self):
-        """#753: an attempt already short from a failed tool keeps the question in its report."""
-        from personal_agent.conversation_projection import REPORT_QUESTION_LABEL
-        question = '어느 날짜로 할까요?'
-
-        def failing(tools):
-            tools.capabilities.record('web_search', 'failed', json.dumps({'host_action': 'web_search', 'error': 'x'}))
-        self.engine.before = failing
-        self.engine.answers = [question]
-        self.script([plan('codex', 'Answer.')], goals=[False], owner_inputs=[True])
-        job, row = self.run_work('찾아줘')
-        self.assertEqual(self.events(job, 'evaluated')[-1][1]['outcome'], 'owner_needed')
+        self.assertEqual(self.events(job, 'evaluated')[-1][1]['outcome'], 'not_reached')
         self.assertEqual(row['status'], 'failed')
-        self.assertIn(REPORT_QUESTION_LABEL + ' ' + question, row['owner_cause'])
-
-    def test_a_question_after_a_failed_internal_state_call_still_reaches_the_owner(self):
-        """#754 review: a failed internal-state call leaves the attempt short; the question is still reported."""
-        from personal_agent.agent_runtime import INTERNAL_STATE_ACTIONS
-        from personal_agent.conversation_projection import REPORT_QUESTION_LABEL
-        internal = sorted(INTERNAL_STATE_ACTIONS)[0]
-        question = '지금 어디에 계신가요?'
-
-        def failing(tools):
-            tools.capabilities.record(internal, 'failed', json.dumps({'host_action': internal, 'error': 'x'}))
-        self.engine.before = failing
-        self.engine.answers = [question]
-        self.script([plan('codex', 'Answer.')], goals=[False], owner_inputs=[True])
-        _job, row = self.run_work('얼마나 걸려?')
-        self.assertEqual(row['status'], 'failed')
-        self.assertIn(REPORT_QUESTION_LABEL + ' ' + question, row['owner_cause'])
-
-    def test_a_question_after_only_internal_state_keeps_its_outcome(self):
-        """#753: AgentOS-internal state actions are not a tool run, as on the direct route."""
-        from personal_agent.agent_runtime import INTERNAL_STATE_ACTIONS
-        internal = sorted(INTERNAL_STATE_ACTIONS)[0]
-
-        def bookkeeping(tools):
-            tools.capabilities.record(internal, 'succeeded', json.dumps({'host_action': internal}))
-        self.engine.before = bookkeeping
-        self.engine.answers = ['어디에서 출발하시나요?']
-        self.script([plan('codex', 'Answer.')], goals=[False], owner_inputs=[True])
-        _job, row = self.run_work('얼마나 걸려?')
-        self.assertEqual(row['status'], 'succeeded')
-        self.assertEqual(row['response'], '어디에서 출발하시나요?')
-
-    def test_a_raising_or_unavailable_owner_input_judgment_keeps_the_attempt_short(self):
-        for owner_inputs in ([], [RuntimeError('down')]):
-            with self.subTest(owner_inputs=owner_inputs):
-                self.engine.answers = ['어디서 출발하세요?']
-                engine = self.script([plan('codex', 'Answer.')], goals=[False])
-                if owner_inputs:
-                    self.service.decision_judge.owner_input_needed = mock.Mock(side_effect=owner_inputs[0])
-                job, row = self.run_work('얼마나 걸려?', key=f'raise-{len(owner_inputs)}')
-                self.assertEqual(self.events(job, 'evaluated')[-1][1]['outcome'], 'not_reached')
-                self.assertEqual(row['status'], 'failed')
+        self.assertEqual(row['response'], '어느 날짜로 할까요?')
+        bubble = self.service.telegram_result_text(row['response'], row['owner_cause'], row['status'])
+        self.assertIn(TERMINAL_ANSWER_LABEL + '\n어느 날짜로 할까요?', bubble)
 
     def test_the_conversation_is_redacted_before_it_is_cut(self):
         """Review P2: a cut landing inside a stored secret never leaves a fragment of it."""
         self.engine.answers = ['키: ' + OPENAI_KEY + ' ' + 'Y' * 1490]
         self.run_work('예전 질문')
         self.engine.answers = ['출발 위치를 알려 주세요?']
-        self.script([plan('codex', 'Answer.')], goals=[False], owner_inputs=[True])
+        self.script([plan('codex', 'Answer.')], goals=[True])
         self.run_work('이어서')
         excerpts = [self.asked_plans[-1][0].facts['recent_conversation'],
-                    self.asked_owner_inputs[-1].facts['recent_conversation']]
+                    self.asked_goals[-1].facts['recent_conversation']]
         for excerpt in excerpts:
             self.assertNotIn(OPENAI_KEY[-6:], excerpt)
-
-    def test_a_goal_reached_attempt_asks_no_owner_input_judgment(self):
-        self.script([plan('codex', 'Answer.')], goals=[True])
-        self.run_work('질문')
-        self.assertEqual(self.asked_owner_inputs, [])
 
 
 class Preflight(Harness):
@@ -1388,7 +1328,7 @@ class OrchestrationUnit(unittest.TestCase):
         self.assertEqual((ok.tools, ok.replaced), (None, {'requested': ['list_notes'], 'why': 'not_offered'}))
         for data, what in ((plan('c', 'g'), 'worker'), (plan('zz', 'g'), 'worker'), (plan('a', 'g', model='m2'), 'model'),
                            ({'worker': 'a'}, 'shape'),
-                           (plan('a', 'g', context=('everything',)), 'sections')):
+                           ({**plan('a', 'g'), 'brief': {'goal': 'g'}}, 'shape')):
             with self.subTest(what=what):
                 self.assertEqual(orchestration.validate(data, candidates, 1), (None, what))
         spent = Orchestration(None, catalogue, request='r', budget=WorkBudget(seconds=10))
@@ -1433,7 +1373,7 @@ class OrchestrationUnit(unittest.TestCase):
     def test_attempt_native_search_never_pairs_with_a_private_read(self):
         private = private_read_actions()
         for tools in (None, set(), {'web_search'}, {'list_notes'}, {'list_notes', 'web_search'}, {'weather'}):
-            attempt = Attempt(1, 'a', goal='g', tools=tools, planned=True)
+            attempt = Attempt(1, 'a', notes='g', tools=tools, planned=True)
             enabled, _reason = attempt.native_search(True, '', private)
             offered = set(turn_actions(BOUNDED_PROFILE, enabled, None if tools is None else frozenset(tools)))
             with self.subTest(tools=tools):
@@ -1444,7 +1384,7 @@ class OrchestrationUnit(unittest.TestCase):
         orchestration, _events, _engine = self.orchestration(None)
         orchestration.orchestrated = True
         for n in range(3):
-            orchestration.history.append((Attempt(n + 1, 'a', goal='g' * 500, planned=True), 'not_reached', 'y' * 900, 'z' * 900))
+            orchestration.history.append((Attempt(n + 1, 'a', notes='g' * 500, planned=True), 'not_reached', 'y' * 900, 'z' * 900))
         self.assertLessEqual(len(orchestration._attempts_text()), ATTEMPTS_CHARS)
 
 
@@ -1493,9 +1433,10 @@ class DecisionLayerStructured(unittest.TestCase):
 
 class TurnContextBrief(unittest.TestCase):
     def test_brief_is_its_own_section_before_the_request(self):
-        context = turn_context([{'role': 'user', 'content': 'the request'}], 'cli', brief='Goal: g')
+        context = turn_context([{'role': 'user', 'content': 'the request'}], 'cli', brief='a note')
         text = render_turn_prompt(context)
-        self.assertLess(text.index('# Brief for this attempt'), text.index('# Current request'))
+        self.assertLess(text.index('# Orchestration notes'), text.index('# Current request'))
+        self.assertIn('never replace or narrow the owner\'s request', text)
         self.assertTrue(text.endswith('# Current request\nthe request'))
         self.assertNotIn('brief', turn_context([{'role': 'user', 'content': 'r'}], 'cli'))
 
@@ -1737,55 +1678,65 @@ class RelayAuthority(Harness):
 
 
 class SecretaryStandard(Harness):
-    """#767: plan, evaluation and worker guidance hold answers to the secretary standard."""
+    """#767, #820: worker guidance holds answers to the secretary standard; the outcome judgment reads the reply."""
 
-    def test_the_goal_judgment_reads_the_brief_completion_criteria(self):
-        self.script([plan('codex', 'Name options with current facts.',
-                          criteria=('names specific options', 'each option has a cited current fact'))], goals=[True])
+    def test_the_outcome_judgment_reads_no_plan_criteria(self):
+        """#820: nothing the plan wrote is part of the outcome judgment."""
+        self.script([plan('codex', 'Name options with current facts.')], goals=[True])
         self.run_work('추천해줘')
         [context] = self.asked_goals
-        self.assertIn('names specific options', context.facts['completion_criteria'])
-        self.assertIn('each option has a cited current fact', context.facts['completion_criteria'])
+        self.assertNotIn('completion_criteria', context.facts)
+        self.assertNotIn('Name options', json.dumps(context.facts, ensure_ascii=False))
+        self.assertEqual(context.facts['owner_request'], '추천해줘')
 
-    def test_the_plan_question_and_worker_guidance_state_the_standard(self):
+    def test_the_worker_guidance_and_the_judgment_state_the_standard(self):
         from personal_agent.agent_runtime import API_TOOL_GUIDANCE, CLI_TOOL_GUIDANCE, CORE_INSTRUCTIONS
         from personal_agent.conversation_handoff import GOAL_REACHED_PROPOSITION
-        self.assertIn('capable personal secretary', QUESTION)
-        self.assertIn('never rules that out', QUESTION)
-        self.assertIn('not only that an answer was given', QUESTION)
         self.assertIn('capable personal secretary', CORE_INSTRUCTIONS)
         self.assertIn('look them up and cite the sources', CORE_INSTRUCTIONS)
         for guidance in (API_TOOL_GUIDANCE, CLI_TOOL_GUIDANCE):
             self.assertIn('ordinary conversation that needs no current facts', guidance)
-        self.assertIn('completion criteria are listed, each of them is met', GOAL_REACHED_PROPOSITION)
-        self.assertIn('no observation sources them', GOAL_REACHED_PROPOSITION)
+        self.assertIn('capable personal secretary', GOAL_REACHED_PROPOSITION)
+        self.assertIn('read in the light of the recent conversation', GOAL_REACHED_PROPOSITION)
+        self.assertIn('the reply\'s own claims are not evidence', GOAL_REACHED_PROPOSITION)
+        self.assertIn('current fact the observations do not show', GOAL_REACHED_PROPOSITION)
 
-    def test_a_direct_route_answer_short_of_the_criteria_is_re_delegated(self):
-        """#767 review P1: the direct route's ordinary-conversation success is held to the criteria."""
-        self.transport.answers = ['일반적인 조언입니다.']
+    def test_a_tool_less_direct_reply_gets_the_one_judgment_and_is_re_delegated_when_short(self):
+        """#820 review P1: a direct run that asked no judgment (no external tool) is judged once, like a CLI attempt."""
+        # run_agent's own execution check (#606) asks the model once more; it answers the same.
+        self.transport.answers = ['일반적인 조언입니다.', '일반적인 조언입니다.']
         self.engine.answers = ['구체적인 선택지와 출처입니다.']
-        self.script([plan('openai', 'Name options.', criteria=('names specific options with sources',)),
-                     plan('codex', 'Look them up.')], goals=[False, True])
+        self.script([plan('openai', 'Name options.'), plan('codex', 'Look them up.')], goals=[False, True])
         job, row = self.run_work('추천해줘')
         outcomes = [detail['outcome'] for _status, detail in self.events(job, 'evaluated')]
         self.assertEqual(outcomes, ['not_reached', 'reached'])
         self.assertEqual(len(self.engine.turns), 1, 'the second attempt ran')
         self.assertEqual(row['status'], 'succeeded')
         self.assertEqual(row['response'], '구체적인 선택지와 출처입니다.')
-        self.assertIn('names specific options with sources', self.asked_goals[0].facts['completion_criteria'])
+        self.assertEqual(self.asked_goals[0].facts['reply'], '일반적인 조언입니다.')
+        self.assertNotIn('completion_criteria', self.asked_goals[0].facts)
 
-    def test_a_direct_route_answer_is_kept_when_the_criteria_judgment_is_unavailable(self):
-        self.transport.answers = ['답입니다.']
+    def test_a_tool_less_direct_reply_is_kept_when_the_judgment_is_unavailable(self):
+        self.transport.answers = ['답입니다.', '답입니다.']
         self.script([plan('openai', 'Answer.')], goals=[])
         job, row = self.run_work('질문')
         self.assertEqual(self.events(job, 'evaluated')[-1][1]['outcome'], 'reached')
         self.assertEqual(row['status'], 'succeeded')
+        self.assertEqual(row['response'], '답입니다.')
+
+    def test_the_outcome_judgment_reads_a_long_reply_whole(self):
+        """#820 review P2: no claim in a long reply is hidden from the one judgment."""
+        reply = '앞부분. ' + '가' * 5000 + ' 중간에 예약을 완료했습니다. ' + '나' * 5000 + ' 끝부분.'
+        self.engine.answers = [reply]
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        self.run_work('알려줘')
+        self.assertEqual(self.asked_goals[0].facts['reply'], reply)
+        self.assertFalse(self.asked_goals[0].too_large())
 
     def test_an_owner_request_not_to_look_things_up_is_honoured_by_the_standard(self):
         from personal_agent.agent_runtime import CORE_INSTRUCTIONS
         self.assertIn('unless the owner asked you not to', CORE_INSTRUCTIONS)
-        self.assertIn('unless the owner asked not to look anything up', QUESTION)
-
+        self.assertIn('never tell the worker to skip looking something up', QUESTION)
 
 
 class StreamDiagnostics(unittest.TestCase):
@@ -1837,7 +1788,7 @@ class OwnerModelAlwaysOn(Harness):
     @mock.patch.dict('os.environ', {'TZ': 'Asia/Seoul'})  # #804: a host zone, not the CI's unset UTC
     def test_both_routes_get_the_owner_model_when_the_brief_selects_no_section(self):
         from personal_agent.agent_runtime import CURRENT_CONTEXT_HEADING, PROFILE_HEADING
-        self.script([plan('codex', 'Recommend lunch.', context=()), plan('openai', 'Recommend lunch.', context=())],
+        self.script([plan('codex', 'Recommend lunch.'), plan('openai', 'Recommend lunch.')],
                     goals=[True])
         self.run_work('점심 추천해줘')
         prompt = self.engine.turns[-1]['prompt']
@@ -1848,17 +1799,17 @@ class OwnerModelAlwaysOn(Harness):
             self.assertIn('판교 사무실', text)
             self.assertIn(CURRENT_CONTEXT_HEADING + '\n', text)
             self.assertIn('"local_time":', text, 'the clock, with current context off')
-        self.assertEqual(self.engine.turns[-1]['context']['conversation'], [], 'history is still the brief\'s choice')
+        self.assertEqual(self.engine.turns[-1]['context']['conversation'], [], 'the first turn has no history yet')
 
     @mock.patch.dict('os.environ', {'TZ': 'Asia/Seoul'})  # #804: a host zone, not the CI's unset UTC
     def test_the_plan_call_reads_the_owner_model_and_selects_only_the_extra_sections(self):
-        self.script([plan('codex', 'Answer.', context=())], goals=[True])
+        self.script([plan('codex', 'Answer.')], goals=[True])
         self.run_work('오늘 점심 추천해줘')
         context, _question, schema = self.asked_plans[0]
         self.assertIn('판교 사무실', context.facts['owner_profile'])
         self.assertIn('"local_time":', context.facts['current_context'])
-        self.assertIn('always given: profile, current_context', context.facts['context_sections'])
-        self.assertEqual(schema['properties']['brief']['properties']['context']['items']['enum'], ['prepared', 'history'])
+        self.assertIn('always given to the worker: the owner\'s message verbatim, history', context.facts['context_sections'])
+        self.assertEqual(schema['properties']['brief']['properties'], {'notes': {'type': 'string'}}, '#820: no section choice')
         self.assertFalse(context.too_large())
 
     def test_a_native_search_turn_offers_save_memory_but_not_list_memory(self):
@@ -1872,12 +1823,15 @@ class OwnerModelAlwaysOn(Harness):
 
 
 class OwnerModelUnit(unittest.TestCase):
-    def test_an_attempt_always_carries_the_owner_model(self):
-        attempt = Attempt(1, 'a', goal='g', sections=(), planned=True)
+    def test_an_attempt_always_carries_every_section(self):
+        """#804, #820: the owner model, the conversation and the prepared answers are never a plan's choice."""
+        attempt = Attempt(1, 'a', notes='g', planned=True)
         self.assertEqual(attempt.section('profile', 'P'), 'P')
         self.assertEqual(attempt.section('current_context', 'C'), 'C')
-        self.assertIsNone(attempt.section('history', True))
-        self.assertIsNone(attempt.section('prepared', 'R'))
+        self.assertIs(attempt.section('history', True), True)
+        self.assertEqual(attempt.section('prepared', 'R'), 'R')
+        self.assertEqual(set(attempt.sections), set(SECTIONS))
+        self.assertIsNone(Attempt(1, 'a', planned=True).brief(), 'no notes: no notes section')
 
     def test_the_owner_model_facts_are_redacted_and_bounded(self):
         from personal_agent.orchestrator import CURRENT_CONTEXT_FACT_CHARS, PROFILE_FACT_CHARS
@@ -1895,12 +1849,12 @@ class OwnerModelUnit(unittest.TestCase):
         orchestration.first()
         self.assertEqual((seen[-1].facts['owner_profile'], seen[-1].facts['current_context']), ('none', 'none'))
 
-    def test_the_question_keeps_a_new_request_its_own_topic(self):
-        self.assertIn('Only when the owner\'s request refers to or continues recent_conversation', QUESTION)
-        self.assertIn('a new request is its own topic and is not narrowed to the previous one', QUESTION)
-        self.assertIn('the worker always receives them', QUESTION)
-        self.assertIn('brief.context lists only the extra AgentOS context sections the worker needs (history, prepared)',
-                      QUESTION)
+    def test_the_question_leaves_the_owners_message_to_the_worker(self):
+        """#820: no topic-continuation or statement-handling wording: the worker reads the message itself."""
+        self.assertNotIn('brief.goal', QUESTION)
+        self.assertNotIn('topic', QUESTION)
+        self.assertNotIn('propose a memory', QUESTION)
+        self.assertIn('it decides for itself what the message needs', QUESTION)
 
 
 class StatedProfileInLookups(unittest.TestCase):
@@ -2109,3 +2063,83 @@ class CatalogueMatchesOffered(Harness):
         self.assertNotIn('propose_current_state', worker_catalogue(self.service).worker('codex')['tools'])
         self.service.context_observations.set_controls({'enabled': True})
         self.assertIn('propose_current_state', worker_catalogue(self.service).worker('codex')['tools'])
+
+
+class ThinOrchestration(Harness):
+    """ARCH-THIN-01 (#820), live Work 2026-09-28 16:05 KST: the owner said "점심은 이미 반포6 분짜오 먹었어".
+
+    Observed on main 65e75e3: the plan narrowed the goal to a short acknowledgement with an empty tool
+    subset; the worker acknowledged; the goal judgment (observations only) said not reached three times,
+    three workers ran and the Work was stored ``failed``.  Now the owner's words, the conversation and the
+    full toolset reach the worker, one judgment reads the reply, and the Work ends succeeded.
+    """
+
+    STATEMENT = '점심은 이미 반포6 분짜오 먹었어'
+    ACK = '오늘 점심은 이미 반포6에서 분짜오를 드셨군요.'
+
+    def earlier_turn(self):
+        self.engine.answers = ['근처 점심으로 분짜와 국밥을 추천드려요.']
+        self.run_work('점심 뭐 먹을까?')
+
+    def test_an_owner_statement_acknowledged_ends_succeeded_after_one_attempt(self):
+        self.earlier_turn()
+        before = len(self.engine.turns)
+        self.engine.answers = [self.ACK]
+        # The plan of the live Work: notes that narrow to an acknowledgement, and an empty tool subset.
+        self.script([plan('codex', 'Short acknowledgement only.', tools=()),
+                     plan('openai', 'Other path.'), plan('codex', 'Third.', model='gpt-5.6-luna')],
+                    goals=[True, False, False])
+        job, row = self.run_work(self.STATEMENT)
+        self.assertEqual(row['status'], 'succeeded')
+        self.assertEqual(row['response'], self.ACK)
+        self.assertEqual(len(self.asked_plans), 1, 'one plan call')
+        self.assertEqual(len(self.asked_goals), 1, 'one outcome judgment')
+        self.assertEqual(len(self.engine.turns) - before, 1, 'no re-delegation')
+        self.assertEqual(self.transport.bodies, [])
+        turn = self.engine.turns[-1]
+        # The owner's words verbatim, with the conversation; the notes only add to them.
+        self.assertEqual(turn['context']['request'], self.STATEMENT)
+        self.assertEqual([m['content'] for m in turn['context']['conversation']],
+                         ['점심 뭐 먹을까?', '근처 점심으로 분짜와 국밥을 추천드려요.'])
+        self.assertTrue(turn['prompt'].endswith('# Current request\n' + self.STATEMENT))
+        # The empty subset never narrows the worker: the Memory write path stays offered.
+        self.assertIsNone(turn['only'])
+        self.assertIn('save_memory', turn['offered'])
+        [(_status, planned)] = self.events(job, 'planned')
+        self.assertEqual(planned['tools_replaced'], {'requested': [], 'why': 'shape'})
+        # The one judgment read the reply and the conversation, not a plan-written goal.
+        [judged] = self.asked_goals
+        self.assertEqual(judged.facts['owner_request'], self.STATEMENT)
+        self.assertEqual(judged.facts['reply'], self.ACK)
+        self.assertIn('점심 뭐 먹을까?', judged.facts['recent_conversation'])
+        self.assertNotIn('acknowledgement', json.dumps(judged.facts, ensure_ascii=False))
+        # A succeeded Work gets the #805 owner-model upkeep, which proposes the stated fact.
+        with self.store.db() as db:
+            self.assertIn(job, [r['job_id'] for r in db.execute('SELECT job_id FROM owner_model_upkeep')])
+
+    def test_a_worker_that_proposes_the_fact_ends_succeeded_and_is_not_redelegated(self):
+        def propose(tools):
+            tools.capabilities.record('save_memory', 'succeeded', json.dumps(
+                {'host_action': 'save_memory', 'evidence': {'saved': False, 'state': 'pending',
+                                                            'refused_because': 'value-not-in-owner-request'}}))
+        self.engine.before = propose
+        self.engine.answers = [self.ACK + ' 기억해 둘까요?']
+        self.script([plan('codex', ''), plan('openai', 'Other path.')], goals=[False])
+        job, row = self.run_work(self.STATEMENT)
+        self.assertEqual(row['status'], 'succeeded')
+        self.assertEqual(len(self.engine.turns), 1)
+        self.assertEqual(self.transport.bodies, [], 'a memory proposal is never re-delegated')
+        self.assertIn(self.ACK, row['response'])
+
+    def test_a_reply_judged_short_is_still_delivered_and_the_notes_never_become_the_goal(self):
+        from personal_agent.conversation_projection import TERMINAL_ANSWER_LABEL
+        self.engine.answers = [self.ACK]
+        self.script([plan('codex', 'Only record the state.')], goals=[False])
+        job, row = self.run_work(self.STATEMENT)
+        self.assertEqual(row['status'], 'failed')
+        self.assertEqual(row['response'], self.ACK)
+        bubble = self.service.telegram_result_text(row['response'], row['owner_cause'], row['status'])
+        self.assertIn(TERMINAL_ANSWER_LABEL + '\n' + self.ACK, bubble)
+        prompt = self.engine.turns[-1]['prompt']
+        self.assertLess(prompt.index('Only record the state.'), prompt.index('# Current request\n' + self.STATEMENT))
+        self.assertIn('never replace or narrow the owner\'s request', prompt)

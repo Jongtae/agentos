@@ -5,12 +5,14 @@ the owner's Judgment AI (the DecisionEngine route, #580/#679) returns one
 typed plan through ``DecisionEngine.structured``:
 
 * ``worker`` - which configured AI route runs the request, and ``model``;
-* ``brief`` - the goal written for that worker, the extra AgentOS context
-  sections it needs (prepared answers, history) and the observable completion
-  criteria.  The owner model - the profile and the current-context snapshot -
-  is always given, to the worker and to the plan call (#804);
+* ``brief.notes`` - optional notes for that worker.  ARCH-THIN-01 (#820):
+  the owner's own words reach the worker verbatim, always with the owner
+  model (profile, current context), the recent conversation and the prepared
+  answers; the notes are supplementary and never replace or narrow the
+  owner's message;
 * ``tools`` - optionally, the subset of that worker's AgentOS tools offered in
-  this attempt;
+  this attempt (validated: it can only keep private reads and web search
+  apart, see ``subset_or_default``);
 * ``reason`` - one line.
 
 Deterministic code here only **validates** the plan: the worker is in the
@@ -20,8 +22,9 @@ an attempt.  It never decides what a request needs.  No request, site,
 provider or category is named in this module (tests/test_no_scenario_code.py)
 and the question text is generic.
 
-After the worker finishes, the existing ``goal_reached`` judgment (#657)
-evaluates the attempt; when the goal is not shown, the orchestrator is asked
+After the worker finishes, one outcome judgment (``goal_reached``, #657,
+#820: did the reply serve the owner's message, given the conversation and the
+tool results AgentOS recorded) evaluates the attempt; when it did not, the orchestrator is asked
 for an adjusted brief and/or another worker, at most ``MAX_REDELEGATIONS``
 times, within the Work's shared ``WorkBudget``, and never after an attempt
 that ran an action with an effect (C8: a re-delegation must not repeat one).
@@ -45,18 +48,15 @@ from .decision import MAX_CONTEXT_CHARS, OUTCOME_DECIDED, OUTCOME_MALFORMED, Dec
 
 #: AgentOS context sections of a turn (``agent_runtime.turn_context``).
 SECTIONS = ('profile', 'current_context', 'prepared', 'history')
-#: #804: the owner model every attempt and the plan call carry, whatever the brief selects.
-ALWAYS_SECTIONS = ('profile', 'current_context')
-#: The extra sections a brief selects.
-SELECTABLE_SECTIONS = tuple(name for name in SECTIONS if name not in ALWAYS_SECTIONS)
+#: #804, #820: every attempt carries every section - the owner model, the prepared
+#: answers and the recent conversation.  A plan no longer selects or drops any.
+ALWAYS_SECTIONS = SECTIONS
 #: Re-delegations after the first attempt (so at most three attempts per Work).
 MAX_REDELEGATIONS = 2
 #: An attempt is started only while the Work's deadline leaves at least this.
 MIN_ATTEMPT_SECONDS = 60
 #: Bounds of the plan text AgentOS keeps and forwards.
-MAX_GOAL_CHARS = 1200
-MAX_CRITERIA = 5
-MAX_CRITERION_CHARS = 300
+MAX_NOTES_CHARS = 1200
 MAX_REASON_CHARS = 200
 #: Bounds of the facts the orchestrator is asked over, besides the owner's
 #: request and the catalogue, which are never cut.
@@ -65,6 +65,9 @@ ATTEMPTS_CHARS = 1800
 ANSWER_EXCERPT_CHARS = 600
 OBSERVATION_CHARS = 3800
 FAILURE_CHARS = 600
+#: The worker's reply as the outcome judgment reads it (#820): whole.  It is the
+#: delivered answer's own cap, so no claim in the reply is hidden from the judgment.
+REPLY_CHARS = 24000
 #: #804: the owner model the plan call reads (redacted, then cut).
 PROFILE_FACT_CHARS = 1200
 CURRENT_CONTEXT_FACT_CHARS = 1200
@@ -113,12 +116,12 @@ FALLBACK_TEXT = {
 NOTICE_ONCE = ('참고: 판단 AI를 지금 사용할 수 없어 요청마다 알맞은 AI를 고르지 않고 기본 AI가 요청을 그대로 '
                '처리합니다. 판단 AI가 다시 응답하면 자동으로 돌아갑니다.')
 EVALUATED_TEXT = {
-    REACHED: '목표 달성이 확인되었습니다.',
-    NOT_REACHED: '관찰된 결과로 목표 달성이 확인되지 않았습니다.',
-    UNJUDGED: '목표 달성 여부를 판단할 수 없었습니다.',
+    REACHED: '답변이 요청에 부응한 것으로 판단되었습니다.',
+    NOT_REACHED: '답변이 요청에 부응하지 못한 것으로 판단되었습니다.',
+    UNJUDGED: '답변이 요청에 부응했는지 판단할 수 없었습니다.',
     OWNER_NEEDED: '소유자의 확인이나 정보가 필요합니다.',
     WORKER_FAILED: '작업 AI가 이 시도를 끝내지 못했습니다.',
-    NOT_JUDGED: '더 맡길 수 없는 시도라 목표 달성 여부를 따로 판단하지 않았습니다.',
+    NOT_JUDGED: '더 맡길 수 없는 시도라 요청에 부응했는지 따로 판단하지 않았습니다.',
 }
 NEXT_TEXT = {
     'redelegate': '계획을 조정해 다시 맡깁니다.',
@@ -126,55 +129,45 @@ NEXT_TEXT = {
     STOP_LIMIT: f'다시 맡기는 횟수 한도({MAX_REDELEGATIONS}회)에 도달해 더 맡기지 않았습니다.',
     STOP_BUDGET: '남은 작업 시간이나 턴이 부족해 더 맡기지 않았습니다.',
     STOP_EFFECT: '이 시도에서 되돌릴 수 없는 작업이 실행되어 같은 요청을 다시 맡기지 않았습니다.',
-    STOP_UNJUDGED: '목표 달성 여부를 판단할 수 없어 더 맡기지 않았습니다.',
+    STOP_UNJUDGED: '요청에 부응했는지 판단할 수 없어 더 맡기지 않았습니다.',
     STOP_OWNER: '소유자의 확인이나 정보가 필요해 더 맡기지 않았습니다.',
     STOP_REPLAN: '판단 AI가 새 계획을 내지 못해 더 맡기지 않았습니다.',
 }
 DEFAULT_MODEL_LABEL = '기본 모델'
 #: The evaluator's reason as the next plan call reads it (#729).
 EVALUATION_REASON = {
-    REACHED: 'the recorded observations showed the goal met',
-    NOT_REACHED: 'the recorded observations did not show the goal met',
-    UNJUDGED: 'the goal could not be judged',
+    REACHED: 'the reply was judged to serve the owner\'s message',
+    NOT_REACHED: 'the reply was judged not to serve the owner\'s message (the recorded observations did not show the goal met)',
+    UNJUDGED: 'whether the reply served the owner\'s message could not be judged',
     OWNER_NEEDED: 'the owner\'s confirmation or information is needed',
     WORKER_FAILED: 'the worker did not finish the attempt',
     NOT_JUDGED: 'not judged: nothing more could follow',
 }
 
 #: The orchestration question.  Generic by construction: it names no request,
-#: site, provider or category (C16).
+#: site, provider or category (C16).  ARCH-THIN-01 (#820): the plan chooses the
+#: worker, model and tools; it never restates, replaces or narrows the owner's
+#: message, which the worker always receives verbatim with the conversation.
 QUESTION = (
-    'Plan how the owner\'s request is handled by one of the AI workers listed. You orchestrate: you choose the '
-    'worker and model and write the brief the worker receives; you do not do the work yourself. Choose an '
-    'available worker whose capabilities and tools fit what the request needs; when several fit, prefer lower '
-    'cost and latency. model is "" for the worker\'s default or one of the models listed for it. brief.goal says '
-    'what the worker must achieve, specific and self-contained, in the owner\'s language, at the level a capable '
-    'personal secretary would deliver for the owner\'s situation: the specific options or result, the current '
-    'facts they depend on from cited sources, and their fit to what the conversation says; when the answer depends '
-    'on facts that change over time or depend on place, the brief asks the worker to look them up and never rules '
-    'that out unless the owner asked not to look anything up. owner_profile and current_context are the owner\'s '
-    'standing facts and current time and situation; the worker always receives them, so fit the brief to them. '
-    'Only when the owner\'s request refers to or continues recent_conversation, resolve what it refers to or leaves '
-    'unsaid from that conversation and write it into brief.goal, and select history; a new request is its own '
-    'topic and is not narrowed to the previous one. When the owner tells AgentOS something about themselves or '
-    'their situation rather than asking, brief.goal is a secretary\'s response: acknowledge it, update what AgentOS '
-    'knows (propose a memory for a durable fact), and act on what it changes - earlier advice or plans in the '
-    'conversation that no longer fit, timing that has passed, and a brief apology where AgentOS fell short. '
-    'Do not brief the worker to ask the owner for something the '
-    'conversation or the owner\'s facts already say. brief.context lists only the extra AgentOS context sections '
-    'the worker needs (history, prepared); brief.completion_criteria lists the observable specifics that '
-    'show the goal is met at that level (for example named options with their current facts and sources), not '
-    'only that an answer was given. tools_mode is "worker_default": the worker keeps its full offered toolset and chooses among '
-    'the tools itself; tools is then [] and tools_reason "". The only subset AgentOS keeps is one that keeps '
-    'private-read tools and web search apart: it removes either the private-read tools or the web-search tools '
-    '(web_search, bounded_public_research) and nothing else, with tools_reason saying so; any other subset is '
-    'replaced by the full toolset. The '
-    'tool_descriptions fact says what each tool does. On a worker with its own web search, web_search means that '
-    'search; a private-read tool and the worker\'s own web search are never on in the same attempt, so selecting a '
-    'private-read tool turns that search off for the attempt. When earlier attempts are listed, they did not meet '
-    'the goal: read what each one called, what failed or never completed and why it was judged short, then change '
-    'the worker, the model, the tools or the brief. A combination of worker, model and tools that already fell '
-    'short is refused. reason is one short line saying why this worker and brief fit.')
+    'Plan which of the AI workers listed handles the owner\'s message. You orchestrate: you choose the worker and '
+    'model; you do not do the work yourself and you do not rewrite the owner\'s message. The worker always receives '
+    'the owner\'s message verbatim together with recent_conversation, owner_profile, current_context and any '
+    'prepared answers, and it decides for itself what the message needs. Choose an available worker whose '
+    'capabilities and tools fit the message; when several fit, prefer lower cost and latency. model is "" for the '
+    'worker\'s default or one of the models listed for it. brief.notes is optional ("" for none): short factual notes '
+    'the worker may find useful that it would not otherwise have (for example what an earlier attempt of this Work '
+    'tried and why it fell short). Notes never restate, replace, narrow or extend the owner\'s message, never tell '
+    'the worker to skip looking something up or to skip a tool, and never ask it to ask the owner for something. '
+    'tools_mode is "worker_default": the worker keeps its full offered toolset; tools is then [] and tools_reason "". '
+    'The only subset AgentOS keeps is one that keeps private-read tools and web search apart: it removes either the '
+    'private-read tools or the web-search tools (web_search, bounded_public_research) and nothing else, with '
+    'tools_reason saying so; any other subset is replaced by the full toolset. The tool_descriptions fact says what '
+    'each tool does. On a worker with its own web search, web_search means that search; a private-read tool and the '
+    'worker\'s own web search are never on in the same attempt, so selecting a private-read tool turns that search '
+    'off for the attempt. When earlier attempts are listed, their replies were judged not to serve the owner\'s '
+    'message: read what each one called, what failed or never completed and why, then change the worker, the model '
+    'or the tools. A combination of worker, model and tools that already fell short is refused. reason is one short '
+    'line saying why this worker fits.')
 PURPOSE = 'work-orchestration'
 
 
@@ -456,11 +449,8 @@ def plan_schema(workers):
                 'worker': {'type': 'string', 'enum': [worker['id'] for worker in workers]},
                 'model': {'type': 'string'},
                 'brief': {'type': 'object', 'additionalProperties': False,
-                          'properties': {'goal': {'type': 'string'},
-                                         'context': {'type': 'array',
-                                                     'items': {'type': 'string', 'enum': list(SELECTABLE_SECTIONS)}},
-                                         'completion_criteria': {'type': 'array', 'items': {'type': 'string'}}},
-                          'required': ['goal', 'context', 'completion_criteria']},
+                          'properties': {'notes': {'type': 'string'}},
+                          'required': ['notes']},
                 'tools_mode': {'type': 'string', 'enum': [TOOLS_DEFAULT, TOOLS_SUBSET]},
                 'tools': {'type': 'array', 'items': item},
                 'tools_reason': {'type': 'string'},
@@ -473,8 +463,7 @@ def plan_shape(data):
     brief = data.get('brief')
     strings = lambda value: isinstance(value, list) and all(isinstance(item, str) for item in value)  # noqa: E731
     return (isinstance(data.get('worker'), str) and isinstance(data.get('model'), str)
-            and isinstance(brief, dict) and isinstance(brief.get('goal'), str)
-            and strings(brief.get('context')) and strings(brief.get('completion_criteria'))
+            and isinstance(brief, dict) and isinstance(brief.get('notes'), str)
             and data.get('tools_mode') in (TOOLS_DEFAULT, TOOLS_SUBSET) and strings(data.get('tools'))
             and isinstance(data.get('tools_reason'), str) and isinstance(data.get('reason'), str))
 
@@ -531,14 +520,14 @@ class Attempt:
     """One worker run of a Work: from a validated plan, or the default fallback.
 
     ``tools`` is a frozenset (the validated subset) or None (the worker's usual
-    set); ``sections`` is the set of context sections the worker receives,
-    always including ``ALWAYS_SECTIONS`` (#804).
+    set).  Every attempt receives every context section (#804, #820); ``notes``
+    are the plan's optional supplementary notes, never a goal of their own.
     """
 
-    __slots__ = ('number', 'worker', 'model', 'goal', 'criteria', 'sections', 'tools', 'reason', 'planned',
+    __slots__ = ('number', 'worker', 'model', 'notes', 'sections', 'tools', 'reason', 'planned',
                  'fallback', 'digest', 'tools_reason', 'replaced', 'signature')
 
-    def __init__(self, number, worker, *, model='', goal='', criteria=(), sections=SECTIONS, tools=None, reason='',
+    def __init__(self, number, worker, *, model='', notes='', tools=None, reason='',
                  planned=False, fallback='', tools_reason='', replaced=None):
         self.number, self.worker, self.model = number, worker, model
         self.tools_reason = tools_reason
@@ -546,27 +535,28 @@ class Attempt:
         self.replaced = replaced
         #: The worker, effective model and tool set this attempt ran with, fixed at validation.
         self.signature = None
-        self.goal, self.criteria, self.sections = goal, tuple(criteria), frozenset(sections) | frozenset(ALWAYS_SECTIONS)
+        self.notes, self.sections = notes, frozenset(ALWAYS_SECTIONS)
         self.tools = None if tools is None else frozenset(tools)
         self.reason, self.planned, self.fallback = reason, planned, fallback
-        self.digest = digest({'goal': goal, 'criteria': list(criteria), 'sections': sorted(self.sections),
-                              'tools': None if tools is None else sorted(self.tools)}) if planned else ''
+        self.digest = digest({'notes': notes, 'tools': None if tools is None else sorted(self.tools)}) if planned else ''
 
     def brief(self, adjusted=False):
-        """The brief section text a worker receives, or None for a fallback attempt."""
+        """The notes section text a worker receives, or None (#820: supplementary only).
+
+        None for a fallback attempt and for a planned first attempt without
+        notes; a re-delegated attempt says an earlier reply fell short.
+        """
         if not self.planned:
             return None
-        lines = [f'Goal: {self.goal}']
-        if self.criteria:
-            lines.append('Done when:')
-            lines.extend(f'- {criterion}' for criterion in self.criteria)
+        lines = [self.notes] if self.notes else []
         if adjusted:
-            lines.append('An earlier attempt did not meet this goal; this brief was adjusted for this attempt.')
-        return '\n'.join(lines)
+            lines.append('An earlier attempt\'s reply was judged not to serve the owner\'s message; this attempt runs '
+                         'with a different worker, model or tools.')
+        return '\n'.join(lines) or None
 
     def section(self, name, value):
-        """``value`` when this attempt's brief selected the section ``name`` or it is always given (#804), else None."""
-        return value if name in self.sections else None
+        """``value``: every attempt receives every context section (#804, #820)."""
+        return value
 
     def native_search(self, enabled, reason, private_tools):
         """The CLI's own web search for this attempt: the existing gate, narrowed by the tool choice.
@@ -643,14 +633,10 @@ class Orchestration:
                 f're-delegations after the first attempt')
 
     def _sections_text(self):
-        parts = []
-        for name in SELECTABLE_SECTIONS:
-            value = self.sections.get(name)
-            if name == 'history':
-                parts.append(f'history ({int(value or 0)} earlier messages)')
-            else:
-                parts.append(f'{name} ({len(value)} chars)' if value else f'{name} (empty)')
-        return ', '.join(parts) + '; always given: ' + ', '.join(ALWAYS_SECTIONS)
+        prepared = self.sections.get('prepared')
+        return (f'always given to the worker: the owner\'s message verbatim, history '
+                f'({int(self.sections.get("history") or 0)} earlier messages), owner_profile, current_context, '
+                f'prepared ({f"{len(prepared)} chars" if prepared else "empty"})')
 
     def _owner_fact(self, name, limit):
         """#804: an always-given section as the plan call reads it: redacted, then cut."""
@@ -663,7 +649,7 @@ class Orchestration:
         for attempt, evaluation, answer, summary in self.history:
             rows.append(f'attempt {attempt.number}: worker={attempt.worker} model={attempt.model or "default"} '
                         f'tools={"worker default" if attempt.tools is None else ", ".join(sorted(attempt.tools)) or "none"} '
-                        f'goal={one_line(attempt.goal, 300) or "the raw request"} '
+                        f'notes={one_line(attempt.notes, 300) or "none"} '
                         f'what happened={one_line(summary, 500) or "no tool was called"} '
                         f'evaluation={evaluation} ({EVALUATION_REASON.get(evaluation, evaluation)}) '
                         f'answer excerpt (model-stated)={one_line(answer, ANSWER_EXCERPT_CHARS)}')
@@ -724,14 +710,8 @@ class Orchestration:
             # #735 review: the worker's default was refused for this account;
             # this attempt runs the substitute the catalogue chose, explicitly.
             model = worker['default_model']
-        brief = data['brief']
-        goal = brief['goal'].strip()[:MAX_GOAL_CHARS]
-        if not goal:
-            return None, 'brief'
-        if any(name not in SECTIONS for name in brief['context']):
-            return None, 'sections'
-        # #804: an always-given section named in the brief changes nothing.
-        criteria = [one_line(item, MAX_CRITERION_CHARS) for item in brief['completion_criteria'] if item.strip()][:MAX_CRITERIA]
+        # #820: notes are optional and supplementary; the owner's message is the goal.
+        notes = data['brief']['notes'].strip()[:MAX_NOTES_CHARS]
         tools_reason = one_line(data['tools_reason'], MAX_REASON_CHARS)
         tools, replaced = None, None
         if data['tools_mode'] == TOOLS_SUBSET:
@@ -741,8 +721,7 @@ class Orchestration:
             return None, 'repeat'
         if not self.budget_allows():
             return None, 'budget'
-        attempt = Attempt(number, worker['id'], model=model, goal=goal, criteria=criteria, sections=brief['context'],
-                          tools=tools, reason=one_line(data['reason'], MAX_REASON_CHARS), planned=True,
+        attempt = Attempt(number, worker['id'], model=model, notes=notes, tools=tools, reason=one_line(data['reason'], MAX_REASON_CHARS), planned=True,
                           tools_reason=tools_reason if tools is not None else '', replaced=replaced)
         attempt.signature = self.signature(worker, model, tools)
         return attempt, ''
@@ -829,57 +808,34 @@ class Orchestration:
         return NOT_REACHED
 
     def evaluate_answer(self, answer, observations, failed='', final=False):
-        """One ``goal_reached`` judgment over a CLI attempt's final answer and recorded tool evidence.
+        """The one outcome judgment of a CLI attempt (#657, #820).
 
-        Not asked when the Work's deadline no longer allows another attempt
-        (``NOT_JUDGED``, next step ``budget``), unless ``final`` (#752): no
-        attempt can follow and the judgment only decides this attempt's
-        outcome, so the Work need only be neither stopped nor past its deadline.
+        ``goal_reached`` over the owner's message (whole), the recent
+        conversation, the worker's reply (model-stated) and the tool results
+        AgentOS recorded for this attempt: did the reply serve the owner's
+        message?  A reply that asks the owner for something the message needs
+        and the conversation does not give serves it.  Nothing the plan wrote
+        is part of the question.  Not asked when the Work's deadline no longer
+        allows another attempt (``NOT_JUDGED``, next step ``budget``), unless
+        ``final`` (#752): no attempt can follow and the judgment only decides
+        this attempt's outcome, so the Work need only be neither stopped nor
+        past its deadline.
         """
         goal_reached = getattr(self.judgments, 'goal_reached', None)
         if goal_reached is None:
             return UNJUDGED
         if not (self.may_judge() if final else self.budget_allows()):
             return NOT_JUDGED
-        text = (f'The worker\'s final answer (model-stated, not an observation):\n{str(answer or "")[:1800]}\n\n'
-                f'Tool results AgentOS recorded for this attempt:\n{observations or "none"}')[:OBSERVATION_CHARS]
-        attempt = self.attempts[-1] if self.attempts else None
-        criteria = '\n'.join(f'- {item}' for item in (attempt.criteria if attempt is not None else ()))
+        observed = str(observations or 'none')[:OBSERVATION_CHARS]
+        # Redacted, then bounded only by the delivered answer's own cap (#820 review): every claim is judged.
+        reply = self._redact(answer)[:REPLY_CHARS]
         try:
-            # #767: judged against the brief's completion criteria too, not only the raw request.
-            judged = goal_reached(self.request, text, str(failed or '')[:FAILURE_CHARS], work_id=self.work_id,
-                                  criteria=criteria)
+            judged = goal_reached(self.request, observed, str(failed or '')[:FAILURE_CHARS], work_id=self.work_id,
+                                  answer=reply, conversation=self._redact(self.conversation)[-CONVERSATION_CHARS:])
         except Exception:
             return UNJUDGED
         verdict = getattr(judged, 'outcome', None)
-        if verdict == 'no' and self.owner_input_needed(answer):
-            # #740: the worker asked the owner for what the request needs; another
-            # worker cannot supply it, so the question is the reply.
-            return OWNER_NEEDED
         return REACHED if verdict == 'yes' else NOT_REACHED if verdict == 'no' else UNJUDGED
-
-    def owner_input_needed(self, answer):
-        """Does the worker's final answer ask the owner for input the request needs (#740)?
-
-        One judgment over the owner's request, the recent conversation and the
-        answer, asked only after ``goal_reached`` said no.  A question the
-        request or the conversation already answers is not needed; unavailable
-        or unsure is no, so the attempt stays short.
-        """
-        judge = getattr(self.judgments, 'owner_input_needed', None)
-        if judge is None or not str(answer or '').strip() or not self.may_judge():
-            return False
-        # Redacted before it is cut; the answer keeps its head and its tail, where a question usually is.
-        answer = self._redact(answer)
-        limit = ANSWER_EXCERPT_CHARS * 3
-        if len(answer) > limit:
-            answer = answer[:limit // 2] + ' … ' + answer[-limit // 2:]
-        try:
-            judged = judge(self.request, self._redact(self.conversation)[-CONVERSATION_CHARS:], answer,
-                           work_id=self.work_id)
-        except Exception:
-            return False
-        return getattr(judged, 'outcome', None) == 'yes'
 
     def may_judge(self):
         """Whether a judgment that can only end the Work may still be asked: not stopped, deadline not passed.

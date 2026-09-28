@@ -154,6 +154,11 @@ class PresenceEval(unittest.TestCase):
         # completion judgment.
         self.claim = False
         self.goal_reached = True
+        # #820: a plain reply after tools is judged by the same one outcome judgment.  The
+        # matrix's scripted plain replies claim more than their observations show, so the
+        # fixture judges them not served unless a test says otherwise.
+        self.plain_reply_served = False
+        self.finish_sent = False
         self.service = self.make_service()
         self.store.put('telegram', {'enabled': True, 'user_id': CHAT, 'generation': GENERATION, 'cursor': 0})
 
@@ -192,6 +197,7 @@ class PresenceEval(unittest.TestCase):
                 if m.get('role') == 'tool' and str(m.get('content', '')).startswith('{')]
         if self.claim and tools and any(refs):
             self.claim = False
+            self.finish_sent = True
             return {'message': {'content': '', 'tool_calls': [
                 {'id': 'finish', 'function': {'name': 'finish', 'arguments': {
                     'status': 'done', 'evidence_refs': [ref for ref in refs if ref], 'summary': self.text}}}]}}
@@ -216,7 +222,8 @@ class PresenceEval(unittest.TestCase):
 
         def judge(context, proposition):
             if context.purpose == 'goal-reached':
-                return BinaryDecision(OUTCOME_DECIDED, self.goal_reached, fixture_confidence())
+                served, self.finish_sent = (self.goal_reached if self.finish_sent else self.plain_reply_served), False
+                return BinaryDecision(OUTCOME_DECIDED, served, fixture_confidence())
             if context.purpose == 'explicit-memory-request':
                 return BinaryDecision(OUTCOME_DECIDED, context.facts.get('owner_message') in self.remember_requests,
                                       fixture_confidence())

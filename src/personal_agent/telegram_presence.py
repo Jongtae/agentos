@@ -122,6 +122,7 @@ FALLBACK_STEP_LINES = {
     'delegate_agent': (None, '전문 에이전트에게 맡기는 중'),
     'propose_current_state': (None, '현재 상황 기록 중'),
     'schedule_preparation': (None, '예약 만드는 중'),
+    'ask_location': (None, '위치 요청 중'),
 }
 
 

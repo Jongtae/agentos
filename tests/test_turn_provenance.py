@@ -263,6 +263,8 @@ class ServiceProvenance(unittest.TestCase):
         # run (the same check `Capabilities.offered_tools` applies: no factory, no tools).
         from personal_agent.agent_runtime import BROWSER_ACTIONS
         hidden = CONTEXT_GATED_ACTIONS | native_search_withheld() | (set() if service.browser_profile.available() else BROWSER_ACTIONS)
+        # #774: ask_location is offered only on a Work from the paired Telegram chat.
+        hidden |= {'ask_location'}
         self.assertEqual(record['exposed_tools'], [tool['name'] for tool in profile_mcp_tools('trusted-local')
                                                    if tool['name'] not in hidden])
         if service.browser_profile.available():

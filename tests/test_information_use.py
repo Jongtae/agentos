@@ -119,8 +119,9 @@ class RecordsOnly(unittest.TestCase):
             self.assertNotIn(STORED_SECRET, json.dumps(audit, ensure_ascii=False))
             self.assertEqual(audit['sent_to']['lookups'][0]['sources'], ['https://example.org/?token=[redacted]'])
 
-    def test_a_preflight_query_is_recovered_from_its_running_event_and_sent_wins_on_success(self):
-        """#826 review P2: the /search preflight records its query in the running event only."""
+    def test_a_failed_preflight_query_is_recovered_from_its_running_event(self):
+        """#826 review P2: the /search preflight records its query in the running event; its success
+        records ``sent`` in the Evidence."""
         with tempfile.TemporaryDirectory() as folder:
             store = QuickStore(Path(folder) / 'state')
             job = store.enqueue('/search 서울 날씨', 'records-preflight')
@@ -130,11 +131,13 @@ class RecordsOnly(unittest.TestCase):
                 ('web_search', 'running', {'call_id': 'c2', 'host_action': 'web_search',
                                            'arguments': {'query': '병원 token=abcdefgh12345678'}}),
                 ('web_search', 'succeeded', {'call_id': 'c2', 'host_action': 'web_search',
-                                             'evidence': {'sent': {'query': '병원'}, 'result_count': 0}})])
+                                             'evidence': {'sent': {'query': '병원'}, 'result_count': 0}}),
+                ('web_search', 'running', {'call_id': 'c3', 'host_action': 'web_search', 'arguments': {'query': 'raw words'}}),
+                ('web_search', 'succeeded', {'call_id': 'c3', 'host_action': 'web_search', 'evidence': {'result_count': 0}})])
             lookups = information_use.work_information_use(store, job)['sent_to']['lookups']
             self.assertEqual([(row['status'], row['queries']) for row in lookups],
-                             [('failed', ['서울 날씨']), ('succeeded', ['병원'])],
-                             'what AgentOS sent is the record, not the worker\'s dropped credential shape')
+                             [('failed', ['서울 날씨']), ('succeeded', ['병원']), ('succeeded', [])],
+                             'a success shows what its Evidence says left, never the worker\'s raw arguments')
 
 
 class _ServiceBase(unittest.TestCase):

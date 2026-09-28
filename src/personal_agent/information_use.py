@@ -91,8 +91,9 @@ def context_claims(text):
     """Refs and short labels of a rendered current-context snapshot (#627, #804)."""
     body = _json_after_legend(text)
     claims = []
-    if body.get('local_time'):
-        claims.append({'ref': 'clock', 'label': f"현재 시각 ({_text(body.get('timezone'), 40)})"})
+    if body.get('local_time') or body.get('as_of'):
+        # #804: every turn carries the clock, with the zone when one is known.
+        claims.append({'ref': 'clock', 'label': f"현재 시각 ({_text(body.get('timezone') or 'unknown', 40)})"})
     for item in body.get('hypotheses') or ():
         if isinstance(item, dict):
             claims.append({'ref': _text(item.get('ref'), 60), 'label': _text(item.get('predicate'), 60)})
@@ -240,9 +241,12 @@ def work_information_use(store, job_id, redact=None):
         if status == 'succeeded' and action in READ_CATEGORIES:
             add(READ_CATEGORIES[action], _event_items(action, evidence))
         if action in LOOKUP_ACTIONS and status in ('succeeded', 'failed'):
-            # A failed lookup was still attempted: its query may have left before the failure.
-            # Either way the starting event's arguments complete what the terminal event recorded.
-            source = {**started.pop((tool, trace.get('call_id')), {}), **trace}
+            # A succeeded lookup's record is what its Evidence says left (``sent``, the CLI's reported
+            # queries); the worker's raw arguments are not shown for it.  A failed lookup was still
+            # attempted: its starting event (the worker's arguments, or the /search preflight's query)
+            # completes what the terminal event recorded.
+            begun = started.pop((tool, trace.get('call_id')), {})
+            source = trace if status == 'succeeded' else {**begun, **trace}
             lookup = _lookup(action, source, evidence)
             lookup['status'] = status
             lookup['queries'] = [label(query, QUERY_CHARS) for query in lookup['queries']]

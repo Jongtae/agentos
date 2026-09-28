@@ -691,9 +691,17 @@ finally:
         (reference/'source.txt').write_text('Aurora subscription boundary',encoding='utf-8')
         self.service.configure_file_workspace({'references':[str(reference)],'workspace':str(workspace)})
         self.store.put('subscription_engine',{'id':'codex','connected_at':0})
+        # A scripted CLI: no real engine process runs in this test.
+        from personal_agent.bounded_execution import ExecutionResult
+        seen=[]
+        class Cli:
+            def execute(self,engine,prompt,tools,**kwargs):
+                seen.append(prompt);return ExecutionResult('Aurora 요약',engine,0)
+        self.service.execution_adapter=Cli()
         job_id=self.store.enqueue('“Aurora” 자료를 요약해 “Subscription”으로 저장해줘','subscription-workspace')
         self.service.run_one();job=self.store.job(job_id)
         self.assertEqual(job['status'],'succeeded',job.get('error'));self.assertEqual(len(list(workspace.glob('*.md'))),1)
+        self.assertIn('Aurora subscription boundary',seen[0],'the approved reference excerpt reached the CLI worker')
         self.assertIn('connected-document',self.store.turn_provenance(job_id)['prompt_withheld'])
 
     def test_idempotent_requests_and_interrupted_recovery(self):

@@ -339,7 +339,10 @@ class ScoringTest(unittest.TestCase):
                                     {'dimensions': {'context_carry': {'score': 1.0, 'reason': 'ok'}}, 'summary': 's'},
                                     'judged')
         unjudged, _ = scoring.combine(scenario(), {'turns': [turn()]}, {'delivered': True}, [])
+        errored, _ = scoring.combine(scenario(), {'error': 'sandbox failed'}, *scoring.deterministic_checks(
+            scenario(), {'error': 'sandbox failed'}))
         self.assertEqual(set(judged), set(unjudged))
+        self.assertEqual(set(judged), set(errored))
         self.assertTrue(math.isnan(unjudged['rubric_context_carry']))
         self.assertTrue(math.isnan(unjudged['rubric_mean']))
         self.assertTrue(math.isnan(judged['check_preparation']))

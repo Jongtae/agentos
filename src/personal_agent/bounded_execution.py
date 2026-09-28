@@ -99,9 +99,13 @@ _BROWSER_ACTIONS = ('browser_open', 'browser_read', 'browser_find', 'browser_cli
 _PREPARATIONS = 'owner-preparations-not-bound-to-cli-route'
 #: #774: relayed to the service on the trusted-local route only.
 _OWNER_STATE_RELAYED = ('calendar_query', 'calendar_draft_create', 'calendar_draft_update', 'calendar_draft_cancel',
-                        'list_memory', 'save_memory', 'schedule_preparation', 'ask_location')
+                        'list_memory', 'save_memory', 'schedule_preparation', 'ask_location',
+                        # #814: owner settings and their confirm-before-apply drafts, held by the service.
+                        'settings_read', 'settings_change')
 #: #774: the owner's paired Telegram chat is held by the service, reached only through its relay.
 _LOCATION = 'owner-telegram-location-request-served-on-trusted-local-route-only'
+#: #814: the owner settings and their confirmation are held by the service, reached only through its relay.
+_SETTINGS = 'owner-settings-served-on-trusted-local-route-only'
 
 #: The verified limitation of the trusted-local profile (owner decision on
 #: #604).  The CLI's own built-in tools can read local host files that AgentOS
@@ -200,7 +204,7 @@ CLI_PROFILES = {
             'find_files', 'read_file', 'list_roots', 'calendar_query', 'calendar_draft_create',
             'calendar_draft_update', 'calendar_draft_cancel', 'save_memory', 'list_memory',
             'list_agents', 'delegate_agent', 'propose_current_state', 'schedule_preparation', 'ask_location',
-            *_BROWSER_ACTIONS)},
+            'settings_read', 'settings_change', *_BROWSER_ACTIONS)},
         # Pinned in Dockerfile.engine; a test keeps the two in step.
         'runtimes': {'codex': {'pinned_version': '0.153.4', 'live_tested_version': None}},
     },
@@ -225,6 +229,7 @@ CLI_PROFILES = {
             **{action: _BROWSER for action in _BROWSER_ACTIONS},
             'schedule_preparation': _PREPARATIONS,
             'ask_location': _LOCATION,
+            'settings_read': _SETTINGS, 'settings_change': _SETTINGS,
         },
         # Only these exact CLI versions passed the process-level tests; any
         # other version is refused until requalified (no silent downgrade).

@@ -21,7 +21,7 @@ from .current_context import redact_known_secrets
 from .providers import ProviderError
 from .bounded_execution import (AgentOSMcpTools, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, ExecutionError,  # noqa: F401
                                 profile_actions, redact_reason, turn_actions)
-from .cli_browser_relay import RELAYED_LOCATION_REQUEST, RELAYED_PREPARATIONS, RelayClient, unused_browser_factory
+from .cli_browser_relay import RELAYED_LOCATION_REQUEST, RELAYED_PREPARATIONS, RELAYED_SETTINGS, RelayClient, unused_browser_factory
 from .context_observations import answerable_work
 from .local_tools import LocalTools
 from .search_providers import ProviderRegistry
@@ -182,6 +182,8 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                                 # ask_location only for a Work from the paired Telegram chat, as on the direct route.
                                 location_request=(RELAYED_LOCATION_REQUEST if relay is not None
                                                   and answerable_work(store.job(job_id)) else None),
+                                # #814: a placeholder that lists the settings tools; their calls go to the service.
+                                settings=RELAYED_SETTINGS if relay is not None else None,
                                 inherited_provenance=_provenance(provenance), lookup_hint=CLI_LOOKUP_HINT,
                                 lookup_sources=_lookup_sources(store, job_id),
                                 # #607 AX-10: the same durable attempt count and

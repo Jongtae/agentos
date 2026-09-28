@@ -123,6 +123,8 @@ FALLBACK_STEP_LINES = {
     'propose_current_state': (None, '현재 상황 기록 중'),
     'schedule_preparation': (None, '예약 만드는 중'),
     'ask_location': (None, '위치 요청 중'),
+    'settings_read': (None, '설정 확인 중'),
+    'settings_change': (None, '설정 변경 초안 만드는 중'),
 }
 
 

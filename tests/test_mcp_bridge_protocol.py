@@ -250,9 +250,11 @@ class ExposedToolWireBoundary(unittest.TestCase):
         names = [tool["name"] for tool in self._listed()]
         # #774: the service relay serves the owner-state tools on the trusted-local route
         # (ask_location only to a Telegram Work: this turn is a web one).
+        # #814: and the owner settings tools.
         self.assertEqual(names, ["bounded_public_research", "calendar_draft_cancel", "calendar_draft_create",
                                  "calendar_draft_update", "calendar_query", "list_memory", "list_notes", "save_memory",
-                                 "save_note", "schedule_preparation", "weather", "web_search"])
+                                 "save_note", "schedule_preparation", "settings_change", "settings_read", "weather",
+                                 "web_search"])
         replies = self._wire(
             {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
              "params": {"name": "save_note", "arguments": {"content": "wire note"}}},
@@ -271,10 +273,11 @@ class ExposedToolWireBoundary(unittest.TestCase):
                              {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "list_notes", "arguments": {}}})
         self.assertIn("--native-search", self.server["args"])
         # #774: relayed writes stay offered; the private reads (list_memory, calendar_query) do not.
-        # #804: save_memory is one of those writes.
+        # #804: save_memory is one of those writes.  #814: the settings snapshot holds no
+        # owner material (configuration only), so the settings tools stay offered.
         self.assertEqual([tool["name"] for tool in replies[2]["result"]["tools"]],
                          ["calendar_draft_cancel", "calendar_draft_create", "calendar_draft_update", "save_memory",
-                          "save_note", "schedule_preparation", "weather"])
+                          "save_note", "schedule_preparation", "settings_change", "settings_read", "weather"])
         self.assertTrue(_refused(replies[3]))
 
     def test_an_unlisted_native_tool_is_refused_by_the_real_bridge(self):

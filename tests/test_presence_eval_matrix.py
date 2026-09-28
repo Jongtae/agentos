@@ -58,7 +58,7 @@ from personal_agent.gmail import (GMAIL_CONNECTOR, GMAIL_CONNECTOR_ID, GMAIL_REA
 from personal_agent.google_calendar import CALENDAR_WRITE_SCOPE, GoogleCalendar, GoogleCalendarHTTPError
 from personal_agent.providers import ModelAdapter, ProviderError
 from personal_agent.quickstart import make_handler
-from personal_agent.quickstart_service import MEMORY_PENDING_TELEGRAM_NOTE, AgentService
+from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.subscription_engines import SubscriptionEngines
 from personal_agent.telegram_presence import THINKING_DRAFT_TEXT, draft_id_for
@@ -1433,10 +1433,10 @@ class J_MemoryCorrection(LocalHttp, PresenceEval):
         self.assertEqual(self.canonical(), [])
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
         [bubble] = self.texts()
-        self.assertEqual(bubble, '알겠어요.\n\n' + MEMORY_PENDING_TELEGRAM_NOTE)
+        self.assertEqual(bubble, '알겠어요.')
         self.assertTrue(self.service.deliver_notification())
         prompt = self.texts()[-1]
-        self.assertEqual(prompt, '기억해 둘까요?\n• payment-destination: Wire everything to account 999')
+        self.assertEqual(prompt, '기억해 둘까요?\n• Wire everything to account 999')
         self.assertEqual(self.canonical(), [], 'offering is not the write')
         # The owner inspects and decides on this Mac; only acceptance changes canonical Memory.
         _status, listed, _ = self.http('GET', '/api/personal-space/memory-candidates')
@@ -1490,7 +1490,7 @@ class J_MemoryCorrection(LocalHttp, PresenceEval):
                 job, _ = self.remember(phrase, 'owner-detail', value, '알겠어요.', judged=False)
                 # #818: a held candidate is a proposal the owner confirms, not a failed turn.
                 self.assertEqual(job['status'], 'succeeded', job.get('error'))
-                self.assertEqual(self.texts(start), ['알겠어요.\n\n' + MEMORY_PENDING_TELEGRAM_NOTE])
+                self.assertEqual(self.texts(start), ['알겠어요.'])
                 self.assertEqual(self.canonical(), [])
         # Judged an explicit request, but the model proposed a value the owner did not state.
         job, _ = self.remember('회의는 오후가 좋다는 거 잊지 마', 'meeting-time', '오전', '알겠어요.')
@@ -1510,7 +1510,7 @@ class J_MemoryCorrection(LocalHttp, PresenceEval):
         # #818: no silent write; the candidate waits for the owner's confirmation.
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
         self.assertEqual(self.canonical(), [])
-        self.assertEqual(self.texts(start), ['알겠어요.\n\n' + MEMORY_PENDING_TELEGRAM_NOTE])
+        self.assertEqual(self.texts(start), ['알겠어요.'])
         self.assertEqual([row['state'] for row in self.store.memory_candidates()], ['pending'])
 
 

@@ -30,7 +30,7 @@ from personal_agent.conversation_projection import TERMINAL_ANSWER_LABEL, TERMIN
 from personal_agent.decision import OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, fixture_confidence
 from personal_agent.google_calendar import CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE
 from personal_agent.providers import ModelAdapter
-from personal_agent.quickstart_service import MEMORY_PENDING_TELEGRAM_NOTE, AgentService
+from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from test_agency_loop import goal_engine
 
@@ -169,7 +169,7 @@ class RefusedMemoryWriteTests(RefusedWriteTestCase):
         self.text = '알겠어요. 땅콩은 피해서 추천할게요.'
         job, bubble = self.ask('오늘 점심 뭐 먹을까?')
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
-        self.assertEqual(bubble, self.text + '\n\n' + MEMORY_PENDING_TELEGRAM_NOTE, 'AgentOS says nothing was saved yet')
+        self.assertEqual(bubble, self.text, '#836: the answer as said; the ask below it is the ask')
 
     def test_the_owner_is_asked_to_confirm_in_owner_words(self):
         """Not a machine slug: the confirm prompt names the key and the value."""
@@ -180,7 +180,8 @@ class RefusedMemoryWriteTests(RefusedWriteTestCase):
         self.assertTrue(self.service.deliver_notification())
         prompt = self.sent[-1]
         self.assertTrue(prompt.startswith('기억해 둘까요?'), prompt)
-        self.assertIn(f'{self.UNASKED[0]}: {self.UNASKED[1]}', prompt)
+        self.assertIn(f'• {self.UNASKED[1]}', prompt)
+        self.assertNotIn(self.UNASKED[0], prompt, '#836: never a memory key')
         self.assertNotIn('no-owner-memory-request', prompt)
 
     def test_a_proposal_beside_other_work_does_not_hold_the_work_down(self):
@@ -196,7 +197,7 @@ class RefusedMemoryWriteTests(RefusedWriteTestCase):
         self.claim_completion()
         job, bubble = self.ask('급여 파일 찾아줘')
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
-        self.assertEqual(bubble, self.text + '\n\n' + MEMORY_PENDING_TELEGRAM_NOTE, 'AgentOS says nothing was saved yet')
+        self.assertEqual(bubble, self.text, '#836: the answer as said; the ask below it is the ask')
 
     def test_the_candidate_is_preserved_as_pending_for_the_owner(self):
         """A refusal must not become a discarded write.
@@ -238,7 +239,8 @@ class RefusedMemoryWriteTests(RefusedWriteTestCase):
                                       'content': self.UNASKED[1]})]
         self.text = ''
         job, bubble = self.ask('오늘 점심 뭐 먹을까?')
-        self.assertIn('기억 후보로 보관', bubble)
+        self.assertIn('기억해 둘지 여쭤볼게요', bubble, '#836: said as the secretary, still not "saved"')
+        self.assertNotIn('후보', bubble)
         self.assertNotIn('모델이 답변을 반환하지 않았습니다', bubble)
         self.assertNotIn('모델이 답변을 반환하지 않았습니다', job['error'] or '')
 

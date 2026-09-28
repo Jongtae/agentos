@@ -321,29 +321,35 @@ BROWSER_LOGIN_NO_SESSION_LINE=('주의: 이 사이트는 AgentOS 로그인 창�
 #: to through an AgentOS login window (evidence of a sign-in when the window closed and saved, #765).
 BROWSER_OWNER_SIGNINS_KEY='browser_owner_signins'
 BROWSER_LOGIN_SKIP_LABEL='예상한 사이트가 아니면 건너뛰기'
-#: #818: one Telegram message after a Work's reply lists the Work's pending MemoryCandidates
-#: of that moment; each is confirmed or declined through the owner's approval path.  The
-#: message is bound at send time to the shown candidate ids, their content digests and the
-#: current Memory under each key, and its buttons expire.  A candidate added later (#805
-#: upkeep) is not added to it: it is left to 내 기록.
+#: #818/#836: one Telegram ask per owner message (Work) lists that Work's pending
+#: MemoryCandidates, whoever proposed them (the worker's ``save_memory`` or #805
+#: upkeep); each is confirmed or declined through the owner's approval path.  The
+#: message is bound at send time to the shown candidate ids, their content digests
+#: and the current Memory under each key, and its buttons expire.  A candidate
+#: added later joins the same message (#836): while it is open, by an edit; once
+#: the owner answered, that answer settles it (``join_memory_prompt``).
 MEMORY_CANDIDATES_KIND='memory_candidates'
-#: #818 review: at most one later prompt per Work for candidates #805 upkeep adds after the reply.
+#: #818 review: the former separate upkeep prompt.  #836 queues none; rows sent
+#: before still accept their taps and expire.
 MEMORY_UPKEEP_KIND='memory_candidates_upkeep'
 MEMORY_PROMPT_KINDS=(MEMORY_CANDIDATES_KIND,MEMORY_UPKEEP_KIND)
-#: #818 review: AgentOS's own line under a reply whose Work left pending candidates;
-#: nothing in the model's prose is inspected (no text rules).
-MEMORY_PENDING_TELEGRAM_NOTE='기억은 아직 저장되지 않았어요. 아래에서 확인하시면 저장돼요.'
-MEMORY_PENDING_WEB_NOTE='기억은 아직 저장되지 않았어요. 내 기록에서 확인하시면 저장돼요.'
+#: #818 review, #836: the web's own line under an answer whose Work left pending
+#: candidates (the web has no inline ask); nothing in the model's prose is
+#: inspected.  Telegram carries no such line: the ask below the reply is the ask.
+MEMORY_PENDING_WEB_NOTE='기억해 둘지는 내 기록에서 골라 주세요.'
 MEMORY_CANDIDATE_IN_RECORDS='내 기록에서 확인해 주세요'
 MEMORY_CANDIDATES_HEADER='기억해 둘까요?'
+#: #836: the prompt's first line once every tappable fact was answered.
+MEMORY_CANDIDATES_SETTLED={'accepted':'기억해 둘게요.','rejected':'기억하지 않을게요.','mixed':'말씀하신 것만 기억해 둘게요.'}
 MEMORY_CANDIDATES_SHOWN=5
 MEMORY_CANDIDATE_CHARS=120
 MEMORY_CANDIDATES_TTL_SECONDS=86400
 MEMORY_CANDIDATES_SWEEP_SECONDS=60
-MEMORY_CANDIDATE_STATUS={'accepted':'기억함','rejected':'기억 안 함','outdated':'그 사이 바뀌어 처리하지 않음'}
-MEMORY_CANDIDATES_SAVED_TEXT='기억한 내용은 내 기록에서 고치거나 지울 수 있습니다.'
-MEMORY_CANDIDATES_OUTDATED_TEXT='그 사이 기억이나 후보가 바뀌어 처리하지 않은 항목이 있습니다. 내 기록에서 확인해 주세요.'
-MEMORY_CANDIDATES_EXPIRED_TEXT='확인 시간이 지나 버튼을 닫았습니다. 남은 후보는 내 기록에서 결정할 수 있습니다.'
+MEMORY_CANDIDATE_STATUS={'accepted':'기억해 둘게요','rejected':'기억하지 않을게요','outdated':'그 사이 바뀌어 그대로 두었어요'}
+MEMORY_CANDIDATES_OUTDATED_TEXT='그 사이 바뀐 것이 있어 일부는 그대로 두었어요. 내 기록에서 볼 수 있어요.'
+MEMORY_CANDIDATES_EXPIRED_TEXT='시간이 지나 여기서는 닫았어요. 남은 것은 내 기록에서 정할 수 있어요.'
+#: #836: a value written like a memory key (``word_word.word``) is shown as words.
+MEMORY_KEY_SHAPED=re.compile(r'[a-z][a-z0-9]*(?:[._][a-z0-9]+)+')
 BROWSER_LOGIN_RESULT_TEXT={'resumed':'로그인 창을 닫고 요청을 한 번 이어서 처리합니다.',
                            'skipped':'로그인을 건너뛰었습니다. 요청은 지금까지의 결과로 마칩니다.',
                            'expired':'로그인 요청 시간이 지나 창을 닫았습니다. 요청은 지금까지의 결과로 마칩니다.',
@@ -865,7 +871,7 @@ class AgentService:
                                                  cancelled=cancelled)
             upkeep.finish(work_id,state,calls,status,detail,upkeep.clock())
             LOG.info('owner-model upkeep work=%s state=%s calls=%s applied=%s',work_id,state,calls,len(detail.get('applied') or ()))
-            # #818 review: candidates this upkeep left pending get one later prompt.
+            # #836: candidates this upkeep left pending join the Work's one ask.
             if any(item.get('candidate_id') and item.get('outcome')==om.APPLIED_CANDIDATE for item in detail.get('applied') or ()):
                 self.queue_upkeep_memory_candidates(work_id)
         except Exception as exc:  # noqa: BLE001 - a background run never raises
@@ -973,32 +979,46 @@ class AgentService:
             offset+=101
         return lambda work_id:bool(keys) and isinstance(work_id,str) and self.store._work_binding(work_id) in keys
 
-    def queue_memory_candidates(self, job, kind=MEMORY_CANDIDATES_KIND, rows=None):
-        """Offer pending MemoryCandidates of this Work to the paired owner once per ``kind`` (#818).
+    def queue_memory_candidates(self, job):
+        """Ask the paired owner about this Work's pending MemoryCandidates: one ask per Work (#818, #836).
 
-        ``kind`` is the reply's prompt (queued only after the reply was sent)
-        or the one later upkeep prompt, with its own ``rows``.
+        Queued only after the reply was delivered ``sent``; it is bound when it
+        is sent to every candidate of the Work still pending then, whoever
+        proposed it (the worker or #805 upkeep).
         """
-        shown,more=(rows[:MEMORY_CANDIDATES_SHOWN],max(0,len(rows)-MEMORY_CANDIDATES_SHOWN)) if rows is not None \
-            else self.pending_memory_candidates(job['id'])
-        if shown:self.queue_notification(job,kind,fingerprint=json.dumps(
+        shown,more=self.pending_memory_candidates(job['id'])
+        if shown:self.queue_notification(job,MEMORY_CANDIDATES_KIND,fingerprint=json.dumps(
             {'candidates':[[row['id'],row['content_digest']] for row in shown],'more':more}))
 
     def queue_upkeep_memory_candidates(self, work_id):
-        """After #805 upkeep: one prompt for the pending candidates no earlier prompt listed (#818 review).
+        """After #805 upkeep: its candidates join the Work's one ask (#836).
 
-        Only for a Telegram Work whose reply was delivered ``sent``; at most one
-        per Work (the notification is unique per Work and kind).
+        Only for a Telegram Work whose reply was delivered ``sent``; before
+        that, the reply's own ask is bound at send time to everything pending.
+        No ask yet: this is the first.  An ask still queued binds them when it
+        is sent.  An ask sent, listed or answered: ``join_memory_prompt``.  An
+        ask whose buttons expired or whose delivery is unknown leaves them to
+        내 기록.  Under ``self.lock``, like the taps and the sends.
         """
-        job=self.store.job(work_id)
-        if not job or job.get('delivery')!='sent':return
-        with self.store.db() as db:
-            row=db.execute('SELECT * FROM telegram_notifications WHERE job_id=? AND kind=?',(work_id,MEMORY_CANDIDATES_KIND)).fetchone()
-        listed={item['id'] if isinstance(item,dict) else item[0] for item in (self.memory_binding(dict(row)) or {}).get('candidates',())} if row else set()
-        rows=[candidate for candidate in sorted(self.store.memory_candidates(MEMORY_OWNER,work_id,limit=101),
-                                                key=lambda candidate:(candidate['created'],candidate['id']))
-              if candidate['id'] not in listed]
-        if rows:self.queue_memory_candidates(job,MEMORY_UPKEEP_KIND,rows)
+        with self.lock:
+            job=self.store.job(work_id)
+            if not job or job.get('delivery')!='sent':return
+            with self.store.db() as db:
+                row=db.execute('SELECT * FROM telegram_notifications WHERE job_id=? AND kind=?',(work_id,MEMORY_CANDIDATES_KIND)).fetchone()
+            row=dict(row) if row else None
+            if row is None:
+                self.queue_memory_candidates(job)
+                return
+            state=row['state']
+            if state=='cancelled':
+                # Nothing was left to ask when the reply's ask was due: this is the Work's first ask.
+                shown,more=self.pending_memory_candidates(work_id)
+                if shown:self.store.update_notification(row['id'],'queued',fingerprint=json.dumps(
+                    {'candidates':[[item['id'],item['content_digest']] for item in shown],'more':more}))
+                return
+            binding=self.memory_binding(row)
+            if state in ('sent','memory_listed','memory_decided') and binding and 'sent' in binding:
+                self.join_memory_prompt(row,binding)
 
     @staticmethod
     def memory_binding(notification):
@@ -1029,54 +1049,97 @@ class AgentService:
         complete=shown==text and len(shown)<=limit
         return (shown if len(shown)<=limit else shown[:limit-1]+'…'),complete
 
-    def bind_memory_prompt(self, notification, now):
-        """What a memory prompt shows, bound at send time; None when no queued candidate is still pending (#818).
+    def memory_fact(self, text, limit):
+        """``(shown, complete)``: one fact as the owner reads it in the ask, never a memory key (#836).
 
-        Only the queued ids count: a candidate added to the Work later neither
-        changes nor cancels this prompt.  Each keeps its content digest and the
-        current Memory under its key, which a tap must still find.  ``tap`` is
-        set only when the prompt shows the key and the value complete and
-        unchanged (#818 review); any other candidate is listed for 내 기록.
+        The ask shows the value only.  A value written like a key
+        (``food_preference.rolls_and_rolls_sushi``) is shown as its words;
+        anything else as ``memory_display``.  Presentation only.
+        """
+        text=str(text or '')
+        if MEMORY_KEY_SHAPED.fullmatch(text.strip()):
+            text=text.strip().rsplit('.',1)[-1].replace('_',' ')
+        return self.memory_display(text,limit)
+
+    def memory_prompt_item(self, row):
+        """One candidate as an ask binds it (#818, #836).
+
+        Its id, content digest and key, the current Memory under the key (a
+        yes must still find it), and ``tap``: set only when the ask shows the
+        value complete and unchanged (#818 review); the key is never shown.
+        """
+        return {'id':row['id'],'digest':row['content_digest'],'key':row['memory_key'],
+                'current':self.current_memory_ref(row['memory_key']),
+                'tap':bool(self.memory_fact(row['content'],MEMORY_CANDIDATE_CHARS)[1])}
+
+    def bind_memory_prompt(self, notification, now):
+        """What a memory ask shows, bound at send time; None when nothing is pending (#818, #836).
+
+        The Work's one ask binds every candidate of the Work still pending
+        when it is sent, oldest first, up to ``MEMORY_CANDIDATES_SHOWN``.  (A
+        former upkeep prompt, #818 review, binds only its queued ids.)
         """
         queued=self.memory_binding(notification)
         if not queued or 'sent' in queued:return None
-        candidates=[]
-        for item in queued['candidates']:
-            row=self.memory_candidate_still(notification['job_id'],*item) if isinstance(item,list) and len(item)==2 else None
-            if not row:continue
-            key=row['memory_key'][len('profile.'):] if row['memory_key'].startswith('profile.') else row['memory_key']
-            tap=self.memory_display(key,60)[1] and self.memory_display(row['content'],MEMORY_CANDIDATE_CHARS)[1]
-            candidates.append({'id':row['id'],'digest':row['content_digest'],'key':row['memory_key'],
-                               'current':self.current_memory_ref(row['memory_key']),'tap':bool(tap)})
+        shown,more=self.pending_memory_candidates(notification['job_id'])
+        if notification['kind']!=MEMORY_CANDIDATES_KIND:
+            ids=[item for item in queued['candidates'] if isinstance(item,list) and len(item)==2]
+            shown,more=[row for row in shown if [row['id'],row['content_digest']] in ids],int(queued.get('more') or 0)
+        candidates=[self.memory_prompt_item(row) for row in shown]
         if not candidates:return None
-        return {'candidates':candidates,'more':int(queued.get('more') or 0),'sent':now,'done':{}}
+        return {'candidates':candidates,'more':more,'sent':now,'done':{}}
 
     @staticmethod
     def memory_open(binding):
         """The 1-based indices of the tappable candidates not yet decided (#818)."""
         return [index for index,item in enumerate(binding['candidates'],1) if item.get('tap') and item['id'] not in binding['done']]
 
-    def memory_prompt_text(self, job_id, binding, footer=None):
-        """The candidates in owner words: key, value, the value it would replace, and each decision (#818).
+    @staticmethod
+    def memory_answered(binding):
+        """The owner's one answer to an ask whose every tappable fact is decided, or None (#836).
 
-        Bounded; stored secrets and credential shapes removed.  No per-key
-        vocabulary exists, so the key is shown as the web shows it.  A
-        candidate the prompt cannot show complete is left to 내 기록.
+        ``accepted`` or ``rejected`` when every decision was the same; None
+        while a fact is open, when nothing was decided, or for mixed answers.
         """
-        numbered=len(binding['candidates'])>1
-        lines=[MEMORY_CANDIDATES_HEADER]
-        for index,item in enumerate(binding['candidates'],1):
+        if not binding['done'] or AgentService.memory_open(binding):return None
+        answers={status for status in binding['done'].values() if status in MEMORY_CANDIDATES_SETTLED}
+        return answers.pop() if len(answers)==1 else None
+
+    def memory_prompt_text(self, job_id, binding, footer=None):
+        """The ask in the owner's words: each fact as a short line, never a key (#818, #836).
+
+        Open: "기억해 둘까요?" with each fact, the value it would replace and
+        each decision so far.  Answered: a settled first line ("기억해 둘게요." /
+        "기억하지 않을게요.") with what is kept.  Bounded; stored secrets and
+        credential shapes removed.  A fact the ask cannot show complete is
+        left to 내 기록.
+        """
+        items,done=binding['candidates'],binding['done']
+        finished=bool(done) and not self.memory_open(binding)
+        decided={status for status in done.values() if status in MEMORY_CANDIDATES_SETTLED}
+        numbered=len(items)>1 and not finished
+        if not finished:lines=[MEMORY_CANDIDATES_HEADER]
+        elif decided:lines=[MEMORY_CANDIDATES_SETTLED[decided.pop() if len(decided)==1 else 'mixed']]
+        else:lines=[MEMORY_CANDIDATES_OUTDATED_TEXT]
+        for index,item in enumerate(items,1):
+            status=done.get(item['id'])
+            prefix=f'{index}. ' if numbered else '• '
+            if status=='rejected':
+                # A no erases the candidate's value; only its place in the numbered list stays.
+                if numbered:lines.append(prefix+MEMORY_CANDIDATE_STATUS['rejected'])
+                continue
             row=self.store.memory_candidate(item['id'],MEMORY_OWNER,job_id) or {}
-            key=item['key'][len('profile.'):] if item['key'].startswith('profile.') else item['key']
-            line=(f'{index}. ' if numbered else '• ')+f"{self.memory_display(key,60)[0]}: {self.memory_display(row.get('content'),MEMORY_CANDIDATE_CHARS)[0]}"
-            old=self.store.memory(item['current'][0],MEMORY_OWNER,current_only=False) if item.get('current') else None
-            if old:line+=f" (현재: {self.memory_display(old['content'],60)[0]})"
-            status=binding['done'].get(item['id'])
-            if status:line+=' → '+MEMORY_CANDIDATE_STATUS[status]
-            elif not item.get('tap'):line+=' → '+MEMORY_CANDIDATE_IN_RECORDS
+            line=prefix+self.memory_fact(row.get('content'),MEMORY_CANDIDATE_CHARS)[0]
+            if status=='accepted':
+                if numbered:line+=' → '+MEMORY_CANDIDATE_STATUS['accepted']
+            elif status:line+=' → '+MEMORY_CANDIDATE_STATUS[status]
+            else:
+                old=self.store.memory(item['current'][0],MEMORY_OWNER,current_only=False) if item.get('current') else None
+                if old:line+=f" (지금은 {self.memory_fact(old['content'],60)[0]})"
+                if not item.get('tap'):line+=' → '+MEMORY_CANDIDATE_IN_RECORDS
             lines.append(line)
-        if binding.get('more'):lines.append(f"그 밖의 후보 {binding['more']}개는 내 기록에서 확인할 수 있습니다.")
-        if footer:lines.append(footer)
+        if binding.get('more'):lines.append(f"그 밖의 {binding['more']}가지는 내 기록에서 정할 수 있어요.")
+        if footer and footer not in lines:lines.append(footer)
         return '\n'.join(lines)
 
     @classmethod
@@ -1091,34 +1154,91 @@ class AgentService:
         if len(open_)>1:rows.append(pair('a','모두 기억하기','모두 아니요'))
         return {'inline_keyboard':rows}
 
-    def decide_memory_prompt(self, job_id, binding, targets, accept):
-        """Apply one tap to the open ``targets`` (1-based) of a bound prompt; returns the ids it decided (#818).
+    def decide_memory_item(self, job_id, item, accept):
+        """One bound candidate decided: ``accepted``, ``rejected`` or ``outdated`` (#818).
 
-        Per candidate: it must still be pending with the shown content and,
-        for a yes, the current Memory under its key must still be the one the
-        prompt showed; otherwise it is ``outdated`` and nothing is written.  A
-        yes is the existing owner approval path (exact approval bound to owner,
-        Work, candidate and content digest, then accept); a no is the existing
-        reject.
+        It must still be pending with the shown content and, for a yes, the
+        current Memory under its key must still be the one the ask bound;
+        otherwise it is ``outdated`` and nothing is written.  A yes is the
+        existing owner approval path (exact approval bound to owner, Work,
+        candidate and content digest, then accept); a no is the existing reject.
         """
+        if not self.memory_candidate_still(job_id,item['id'],item['digest']) or (
+                accept and self.current_memory_ref(item['key'])!=item.get('current')):
+            return 'outdated'
+        try:
+            if accept:
+                approval=self.store.issue_candidate_memory_approval(MEMORY_OWNER,job_id,item['id'],item['digest'])
+                self.store.accept_memory_candidate(MEMORY_OWNER,job_id,item['id'],item['digest'],approval['approval_token'])
+                return 'accepted'
+            self.store.reject_memory_candidate(MEMORY_OWNER,job_id,item['id'],item['digest'])
+            return 'rejected'
+        except ValueError as exc:
+            LOG.info('memory candidate %s refused work=%s kind=%s',('accept' if accept else 'reject'),job_id,type(exc).__name__)
+            return 'outdated'
+
+    def decide_memory_prompt(self, job_id, binding, targets, accept):
+        """Apply one tap to the open ``targets`` (1-based) of a bound prompt; returns the ids it decided (#818)."""
         decided=[]
         for index in targets:
             item=binding['candidates'][index-1]
-            status='outdated'
-            if self.memory_candidate_still(job_id,item['id'],item['digest']) and (
-                    not accept or self.current_memory_ref(item['key'])==item.get('current')):
-                try:
-                    if accept:
-                        approval=self.store.issue_candidate_memory_approval(MEMORY_OWNER,job_id,item['id'],item['digest'])
-                        self.store.accept_memory_candidate(MEMORY_OWNER,job_id,item['id'],item['digest'],approval['approval_token'])
-                        status='accepted'
-                    else:
-                        self.store.reject_memory_candidate(MEMORY_OWNER,job_id,item['id'],item['digest'])
-                        status='rejected'
-                except ValueError as exc:
-                    LOG.info('memory candidate %s refused work=%s kind=%s',('accept' if accept else 'reject'),job_id,type(exc).__name__)
-            binding['done'][item['id']]=status;decided.append(item['id'])
+            binding['done'][item['id']]=self.decide_memory_item(job_id,item,accept);decided.append(item['id'])
         return decided
+
+    def join_memory_prompt(self, notification, binding, now=None):
+        """A candidate proposed after the Work's ask was sent joins that same ask (#836).
+
+        Owner feedback 2026-09-28: one ask per owner message, and answering it
+        settles what follows.  While the ask is open (or only a list), a new
+        candidate is added by editing the message, and it is bound only when
+        the edit is confirmed, so a tap never covers a fact the owner was not
+        shown.  Once the owner answered every fact with one answer, that
+        answer covers what they said in that message: a no rejects the new
+        candidate; a yes accepts it through the owner approval path when the
+        ask can show it complete and it replaces no current Memory (otherwise
+        it reopens the ask).  A candidate settled this way is recorded in the
+        binding under ``by_answer`` (provenance: the owner's answer to this
+        Work's ask), and the edit shows it.  Mixed answers reopen the ask.
+        Past ``MEMORY_CANDIDATES_SHOWN`` a candidate stays in 내 기록.
+        """
+        now=time.time() if now is None else now
+        job_id=notification['job_id']
+        listed={item['id'] for item in binding['candidates']}
+        new=[row for row in sorted(self.store.memory_candidates(MEMORY_OWNER,job_id,limit=101),
+                                   key=lambda row:(row['created'],row['id'])) if row['id'] not in listed]
+        if not new:return
+        answer=self.memory_answered(binding)
+        settled,opened,beyond=[],[],0
+        for row in new:
+            if len(binding['candidates'])+len(opened)>=MEMORY_CANDIDATES_SHOWN:
+                beyond+=1
+                continue
+            item=self.memory_prompt_item(row)
+            if answer=='rejected' or (answer=='accepted' and item['tap'] and item['current'] is None):
+                binding['candidates'].append(item)
+                binding['done'][item['id']]=self.decide_memory_item(job_id,item,answer=='accepted')
+                binding.setdefault('by_answer',[]).append(item['id'])
+                settled.append(item['id'])
+            else:
+                opened.append(item)
+        binding['more']=int(binding.get('more') or 0)+beyond
+        shown={**binding,'candidates':binding['candidates']+opened}
+        if binding['done'] and not self.memory_open(binding) and self.memory_open(shown):
+            shown['sent']=now   # an answered ask reopened: its buttons get their own time
+        edited=False
+        if isinstance(notification.get('message_id'),int):
+            try:
+                self.telegram.edit_message_text(notification['chat_id'],notification['message_id'],
+                                                self.memory_prompt_text(job_id,shown),
+                                                self.memory_prompt_markup(notification['id'],shown))
+                edited=True
+            except ProviderError:
+                pass
+        final=shown if edited else binding
+        state=('sent' if self.memory_open(final) else 'memory_decided' if final['done'] else 'memory_listed')
+        self.store.update_notification(notification['id'],state,fingerprint=json.dumps(final))
+        LOG.info('memory candidates joined the ask work=%s settled_by_answer=%s added=%s edited=%s',
+                 job_id,len(settled),len(opened) if edited else 0,edited)
 
     def expire_memory_prompt(self, notification, binding):
         """Refuse further taps on one memory prompt and remove its buttons (#818)."""
@@ -3226,8 +3346,8 @@ class AgentService:
     def owner_jobs(self, jobs):
         """Work rows as the web reads them (#820: the AI's answer is always delivered).
 
-        #818 review: a Work with pending memory candidates carries AgentOS's
-        own line that nothing was saved yet, pointing to 내 기록.
+        #818 review, #836: a Work with pending memory candidates carries the
+        web's own short line pointing to 내 기록 (the web has no inline ask).
         """
         pending=self.pending_candidate_works()
         return [{**job,'response':job['response']+'\n\n'+MEMORY_PENDING_WEB_NOTE} if job.get('response') and pending(job['id']) else job
@@ -3236,8 +3356,8 @@ class AgentService:
     def owner_messages(self, messages):
         """Transcript rows as the web reads them (#820: the AI's answer is always delivered).
 
-        #818 review: an answer of a Work with pending memory candidates
-        carries AgentOS's own line that nothing was saved yet.
+        #818 review, #836: an answer of a Work with pending memory candidates
+        carries the web's own short line pointing to 내 기록.
         """
         pending=self.pending_candidate_works()
         def view(row):
@@ -5960,8 +6080,7 @@ class AgentService:
                                                        fingerprint=json.dumps(binding))
                         outdated=any(binding['done'][item]=='outdated' for item in decided)
                         LOG.info('memory candidates %s by owner button work=%s decided=%s outdated=%s',parts[3],notification['job_id'],len(decided),outdated)
-                        footer=(MEMORY_CANDIDATES_OUTDATED_TEXT if outdated else
-                                MEMORY_CANDIDATES_SAVED_TEXT if finished and 'accepted' in binding['done'].values() else None)
+                        footer=MEMORY_CANDIDATES_OUTDATED_TEXT if outdated else None
                         try:self.telegram.edit_message_text(sender,notification['message_id'],
                                                             self.memory_prompt_text(notification['job_id'],binding,footer),
                                                             self.memory_prompt_markup(notification['id'],binding))
@@ -7192,13 +7311,12 @@ class AgentService:
                                                       verified=job.get('owner_verified'))
             # #659: a prepared answer arrives without an owner turn; say what it is for.
             text=self.preparation_reply_prefix(job)+text
-            # #818 review: AgentOS's own line when this Work left pending memory
-            # candidates, so the reply never reads as if Memory changed.
+            # #818: whether this Work left pending memory candidates; its one ask
+            # follows the reply (#836: the ask is the ask, no line is appended).
             try:memory_pending=not blocked and bool(self.pending_memory_candidates(job['id'])[0])
             except Exception as exc:
                 LOG.warning('memory candidate read failed work=%s kind=%s',job['id'],type(exc).__name__)
                 memory_pending=False
-            if memory_pending:text+='\n\n'+MEMORY_PENDING_TELEGRAM_NOTE
             # #581: one durable reply, valid Telegram HTML (no leaked `**`),
             # anchored to the owner turn only when that clarifies it, with
             # bounded recovery controls only when the turn did not succeed.
@@ -7231,8 +7349,8 @@ class AgentService:
             self.presence.pop(job['id'],None)
             if markup and isinstance(message_id,int):
                 self.telegram_turns.record_reply(job['id'],job['chat_id'],message_id)
-            # #818: after a reply confirmed sent (never 'unknown'), one message with
-            # this Work's pending memory proposals.
+            # #818/#836: after a reply confirmed sent (never 'unknown'), the Work's
+            # one ask about its pending memory proposals.
             try:
                 if memory_pending and status=='sent':self.queue_memory_candidates(job)
             except Exception as exc:

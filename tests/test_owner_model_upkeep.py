@@ -306,6 +306,28 @@ class Apply(Upkeep):
         [(_status, detail)] = self.evidence(job)
         self.assertEqual([item['reason'] for item in detail['dropped']], ['duplicate', 'duplicate'])
 
+    def test_what_the_work_already_noted_is_asked_once(self):
+        """#836: upkeep sees what the same owner message already noted, and adds nothing under a key it covers."""
+        job = self.finished('할인 초밥으로 저녁을 먹었어')
+        self.store.save_memory_candidate(job, 'profile.preference.sushi', '할인 초밥')
+        self.answers = [[proposal('profile.preference.sushi', '할인하는 초밥을 즐겨 먹음', kind='inferred',
+                                  category='preference'),
+                         proposal('profile.routine.dinner', '저녁은 주로 밖에서', kind='inferred', category='routine')]]
+        self.service.run_owner_model_upkeep()
+        context = self.facts[0][0]
+        self.assertEqual(context.facts['already_noted'], '할인 초밥')
+        self.assertIn('already_noted', om.QUESTION)
+        [(_status, detail)] = self.evidence(job)
+        self.assertEqual(detail['dropped'], [{'key_digest': om.key_digest('profile.preference.sushi'), 'reason': 'duplicate'}])
+        self.assertEqual(sorted(row['memory_key'] for row in self.store.memory_candidates()),
+                         ['profile.preference.sushi', 'profile.routine.dinner'])
+
+    def test_nothing_noted_is_said_as_none(self):
+        self.finished('나는 판교에서 일해')
+        self.answers = [[]]
+        self.service.run_owner_model_upkeep()
+        self.assertEqual(self.facts[0][0].facts['already_noted'], 'none')
+
     def test_a_contradiction_of_an_unnamed_memory_is_not_silently_superseded(self):
         self.store.save_memory('profile.place.work', '서울역', work_id='w0')
         job = self.finished('나는 판교에서 일해')

@@ -32,7 +32,7 @@ from personal_agent.conversation_projection import (TERMINAL_ANSWER_LABEL, TERMI
                                                     TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
                                                     TERMINAL_VERIFIED_LABEL)
 from personal_agent.providers import ModelAdapter
-from personal_agent.quickstart_service import MEMORY_PENDING_TELEGRAM_NOTE, TELEGRAM_CARD_GRACE_SECONDS, AgentService
+from personal_agent.quickstart_service import TELEGRAM_CARD_GRACE_SECONDS, AgentService
 from personal_agent.quickstart_store import QuickStore
 from test_agency_loop import goal_engine
 
@@ -271,7 +271,7 @@ class DeliveredAnswerTests(TerminalResultTestCase):
         self.text = '정리해 드릴게요.'
         job, bubble = self.ask('이건 기억하지 마. 그냥 방금 이야기만 정리해 줘', card=True)
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
-        self.assertEqual(bubble, self.text + '\n\n' + MEMORY_PENDING_TELEGRAM_NOTE, 'AgentOS says nothing was saved yet')
+        self.assertEqual(bubble, self.text, '#836: the answer as said; the ask below it is the ask')
         self.assertTrue(self.card(job)['result_available'])
         self.assertEqual(self.store.memories(), [])
         self.assertEqual([row['state'] for row in self.store.memory_candidates()], ['pending'])

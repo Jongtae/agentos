@@ -15,7 +15,7 @@ from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERS
 
 from .agent_runtime import (ENGINE_UNMEDIATED, OWNER_STATE_ACTIONS, TRANSIENT_FAILURE_TEXT,
                             Capabilities, ToolError, WorkBudget, WorkLedger, classify_failure, declared_effect,
-                            evidence_summary, lookup_sources, progress_step, recorded_private_sources, split_status, work_source_records,
+                            evidence_summary, lookup_sources, progress_step, worker_result, recorded_private_sources, split_status, work_source_records,
                             work_stop_requested)
 from .current_context import redact_known_secrets
 from .providers import ProviderError
@@ -286,7 +286,8 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                 record(name, 'succeeded', json.dumps({'scope':'subscription-mcp-bridge','host_action':host_action,
                                                        'evidence':evidence_summary(host_action, value), **declared},
                                                       ensure_ascii=False))
-                result = {'content':[{'type':'text','text':json.dumps(value, ensure_ascii=False)}]}
+                # #836: the worker reads a held memory write as the owner's one-tap ask, nothing more.
+                result = {'content':[{'type':'text','text':json.dumps(worker_result(host_action, value), ensure_ascii=False)}]}
             elif method == 'notifications/initialized': continue
             else: raise _Rejected(-32601, 'Method not found.')
             if ident is not None: _send({'jsonrpc':'2.0','id':ident,'result':result})

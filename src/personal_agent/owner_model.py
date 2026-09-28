@@ -110,7 +110,9 @@ QUESTION = ('From this one finished request, propose durable facts about the own
             'the request (profile.<category>.<name>); when the fact updates a key already in owner_profile, use '
             'that key and set supersedes_key to it, otherwise supersedes_key is an empty string. content and '
             'evidence are at most 200 characters each; evidence is a short quote or paraphrase of what the owner '
-            'said. Never propose health, finances, relationships, beliefs, credentials or anything about other '
+            'said. already_noted lists what was already noted from this same request; never propose a fact it '
+            'already covers, even in other words or under another key. Never propose health, finances, '
+            'relationships, beliefs, credentials or anything about other '
             'people unless the owner stated it about themselves for a purpose (then kind "stated"). Do not repeat '
             'what owner_profile already says. Use clock only to turn relative time into an absolute date, or to '
             'leave out what is only about today. Propose at most 5, and an empty list when nothing durable and '
@@ -172,14 +174,17 @@ def key_digest(key):
     return hashlib.sha256(str(key).encode()).hexdigest()[:12]
 
 
-def validate(proposals, known, pending):
+def validate(proposals, known, pending, noted_keys=()):
     """``(kept, dropped)`` of the proposals AgentOS may apply (deterministic).
 
     ``known`` is the normalized content of every current ``profile.`` Memory
     value and of everything the source Work already wrote (Memory or
     candidate), under any key: the same content under another key is a
     duplicate.  ``pending`` is ``{(memory_key, normalized content)}`` of the
-    pending candidates.  ``dropped`` keeps a key only as a digest.
+    pending candidates.  ``noted_keys`` are the keys the source Work already
+    wrote or proposed (#836: one ask per owner message, so upkeep never adds
+    a second fact under a key that Work already covers).  ``dropped`` keeps a
+    key only as a digest.
     """
     kept, dropped, keys, contents = [], [], set(), set()
     for index, item in enumerate(proposals if isinstance(proposals, list) else ()):
@@ -187,7 +192,8 @@ def validate(proposals, known, pending):
         key = item.get('memory_key') if isinstance(item, dict) and isinstance(item.get('memory_key'), str) else None
         if reason is None:
             content = normalized(item['content'])
-            if key in keys or content in contents or content in known or (key, content) in pending:
+            if (key in keys or key in noted_keys or content in contents or content in known
+                    or (key, content) in pending):
                 reason = 'duplicate'
         if reason is not None:
             dropped.append({'key_digest': key_digest(key), 'reason': reason} if key else {'reason': reason})
@@ -357,6 +363,23 @@ class Upkeep:
                 "SELECT memory_key,content FROM memory_candidates WHERE state='pending' AND memory_key LIKE 'profile.%'")}
         return known, pending
 
+    def work_noted(self, job_id):
+        """``(keys, contents)`` the source Work already wrote or proposed, any state (#836).
+
+        A rejected candidate keeps neither (the reject erases them).  The
+        contents go to the proposal judgment as ``already_noted``; the keys to
+        ``validate``.
+        """
+        work_key = self.store._work_binding(job_id)
+        with self.store.db() as db:
+            rows = [tuple(row) for row in db.execute(
+                "SELECT memory_key,content FROM memory_candidates WHERE work_key=? AND memory_key!='' ORDER BY created,id",
+                (work_key,))]
+            rows += [tuple(row) for row in db.execute(
+                "SELECT memory_key,content FROM memories WHERE work_key=? AND state='current' ORDER BY created,id",
+                (work_key,))]
+        return {key for key, _content in rows}, list(dict.fromkeys(content for _key, content in rows if content))
+
     # -- one run ------------------------------------------------------------
     def run(self, job, judgments, *, answer, profile, clock, cancelled=None):
         """Ask, validate and apply for one finished Work; returns ``(state, calls, event_status, detail)``.
@@ -372,8 +395,9 @@ class Upkeep:
         from .conversation_handoff import JUDGMENT_YES
         stop = cancelled or (lambda: False)
         request = str(job.get('message') or '')
+        noted_keys, noted = self.work_noted(job['id'])
         data, decision = judgments.owner_model_proposals(request, answer, profile, clock, work_id=job['id'],
-                                                         cancelled=cancelled)
+                                                         cancelled=cancelled, noted=noted)
         confidence = decision.confidence
         calls = 1 if call_sent(decision) else 0
         self.count(job['id'], calls)
@@ -385,7 +409,7 @@ class Upkeep:
         if data is None:
             return STATE_UNAVAILABLE, calls, EVENT_UNAVAILABLE, detail
         known, pending = self.known_values(MEMORY_OWNER, job['id'])
-        kept, dropped = validate(data.get('proposals'), known, pending)
+        kept, dropped = validate(data.get('proposals'), known, pending, noted_keys)
         applied, verdicts, stopped = [], [], None
         for index, item in enumerate(kept):
             key, content = item['memory_key'], item['content']

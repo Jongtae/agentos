@@ -80,7 +80,7 @@ class ProfileJudgmentAndGuidance(unittest.TestCase):
         save_memory, list_memory = described['save_memory'], described['list_memory']
         self.assertIn('When the owner states a durable fact about themselves', save_memory)
         self.assertIn('where they live or work, a preference, an allergy, a routine', save_memory)
-        self.assertIn('AgentOS decides whether it becomes Memory or a candidate the owner confirms', save_memory)
+        self.assertIn('unless the owner asked you to remember it, the owner is asked with one tap whether to remember it', save_memory)
         self.assertIn('Never save an inference as a fact, and never save a credential', save_memory)
         for text in (save_memory, list_memory, API_TOOL_GUIDANCE):
             self.assertNotIn('explicit owner request', text)

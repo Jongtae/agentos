@@ -1,5 +1,21 @@
 # Personal AgentOS Secretary Agency Contract
 
+## Amendment — #836 (2026-09-28)
+
+PRESENCE-MEM-01 amends the #818 amendment below after owner feedback: "두 번 물어봤고, 첫 번째에 답을 하면 그 뒤에 것도 처리가 되어야 함. 그리고 AgentOS가 라면서 시스템 툴을 다루듯이 했는데, 우리의 컨셉은 presence잖아." The owner-facing rules are in the [Presence Experience Contract](presence-experience-contract.en.md) amendment of the same number.
+- **One ask per Work.** The reply's ask (`memory_candidates`) is bound when it is sent to every candidate of the Work still pending then, up to five. #805 upkeep queues no separate prompt (`memory_candidates_upkeep` rows sent before still work and expire). After upkeep, `join_memory_prompt` handles the Work's ask:
+  - No ask yet, or an ask cancelled because nothing was pending: this becomes the first ask.
+  - An ask still queued: its binding at send time includes the new candidates.
+  - An open or list-only ask: the new candidates are added by editing the message. They are bound only when the edit is confirmed, so a tap never covers a fact the owner was not shown.
+  - An answered ask: one answer settles them. A no rejects. A yes accepts through `issue_candidate_memory_approval` → `accept_memory_candidate` when the ask can show the value complete and it replaces no current Memory. The binding lists them under `by_answer` (provenance: the owner's answer to that Work's ask), and the edit shows them.
+  - Mixed answers, or a yes that would replace a Memory the owner was not shown: the ask reopens with the new facts and fresh buttons.
+  - An expired ask, or one with unknown delivery: the candidates stay in 내 기록.
+  The web list reads the same store state.
+- **Upkeep dedupe.** The proposal judgment gets `already_noted`: what the Work already wrote or proposed, as owner words, with secrets redacted. The question says never to propose what it covers. AgentOS also drops a proposal under a key the Work already used.
+- **Wording.** The ask shows values, never keys. A value written like a key (`food_preference.rolls_and_rolls_sushi`) is shown as its words, and a tap needs that shown value complete and unredacted. Once answered, the first line is "기억해 둘게요." / "기억하지 않을게요." / "말씀하신 것만 기억해 둘게요.". The Telegram "기억은 아직 저장되지 않았어요…" line and the "기억한 내용은 내 기록에서 고치거나 지울 수 있습니다" footer are removed. The web keeps "기억해 둘지는 내 기록에서 골라 주세요." until nothing of that Work is pending.
+- **Worker view.** A held `save_memory` reaches the worker, on the direct loop and the MCP bridge alike, as `{remembered: false, content, next}` (`worker_result`), with no AgentOS, approval, candidate or storage wording. AgentOS keeps the full result for Evidence and the trail. The `save_memory` description and the core instructions follow suit ("Speak as the owner's secretary: never narrate AgentOS, tools, approvals, candidates or other internal states").
+- **Kept.** #597 authority, secrets exclusion and truthfulness. No task-specific code (C16).
+
 ## Amendment — #826 (2026-09-28)
 
 EGRESS-OPEN-01 records an owner decision: "이 정보를 주는 건 엄청 큰 차이를 주는거네. 대신 어떤 정보를 이용해서 했는지만 확인 가능하도록 audit을 제공하면 될 듯. 허락할게." It supersedes the #678 separation stated in the #774, #701 and #705 amendments below. See the [request-path rule census](request-path-rule-census.en.md), class g.
@@ -18,14 +34,14 @@ EGRESS-OPEN-01 records an owner decision: "이 정보를 주는 건 엄청 큰 �
 
 OWNER-MODEL-04 follows owner feedback on Works `18c91ca7` and `7767e7da`, where a stated fact became a pending MemoryCandidate and the owner saw only a failure:
 - **A proposed memory is not a failed action.** A `save_memory` that #597 holds as a pending MemoryCandidate is a recorded proposal (trail state `proposed`). It neither withholds the answer (#752 `answer_withheld`) nor makes the Work partial or failed, and it is not evidence of the goal. The #488/#752 rule is unchanged for every other tool, for calendar drafts and for a memory write that errored.
-- **The reply never reads as if Memory changed.** AgentOS does not inspect the model's prose. When a Work has pending candidates, AgentOS appends its own line to the reply: on Telegram "기억은 아직 저장되지 않았어요. 아래에서 확인하시면 저장돼요.", and on the web the same line pointing to 내 기록. The web line disappears once nothing of that Work is pending.
+- **The reply never reads as if Memory changed.** (Telegram line removed by #836; see above.) AgentOS does not inspect the model's prose. When a Work has pending candidates, AgentOS appends its own line to the reply: on Telegram "기억은 아직 저장되지 않았어요. 아래에서 확인하시면 저장돼요.", and on the web the same line pointing to 내 기록. The web line disappears once nothing of that Work is pending.
 - **The owner confirms in one tap, and approves only what was shown.** One message lists the Work's pending candidates after its reply was delivered `sent` (never after an `unknown` delivery).
   - A candidate gets its own [기억하기] [아니요] buttons only when the message shows its key and value complete and unchanged: within the display bound and untouched by whitespace folding or secret redaction. Any other candidate is listed with "내 기록에서 확인해 주세요" and no button, and a message with nothing tappable is only a list. "All" buttons appear when more than one tappable candidate is open.
   - A value it would replace is shown as "(현재: …)".
   - The message follows the #659 pattern: this notification, sent, the paired private chat, its generation and message. It is bound at send time to the shown candidate ids, their content digests and the current Memory under each key. At a tap, each targeted candidate must still be pending with that content, and for a yes the current Memory under its key must be unchanged. Otherwise it is shown as outdated and nothing is written.
   - The buttons expire after 24 hours: taps are then refused and the buttons removed.
   - A yes goes through the existing owner approval path (`issue_candidate_memory_approval` → `accept_memory_candidate`); a no is the existing reject. The web keeps 내 기록.
-- **Candidates from #805 upkeep.** Upkeep runs after the reply. When it leaves new pending candidates on a Telegram Work whose reply was delivered `sent`, it queues one later prompt for the candidates no earlier prompt listed. The prompt uses the same bindings, TTL and buttons, with at most one upkeep prompt per Work. Candidates added after that are left to 내 기록.
+- **Candidates from #805 upkeep.** (Superseded by #836: they join the Work's one ask.) Upkeep runs after the reply. When it leaves new pending candidates on a Telegram Work whose reply was delivered `sent`, it queues one later prompt for the candidates no earlier prompt listed. The prompt uses the same bindings, TTL and buttons, with at most one upkeep prompt per Work. Candidates added after that are left to 내 기록.
 - **Guidance only (C16).** `save_memory` content is the value in the owner's own words, and the key names the attribute. When the owner tells AgentOS something rather than asking, the plan question and the core instructions ask for a secretary's response: acknowledge it, update what AgentOS knows, and act on what it changes. No task logic.
 
 ## Amendment — #805 phase 1 (2026-09-28)

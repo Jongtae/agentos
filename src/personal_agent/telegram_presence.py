@@ -1,15 +1,19 @@
-"""Native Telegram presence for the one paired conversation (PRESENCE-TG-01 / #581, PRESENCE-TG-02 / #835).
+"""Native Telegram presence for the one paired conversation (PRESENCE-TG-01 / #581, PRESENCE-TG-02 / #835, PRESENCE-TG-03 / #858).
 
 The kernel stays mechanical: Work -> Event -> tool -> Evidence -> outcome.
 This module only decides *how an already-decided turn looks in Telegram*:
 
-* a best-effort **reaction** on the owner's own message: 👀 ("looking") when
-  the Work starts, replaced once the outcome is decided and the answer sent
-  (``outcome_reaction``);
+* a best-effort **reaction** on the owner's own message: 👀 ("looking") the
+  moment the Work starts, then the emoji the owner's Judgment AI chooses for
+  that message (#858, ``RECEIVED_CANDIDATES``), replaced once the outcome is
+  decided and the answer sent (``outcome_reaction``, and for a succeeded
+  answer again the Judgment AI's choice among ``CLOSING_CANDIDATES``);
 * a **wait surface** while Work runs - nothing, ``typing…``, and from
-  ``draft_after`` an ephemeral ``sendMessageDraft`` with cycling dots (and the
-  observed step line, #718) plus Telegram's Stop button, with ``typing…``
-  kept alive until the answer lands;
+  ``draft_after`` an ephemeral draft: Telegram's own animated *thinking*
+  block (``sendRichMessageDraft``, #858) carrying cycling dots and the
+  observed step line (#718), a plain ``sendMessageDraft`` with the same text
+  when the rich draft is refused, plus Telegram's Stop button, with
+  ``typing…`` kept alive until the answer lands;
 * the **reply anchor** and bounded **controls** of the one durable reply;
 * the **formatting** of that reply, so model Markdown never leaks as ``**``.
 
@@ -32,11 +36,27 @@ from an extra model call made only to pick an emoji - and every emoji used is
 one Telegram documents as available (``TELEGRAM_REACTION_EMOJI``, pinned by a
 test).  The same feedback replaced the "생각 중…" wait text with cycling dots.
 
-Telegram Bot API baseline verified at implementation time (2026-09-25):
-Bot API 10.3 (2026-08-24), https://core.telegram.org/bots/api -
-``setMessageReaction`` (an empty ``reaction`` list removes the bot's
-reaction), ``sendChatAction``, ``sendMessageDraft`` (``draft_id``,
-``can_stop``, ``keep_on_stop``), the ``stopped_message_generation`` update
+Owner direction 2026-09-29 (#858): the wait is animated again - Telegram's
+thinking block, which the client renders with its own motion, now holds the
+dots instead of a label - and the reaction is no longer one fixed emoji per
+outcome.  The Judgment AI (the same DecisionEngine seam as every other
+per-turn judgment) chooses it from a curated subset of the documented
+reactions: once over the owner's message when the Work starts, once over the
+message and the delivered answer after a succeeded reply.  The #835 truth rule
+is unchanged: the AI is asked for a closing emoji only when the deterministic
+rule would already show one; every other outcome removes the reaction and
+asks nothing.  An unavailable or unconfident judgment keeps the deterministic
+emoji.
+
+Telegram Bot API baseline verified at implementation time (2026-09-25,
+re-checked 2026-09-29): Bot API 10.3 (2026-08-24),
+https://core.telegram.org/bots/api - ``setMessageReaction`` (an empty
+``reaction`` list removes the bot's reaction), ``sendChatAction``,
+``sendMessageDraft`` (``draft_id``, ``can_stop``, ``keep_on_stop``),
+``sendRichMessageDraft`` with ``InputRichBlockThinking`` (``type:
+thinking``, ``text: RichText``, a plain String allowed; "may be used only in
+sendRichMessageDraft"; "changes to drafts with the same identifier are
+animated"), the ``stopped_message_generation`` update
 (``MessageGenerationStopped``: ``chat``, ``draft_id``), ``ReplyParameters``,
 ``InlineKeyboardButton.disabled`` / ``DisabledButton`` and the HTML parse mode.
 """
@@ -57,13 +77,16 @@ WAIT_DRAFT = 'draft'
 
 # --- waiting dots (PRESENCE-TG-02 / #835) ----------------------------------------
 #
-# The draft animates by cycling these frames, one per ``PresenceTiming.
-# dots_refresh``, instead of the "생각 중…" / "결과를 살펴보는 중…" text the
-# owner found stiff (2026-09-28).  It is the plain ``sendMessageDraft``: the
-# rich draft's ``InputRichBlockThinking`` renders its own "thinking" label,
-# which is exactly what the owner asked to lose.  The text is never empty:
-# an empty ``sendMessageDraft`` renders as a blank bubble on the owner's iOS
-# client (#581 live check, 2026-09-26).
+# The draft cycles these frames, one per ``PresenceTiming.dots_refresh``,
+# instead of the "생각 중…" / "결과를 살펴보는 중…" text the owner found stiff
+# (2026-09-28).  #858: the frames are the *text* of Telegram's thinking block
+# (``sendRichMessageDraft``), which the client animates itself - #649 showed
+# that motion on Telegram Desktop; #837 lost it by moving to a plain draft
+# only to drop the "생각 중…" label the block then carried.  Now the block
+# carries the dots and no label.  A refused rich draft falls back to the plain
+# ``sendMessageDraft`` with the same text.  The text is never empty: an empty
+# ``sendMessageDraft`` renders as a blank bubble on the owner's iOS client
+# (#581 live check, 2026-09-26).
 
 #: Frames of the waiting animation (U+00B7 MIDDLE DOT), in display order.
 DOTS_FRAMES = ('·', '· ·', '· · ·')
@@ -82,9 +105,39 @@ def draft_frame(line, frame, note=None):
     """
     dots = DOTS_FRAMES[frame % len(DOTS_FRAMES)]
     line = _TRAILING_ELLIPSIS.sub('', str(line or '')).strip()
-    text = f'{line} {dots}' if line else dots
+    return with_note(f'{line} {dots}' if line else dots, note)
+
+
+def with_note(text, note=None):
+    """``text`` followed, on its own line, by the one attention ``note`` (#839) if any."""
     note = ' '.join(str(note or '').split())
     return f'{text}\n{note}' if note else text
+
+
+def rich_draft_blocks(text, note=None):
+    """The ``InputRichMessage.blocks`` of one waiting draft (#858).
+
+    The first block is Telegram's ``thinking`` block holding ``text`` (the
+    step line and dots, never empty); the #839 attention ``note`` follows as
+    an ordinary paragraph so the animated block keeps only the wait itself.
+    """
+    blocks = [{'type': 'thinking', 'text': text or draft_frame('', 0)}]
+    note = ' '.join(str(note or '').split())
+    if note:
+        blocks.append({'type': 'paragraph', 'text': note})
+    return blocks
+
+
+def draft_body_text(body):
+    """The text one draft request body shows, for a plain or a rich draft.
+
+    A rich body's blocks are joined by newlines (thinking text first, then the
+    attention paragraph), the same shape ``draft_frame`` gives the plain
+    draft, so both can be compared as one text.
+    """
+    if 'rich_message' in body:
+        return '\n'.join(str(block.get('text') or '') for block in body['rich_message'].get('blocks') or ())
+    return str(body.get('text') or '')
 
 
 # --- attention while waiting (ATTN-WAIT-01 / #839) ------------------------------
@@ -301,6 +354,32 @@ CLEAR_REACTION = ''
 #: (pinned by a test).
 PRESENCE_REACTIONS = (RECEIVED_REACTION, DONE_REACTION, WROTE_REACTION)
 
+# --- Judgment-AI-chosen reactions (PRESENCE-TG-03 / #858) -------------------------
+#
+# Owner direction 2026-09-29: the reaction should vary with the message, and
+# the owner's Judgment AI picks it (model-first; no cue list ever maps words
+# to an emoji here).  AgentOS keeps only the policy: which emoji may be used
+# at all (documented reactions, curated so that nothing rude, mocking or
+# dismissive can land on the owner's own message), and *when* a closing
+# emoji is allowed (``outcome_reaction``).  Both sets are subsets of
+# TELEGRAM_REACTION_EMOJI (pinned by a test).
+
+#: Offered when the Work starts, over the owner's message: acknowledgements
+#: that fit a question, a request, news, a plan or a feeling.
+RECEIVED_CANDIDATES = (
+    '👀', '🤔', '👍', '🫡', '🤗', '😁', '🙏', '🔥', '🤩', '😎', '🤓', '👨\u200d💻', '❤', '🥰', '🎉', '😢',
+    '😱', '🤯', '💯', '⚡', '😴', '🤝', '😇', '😍', '☃', '🎄', '🎃', '🍓', '🍌', '🌚', '🕊', '🦄',
+)
+#: Offered after a succeeded, delivered answer, over the message and the
+#: reply: a closing gesture.  The deterministic 👌 / ✍ stay in the set so the
+#: AI may also simply confirm them.
+CLOSING_CANDIDATES = (
+    '👌', '✍', '👍', '🎉', '🏆', '💯', '🔥', '🤝', '🫡', '🙏', '😎', '🤓', '🍾', '⚡', '🆒', '❤', '🥰',
+    '😁', '🤗', '😇', '🕊', '🤩', '☃', '🎄',
+)
+#: The deterministic closing emoji, the only ones that let the AI be asked.
+DONE_REACTIONS = (DONE_REACTION, WROTE_REACTION)
+
 #: Decided outcomes that end a Work.  Anything else (queued, running, parked
 #: for a connection, Drive or context) is not decided yet and keeps 👀.
 TERMINAL_OUTCOMES = frozenset({'succeeded', 'partial', 'failed', 'unknown', 'cancelled', 'interrupted'})
@@ -420,9 +499,16 @@ class WaitState:
     """In-memory presentation state for one running Work (never persisted)."""
 
     reacted: bool = False
+    #: #858: the emoji currently on the owner's message (None: none set by
+    #: this run), and whether the Judgment AI was already asked for it.
+    reaction: str = None
+    reaction_asked: bool = False
     chat_action_at: float = None
     draft_at: float = None
     draft_failed: bool = False
+    #: #858: the rich (thinking-block) draft was refused for this Work, so
+    #: the plain dots draft is used instead; ``draft_failed`` then covers that.
+    rich_draft_failed: bool = False
     stopped: bool = False
     shown: set = field(default_factory=set)
     #: #718/#835: the text the draft last showed (step line and dots), the

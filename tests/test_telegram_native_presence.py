@@ -25,7 +25,8 @@ from pathlib import Path
 from personal_agent.conversation_handoff import (FOLLOWUP_CANCEL, FOLLOWUP_CORRECTION, FOLLOWUP_REFERENCE,
                                                  FOLLOWUP_RETRY, INTENT_AMBIGUOUS, INTENT_CALENDAR_CREATE,
                                                  INTENT_CONVERSATION, INTENT_NOTE_CREATE, INTENT_SETTINGS,
-                                                 INTENT_UNSUPPORTED, TELEGRAM_POLL_UPDATE_KINDS, TelegramChannel,
+                                                 INTENT_UNSUPPORTED, TELEGRAM_POLL_UPDATE_KINDS, ConversationJudgments,
+                                                 TelegramChannel,
                                                  TelegramRejected, telegram_request_json)
 from personal_agent.conversation_projection import TERMINAL_FAILED_HEADER
 from personal_agent.decision import OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision, fixture_confidence
@@ -33,14 +34,16 @@ from personal_agent.agent_runtime import WORK_STOPPED
 from personal_agent.providers import ModelAdapter, ProviderError, request_json
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
-from personal_agent.telegram_presence import (CLEAR_REACTION, DONE_REACTION, DOTS_FRAMES, PRESENCE_REACTIONS,
-                                              RECEIVED_REACTION, TELEGRAM_REACTION_EMOJI, WROTE_REACTION,
-                                              WAIT_CHAT_ACTION, WAIT_DRAFT, WAIT_NONE, PresenceTiming, draft_frame,
-                                              draft_id_for, outcome_reaction, render_telegram_html)
+from personal_agent.telegram_presence import (CLEAR_REACTION, CLOSING_CANDIDATES, DONE_REACTION, DOTS_FRAMES,
+                                              PRESENCE_REACTIONS, RECEIVED_CANDIDATES, RECEIVED_REACTION,
+                                              TELEGRAM_REACTION_EMOJI, WROTE_REACTION, WAIT_CHAT_ACTION, WAIT_DRAFT,
+                                              WAIT_NONE, PresenceTiming, draft_body_text, draft_frame, draft_id_for,
+                                              outcome_reaction, render_telegram_html, rich_draft_blocks)
 
 CHAT = 4242
 GENERATION = 'g1'
-PRESENCE_METHODS = ('setMessageReaction', 'sendChatAction', 'sendMessageDraft')
+PRESENCE_METHODS = ('setMessageReaction', 'sendChatAction', 'sendMessageDraft', 'sendRichMessageDraft')
+DRAFT_METHODS = ('sendMessageDraft', 'sendRichMessageDraft')
 
 
 class NativePresenceTestCase(unittest.TestCase):
@@ -120,7 +123,11 @@ class NativePresenceTestCase(unittest.TestCase):
         return [(body['reaction'][0]['emoji'] if body['reaction'] else CLEAR_REACTION) for body in self.reactions()]
 
     def drafts(self):
-        return [body['text'] for method, body in self.calls if method == 'sendMessageDraft']
+        """Each draft edit as the text it shows: the rich thinking block (#858) or the plain fallback."""
+        return [draft_body_text(body) for method, body in self.calls if method in DRAFT_METHODS]
+
+    def draft_methods(self):
+        return [method for method, _body in self.calls if method in DRAFT_METHODS]
 
     def after_answer(self):
         """Methods called after the last durable reply."""
@@ -166,6 +173,7 @@ class ImmediateTurnTests(NativePresenceTestCase):
             self.assertNotIn('결과 상태 보기', json.dumps(body, ensure_ascii=False))
             self.assertNotIn('처리 중입니다', body['text'])
 
+
     def test_immediate_answer_gets_no_chat_action_or_draft(self):
         self.connect_model()
         self.during_model = lambda job: self.service.acknowledge_long_work(now=job['created'] + 0.4)
@@ -192,6 +200,87 @@ class ImmediateTurnTests(NativePresenceTestCase):
         self.assertIn('**갈비탕**', self.store.jobs()[0]['response'])
 
 
+class JudgmentReactionTests(NativePresenceTestCase):
+    """#858: the existing Judgment AI chooses only the allowed presence emoji."""
+
+    def install_reaction_judgment(self, choices):
+        self.judgment_calls = []
+
+        def choose(context, candidates, question):
+            self.judgment_calls.append((context, tuple(candidates), question, self.service.current_work_id))
+            return SelectionDecision(OUTCOME_DECIDED, choices.get(context.purpose, 'none-of-these'),
+                                     tuple(candidates), fixture_confidence())
+
+        self.service.decision_judge = ConversationJudgments(FixtureDecisionEngine(choose=choose),
+                                                            redactor=self.service.redact_judgment_text)
+
+    def test_judgment_ai_varies_start_and_success_reactions(self):
+        self.connect_model()
+        self.store.secret('decision_model_key', 'owner-private-sentinel')
+        owner_message = '고마워, 이 계획은 owner-private-sentinel 괜찮을까?'
+        self.install_reaction_judgment({'turn-reaction': '🤗', 'closing-reaction': '🎉'})
+
+        job, message_id = self.turn(owner_message)
+
+        self.assertEqual(job['status'], 'succeeded')
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, '🤗', '🎉'])
+        self.assertEqual([call[0].purpose for call in self.judgment_calls], ['turn-reaction', 'closing-reaction'])
+        self.assertEqual(self.judgment_calls[0][0].facts,
+                         {'owner_message': '고마워, 이 계획은 [redacted] 괜찮을까?'})
+        self.assertEqual(self.judgment_calls[1][0].facts['owner_message'], '고마워, 이 계획은 [redacted] 괜찮을까?')
+        self.assertEqual(self.judgment_calls[0][1], RECEIVED_CANDIDATES)
+        self.assertEqual(self.judgment_calls[1][1], CLOSING_CANDIDATES)
+        self.assertEqual([call[3] for call in self.judgment_calls], [job['id'], job['id']],
+                         'both Judgment AI calls are linked to this Work for the #826 information-use audit')
+        self.assertTrue(all(body['message_id'] == message_id for body in self.reactions()))
+
+    def test_none_of_these_keeps_deterministic_reactions_without_repeating_them(self):
+        self.connect_model()
+        self.install_reaction_judgment({})
+
+        self.turn('질문')
+
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, DONE_REACTION])
+        self.assertEqual([call[0].purpose for call in self.judgment_calls], ['turn-reaction', 'closing-reaction'])
+
+    def test_a_matching_turn_choice_is_not_sent_again(self):
+        self.connect_model()
+        self.install_reaction_judgment({'turn-reaction': RECEIVED_REACTION, 'closing-reaction': '🎉'})
+
+        self.turn('질문')
+
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, '🎉'])
+
+    def test_a_matching_closing_choice_keeps_the_existing_reaction_without_a_call(self):
+        self.connect_model()
+        self.install_reaction_judgment({'turn-reaction': '🤗', 'closing-reaction': '🤗'})
+
+        self.turn('질문')
+
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, '🤗'])
+
+    def test_failed_work_clears_reaction_without_a_closing_judgment(self):
+        self.connect_model()
+        self.install_reaction_judgment({'turn-reaction': '🤗', 'closing-reaction': '🎉'})
+        self.model_error = ProviderError('fixture failure')
+
+        job, _ = self.turn('이 자료를 찾아줘')
+
+        self.assertEqual(job['status'], 'failed')
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, '🤗', CLEAR_REACTION])
+        self.assertEqual([call[0].purpose for call in self.judgment_calls], ['turn-reaction'])
+
+
+class DraftCompositionTests(unittest.TestCase):
+    """#858: the animated thinking block carries the wait, attention stays a paragraph."""
+
+    def test_rich_draft_blocks_keep_attention_outside_the_thinking_block(self):
+        self.assertEqual(rich_draft_blocks('저장한 메모를 확인 중 · ·', '참, 준비한 답이 있어요'),
+                         [{'type': 'thinking', 'text': '저장한 메모를 확인 중 · ·'},
+                          {'type': 'paragraph', 'text': '참, 준비한 답이 있어요'}])
+        self.assertEqual(rich_draft_blocks('·'), [{'type': 'thinking', 'text': '·'}])
+
+
 class WaitSurfaceTests(NativePresenceTestCase):
     def test_noticeable_wait_is_typing_not_a_status_bubble(self):
         self.connect_model()
@@ -210,13 +299,15 @@ class WaitSurfaceTests(NativePresenceTestCase):
                 self.service.acknowledge_long_work(now=job['created'] + offset)
         self.during_model = think
         job, message_id = self.turn('제주 여행 준비 자료 조사해줘')
-        drafts = [body for method, body in self.calls if method == 'sendMessageDraft']
-        # #835: a draft edit at 6s, 12s and 27s, each the next dots frame; the
-        # rich "thinking" block (its own "생각 중" label) is never used.
-        self.assertEqual(drafts, [{'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'text': frame, 'can_stop': True}
+        drafts = [body for method, body in self.calls if method == 'sendRichMessageDraft']
+        # #835: a draft edit at 6s, 12s and 27s, each the next dots frame.  #858:
+        # each is Telegram's animated thinking block holding the dots and no
+        # "생각" label; the plain draft is only the fallback.
+        self.assertEqual(drafts, [{'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'can_stop': True,
+                                   'rich_message': {'blocks': [{'type': 'thinking', 'text': frame}]}}
                                   for frame in DOTS_FRAMES])
-        self.assertNotIn('sendRichMessageDraft', self.methods())
-        self.assertFalse(any('생각' in body['text'] for body in drafts))
+        self.assertNotIn('sendMessageDraft', self.methods())
+        self.assertFalse(any('생각' in draft_body_text(body) for body in drafts))
         # 7s: no draft edit due yet, so typing… (never sent before) is refreshed.
         self.assertEqual(self.methods().count('sendChatAction'), 1)
         self.assertEqual(self.after_answer(), ['setMessageReaction'])
@@ -279,11 +370,26 @@ class PresentationFailureTests(NativePresenceTestCase):
 
     def test_unsupported_draft_falls_back_to_typing(self):
         self.connect_model()
-        self.failing = {'sendMessageDraft': ProviderError('method not found')}
+        self.failing = {'sendRichMessageDraft': ProviderError('method not found'),
+                        'sendMessageDraft': ProviderError('method not found')}
         self.during_model = lambda job: [self.service.acknowledge_long_work(now=job['created'] + t) for t in (6, 7, 9)]
         self.turn('긴 요청')
-        self.assertEqual(self.methods().count('sendMessageDraft'), 1, 'a failed draft is not retried')
+        self.assertEqual(self.methods().count('sendRichMessageDraft'), 1, 'a refused rich draft is not retried')
+        self.assertEqual(self.methods().count('sendMessageDraft'), 1, 'a failed plain draft is not retried')
         self.assertIn('sendChatAction', self.methods())
+        self.assertEqual(len(self.sends()), 1)
+
+    def test_a_refused_thinking_block_falls_back_to_the_plain_dots_draft(self):
+        # #858: a client/API without the rich draft still gets the dots, as text.
+        self.connect_model()
+        self.failing = {'sendRichMessageDraft': ProviderError('Bad Request: method not found')}
+        self.during_model = lambda job: [self.service.acknowledge_long_work(now=job['created'] + t) for t in (6, 8, 10)]
+        job, _ = self.turn('긴 요청')
+        self.assertEqual(self.draft_methods(), ['sendRichMessageDraft', 'sendMessageDraft', 'sendMessageDraft',
+                                                'sendMessageDraft'])
+        plain = [body for method, body in self.calls if method == 'sendMessageDraft']
+        self.assertEqual(plain, [{'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'text': frame, 'can_stop': True}
+                                 for frame in DOTS_FRAMES[:3]])
         self.assertEqual(len(self.sends()), 1)
 
     def test_uncertain_final_send_is_not_resent(self):
@@ -462,7 +568,7 @@ class StopTests(NativePresenceTestCase):
         self.during_model = think
         job, message_id = self.turn('긴 조사 부탁해')
         self.assertEqual(outcomes, ['running'])
-        self.assertEqual(self.methods().count('sendMessageDraft'), 1, 'no draft after Stop')
+        self.assertEqual(len(self.draft_methods()), 1, 'no draft after Stop')
         self.assertNotIn('sendChatAction', self.methods())
         # #606 T1: Stop is checked before the next model turn or tool call, so
         # the running Work ends there and its one real result says why.
@@ -602,6 +708,10 @@ class OutcomeReactionTests(unittest.TestCase):
         self.assertEqual(PRESENCE_REACTIONS, (RECEIVED_REACTION, DONE_REACTION, WROTE_REACTION))
         for emoji in PRESENCE_REACTIONS:
             self.assertIn(emoji, TELEGRAM_REACTION_EMOJI)
+        for emoji in (*RECEIVED_CANDIDATES, *CLOSING_CANDIDATES):
+            self.assertIn(emoji, TELEGRAM_REACTION_EMOJI)
+        self.assertFalse({'👎', '🤬', '💩', '🤡', '🖕', '😈', '🤮'} &
+                         set(RECEIVED_CANDIDATES + CLOSING_CANDIDATES))
         self.assertEqual((RECEIVED_REACTION, DONE_REACTION, WROTE_REACTION), ('👀', '👌', '✍'))
 
     def test_succeeded_is_done_and_an_observed_note_or_memory_write_is_writing(self):
@@ -745,7 +855,7 @@ class LiveWaitTests(NativePresenceTestCase):
         self.during_model = lambda job: ticks.extend(self.tick_every(job, 0, 20))
         job, _ = self.turn('긴 조사 부탁해')
         typing = [offset for offset, methods in ticks if 'sendChatAction' in methods]
-        drafted = [offset for offset, methods in ticks if 'sendMessageDraft' in methods]
+        drafted = [offset for offset, methods in ticks if 'sendRichMessageDraft' in methods]
         self.assertEqual(drafted[0], 5, drafted)
         self.assertTrue([offset for offset in typing if offset > drafted[0]], 'typing continues under the draft')
         # From the first typing… to the end, never a gap the 5 s typing lifetime could expire in.
@@ -764,7 +874,7 @@ class LiveWaitTests(NativePresenceTestCase):
         self.during_model = lambda job: self.tick_every(job, 0, 8)
         job_id, _ = self.receive('긴 조사 부탁해')
         self.service.run_one()
-        self.assertIn('sendMessageDraft', self.methods())
+        self.assertIn('sendRichMessageDraft', self.methods())
         # Decided but not yet delivered: no more typing… or draft either.
         before = len(self.calls)
         self.tick_every(self.store.job(job_id), 8, 12)

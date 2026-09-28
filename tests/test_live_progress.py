@@ -31,11 +31,12 @@ from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.telegram_presence import (DEFAULT_STEP_TEXT, NO_STEP_LINE, RETRY_STEP_TEXT, PresenceTiming,
-                                              draft_frame, draft_id_for, draft_step, step_line)
+                                              draft_body_text, draft_frame, draft_id_for, draft_step, step_line)
 
 CHAT = 4242
 GENERATION = 'g1'
 SECRET = 'zq9Wm4LtHv82PkXr'
+DRAFT_METHODS = ('sendMessageDraft', 'sendRichMessageDraft')
 
 
 def running(tool, step, call_id=None, created=1.0):
@@ -371,7 +372,8 @@ class _TelegramCase(unittest.TestCase):
         return self.store.jobs()[0]['id']
 
     def drafts(self):
-        return [body['text'] for method, body in self.calls if method == 'sendMessageDraft']
+        """Each draft edit as the text it shows (#858: the thinking block's text)."""
+        return [draft_body_text(body) for method, body in self.calls if method in DRAFT_METHODS]
 
 
 class ScriptedLoopDraftTests(_TelegramCase):
@@ -432,12 +434,13 @@ class ScriptedLoopDraftTests(_TelegramCase):
         job = self.run_turn('메모랑 기억 좀 정리해줘')
         # #835: each edit advances the dots; the step line (if any) comes first.
         self.assertEqual(self.drafts(), ['·', '저장한 메모를 훑어보고 있어요 · ·', '기억 확인 중 · · ·', '·'])
-        draft_ids = {body['draft_id'] for method, body in self.calls if method == 'sendMessageDraft'}
+        draft_ids = {body['draft_id'] for method, body in self.calls if method in DRAFT_METHODS}
         self.assertEqual(draft_ids, {draft_id_for(job['id'])}, 'one draft, edited in place (Stop maps back)')
         for method, body in self.calls:
-            if method == 'sendMessageDraft':
+            if method in DRAFT_METHODS:
                 self.assertTrue(body['can_stop'])
-        self.assertNotIn('sendRichMessageDraft', [method for method, _body in self.calls])
+        # #858: the animated thinking block, never the plain draft while the rich one is accepted.
+        self.assertNotIn('sendMessageDraft', [method for method, _body in self.calls])
         # The status is recorded on the call's own running event, never passed to the tool.
         steps = [event['trace'].get('step') for event in self.store.task_events(job['id']) if event['status'] == 'running']
         self.assertIn({'action': 'list_notes', 'status': '저장한 메모를 훑어보고 있어요'}, steps)

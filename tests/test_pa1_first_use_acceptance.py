@@ -444,6 +444,18 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
         """The task/progress record the web management surface renders."""
         return self.web('/api/tasks/' + job_id)['selected']
 
+    def assertCalendarNoteReachedTheWorker(self, job_id, request, store=None):
+        """#832: no Calendar in this install is a note to the worker, not a failure."""
+        job = (store or self.store).job(job_id)
+        self.assertNotEqual(job['status'], 'failed', job.get('error'))
+        self.assertNotIn('구성되어 있지 않습니다', job.get('error') or '')
+        sent = [str(message.get('content', '')) for _url, body in self.model_calls()
+                for message in (body or {}).get('messages', []) if message.get('role') == 'user']
+        # This install registers no Calendar connector at all, so the note says it is not available.
+        self.assertTrue(any(request + '\n\n[AgentOS observation, not an owner instruction] Google Calendar is not '
+                            'available in this install' in text for text in sent),
+                        'the owner words reach the worker verbatim, with the note')
+
     def model_calls(self):
         return [call for call in self.calls if call[0].endswith('/chat/completions')]
 
@@ -709,12 +721,11 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
             # exists, so an install without credentials registers nothing,
             # advertises nothing, and refuses by naming the reason rather
             # than parking Work for a connection it cannot offer.
+            # #832 (ARCH-THIN-02): with an AI route the missing Calendar is a
+            # note to the worker, never a terminal failure before any AI runs.
             calendar = self.says(20, '내일 오후 3시에 팀 회의 일정 잡아줘')
             self.drain()
-            job = self.store.job(calendar)
-            self.assertEqual(job['status'], 'failed')
-            self.assertIn('구성되어 있지 않습니다', job['error'])
-            self.assertEqual(self.card(calendar)['status_label'], '확인 필요')
+            self.assertCalendarNoteReachedTheWorker(calendar, '내일 오후 3시에 팀 회의 일정 잡아줘')
             self.assertNotIn('연결 대기', self.card(calendar)['waits'])
             # And it created no connector authority on its way out.
             self.assertIsNone(self.store.config(CONNECTOR_STATE_KEY, None))
@@ -796,8 +807,7 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
         with self.subTest('negative: one connection does not authorize another'):
             again = self.says(23, '모레 오전 10시에 병원 예약 일정 잡아줘')
             self.drain()
-            self.assertEqual(self.store.job(again)['status'], 'failed')
-            self.assertIn('구성되어 있지 않습니다', self.store.job(again)['error'])
+            self.assertCalendarNoteReachedTheWorker(again, '모레 오전 10시에 병원 예약 일정 잡아줘')
             with self.assertRaises(HTTPError) as refused:
                 self.web('/api/state', opener=build_opener())
             self.assertEqual(refused.exception.code, 401)
@@ -858,8 +868,7 @@ class FirstUseEndToEndAcceptance(unittest.TestCase):
             # And the refusals are still refusals on the other side of it.
             still = self.says(26, '다음 주 금요일 저녁 식사 일정 잡아줘', service=restarted)
             self.drain(service=restarted, store=restarted_store)
-            self.assertEqual(restarted_store.job(still)['status'], 'failed')
-            self.assertIn('구성되어 있지 않습니다', restarted_store.job(still)['error'])
+            self.assertCalendarNoteReachedTheWorker(still, '다음 주 금요일 저녁 식사 일정 잡아줘', store=restarted_store)
 
         with self.subTest('J6 an authorized turn cannot write a value the owner did not state'):
             # The J6 defect PA1-MEMORY-01 #392 recorded on the live path and

@@ -2,7 +2,7 @@
 
     python -m agentos_eval snapshot --from ~/.local/share/agentos --name owner
     python -m agentos_eval scenarios
-    python -m agentos_eval sweep --seed owner --worker both --instances 3 --epochs 3
+    python -m agentos_eval sweep --seed owner --worker codex --instances 3 --epochs 3
     python -m agentos_eval report --log <eval log>
     python -m agentos_eval budget
 
@@ -146,7 +146,7 @@ def main(argv=None):
     listing.add_argument('--split', choices=scenario_module.SPLITS)
     listing.add_argument('--no-local', action='store_true')
     sweep = sub.add_parser('sweep', help='run scenarios on fresh sandboxes and write the trend report')
-    sweep.add_argument('--worker', choices=('codex', 'claude-code', 'both'), default='both')
+    sweep.add_argument('--worker', choices=('codex', 'claude-code', 'both'), default='codex')
     sweep.add_argument('--instances', type=int, default=3)
     sweep.add_argument('--epochs', type=int, default=1)
     sweep.add_argument('--seed', default=os.environ.get('AGENTOS_EVAL_SEED', ''),

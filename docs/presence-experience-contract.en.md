@@ -107,6 +107,14 @@ A short ordinary request should normally yield one useful answer. Internal Work 
 
 One concise acknowledgement is allowed when latency or handoff makes it useful. Further updates require a meaningful owner-relevant state change such as a blocker, authority request, important partial result or completion. Event count must never mechanically determine message count.
 
+### Telegram presence: reactions, dots and typing (#581, #835)
+
+Owner feedback 2026-09-28 (#835): a fixed 👍 on every turn meant nothing, the "생각 중…" wait text felt stiff, and the header `typing…` ended too early. PRESENCE-TG-02 amends the #581 rule that a reaction may never read as "done". It stays presentation only: Work, Event, Evidence and outcome semantics are unchanged, and every reaction, chat action and draft is a best-effort call whose failure never fails, duplicates or changes Work.
+
+- **Reaction on the owner's message.** 👀 when the Work starts, for every natural-language turn (commands get none). It is replaced only after the terminal outcome is decided and the one reply was sent. `succeeded` gets a "done" reaction: ✍ when this Work observably saved a note or Memory item (a succeeded `save_note`/`save_memory` event whose Evidence says `saved`), otherwise 👌. `partial`, `failed`, `unknown`, `cancelled`, `interrupted`, a blocked reply, an uncertain delivery, and a succeeded Work that still waits for the owner's approval (a calendar or settings draft, a pending approval prompt, pending memory candidates) never get a done emoji: the 👀 is removed and no other emoji is shown, because the reply states the truth and any gesture there could be read as success. A parked Work (awaiting a connection, Drive or context) keeps 👀 until it ends. The mapping is deterministic from the decided outcome and observed tool events only: never from the owner's words, never from an extra model call, and only emoji Telegram documents as available (pinned by a test).
+- **Waiting draft.** From 5 s, a plain `sendMessageDraft` with Stop shows cycling dots (`·`, `· ·`, `· · ·`), one edit per 1.5 s; an observed step line (#718) is kept with the dots appended. The rich draft's thinking block is no longer used because it renders its own "thinking" label. The draft text is never empty (an empty draft is a blank bubble on the owner's iOS client, #581). While an approval prompt is pending it is the only surface.
+- **Typing.** `typing…` is refreshed at least every 4 s for as long as the Work runs, a draft shown or not. Presence calls and the final reply are serialized under one lock, so no `typing…` or draft follows the answer; the outcome reaction on the owner's own message is the only call after it.
+
 ### Failure and recovery
 
 Explain:

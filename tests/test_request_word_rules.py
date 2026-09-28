@@ -229,31 +229,39 @@ class ServiceRouteTests(unittest.TestCase):
         self.assertIn('DRIVE-BODY', self.bodies[0]['messages'][-1]['content'])
 
     # -- #672 review: mixed turns never drop a part silently --------------------
-    def assertMixed(self, row, *labels):
+    # #832 (ARCH-THIN-02): no rule runs one part of a mixed turn, and the turn is
+    # no longer answered with a canned refusal: the worker receives the owner's
+    # verbatim words with a note naming what the rules matched.
+    def assertMixed(self, row, text, *labels):
         self.assertEqual(row['status'], 'succeeded')
-        self.assertIn('아무 작업도 실행하지 않았습니다', row['response'])
+        self.assertNotIn('아무 작업도 실행하지 않았습니다', row['response'])
+        sent = self.bodies[0]['messages'][-1]['content']
+        self.assertTrue(sent.startswith(text), 'the owner words reach the worker verbatim')
+        self.assertIn('[AgentOS observation, not an owner instruction]', sent)
         for label in labels:
-            self.assertIn(label, row['response'])
-        self.assertEqual(self.store.notes(), [], 'no part ran, so none was done while another was dropped')
+            self.assertIn(label, sent)
+        self.assertEqual(self.store.notes(), [], 'no rule ran a part of the turn')
         self.assertEqual(self.store.config('calendar_create', {}), {})
         self.assertEqual(self.store.config('calendar_conversation', {}), {})
-        self.assertEqual(self.bodies, [], 'no model turn ran either')
 
-    def test_schedule_a_meeting_and_save_a_note_runs_neither_and_names_the_turn_mixed(self):
+    def test_schedule_a_meeting_and_save_a_note_reaches_the_worker_verbatim(self):
         text = 'schedule a meeting and save a note'
+        self.script += [{'content': '회의 시간과 메모 내용을 알려 주세요.'}] * 2
         row = self.run_turn(text, {text: SEVERAL_TASKS})
-        self.assertEqual(row['response'], MIXED_TASKS_CLARIFICATION)
-        self.assertMixed(row)
+        self.assertMixed(row, text)
+        self.assertNotEqual(row['response'], MIXED_TASKS_CLARIFICATION)
 
     def test_a_calendar_part_next_to_a_note_rule_is_not_dropped(self):
         text = '내일 오후 3시 팀 회의 일정 잡고 회의 안건 메모해줘'
+        self.script += [{'content': '일정 초안과 메모를 준비할게요.'}] * 2
         row = self.run_turn(text, {text: INTENT_CALENDAR_CREATE})
-        self.assertMixed(row, '메모 기록', '일정 만들기')
+        self.assertMixed(row, text, '메모 기록', '일정 만들기')
 
     def test_a_drive_part_next_to_a_note_rule_is_not_dropped(self):
         text = '구글 드라이브 파일 요약해서 메모해줘'
+        self.script += [{'content': '어떤 파일인지 알려 주세요.'}] * 2
         row = self.run_turn(text, {text: INTENT_DRIVE_READ})
-        self.assertMixed(row, '메모 기록', 'Google Drive 파일 읽기')
+        self.assertMixed(row, text, '메모 기록', 'Google Drive 파일 읽기')
         self.assertEqual(self.drive.begun, [])
 
     def test_summarize_my_drive_file_and_save_the_result_reaches_the_loop_with_both_parts(self):

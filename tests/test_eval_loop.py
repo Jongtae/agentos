@@ -84,8 +84,10 @@ class ScenarioLoaderTest(unittest.TestCase):
 class FakeServer:
     """In-memory stand-in for the AgentOS HTTP routes the client uses."""
 
-    def __init__(self, claimed=True, statuses=('running', 'succeeded'), judgment=None):
+    def __init__(self, claimed=True, statuses=('running', 'succeeded'), judgment=None, owner_model=None):
         self.claimed = claimed
+        # ``/api/owner-model`` views served in order (the last one repeats); None answers 403.
+        self.owner_model = list(owner_model or [])
         self.statuses = list(statuses)
         self.calls = []
         self.memories = []
@@ -118,7 +120,10 @@ class FakeServer:
         if path == '/api/personal-space':
             return 200, {}, json.dumps({'memories': self.memories, 'memory_candidates': []}).encode()
         if path == '/api/owner-model':
-            return 403, {}, b'{"error": "nope"}'
+            if not self.owner_model:
+                return 403, {}, b'{"error": "nope"}'
+            view = self.owner_model.pop(0) if len(self.owner_model) > 1 else self.owner_model[0]
+            return 200, {}, json.dumps(view).encode()
         return 200, {}, b'{}'
 
 
@@ -169,6 +174,53 @@ class ClientTest(unittest.TestCase):
         self.assertEqual([row['id'] for row in diff['candidates']], ['c1'])
         self.assertEqual([row['id'] for row in diff['preparations']], ['p1'])
         self.assertTrue(diff['settings_changed'])
+
+
+class UpkeepWaitTest(unittest.TestCase):
+    """#832: the state diff waits, bounded, for the asynchronous owner-model upkeep (#805)."""
+
+    @staticmethod
+    def view(pending=0, running=0, enabled=True, used=0, cap=12):
+        return {'enabled': enabled, 'daily_calls': cap, 'pending': pending, 'running': running, 'calls_last_24h': used}
+
+    def clocked(self, server):
+        now = [0.0]
+        client = AgentOSClient('http://127.0.0.1:18900', transport=server, clock=lambda: now[0],
+                               sleep=lambda seconds: now.__setitem__(0, now[0] + seconds))
+        return client, now
+
+    def test_waits_until_pending_and_running_upkeep_is_done(self):
+        server = FakeServer(owner_model=[self.view(pending=1), self.view(running=1), self.view()])
+        client, _ = self.clocked(server)
+        self.assertEqual(client.wait_upkeep_idle(timeout=90, interval=2), {'idle': True, 'busy': 0, 'waited': 4.0})
+        self.assertEqual(sum(1 for call in server.calls if call[1] == '/api/owner-model'), 3)
+
+    def test_wait_is_bounded(self):
+        client, _ = self.clocked(FakeServer(owner_model=[self.view(running=1)]))
+        self.assertEqual(client.wait_upkeep_idle(timeout=10, interval=4), {'idle': False, 'busy': 1, 'waited': 12.0})
+
+    def test_paused_capped_or_unreadable_upkeep_does_not_wait(self):
+        for server in (FakeServer(owner_model=[self.view(pending=2, enabled=False)]),
+                       FakeServer(owner_model=[self.view(pending=2, used=12, cap=12)]),
+                       FakeServer()):
+            client, now = self.clocked(server)
+            result = client.wait_upkeep_idle(timeout=90, interval=2)
+            self.assertEqual(now[0], 0.0)
+            self.assertEqual(result['busy'], None if not server.owner_model else 0)
+
+    def test_runner_waits_for_upkeep_before_the_after_snapshot(self):
+        # Before-snapshot, then the wait's reads (pending, idle), then the after-snapshot.
+        server = FakeServer(statuses=['succeeded'], owner_model=[self.view(), self.view(pending=1), self.view()])
+        record = runner.run_scenario(scenario(), 'claude-code', FakePool(),
+                                     client_factory=lambda url: AgentOSClient(url, transport=server, sleep=lambda _: None))
+        self.assertIsNone(record['error'])
+        self.assertTrue(record['upkeep']['idle'])
+        paths = [call[1] for call in server.calls]
+        last_chat = max(index for index, path in enumerate(paths) if path == '/api/chat')
+        waits = [index for index, path in enumerate(paths) if path == '/api/owner-model' and index > last_chat]
+        # Two reads by the wait (pending, then idle), then the after-snapshot's own read.
+        self.assertEqual(len(waits), 3)
+        self.assertLess(waits[1], paths.index('/api/personal-space', last_chat))
 
 
 class FakeBox:

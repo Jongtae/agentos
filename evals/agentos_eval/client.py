@@ -154,6 +154,40 @@ class AgentOSClient:
                         'status': job.get('status')}
         return {'response': None, 'answer_withheld': False, 'status': None}
 
+    # -- owner-model upkeep ---------------------------------------------------
+    def upkeep_busy(self):
+        """Upkeep rows still waiting or running, 0 when idle, None when the route is unreadable.
+
+        Owner-model upkeep runs after a Work ends and asynchronously (#805), so
+        a snapshot taken right after the last turn can race the Memory it
+        proposes.  Paused upkeep, or a spent daily cap with nothing running,
+        will not move and counts as idle.
+        """
+        try:
+            view = self.get('/api/owner-model')
+        except ClientError:
+            return None
+        if not isinstance(view, dict) or 'pending' not in view:
+            return None
+        running = int(view.get('running') or 0)
+        pending = int(view.get('pending') or 0)
+        if not view.get('enabled', True):
+            pending = 0
+        cap = view.get('daily_calls')
+        if isinstance(cap, int) and int(view.get('calls_last_24h') or 0) >= cap:
+            pending = 0
+        return pending + running
+
+    def wait_upkeep_idle(self, timeout=90, interval=2.0):
+        """Wait, bounded, until the sandbox's owner-model upkeep queue is idle (#832)."""
+        started = self.clock()
+        deadline = started + timeout
+        while True:
+            busy = self.upkeep_busy()
+            if not busy or self.clock() >= deadline:
+                return {'idle': busy == 0, 'busy': busy, 'waited': round(self.clock() - started, 1)}
+            self.sleep(interval)
+
     # -- state snapshot -------------------------------------------------------
     SNAPSHOT_ROUTES = {'personal_space': '/api/personal-space', 'candidates': '/api/personal-space/memory-candidates',
                        'profile': '/api/personal-space/profile', 'owner_model': '/api/owner-model',

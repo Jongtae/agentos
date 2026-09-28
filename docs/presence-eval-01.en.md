@@ -2,6 +2,8 @@
 
 Issue: [#512](https://github.com/Jongtae/agentos/issues/512), final convergence verification child of PRESENCE-01 [#508](https://github.com/Jongtae/agentos/issues/508). Canonical matrix: [Presence Experience Contract](presence-experience-contract.en.md), "Observable acceptance matrix".
 
+Successor note (PRESENCE-TG-02 [#835](https://github.com/Jongtae/agentos/issues/835), 2026-09-28): this record is historical. The receipt reaction is now 👀, replaced after the answer by an outcome reaction (👌 or ✍ on `succeeded`, removed otherwise), and the waiting draft shows cycling dots instead of a "thinking" preview. The current rules are in the contract's "Telegram presence" section; `tests/test_presence_eval_matrix.py` asserts them.
+
 ## Evidence class and boundary
 
 Everything recorded as a result here is **automated synthetic fixture evidence**: `tests/test_presence_eval_matrix.py`, run in repository CI. Each scenario goes through the shipped owner boundaries:

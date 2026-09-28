@@ -6,6 +6,13 @@ Canonical record for ARCH-THIN-01 [#820](https://github.com/Jongtae/agentos/issu
 
 **Amendment — EGRESS-OPEN-01 [#826](https://github.com/Jongtae/agentos/issues/826) (2026-09-28).** The owner approved removing every class-g rule (A6, A7, A8, A10, A12, A13, A14, A16): "이 정보를 주는 건 엄청 큰 차이를 주는거네. 대신 어떤 정보를 이용해서 했는지만 확인 가능하도록 audit을 제공하면 될 듯. 허락할게." Each is now **Removed (owner decision #826)**. In exchange every Work carries an information-use audit (`information_use.py`), derived from its turn record, tool events and decision audit. It lists the owner information used, where it went and what came back. Invariants a–d, i and the folder grants are unchanged. A follow-up applies the same decision to the owner's Judgment AI: its facts are no longer masked of the Work's saved values, and secrets are still redacted (D8). The rows below keep their #820 wording for the rule itself; the disposition column is updated.
 
+**Amendment — ARCH-THIN-02 [#832](https://github.com/Jongtae/agentos/issues/832) (2026-09-28).** The deferred pre-worker command and intent layer (A25, B13, B14) now falls through to the Work model loop. A natural-language rule decision is a hint, not a route: the worker receives the owner's verbatim message and a factual note (`[AgentOS observation, not an owner instruction] …`), through the existing `RULE_FALLTHROUGH` path (`AgentService.rule_intent_note`). An unavailable or unconnected calendar connector becomes a note ("Google Calendar is not connected in this install"), never a park or a terminal failure; the worker has its own calendar and `schedule_preparation` tools. Canned ambiguous, mixed and unsupported replies become notes. A Telegram message over 12,000 characters reaches the worker truncated, with a note. What stays terminal, and why:
+- explicit forms (`/settings …`, `/note …`, `/knowledge …`, `/start`), approvals, and #814 owner-typed settings confirmation (`/settings 확인 <id>` or the button): the owner said it literally;
+- a parked Work's resume, retry and cancel, and a pending calendar draft's follow-up: their own state machines own them (c);
+- a read or connector action no worker tool can do, when its connector is ready: a Gmail search, the owner's saved knowledge and workspace results, a Drive read, and a calendar draft on a connected calendar. An executed result is the answer; an empty result falls through with a note. A connectable but unconnected Gmail or Drive keeps its contextual handoff, which resumes the request once, because no worker tool can read mail or Drive;
+- an install with no usable AI route: nothing could answer instead, so the rule's own truthful answer stays.
+Payment approval (b), secrets exclusion (a), effect idempotency and `unknown` statements (c), and Memory authority (d) are unchanged. Evidence class: deterministic unit tests with injected transports (`tests/test_intent_fallthrough.py`, `tests/test_request_word_rules.py`, `tests/test_presence_eval_matrix.py`); no live model behaviour was observed.
+
 This document is a census of every deterministic rule, and every judgment verdict, on the owner-request path that gates, withholds, filters, rewrites, narrows or overrides. For each one it records what the rule protects and what was done with it. Line numbers refer to the ARCH-THIN-01 head.
 
 Evidence class: a static reading of the source plus deterministic unit tests with injected transports (`tests/test_orchestrator.py` `ThinOrchestration`, `OwnerQuestion`, `SecretaryStandard`; `tests/test_agency_loop.py`; `tests/test_truthful_terminal_result.py`; `tests/test_refused_write_outcome.py`; `tests/test_truth_integrity_history.py`). No live model behaviour was observed for this change.
@@ -65,7 +72,7 @@ Dispositions:
 | A22 | `agent_runtime.py:2281` `CORE_INSTRUCTIONS` | "Address ONLY the latest user request … Never retry a previous failed request." | Generic worker guidance; it names no task. | c (no replay) | **Kept.** |
 | A23 | `bounded_execution.py:89` `_SPECIALISTS` | `list_agents` and `delegate_agent` are not offered on a CLI. | No delegation from a CLI. | e | **Deferred.** |
 | A24 | `bounded_execution.py:1681` | A prompt over 48 KB is refused. | The owner's request is refused. | bound | **Kept.** |
-| A25 | `quickstart_service.py:170` `workspace_summary_request`, `:188` `workspace_search_request`, `:3118` `RULE_FALLTHROUGH_INTENTS`; `conversation_handoff.py:983` `_rule_settings`, `:457` `_strip_noise`, `:997` `_rule_workspace`, `:1025` `_note_content` | Command and intent-rule rewrites of the owner's words, such as a fixed summary query or a cue-stripped subject. | The rule layer, not the worker, receives a rewritten request. | e | **Deferred.** |
+| A25 | `quickstart_service.py:170` `workspace_summary_request`, `:188` `workspace_search_request`, `:3118` `RULE_FALLTHROUGH_INTENTS`; `conversation_handoff.py:983` `_rule_settings`, `:457` `_strip_noise`, `:997` `_rule_workspace`, `:1025` `_note_content` | Command and intent-rule rewrites of the owner's words, such as a fixed summary query or a cue-stripped subject. | The rule layer, not the worker, receives a rewritten request. | e | **Reduced (#832).** A natural-language rule decision falls through: the worker receives the owner's verbatim words and a note naming what the rules matched. A natural workspace summary keeps the owner's words and adds the attached material and the save target as a note. Only an explicit form, or a ready read no worker tool can do, still uses the rule's argument. |
 
 ## B. What the owner sees
 
@@ -83,8 +90,8 @@ Dispositions:
 | B10 | `bounded_execution.py:531` `redact_reason`, `quickstart_service.py` `_redact_reason`, `scrub_work_text` | Secrets and prompt echoes are redacted from causes and from preparation answers. | Redaction. | a | **Kept.** |
 | B11 | `quickstart_service.py` appended `조회 출처`, `컨텍스트 출처`, `NOTICE_ONCE`, `MEMORY_PENDING_*_NOTE` | Appended receipts and qualifiers. | Append-only. | c, d | **Kept.** |
 | B12 | `orchestrator.py:854` `next` | A re-delegated Work shows the last attempt's answer. | A later attempt runs only after the earlier reply was judged not to serve. | e (orchestration) | **Kept.** |
-| B13 | `conversation_handoff.py:1191` `_mixed`, `:1183` `_ambiguous`, `:1116` mixed mail action, `:651` `unsupported_capability`, `:572` `UNSUPPORTED_JUDGMENT_UNAVAILABLE`; `quickstart_service.py:6349` clarification, `:6351` greeting text, knowledge, mail and workspace raw-row replies | Canned AgentOS text instead of a worker answer. | The worker never runs. | e | **Deferred.** |
-| B14 | `quickstart_service.py:6092` | Telegram text over 12,000 characters is silently skipped. | The owner's message is dropped. | e | **Deferred.** |
+| B13 | `conversation_handoff.py:1191` `_mixed`, `:1183` `_ambiguous`, `:1116` mixed mail action, `:651` `unsupported_capability`, `:572` `UNSUPPORTED_JUDGMENT_UNAVAILABLE`; `quickstart_service.py:6349` clarification, `:6351` greeting text, knowledge, mail and workspace raw-row replies | Canned AgentOS text instead of a worker answer. | The worker never runs. | e | **Reduced (#832).** Ambiguous, mixed, unsupported and missing-detail replies, and an unavailable connector, become notes to the worker. Kept: the explicit `/start` greeting, and a found result of a ready read no worker tool can do (Gmail, saved knowledge and workspace results); an empty one falls through. With no usable AI route the canned reply stays. |
+| B14 | `quickstart_service.py:6092` | Telegram text over 12,000 characters is silently skipped. | The owner's message is dropped. | e | **Reduced (#832)** to a bound: the message reaches the worker cut to 12,000 characters, with a note saying so. |
 
 ## C. What decides the outcome
 
@@ -133,15 +140,15 @@ The census has 63 rows. Each row is counted once, under its primary code. The e 
 | g: private-doc egress guard | 8 | 8 | 0 | 0 | 0 |
 | i: isolation | 1 | 0 | 0 | 1 | 0 |
 | bound | 7 | 0 | 0 | 7 | 0 |
-| e: none | 23 | 9 | 4 | 4 | 6 |
-| **Total** | **63** | **17** | **5** | **35** | **6** |
+| e: none | 23 | 9 | 7 | 4 | 3 |
+| **Total** | **63** | **17** | **8** | **35** | **3** |
 
 - **Every rule that protects a, b, c or d is kept.** The one reduction is C8: its owner-question branches went, and the rest is now a label.
 - **Of the 23 rules that protect nothing:**
   - 9 are removed: A1, A3, A5, B1, B2, B6, C2, C3, C4.
-  - 4 are reduced to notes or labels: A2, A4, C1, C5.
+  - 7 are reduced to notes, labels or a bound: A2, A4, C1, C5, and (#832) A25, B13, B14.
   - 4 are kept because they never change what the owner sees or what the worker is asked: A9, B7, B9, B12.
-  - 6 are deferred. They sit in the pre-worker command and intent layer, or are setup blockers and bounds: A21, A23, A25, B13, B14, D9.
+  - 3 are deferred. They are setup blockers and bounds: A21, A23, D9.
 - **The removals and reductions cover every failure mode of the day:** rewriting the owner's words (A1–A5), overriding the AI's result (B1, B2, B6, C1–C5), and blocking owner-state flow (A1, and A6's empty subset staying the full toolset).
 
 ## Live case (Work of 2026-09-28 16:05 KST)
@@ -171,11 +178,8 @@ The owner said "점심은 이미 반포6 분짜오 먹었어" (a statement: "I a
 
 ## Follow-up (deferred e rules, outside this change)
 
-- **The pre-worker command and intent layer:**
-  - A25 and B13: canned clarifications, mixed and ambiguous refusals, rule rewrites, raw knowledge, mail and workspace rows, and the greeting text;
-  - route these to the worker with the owner's words instead.
+- **The pre-worker command and intent layer (A25, B13, B14):** done by ARCH-THIN-02 #832; see the amendment under *Status*. Still open there: a found Gmail, saved-knowledge or workspace result is shown as raw rows, because no worker tool reads those stores; giving the worker such a tool would let these fall through too.
 - **Silent drops and refusals:**
-  - B14: a Telegram message over 12,000 characters is dropped silently;
   - D9: the unverified-model blocker;
   - A23: specialists on a CLI;
   - A21: a preparation's conversation.

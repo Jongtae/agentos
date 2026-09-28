@@ -33,14 +33,14 @@ from personal_agent.agent_runtime import WORK_STOPPED
 from personal_agent.providers import ModelAdapter, ProviderError, request_json
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
-from personal_agent.telegram_presence import (REACTION_FOR_SEMANTICS, REACTION_SEMANTICS, TELEGRAM_REACTION_EMOJI,
-                                              THINKING_DRAFT_TEXT,
-                                              WAIT_CHAT_ACTION, WAIT_DRAFT, WAIT_NONE, PresenceTiming, draft_id_for,
-                                              render_telegram_html, turn_gesture)
+from personal_agent.telegram_presence import (CLEAR_REACTION, DONE_REACTION, DOTS_FRAMES, PRESENCE_REACTIONS,
+                                              RECEIVED_REACTION, TELEGRAM_REACTION_EMOJI, WROTE_REACTION,
+                                              WAIT_CHAT_ACTION, WAIT_DRAFT, WAIT_NONE, PresenceTiming, draft_frame,
+                                              draft_id_for, outcome_reaction, render_telegram_html)
 
 CHAT = 4242
 GENERATION = 'g1'
-PRESENCE_METHODS = ('setMessageReaction', 'sendChatAction', 'sendRichMessageDraft', 'sendMessageDraft')
+PRESENCE_METHODS = ('setMessageReaction', 'sendChatAction', 'sendMessageDraft')
 
 
 class NativePresenceTestCase(unittest.TestCase):
@@ -115,6 +115,18 @@ class NativePresenceTestCase(unittest.TestCase):
     def reactions(self):
         return [body for method, body in self.calls if method == 'setMessageReaction']
 
+    def emojis(self):
+        """Each reaction call as its emoji, or '' for a removal (#835)."""
+        return [(body['reaction'][0]['emoji'] if body['reaction'] else CLEAR_REACTION) for body in self.reactions()]
+
+    def drafts(self):
+        return [body['text'] for method, body in self.calls if method == 'sendMessageDraft']
+
+    def after_answer(self):
+        """Methods called after the last durable reply."""
+        methods = self.methods()
+        return methods[len(methods) - methods[::-1].index('sendMessage'):]
+
     def tap(self, data, message_id, sender=CHAT, callback_id='cb'):
         self.service.ingest_callback({'id': callback_id, 'from': {'id': sender}, 'data': data,
                                       'message': {'message_id': message_id, 'chat': {'id': sender, 'type': 'private'}}},
@@ -134,13 +146,16 @@ class NativePresenceTestCase(unittest.TestCase):
 
 
 class ImmediateTurnTests(NativePresenceTestCase):
-    def test_ordinary_question_is_reaction_then_one_answer(self):
+    def test_ordinary_question_is_looking_then_one_answer_then_done(self):
         self.connect_model()
         job, message_id = self.turn('오늘 저녁은 뭐해 먹을까?')
         self.assertEqual(job['status'], 'succeeded')
-        self.assertEqual(self.methods(), ['setMessageReaction', 'sendMessage'])
+        # #835: 👀 on receipt; only after the answer, the outcome reaction replaces it.
+        self.assertEqual(self.methods(), ['setMessageReaction', 'sendMessage', 'setMessageReaction'])
         self.assertEqual(self.reactions(), [{'chat_id': CHAT, 'message_id': message_id,
-                                             'reaction': [{'type': 'emoji', 'emoji': '👍'}]}])
+                                             'reaction': [{'type': 'emoji', 'emoji': '👀'}]},
+                                            {'chat_id': CHAT, 'message_id': message_id,
+                                             'reaction': [{'type': 'emoji', 'emoji': DONE_REACTION}]}])
         [reply] = self.sends()
         self.assertEqual(reply['text'], self.text)
         self.assertEqual(reply['parse_mode'], 'HTML')
@@ -158,7 +173,7 @@ class ImmediateTurnTests(NativePresenceTestCase):
         self.assertNotIn('sendChatAction', self.methods())
         self.assertNotIn('sendMessageDraft', self.methods())
 
-    def test_command_and_effect_turns_get_no_reaction(self):
+    def test_command_turns_get_no_reaction(self):
         self.connect_model()
         self.turn('/notes')
         self.turn('/note 커피는 따뜻하게')
@@ -182,12 +197,12 @@ class WaitSurfaceTests(NativePresenceTestCase):
         self.connect_model()
         self.during_model = lambda job: self.service.acknowledge_long_work(now=job['created'] + 2)
         job, _ = self.turn('오늘 저녁은 뭐해 먹을까?')
-        self.assertEqual(self.methods(), ['setMessageReaction', 'sendChatAction', 'sendMessage'])
+        self.assertEqual(self.methods(), ['setMessageReaction', 'sendChatAction', 'sendMessage', 'setMessageReaction'])
         self.assertEqual(self.calls[1][1], {'chat_id': CHAT, 'action': 'typing'})
         self.assertEqual(len(self.sends()), 1)
         self.assertEqual(job['status'], 'succeeded')
 
-    def test_long_generation_uses_one_stop_able_draft_then_one_durable_answer(self):
+    def test_long_generation_uses_one_stop_able_dots_draft_then_one_durable_answer(self):
         self.connect_model()
 
         def think(job):
@@ -195,14 +210,16 @@ class WaitSurfaceTests(NativePresenceTestCase):
                 self.service.acknowledge_long_work(now=job['created'] + offset)
         self.during_model = think
         job, message_id = self.turn('제주 여행 준비 자료 조사해줘')
-        drafts = [body for method, body in self.calls if method == 'sendRichMessageDraft']
-        # First draft at 6s, refreshed once at 27s (>= 20s later); 7s and 12s are no-ops.
-        self.assertEqual(len(drafts), 2)
-        for body in drafts:
-            self.assertEqual(body, {'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'can_stop': True,
-                                    'rich_message': {'blocks': [{'type': 'thinking', 'text': THINKING_DRAFT_TEXT}]}})
-        self.assertNotIn('sendChatAction', self.methods())
-        self.assertEqual(self.methods()[-1], 'sendMessage')
+        drafts = [body for method, body in self.calls if method == 'sendMessageDraft']
+        # #835: a draft edit at 6s, 12s and 27s, each the next dots frame; the
+        # rich "thinking" block (its own "생각 중" label) is never used.
+        self.assertEqual(drafts, [{'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'text': frame, 'can_stop': True}
+                                  for frame in DOTS_FRAMES])
+        self.assertNotIn('sendRichMessageDraft', self.methods())
+        self.assertFalse(any('생각' in body['text'] for body in drafts))
+        # 7s: no draft edit due yet, so typing… (never sent before) is refreshed.
+        self.assertEqual(self.methods().count('sendChatAction'), 1)
+        self.assertEqual(self.after_answer(), ['setMessageReaction'])
         [reply] = self.sends()
         self.assertEqual(reply['reply_parameters'], {'message_id': message_id, 'allow_sending_without_reply': True})
         self.assertIsNone(self.store.task_card(job['id']), 'the draft replaces the old running-Work card')
@@ -243,7 +260,8 @@ class PresentationFailureTests(NativePresenceTestCase):
                 self.assertEqual(job['status'], 'succeeded')
                 self.assertEqual(job['delivery'], 'sent')
                 self.assertEqual(len(self.sends()), 1)
-                self.assertEqual(self.methods()[-1], 'sendMessage')
+                # The failed outcome reaction is attempted once and changes nothing.
+                self.assertEqual(self.after_answer(), ['setMessageReaction'])
 
     def test_a_refused_presence_call_is_logged_without_telegram_detail(self):
         self.connect_model()
@@ -252,31 +270,18 @@ class PresentationFailureTests(NativePresenceTestCase):
         with self.assertLogs('personal_agent.service', 'INFO') as logs:
             job, _ = self.turn('오늘 저녁은 뭐해 먹을까?')
         self.assertEqual(job['delivery'], 'sent')
-        [line] = [line for line in logs.output if 'telegram presence' in line]
-        self.assertIn('set_message_reaction failed: TelegramRejected status=400', line)
-        for secret in ('REACTION_INVALID', 'owner-text', 'SECRET-TOKEN', '저녁'):
-            self.assertNotIn(secret, line)
-
-    def test_refused_rich_thinking_draft_falls_back_to_the_plain_placeholder_draft(self):
-        self.connect_model()
-        self.failing = {'sendRichMessageDraft': TelegramRejected(400, 'Bad Request: method not supported')}
-        self.during_model = lambda job: [self.service.acknowledge_long_work(now=job['created'] + t) for t in (6, 27)]
-        job, _ = self.turn('긴 요청')
-        self.assertEqual(self.methods().count('sendRichMessageDraft'), 1, 'a refused rich draft is not retried')
-        plain = [body for method, body in self.calls if method == 'sendMessageDraft']
-        self.assertEqual(len(plain), 2, 'the plain placeholder draft is shown at once and refreshed')
-        for body in plain:
-            self.assertEqual(body, {'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'text': '', 'can_stop': True})
-        self.assertNotIn('sendChatAction', self.methods())
-        self.assertEqual(len(self.sends()), 1)
+        lines = [line for line in logs.output if 'telegram presence' in line]
+        self.assertEqual(len(lines), 2, 'the 👀 and the outcome reaction')
+        for line in lines:
+            self.assertIn('set_message_reaction failed: TelegramRejected status=400', line)
+            for secret in ('REACTION_INVALID', 'owner-text', 'SECRET-TOKEN', '저녁'):
+                self.assertNotIn(secret, line)
 
     def test_unsupported_draft_falls_back_to_typing(self):
         self.connect_model()
-        self.failing = {'sendRichMessageDraft': ProviderError('method not found'),
-                        'sendMessageDraft': ProviderError('method not found')}
-        self.during_model = lambda job: [self.service.acknowledge_long_work(now=job['created'] + t) for t in (6, 7)]
+        self.failing = {'sendMessageDraft': ProviderError('method not found')}
+        self.during_model = lambda job: [self.service.acknowledge_long_work(now=job['created'] + t) for t in (6, 7, 9)]
         self.turn('긴 요청')
-        self.assertEqual(self.methods().count('sendRichMessageDraft'), 1, 'a failed draft is not retried')
         self.assertEqual(self.methods().count('sendMessageDraft'), 1, 'a failed draft is not retried')
         self.assertIn('sendChatAction', self.methods())
         self.assertEqual(len(self.sends()), 1)
@@ -304,8 +309,9 @@ class FailedTurnTests(NativePresenceTestCase):
         self.assertEqual(reply['reply_parameters']['message_id'], message_id)
         labels = [button['text'] for button in reply['reply_markup']['inline_keyboard'][0]]
         self.assertEqual(labels, ['다시 시도', '상세'])
-        # The acknowledgement reaction came first and says only "received".
+        # 👀 came first; a failed outcome removes it and never shows a done emoji (#835).
         self.assertEqual(self.methods()[0], 'setMessageReaction')
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, CLEAR_REACTION])
 
     def test_retry_control_is_owner_bound_exact_message_and_idempotent(self):
         job, source = self.failed_turn()
@@ -456,7 +462,7 @@ class StopTests(NativePresenceTestCase):
         self.during_model = think
         job, message_id = self.turn('긴 조사 부탁해')
         self.assertEqual(outcomes, ['running'])
-        self.assertEqual(self.methods().count('sendRichMessageDraft'), 1, 'no draft after Stop')
+        self.assertEqual(self.methods().count('sendMessageDraft'), 1, 'no draft after Stop')
         self.assertNotIn('sendChatAction', self.methods())
         # #606 T1: Stop is checked before the next model turn or tool call, so
         # the running Work ends there and its one real result says why.
@@ -585,36 +591,197 @@ class AnchorTests(NativePresenceTestCase):
         self.assertEqual(reply['reply_parameters']['message_id'], first_message)
 
 
-class ReactionSemanticsTests(unittest.TestCase):
-    def test_every_mapped_reaction_is_a_documented_telegram_reaction(self):
-        for semantics in REACTION_SEMANTICS:
-            self.assertIn(REACTION_FOR_SEMANTICS[semantics], TELEGRAM_REACTION_EMOJI, semantics)
+def write_event(tool, saved=True, status='succeeded'):
+    return {'tool': tool, 'status': status, 'trace': {'evidence': {'saved': saved}}}
 
-    def test_typed_decisions_map_deterministically_and_unknown_is_no_reaction(self):
-        self.assertEqual(turn_gesture(intent=INTENT_CONVERSATION).reaction, '👍')
-        self.assertEqual(turn_gesture(relation=FOLLOWUP_CORRECTION).reaction, '👌')
-        self.assertEqual(turn_gesture(relation=FOLLOWUP_RETRY).reaction, '👍')
-        self.assertEqual(turn_gesture(relation=FOLLOWUP_REFERENCE).reaction, '👍')
-        self.assertEqual(turn_gesture(semantics='celebrate').reaction, '🎉')
-        for gesture in (turn_gesture(relation=FOLLOWUP_CANCEL), turn_gesture(intent=INTENT_CALENDAR_CREATE),
-                        turn_gesture(intent=INTENT_NOTE_CREATE), turn_gesture(intent=INTENT_SETTINGS),
-                        turn_gesture(intent=INTENT_AMBIGUOUS), turn_gesture(intent=INTENT_UNSUPPORTED),
-                        turn_gesture(intent=INTENT_CONVERSATION, executes=False),
-                        turn_gesture(semantics='sarcasm'), turn_gesture(relation='unknown'), turn_gesture()):
-            self.assertIsNone(gesture.reaction)
+
+class OutcomeReactionTests(unittest.TestCase):
+    """#835: the outcome reaction is a pure function of the decided outcome and observed events."""
+
+    def test_every_presence_reaction_is_a_documented_telegram_reaction(self):
+        self.assertEqual(PRESENCE_REACTIONS, (RECEIVED_REACTION, DONE_REACTION, WROTE_REACTION))
+        for emoji in PRESENCE_REACTIONS:
+            self.assertIn(emoji, TELEGRAM_REACTION_EMOJI)
+        self.assertEqual((RECEIVED_REACTION, DONE_REACTION, WROTE_REACTION), ('👀', '👌', '✍'))
+
+    def test_succeeded_is_done_and_an_observed_note_or_memory_write_is_writing(self):
+        self.assertEqual(outcome_reaction('succeeded'), DONE_REACTION)
+        self.assertEqual(outcome_reaction('succeeded', [write_event('save_note')]), WROTE_REACTION)
+        self.assertEqual(outcome_reaction('succeeded', [write_event('save_memory')]), WROTE_REACTION)
+        aliased = {'tool': 'package.save_fact', 'status': 'succeeded',
+                   'trace': {'host_action': 'save_memory', 'evidence': {'saved': True}}}
+        self.assertEqual(outcome_reaction('succeeded', [aliased]), WROTE_REACTION)
+        # A pending MemoryCandidate, a failed write or another tool is not a write.
+        for events in ([write_event('save_memory', saved=False)], [write_event('save_note', status='failed')],
+                       [write_event('save_note', status='running')], [write_event('web_search')],
+                       [{'tool': 'save_note', 'status': 'succeeded', 'trace': {}}]):
+            self.assertEqual(outcome_reaction('succeeded', events), DONE_REACTION, events)
+
+    def test_no_done_reaction_unless_succeeded_and_delivered(self):
+        done = (DONE_REACTION, WROTE_REACTION)
+        for outcome in ('partial', 'failed', 'unknown', 'cancelled', 'interrupted'):
+            with self.subTest(outcome=outcome):
+                reaction = outcome_reaction(outcome, [write_event('save_note')])
+                self.assertEqual(reaction, CLEAR_REACTION)
+                self.assertNotIn(reaction, done)
+        self.assertEqual(outcome_reaction('succeeded', delivered=False), CLEAR_REACTION)
+        self.assertEqual(outcome_reaction('succeeded', [write_event('save_note')], blocked=True), CLEAR_REACTION)
+
+    def test_a_succeeded_work_awaiting_the_owners_approval_is_not_done(self):
+        # Typed flags only: a calendar draft awaiting approval, an unapplied
+        # draft needing confirmation, or the caller's pending-approval signal.
+        for events in ([{'tool': 'calendar_draft', 'status': 'succeeded', 'trace': {'state': 'awaiting-approval'}}],
+                       [{'tool': 'x', 'status': 'succeeded',
+                         'trace': {'evidence': {'requires_owner_approval': True, 'applied': False}}}],
+                       [{'tool': 'y', 'status': 'succeeded', 'trace': {'evidence': {'requires_owner_confirmation': True}}}]):
+            self.assertEqual(outcome_reaction('succeeded', events), CLEAR_REACTION, events)
+        self.assertEqual(outcome_reaction('succeeded', awaiting_owner=True), CLEAR_REACTION)
+        applied = [{'tool': 'y', 'status': 'succeeded',
+                    'trace': {'evidence': {'requires_owner_confirmation': True, 'applied': True}}}]
+        self.assertEqual(outcome_reaction('succeeded', applied), DONE_REACTION)
+
+    def test_an_undecided_outcome_keeps_the_looking_reaction(self):
+        for outcome in ('queued', 'running', 'awaiting_connection', 'awaiting_drive', 'awaiting_context', None, 'x'):
+            self.assertIsNone(outcome_reaction(outcome), outcome)
 
     def test_poll_includes_the_stop_update_kind(self):
         self.assertIn('stopped_message_generation', TELEGRAM_POLL_UPDATE_KINDS)
 
 
-class CorrectionReactionTests(NativePresenceTestCase):
-    def test_a_decision_engine_correction_gets_the_okay_reaction(self):
+class OutcomeReactionServiceTests(NativePresenceTestCase):
+    """#835 through the real delivery path: 👀 on receipt, the outcome reaction only after the answer."""
+
+    def test_looking_appears_as_soon_as_the_work_runs(self):
+        job_id, message_id = self.receive('오래 걸리는 질문')
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='running' WHERE id=?", (job_id,))
+        self.service.acknowledge_long_work(now=self.store.job(job_id)['created'] + 0.1)
+        self.assertEqual(self.reactions(), [{'chat_id': CHAT, 'message_id': message_id,
+                                             'reaction': [{'type': 'emoji', 'emoji': RECEIVED_REACTION}]}])
+        # present_turn later in the same run does not react twice.
+        self.service.present_turn(self.store.job(job_id))
+        self.assertEqual(len(self.reactions()), 1)
+
+    def test_superseded_parked_work_clears_looking_reaction(self):
+        job_id, message_id = self.receive('연결 후 이어서 해줘')
+        self.service.present_turn(self.store.job(job_id))
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='awaiting_connection',delivery='pending' WHERE id=?", (job_id,))
+        self.service.cancel_superseded_work([job_id], notify=False)
+        self.assertEqual(self.reactions()[-1], {'chat_id': CHAT, 'message_id': message_id, 'reaction': []})
+
+    def settle(self, status, response='결과', delivery='pending'):
+        job_id, _ = self.receive('요청')
+        self.service.present_turn(self.store.job(job_id))
+        with self.store.db() as db:
+            db.execute('UPDATE jobs SET status=?,response=?,delivery=? WHERE id=?', (status, response, delivery, job_id))
+        self.service.deliver_one()
+        return job_id
+
+    def test_no_done_reaction_on_failed_partial_unknown_or_interrupted(self):
+        for status in ('failed', 'partial', 'unknown', 'interrupted'):
+            with self.subTest(status=status):
+                self.calls.clear()
+                self.settle(status)
+                self.assertEqual(self.emojis(), [RECEIVED_REACTION, CLEAR_REACTION])
+                self.assertEqual(self.after_answer(), ['setMessageReaction'])
+                self.assertEqual(self.reactions()[-1]['reaction'], [])
+
+    def test_done_reaction_only_after_the_answer_on_succeeded(self):
+        self.settle('succeeded')
+        self.assertEqual(self.methods(), ['setMessageReaction', 'sendMessage', 'setMessageReaction'])
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, DONE_REACTION])
+
+    def test_uncertain_delivery_never_shows_done(self):
+        self.failing = {'sendMessage': ProviderError('response lost')}
+        job_id = self.settle('succeeded')
+        self.assertEqual(self.store.job(job_id)['delivery'], 'unknown')
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, CLEAR_REACTION])
+
+    def test_a_parked_work_keeps_looking_until_it_ends(self):
+        self.settle('awaiting_connection', response='연결이 필요해요.')
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION])
+
+    def test_a_note_write_that_succeeded_gets_the_writing_reaction(self):
+        self.connect_model()
+
+        def wrote(job):
+            with self.store.db() as db:
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           (job['id'], 'save_note', 'succeeded', json.dumps({'evidence': {'saved': True, 'id': 'n1'}}),
+                            time.time()))
+        self.during_model = wrote
+        # The words say nothing about notes: only the observed event chooses ✍.
+        job, _ = self.turn('오늘 저녁은 뭐해 먹을까?')
+        self.assertEqual(job['status'], 'succeeded')
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, WROTE_REACTION])
+
+    def test_a_correction_turn_gets_the_same_looking_reaction(self):
         self.connect_model()
         self.turn('오늘 저녁 메뉴 추천해줘')
+        self.calls.clear()
         self.service.use_decision_engine(self.relation_engine({'아니 국물 말고': FOLLOWUP_CORRECTION}))
         _job, message_id = self.turn('아니 국물 말고')
-        self.assertEqual(self.reactions()[-1], {'chat_id': CHAT, 'message_id': message_id,
-                                                'reaction': [{'type': 'emoji', 'emoji': '👌'}]})
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, DONE_REACTION])
+        self.assertEqual({body['message_id'] for body in self.reactions()}, {message_id})
+
+
+class LiveWaitTests(NativePresenceTestCase):
+    """#835: typing… stays alive under the dots draft, and nothing follows the answer."""
+
+    def tick_every(self, job, start, end, step=0.25):
+        """Tick like the acknowledge thread; returns [(offset, methods sent in that tick)]."""
+        seen = []
+        for index in range(int(round((end - start) / step)) + 1):
+            offset = start + index * step
+            before = len(self.calls)
+            self.service.acknowledge_long_work(now=job['created'] + offset)
+            seen.append((offset, [method for method, _body in self.calls[before:]]))
+        return seen
+
+    def test_typing_is_refreshed_while_the_dots_draft_is_shown(self):
+        self.connect_model()
+        ticks = []
+        self.during_model = lambda job: ticks.extend(self.tick_every(job, 0, 20))
+        job, _ = self.turn('긴 조사 부탁해')
+        typing = [offset for offset, methods in ticks if 'sendChatAction' in methods]
+        drafted = [offset for offset, methods in ticks if 'sendMessageDraft' in methods]
+        self.assertEqual(drafted[0], 5, drafted)
+        self.assertTrue([offset for offset in typing if offset > drafted[0]], 'typing continues under the draft')
+        # From the first typing… to the end, never a gap the 5 s typing lifetime could expire in.
+        gaps = [later - earlier for earlier, later in zip(typing, typing[1:])] + [20 - typing[-1]]
+        self.assertLessEqual(max(gaps), 4.25, typing)
+        # One draft edit per dots_refresh at most, each the next frame, never empty.
+        self.assertTrue(all(later - earlier >= 1.5 for earlier, later in zip(drafted, drafted[1:])), drafted)
+        self.assertEqual(self.drafts()[:4], [DOTS_FRAMES[0], DOTS_FRAMES[1], DOTS_FRAMES[2], DOTS_FRAMES[0]])
+        self.assertTrue(all(self.drafts()))
+        # At most one presence call per Work per tick.
+        self.assertTrue(all(len(methods) <= 1 for _offset, methods in ticks))
+        self.assertEqual(job['status'], 'succeeded')
+
+    def test_nothing_is_sent_after_the_final_answer(self):
+        self.connect_model()
+        self.during_model = lambda job: self.tick_every(job, 0, 8)
+        job_id, _ = self.receive('긴 조사 부탁해')
+        self.service.run_one()
+        self.assertIn('sendMessageDraft', self.methods())
+        # Decided but not yet delivered: no more typing… or draft either.
+        before = len(self.calls)
+        self.tick_every(self.store.job(job_id), 8, 12)
+        self.assertEqual(len(self.calls), before)
+        self.service.deliver_one()
+        self.tick_every(self.store.job(job_id), 12, 40, step=1)
+        self.assertEqual(self.after_answer(), ['setMessageReaction'], 'only the outcome reaction, on the owner message')
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, DONE_REACTION])
+
+
+class DotsFrameTests(unittest.TestCase):
+    def test_dots_cycle_follow_a_step_line_and_are_never_empty(self):
+        self.assertEqual([draft_frame('', frame) for frame in range(4)], ['·', '· ·', '· · ·', '·'])
+        self.assertEqual(draft_frame('웹 검색 중: 환율', 1), '웹 검색 중: 환율 · ·')
+        self.assertEqual(draft_frame('다시 해보는 중…', 2), '다시 해보는 중 · · ·', 'the dots replace an ellipsis')
+        self.assertEqual(draft_frame('찾는 중...', 0), '찾는 중 ·')
+        self.assertEqual(draft_frame(None, 0), '·')
 
 
 class TimingTests(unittest.TestCase):
@@ -959,21 +1126,19 @@ class ChannelWireTests(unittest.TestCase):
             log.append((url.rsplit('/', 1)[-1], body, timeout))
             return {'ok': True, 'result': True}
         channel = TelegramChannel(lambda: transport, lambda: 'BOT:TOKEN')
-        channel.set_message_reaction(1, 2, '👍')
+        channel.set_message_reaction(1, 2, '👀')
         channel.send_chat_action(1)
-        channel.send_message_draft(1, 77)
-        channel.send_rich_message_draft(1, 77, THINKING_DRAFT_TEXT)
+        channel.send_message_draft(1, 77, '·')
+        channel.set_message_reaction(1, 2, CLEAR_REACTION)
         channel.send_message(1, 'x', parse_mode='HTML', reply_to=5)
         channel.edit_message_reply_markup(1, 5, {'inline_keyboard': []})
         channel.answer_callback_query('c', 'y' * 300, show_alert=True)
         self.assertEqual(log[0], ('setMessageReaction', {'chat_id': 1, 'message_id': 2,
-                                                         'reaction': [{'type': 'emoji', 'emoji': '👍'}]}, 4))
+                                                         'reaction': [{'type': 'emoji', 'emoji': '👀'}]}, 4))
         self.assertEqual(log[1], ('sendChatAction', {'chat_id': 1, 'action': 'typing'}, 4))
-        self.assertEqual(log[2], ('sendMessageDraft', {'chat_id': 1, 'draft_id': 77, 'text': '', 'can_stop': True}, 4))
-        # Bot API 10.3: InputRichMessage.blocks with one InputRichBlockThinking.
-        self.assertEqual(log.pop(3), ('sendRichMessageDraft', {
-            'chat_id': 1, 'draft_id': 77, 'can_stop': True,
-            'rich_message': {'blocks': [{'type': 'thinking', 'text': THINKING_DRAFT_TEXT}]}}, 4))
+        self.assertEqual(log[2], ('sendMessageDraft', {'chat_id': 1, 'draft_id': 77, 'text': '·', 'can_stop': True}, 4))
+        # Bot API: an empty reaction list removes the bot's reaction (#835).
+        self.assertEqual(log.pop(3), ('setMessageReaction', {'chat_id': 1, 'message_id': 2, 'reaction': []}, 4))
         self.assertEqual(log[3][1], {'chat_id': 1, 'text': 'x', 'parse_mode': 'HTML',
                                      'reply_parameters': {'message_id': 5, 'allow_sending_without_reply': True}})
         self.assertEqual(log[4][1], {'chat_id': 1, 'message_id': 5, 'reply_markup': {'inline_keyboard': []}})

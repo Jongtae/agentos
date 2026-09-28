@@ -108,12 +108,14 @@ SLOW_SETTINGS = frozenset({("judgment_ai", "model"), ("main_ai", "route"), ("mai
 #: How long a confirmation waits for another apply of the same category (#814 review).
 APPLY_WAIT_SECONDS = 5
 #: #814 review: a draft left ``applying`` by a restart: its setter may or may not have committed.
-IN_DOUBT_MESSAGE = ("설정 변경이 적용 중에 중단되어 실제로 바뀌었는지 알 수 없습니다. 현재 값을 확인하고, "
+IN_DOUBT_MESSAGE = ("설정 변경이 적용 중에 중단되어 적용됐는지 확인하지 못했어요. 현재 값을 확인해 주세요. "
                     "필요하면 다시 요청하세요: {effect}")
 #: #814 review P1: text confirmation needs a message the owner typed, not one AgentOS ran.
 NOT_OWNER_TYPED_MESSAGE = ("설정 변경은 소유자가 직접 보낸 메시지나 확인 버튼으로만 확인하거나 취소할 수 있습니다. "
                            "아무것도 바꾸지 않았습니다.")
 BUSY_MESSAGE = "다른 설정을 적용하는 중입니다. 끝난 뒤 다시 확인하세요. 아직 아무것도 바꾸지 않았습니다."
+STALE_MESSAGE = "초안을 만든 뒤 설정이 바뀌었거나 이 값을 더 이상 고를 수 없어 적용하지 않았습니다. 다시 요청하세요."
+WORKER_START_MESSAGE = "설정을 적용하는 작업을 시작하지 못했습니다. 아무것도 바꾸지 않았습니다."
 FOLLOW_REQUESTED_MESSAGE = "판단 AI를 기본 AI 따라가기로 요청했어요. 확인이 끝나면 적용돼요."
 
 
@@ -143,8 +145,8 @@ class SettingsOrchestrator:
         # One confirmation moves a draft out of awaiting at a time (exactly once);
         # every read-modify-write of the draft rows holds it (re-entrant).
         self._confirming = threading.RLock()
-        # #814 review P2-3: at most one slow apply runs off-thread at a time.
-        self._background = threading.Lock()
+        # #814 review P2-3: slow applies run in order on one background worker.
+        self._queue, self._worker_running = [], False
         self.thread = None
         # #814 review: one compare-and-apply per category at a time (the stale ``before``
         # check and the setter under one lock, handed to the off-thread apply).
@@ -447,84 +449,99 @@ class SettingsOrchestrator:
         return {"state": outcome, "draft_id": row["id"], "target": row["target"], "before": row["before"],
                 "after": row["after"], "response": response}
 
-    def _run_background(self, row, notify, category_lock):
-        """The off-thread apply: it owns the category lock and the single-flight slot it was handed."""
+    def _admit(self, row, digest):
+        """Check one draft is still confirmable and move it to ``applying``, in flight (exactly once)."""
+        with self._confirming:
+            row = self._drafts().get(row["id"]) or row
+            if row.get("state") in ("applied", "requested"):
+                raise SettingsError("이미 적용한 설정 초안입니다.")
+            if row.get("state") == "unknown":
+                raise SettingsError(IN_DOUBT_MESSAGE.format(effect=row["effect"]))
+            if row.get("state") != "awaiting-confirmation":
+                raise SettingsError("이 설정 초안은 더 이상 확인할 수 없습니다. 필요하면 다시 요청하세요.")
+            if not hmac.compare_digest(str(row.get("digest") or ""), digest) or self._digest(row) != row.get("digest"):
+                raise SettingsError("확인 정보가 이 설정 초안과 맞지 않아 적용하지 않았습니다.")
+            if self.now() > float(row.get("expires_at") or 0):
+                self._settle(row["id"], "expired", "expired")
+                raise SettingsError("설정 초안이 만료되어 적용하지 않았습니다. 필요하면 다시 요청하세요.")
+            row = self._settle(row["id"], "applying", None, applying_at=self.now())
+            self._in_flight.add(row["id"])
+            return row
+
+    def _checked_apply(self, row):
+        """Compare-and-apply (#814 review): re-check ``before``, then the setter.  The caller holds the category lock."""
         try:
             try:
-                text = self._finish(row)["response"]
-            except SettingsError as exc:
-                text = f"{row['effect']} 변경을 적용하지 못했습니다: {exc}"
+                after, current = self._normalized(row["category"], row["setting"], row["after"])
+                if after != row["after"] or current[row["setting"]]["value"] != row["before"]:
+                    raise SettingsError(STALE_MESSAGE)
+            except Exception as exc:
+                self._settle(row["id"], "failed", "failed", type(exc).__name__)
+                message = str(exc) if isinstance(exc, ValueError) and str(exc) else "설정을 적용하지 못했습니다."
+                raise SettingsError(message) from None
+            return self._finish(row)
         finally:
-            self._done(row["id"], category_lock, True)
-        try:
-            notify(text)
-        except Exception:
-            pass
+            with self._confirming:
+                self._in_flight.discard(row["id"])
 
-    def _done(self, draft_id, category_lock, background):
+    def _worker(self):
+        """The one background worker: queued slow drafts, in order, each compare-and-apply under its category lock."""
+        while True:
+            with self._confirming:
+                if not self._queue:
+                    self._worker_running = False
+                    return
+                row, notify = self._queue.pop(0)
+            with self._category_locks[row["category"]]:
+                try:
+                    text = self._checked_apply(row)["response"]
+                except Exception as exc:
+                    text = f"{row['effect']} 변경을 적용하지 못했습니다: {exc if isinstance(exc, SettingsError) else '오류'}"
+            try:
+                notify(text)
+            except Exception:
+                pass
+
+    def _enqueue(self, row, notify):
+        """Queue one admitted slow draft on the background worker; start it when idle."""
         with self._confirming:
-            self._in_flight.discard(draft_id)
-        category_lock.release()
-        if background:
-            self._background.release()
+            self._queue.append((row, notify))
+            start = not self._worker_running
+            self._worker_running = True
+        if start:
+            thread = threading.Thread(target=self._worker, daemon=True, name="agentos-settings-apply")
+            try:
+                thread.start()
+            except Exception:
+                # #814 review P3: nothing ran; every queued draft fails and nothing stays in flight.
+                with self._confirming:
+                    items, self._queue, self._worker_running = self._queue, [], False
+                    for item, _notify in items:
+                        self._in_flight.discard(item["id"])
+                        self._settle(item["id"], "failed", "failed", "worker-start")
+                raise SettingsError(WORKER_START_MESSAGE) from None
+            self.thread = thread
+        return {"state": "applying", "draft_id": row["id"], "target": row["target"], "before": row["before"],
+                "after": row["after"],
+                "response": f"{row['effect']} 변경을 확인하고 있어요. 끝나면 결과를 알려드릴게요."}
 
     def _confirm_owner_setting(self, row, digest, notify=None):
         """Apply one awaiting draft exactly once, after re-checking it is still current (#814).
 
         With ``notify`` (a follow-up to the confirming conversation) a slow
-        setter runs off the caller's thread, single-flight, and ``notify``
-        gets its result; the caller is answered at once.
+        setter is queued on the one background worker and ``notify`` gets its
+        result; the caller is answered at once.  Otherwise the stale check and
+        the setter run here under the category lock.
         """
-        slow = notify is not None and (row.get("category"), row.get("setting")) in SLOW_SETTINGS
-        # #814 review: the stale ``before`` check and the setter run under this category's lock,
-        # so a second draft with the same ``before`` waits and is then refused as stale.
+        if notify is not None and (row.get("category"), row.get("setting")) in SLOW_SETTINGS:
+            return self._enqueue(self._admit(row, digest), notify)
         category_lock = self._category_locks.get(row.get("category"))
         if category_lock is None or not category_lock.acquire(timeout=APPLY_WAIT_SECONDS):
             raise SettingsError(BUSY_MESSAGE)
-        handed = background = False
         try:
-            with self._confirming:
-                row = self._drafts().get(row["id"]) or row
-                if row.get("state") in ("applied", "requested"):
-                    raise SettingsError("이미 적용한 설정 초안입니다.")
-                if row.get("state") == "unknown":
-                    raise SettingsError(IN_DOUBT_MESSAGE.format(effect=row["effect"]))
-                if row.get("state") != "awaiting-confirmation":
-                    raise SettingsError("이 설정 초안은 더 이상 확인할 수 없습니다. 필요하면 다시 요청하세요.")
-                if not hmac.compare_digest(str(row.get("digest") or ""), digest) or self._digest(row) != row.get("digest"):
-                    raise SettingsError("확인 정보가 이 설정 초안과 맞지 않아 적용하지 않았습니다.")
-                if self.now() > float(row.get("expires_at") or 0):
-                    self._settle(row["id"], "expired", "expired")
-                    raise SettingsError("설정 초안이 만료되어 적용하지 않았습니다. 필요하면 다시 요청하세요.")
-                if slow and not self._background.acquire(blocking=False):
-                    raise SettingsError(BUSY_MESSAGE)
-                background = slow
-                row = self._settle(row["id"], "applying", None, applying_at=self.now())
-                self._in_flight.add(row["id"])
-            try:
-                after, current = self._normalized(row["category"], row["setting"], row["after"])
-                if after != row["after"] or current[row["setting"]]["value"] != row["before"]:
-                    raise SettingsError("초안을 만든 뒤 설정이 바뀌었거나 이 값을 더 이상 고를 수 없어 적용하지 않았습니다. 다시 요청하세요.")
-            except Exception as exc:
-                self._settle(row["id"], "failed", "failed", type(exc).__name__)
-                message = str(exc) if isinstance(exc, ValueError) and str(exc) else "설정을 적용하지 못했습니다."
-                raise SettingsError(message) from None
-            if not slow:
-                return self._finish(row)
-            self.thread = threading.Thread(target=self._run_background, args=(row, notify, category_lock), daemon=True,
-                                           name="agentos-settings-apply")
-            self.thread.start()
-            handed = True
+            return self._checked_apply(self._admit(row, digest))
         finally:
-            if not handed:
-                with self._confirming:
-                    self._in_flight.discard(row["id"])
-                category_lock.release()
-                if background:
-                    self._background.release()
-        return {"state": "applying", "draft_id": row["id"], "target": row["target"], "before": row["before"],
-                "after": row["after"],
-                "response": f"{row['effect']} 변경을 확인하고 있어요. 끝나면 결과를 알려드릴게요."}
+            category_lock.release()
 
     def pending_for_work(self, work_id):
         """This Work's drafts still awaiting the owner, oldest first (#814)."""
@@ -609,10 +626,12 @@ class SettingsOrchestrator:
         if row.get("category") in SETTINGS and self.service is not None:
             self.reconcile()
             return self._confirm_owner_setting(row, digest, notify)
-        if row.get("state") == "awaiting-confirmation":
-            row["state"] = "failed"
-            rows = self._drafts(); rows[draft_id] = row; self._put_drafts(rows)
-            self._audit(row, "failed", "retired-control")
+        with self._confirming:
+            row = self._drafts().get(draft_id) or row
+            if row.get("state") == "awaiting-confirmation":
+                row["state"] = "failed"
+                rows = self._drafts(); rows[draft_id] = row; self._put_drafts(rows)
+                self._audit(row, "failed", "retired-control")
         raise SettingsError(RETIRED_CONTROL_MESSAGE)
 
     def cancel(self, owner, channel, draft_id):

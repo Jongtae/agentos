@@ -21,7 +21,7 @@ from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent import preparations as prep
-from personal_agent.settings_orchestrator import (BUSY_MESSAGE, CREDENTIAL_VALUE_MESSAGE, FOLLOW_REQUESTED_MESSAGE,
+from personal_agent.settings_orchestrator import (CREDENTIAL_VALUE_MESSAGE, FOLLOW_REQUESTED_MESSAGE,
                                                   NOT_OWNER_TYPED_MESSAGE, SettingsError,
                                                   canonical_timezone)
 
@@ -443,20 +443,94 @@ class ReviewRemediation(ConversationConfirmation):
         self.assertIn('바꿨습니다', told[0])
         self.assertEqual(self.store.config('settings_change_drafts')[route['draft_id']]['state'], 'applied')
 
-    def test_p2_3_only_one_slow_apply_at_a_time(self):
+    def two_api_routes_and_a_direct_judgment_route(self):
         self.service.main_ai.save_key({'provider': 'openai', 'key': OPENAI_KEY})
         self.service.activate_main_ai({'route': 'openai'})
         self.service.main_ai.save_key({'provider': 'openrouter', 'key': OPENROUTER_KEY})
         self.service.activate_main_ai({'route': 'openrouter'})
+        self.store.secret('decision_model_key', 'decision-owner-key-value-0003')
+        self.store.put('decision_route', {'transport': 'direct_api', 'provider': 'openai',
+                                          'requested_model': 'gpt-4o-mini', 'model_policy': 'explicit'})
+        self.service.decision_routes._first_qualified = lambda candidates, make: (
+            candidates[0], {'suite_version': 'test', 'score': 1.0, 'qualified': True}, [{'observed_model': candidates[0]}])
+
+    def telegram_drafts(self, *changes):
+        self.script = [{'content': '알겠습니다.'}]
+        work = self.receive('설정 바꿔 줘')
+        job = self.store.job(work)
+        owner = self.service.settings_owner(job)
+        drafts = []
+        for category, setting, value in changes:
+            drafts.append(self.settings.propose(owner, job['channel'], category, setting, value, work_id=work))
+            self.clock[0] += 1
+        self.service.queue_settings_confirmation(job)
+        self.service.deliver_one()
+        self.assertTrue(self.service.deliver_notification())
+        return work, drafts
+
+    def test_p2_3_one_tap_queues_two_slow_drafts_in_order(self):
+        """Re-review P2: both slow drafts of one tap apply, one after another, each told once."""
+        self.two_api_routes_and_a_direct_judgment_route()
+        work, (route, model) = self.telegram_drafts(('main_ai', 'route', 'openai'), ('judgment_ai', 'model', 'gpt-6-luna'))
+        notification = self.notification(work)
         started, release = self.slow_openai_probe()
-        first = self.draft('main_ai', 'route', 'openai')
-        self.settings.confirm('owner', 'http', first['draft_id'], first['digest'], notify=lambda text: None)
+        self.telegram.clear()
+        self.tap(f"p7s:{notification['id']}:confirm", notification['message_id'])
         self.assertTrue(started.wait(5))
-        second = self.draft('main_ai', 'route', 'openai')
-        with self.assertRaisesRegex(SettingsError, BUSY_MESSAGE[:10]):
-            self.settings.confirm('owner', 'http', second['draft_id'], second['digest'], notify=lambda text: None)
-        self.assertEqual(self.store.config('settings_change_drafts')[second['draft_id']]['state'], 'awaiting-confirmation')
-        release.set(); self.settings.thread.join(5)
+        edited = [body['text'] for method, body in self.telegram if method == 'editMessageText'][-1]
+        self.assertEqual(edited.count('확인하고 있어요'), 2, 'both drafts are queued, neither is refused')
+        release.set(); self.settings.thread.join(10)
+        drafts = self.store.config('settings_change_drafts')
+        self.assertEqual((drafts[route['draft_id']]['state'], drafts[model['draft_id']]['state']), ('applied', 'applied'))
+        self.assertEqual(self.service.main_ai.current(), 'openai')
+        self.assertEqual(self.service.decision_routes.active()['requested_model'], 'gpt-6-luna')
+        told = [body['text'] for method, body in self.telegram if method == 'sendMessage']
+        self.assertEqual(len(told), 2)
+        self.assertIn('기본 AI', told[0]); self.assertIn('판단 AI', told[1])
+
+    def test_p2_3_a_queued_draft_rechecks_its_own_before(self):
+        """The reviewer's reproduction: two drafts with the same ``before``; the second is refused as stale."""
+        self.two_api_routes_and_a_direct_judgment_route()
+        work, (first, second) = self.telegram_drafts(('main_ai', 'route', 'openai'), ('main_ai', 'route', 'openai'))
+        notification = self.notification(work)
+        self.tap(f"p7s:{notification['id']}:confirm", notification['message_id'])
+        self.settings.thread.join(10)
+        drafts = self.store.config('settings_change_drafts')
+        self.assertEqual((drafts[first['draft_id']]['state'], drafts[second['draft_id']]['state']), ('applied', 'failed'))
+        told = [body['text'] for method, body in self.telegram if method == 'sendMessage'][-2:]
+        self.assertIn('바꿨습니다', told[0]); self.assertIn('바뀌었', told[1])
+        self.assertEqual(self.settings.pending_for_work(work), [], 'nothing is left awaiting a consumed message')
+
+    def test_p3_a_worker_that_cannot_start_fails_its_draft_and_releases_everything(self):
+        from personal_agent import settings_orchestrator as orchestrator
+        self.two_api_routes_and_a_direct_judgment_route()
+        route = self.draft('main_ai', 'route', 'openai')
+        class Refused(threading.Thread):
+            def start(self):raise RuntimeError('cannot start thread')
+        real = orchestrator.threading.Thread
+        orchestrator.threading.Thread = Refused
+        try:
+            with self.assertRaisesRegex(SettingsError, '시작하지 못했습니다'):
+                self.settings.confirm('owner', 'http', route['draft_id'], route['digest'], notify=lambda text: None)
+        finally:
+            orchestrator.threading.Thread = real
+        self.assertEqual(self.store.config('settings_change_drafts')[route['draft_id']]['state'], 'failed')
+        self.assertEqual(self.settings._in_flight, set())
+        again = self.draft('main_ai', 'route', 'openai')
+        self.settings.confirm('owner', 'http', again['draft_id'], again['digest'], notify=lambda text: None)
+        self.settings.thread.join(10)
+        self.assertEqual(self.service.main_ai.current(), 'openai', 'the worker slot was released')
+
+    def test_p3_the_retired_control_branch_rewrites_drafts_under_the_lock(self):
+        from test_settings_orchestrator import legacy_draft
+        self.store.put('settings_change_drafts', {'legacy-draft': legacy_draft()})
+        held = []
+        original = self.settings._put_drafts
+        self.settings._put_drafts = lambda rows: (held.append(self.settings._confirming._is_owned()), original(rows))[1]
+        with self.assertRaises(SettingsError):
+            self.settings.confirm('owner', 'http', 'legacy-draft', 'legacy-digest')
+        self.assertEqual(held, [True])
+        self.assertEqual(self.store.config('settings_change_drafts')['legacy-draft']['state'], 'failed')
 
     def test_p2_3_the_telegram_tap_is_answered_before_a_slow_apply(self):
         self.service.main_ai.save_key({'provider': 'openai', 'key': OPENAI_KEY})
@@ -501,7 +575,7 @@ class ReviewRemediation(ConversationConfirmation):
         read = restarted.settings_orchestrator.read('owner')
         self.assertIn('현재 값을 확인', read['response'])
         self.assertIn('시간대', read['response'])
-        with self.assertRaisesRegex(SettingsError, '알 수 없습니다'):
+        with self.assertRaisesRegex(SettingsError, '확인하지 못했어요'):
             restarted.settings_orchestrator.confirm('owner', 'http', draft['draft_id'], draft['digest'])
         self.assertEqual(self.context()['timezone'], '', 'an in-doubt draft is never re-applied')
 

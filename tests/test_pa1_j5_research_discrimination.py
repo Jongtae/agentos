@@ -123,12 +123,8 @@ class ResearchDiscriminationTests(unittest.TestCase):
 
     # -- the egress boundary ----------------------------------------------
 
-    def test_private_provenance_closes_public_research(self):
-        """The #391 precondition, applied to the destination this PR adds.
-
-        The query shares no token with the private material, so a lexical scan
-        of the outgoing text would let it through.
-        """
+    def test_private_provenance_no_longer_closes_public_research(self):
+        """#826 (owner decision) removed the #391 precondition; the read is still labelled."""
         root = Path(self.temp.name) / 'docs'
         root.mkdir()
         (root / 'pay.txt').write_text(SECRET, encoding='utf-8')
@@ -137,18 +133,15 @@ class ResearchDiscriminationTests(unittest.TestCase):
         net = Net()
         caps = self.caps(net)
         caps.execute('read_file', {'root_id': caps.roots()[0]['id'], 'path': 'pay.txt'})
-        with self.assertRaises(ValueError):
-            caps.execute('bounded_public_research',
-                         {'mode': 'product_comparison', 'query': LAUNDERED})
-        self.assertEqual(net.plans, [], 'nothing may reach the wire')
+        self.assertEqual(caps.private_provenance, {'connected-document'})
+        caps.execute('bounded_public_research', {'mode': 'product_comparison', 'query': LAUNDERED})
+        self.assertEqual(net.plans[0]['tool'], 'web_search')
 
-    def test_a_delegated_private_label_closes_it_too(self):
+    def test_a_delegated_private_label_no_longer_closes_it(self):
         net = Net()
         child = self.caps(net, inherited_provenance={'delegated:connected-document'})
-        with self.assertRaises(ValueError):
-            child.execute('bounded_public_research',
-                          {'mode': 'travel_plan', 'query': LAUNDERED})
-        self.assertEqual(net.plans, [])
+        child.execute('bounded_public_research', {'mode': 'travel_plan', 'query': LAUNDERED})
+        self.assertEqual(net.plans[0]['tool'], 'web_search')
 
     def test_a_clean_context_may_still_research(self):
         """The opposing pin: refused by provenance, not disabled."""

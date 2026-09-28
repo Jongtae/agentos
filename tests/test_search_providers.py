@@ -656,14 +656,16 @@ class CliNativeSearch(unittest.TestCase):
         # Judgments keep search disabled.
         self.assertIn(('web_search', '"disabled"'), CODEX_DECISION_CONFIG)
 
-    def test_a_native_search_turn_never_offers_a_private_read_to_either_cli(self):
+    def test_a_native_search_turn_offers_the_private_reads_to_either_cli(self):
+        """#826 (owner decision): private reads and the CLI's own web search share a turn."""
         adapter, config = self.adapter(), self.mcp()
         claude = adapter.command('claude-code', '/bin/claude', 'hi', config, native_search=True)
         self.assertIn('WebSearch', claude[-1].split(','))
-        self.assertNotIn('mcp__agentos__list_notes', ' '.join(claude))
+        self.assertIn('mcp__agentos__list_notes', claude[-1].split(','))
+        self.assertNotIn('mcp__agentos__web_search', claude[-1].split(','))
         off = adapter.command('claude-code', '/bin/claude', 'hi', config)
         self.assertIn('mcp__agentos__list_notes', off[-1].split(','))
-        self.assertNotIn('list_notes', turn_actions('trusted-local', native_search=True))
+        self.assertIn('list_notes', turn_actions('trusted-local', native_search=True))
         self.assertIn('list_notes', turn_actions('trusted-local'))
 
         class Caps:
@@ -672,12 +674,11 @@ class CliNativeSearch(unittest.TestCase):
             def definitions(self):
                 return [{'function': {'name': name, 'description': '', 'parameters': {'type': 'object', 'properties': {},
                                                                                    'required': []}}} for name in self.tools]
-        self.assertNotIn('list_notes', [tool['name'] for tool in AgentOSMcpTools(Caps(), native_search=True).definitions()])
+        self.assertIn('list_notes', [tool['name'] for tool in AgentOSMcpTools(Caps(), native_search=True).definitions()])
+        self.assertNotIn('web_search', [tool['name'] for tool in AgentOSMcpTools(Caps(), native_search=True).definitions()])
         self.assertIn('list_notes', [tool['name'] for tool in AgentOSMcpTools(Caps()).definitions()])
-        with self.assertRaises(Exception):
-            AgentOSMcpTools(Caps(), native_search=True).call('list_notes', {})
 
-    def test_the_codex_bridge_of_a_native_search_turn_is_launched_without_private_reads(self):
+    def test_the_codex_bridge_of_a_native_search_turn_is_launched_for_native_search(self):
         seen = {}
 
         def runner(argv, **kwargs):
@@ -706,7 +707,8 @@ class CliNativeSearch(unittest.TestCase):
         self.assertNotIn('--native-search', seen['config']['mcpServers']['agentos']['args'])
         self.assertIn('web_search="disabled"', seen['argv'])
 
-    def test_the_bridge_process_withholds_private_reads_when_launched_for_native_search(self):
+    def test_the_bridge_process_serves_private_reads_when_launched_for_native_search(self):
+        """#826: the bridge lists and serves list_notes on a native-search turn; only its own search steps aside."""
         import contextlib, io, sys
         from unittest import mock
         from personal_agent import mcp_bridge
@@ -715,16 +717,15 @@ class CliNativeSearch(unittest.TestCase):
         job = store.enqueue('x', 'bridge-native')
         requests = [{'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'},
                     {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/call', 'params': {'name': 'list_notes', 'arguments': {}}}]
-        for native, listed in ((True, False), (False, True)):
+        for native in (True, False):
             out = io.StringIO()
             with mock.patch.object(sys, 'stdin', io.StringIO(''.join(json.dumps(r) + '\n' for r in requests))), \
                     contextlib.redirect_stdout(out):
                 mcp_bridge.serve(str(store.root), job, (), native_search=native)
             replies = {reply['id']: reply for reply in map(json.loads, out.getvalue().splitlines())}
             names = [tool['name'] for tool in replies[1]['result']['tools']]
-            self.assertEqual('list_notes' in names, listed)
-            if native:
-                self.assertIn('error', replies[2])
+            self.assertIn('list_notes', names)
+            self.assertEqual('web_search' in names, not native)
 
     def test_claude_work_argv_adds_only_websearch(self):
         adapter, config = self.adapter(), self.mcp()
@@ -927,7 +928,7 @@ class ServiceIntegration(unittest.TestCase):
         self.assertIn('only available in the US', event['trace']['reason'])
         native = service.settings()['search_providers']['native']
         self.assertEqual((native['route'], native['state'], native['reason']), ('claude-code', 'unavailable', 'refused'))
-        self.assertEqual(service.cli_native_search('claude-code', 'trusted-local', False, set()), (False, 'refused'))
+        self.assertEqual(service.cli_native_search('claude-code', 'trusted-local', False), (False, 'refused'))
 
     def test_an_explicit_search_on_a_cli_route_without_providers_leaves_the_search_to_the_cli(self):
         engine = _Engine()
@@ -965,7 +966,8 @@ class ServiceIntegration(unittest.TestCase):
         self.assertIn('history:personal-space', store.config('work_source_provenance', {}).get(second, []))
         self.assertIn('personal-space', store.turn_provenance(second).get('prompt_withheld') or [])
 
-    def test_a_turn_with_a_notes_read_keeps_native_search_off(self):
+    def test_a_turn_with_a_notes_read_keeps_native_search_on(self):
+        """#826 (owner decision): spliced notes no longer turn the CLI's own search off."""
         engine = _Engine()
         service = self.service(engine)
         service.store.put('subscription_engine', {'id': 'codex', 'connected_at': 0})
@@ -974,8 +976,10 @@ class ServiceIntegration(unittest.TestCase):
         job = service.store.enqueue('/summarize', 'notes-turn')
         self.assertTrue(service.run_one())
         [launched] = engine.calls
-        self.assertFalse(launched['native_search'])
-        self.assertEqual(service.store.turn_provenance(job)['native_search_reason'], 'private_turn')
+        self.assertTrue(launched['native_search'])
+        record = service.store.turn_provenance(job)
+        self.assertIsNone(record.get('native_search_reason'))
+        self.assertIn('personal-space', record['prompt_withheld'])
 
     def test_a_denial_or_a_transient_error_or_a_turn_with_search_off_is_never_remembered(self):
         cases = ((True, 'denied', 'unavailable', 'native_search_off'), (True, 'failed', 'failed', 'tool_failed'),
@@ -1011,12 +1015,11 @@ class ServiceIntegration(unittest.TestCase):
         native = service.recheck_native_search({})['native']
         self.assertEqual((native['state'], native['recheckable']), ('unknown', False))
 
-    def test_native_cli_search_is_off_for_private_turns_strict_and_isolated_routes(self):
+    def test_native_cli_search_is_off_only_for_strict_and_isolated_routes(self):
         service = self.service()
-        self.assertEqual(service.cli_native_search('codex', 'trusted-local', False, set()), (True, ''))
-        self.assertEqual(service.cli_native_search('codex', 'trusted-local', False, {'personal-space'}), (False, 'private_turn'))
-        self.assertEqual(service.cli_native_search('codex', STRICT_PROFILE, False, set()), (False, 'strict_profile'))
-        self.assertEqual(service.cli_native_search('codex', 'trusted-local', True, set()), (False, 'strict_profile'))
+        self.assertEqual(service.cli_native_search('codex', 'trusted-local', False), (True, ''))
+        self.assertEqual(service.cli_native_search('codex', STRICT_PROFILE, False), (False, 'strict_profile'))
+        self.assertEqual(service.cli_native_search('codex', 'trusted-local', True), (False, 'strict_profile'))
         context = turn_context([{'role': 'user', 'content': 'x'}], 'cli')
         self.assertNotIn('built-in web search', context['instructions'])
 

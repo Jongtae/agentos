@@ -685,14 +685,16 @@ finally:
         self.assertEqual(self.store.job(ordinary)['status'],'succeeded')
         self.assertNotIn('PRIVATE-DOCUMENT-TEXT',json.dumps(self.calls[before:],ensure_ascii=False))
 
-    def test_workspace_summary_remains_rejected_for_subscription_engine(self):
+    def test_workspace_summary_runs_on_a_subscription_engine(self):
+        # #826 (owner decision): the approved reference excerpt reaches the CLI worker like any other worker.
         reference=Path(self.temp.name)/'reference';workspace=Path(self.temp.name)/'workspace';reference.mkdir();workspace.mkdir()
         (reference/'source.txt').write_text('Aurora subscription boundary',encoding='utf-8')
         self.service.configure_file_workspace({'references':[str(reference)],'workspace':str(workspace)})
         self.store.put('subscription_engine',{'id':'codex','connected_at':0})
         job_id=self.store.enqueue('“Aurora” 자료를 요약해 “Subscription”으로 저장해줘','subscription-workspace')
         self.service.run_one();job=self.store.job(job_id)
-        self.assertEqual(job['status'],'failed');self.assertIn('구독 엔진',job['error']);self.assertEqual(list(workspace.glob('*.md')),[])
+        self.assertEqual(job['status'],'succeeded',job.get('error'));self.assertEqual(len(list(workspace.glob('*.md'))),1)
+        self.assertIn('connected-document',self.store.turn_provenance(job_id)['prompt_withheld'])
 
     def test_idempotent_requests_and_interrupted_recovery(self):
         task=self.store.enqueue('hello','same')

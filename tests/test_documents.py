@@ -56,9 +56,14 @@ class DocumentTests(unittest.TestCase):
   service.save_roots({'paths':[str(self.root)]});self.assertTrue(service.document_boundary()['requires_approval'])
   service.save_model({'provider':'ollama','endpoint':'http://127.0.0.1:11434','model':'local'})
   self.assertFalse(service.document_boundary()['external_model'])
- def test_document_evidence_cannot_be_used_for_web_search(self):
-  self.caps.evidence.append({'tool':'read_file','result':{'content':'private'}})
-  with self.assertRaisesRegex(ValueError,'웹 검색어로 전송할 수 없습니다'):self.caps.execute('web_search',{'query':'private'})
+ def test_document_evidence_no_longer_blocks_a_web_search(self):
+  # #826 (owner decision): a document read and a web search may share a Work; the label is still recorded.
+  plans=[]
+  caps=Capabilities(self.store,None,{},'','job',lambda *args:None,network=type('N',(),{'execute':lambda _self,plan:plans.append(plan) or {'results':[],'sources':[]}})())
+  caps.evidence.append({'tool':'read_file','result':{'content':'private'}})
+  caps.execute('web_search',{'query':'private'})
+  self.assertEqual(plans,[{'tool':'web_search','query':'private'}])
+  self.assertEqual(caps.private_provenance,{'connected-document'})
 
 
 if __name__=='__main__':unittest.main()

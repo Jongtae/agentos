@@ -256,13 +256,13 @@ class ServiceProvenance(unittest.TestCase):
         self.assertTrue(service.run_one())
         record = self._selected(service)['provenance']
         # #627: current context is off here, so its gated action is not offered.
-        from personal_agent.bounded_execution import CONTEXT_GATED_ACTIONS, native_search_withheld
-        # #678: a clean turn may use the CLI's own web search, so the record says
-        # so and no private-read bridge tool is offered to it.
+        from personal_agent.bounded_execution import CONTEXT_GATED_ACTIONS, NATIVE_SEARCH_REPLACED
+        # #678: a clean turn may use the CLI's own web search, so the record says so and
+        # the bridge's own search steps aside; #826: the private reads stay offered.
         # #701: the browser tools are offered only where the service's browser profile can
         # run (the same check `Capabilities.offered_tools` applies: no factory, no tools).
         from personal_agent.agent_runtime import BROWSER_ACTIONS
-        hidden = CONTEXT_GATED_ACTIONS | native_search_withheld() | (set() if service.browser_profile.available() else BROWSER_ACTIONS)
+        hidden = CONTEXT_GATED_ACTIONS | NATIVE_SEARCH_REPLACED | (set() if service.browser_profile.available() else BROWSER_ACTIONS)
         # #774: ask_location is offered only on a Work from the paired Telegram chat.
         hidden |= {'ask_location'}
         self.assertEqual(record['exposed_tools'], [tool['name'] for tool in profile_mcp_tools('trusted-local')
@@ -276,7 +276,8 @@ class ServiceProvenance(unittest.TestCase):
         self.assertEqual(record['capability_profile'], 'trusted-local')
         self.assertEqual(record['capability_trust'], 'trusted-local')
         self.assertIn('outside AgentOS provenance', record['capability_limitation'])
-        self.assertEqual(record['unavailable_tools']['public_page_read'], 'owner-page-approval-bound-to-direct-api-model')
+        self.assertNotIn('public_page_read', record['unavailable_tools'])
+        self.assertIn('list_notes', record['exposed_tools'])
         self.assertEqual(record['build'], build_identity())
         self.assertEqual(record['build']['package_digest'], package_digest(PACKAGE_DIR))
         self.assertEqual(record['build']['origin'], 'source-checkout')

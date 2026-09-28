@@ -217,12 +217,12 @@ class ExposedToolWireBoundary(unittest.TestCase):
                                     execution_adapter=adapter,
                                     browser_profile=BrowserProfile(Path(tmp.name) / "browser", available=lambda: False))
         self.service.connect_subscription_engine({"engine": "codex", "officially_authenticated": True})
-        # #678: these wire checks exercise the private-read bridge tool, which a
+        # #678: these wire checks exercise the bridge's own search tools, which a
         # turn with the CLI's own web search does not get; they run search-off
-        # turns (the service's own gate, answered as for a private turn).
+        # turns (the service's own gate, answered as for a remembered refusal).
         self.native = False
         gate = self.service.cli_native_search
-        self.service.cli_native_search = lambda *args: gate(*args) if self.native else (False, "private_turn")
+        self.service.cli_native_search = lambda *args: gate(*args) if self.native else (False, "refused")
 
     def _run_bridge(self, args, requests):
         env = {**self.env, **self.server.get("env", {})}
@@ -251,8 +251,10 @@ class ExposedToolWireBoundary(unittest.TestCase):
         # #774: the service relay serves the owner-state tools on the trusted-local route
         # (ask_location only to a Telegram Work: this turn is a web one).
         # #814: and the owner settings tools.
+        # #826: and the connected-folder documents, approved pages and the information-use audit.
         self.assertEqual(names, ["bounded_public_research", "calendar_draft_cancel", "calendar_draft_create",
-                                 "calendar_draft_update", "calendar_query", "list_memory", "list_notes", "save_memory",
+                                 "calendar_draft_update", "calendar_query", "find_files", "information_use",
+                                 "list_memory", "list_notes", "list_roots", "public_page_read", "read_file", "save_memory",
                                  "save_note", "schedule_preparation", "settings_change", "settings_read", "weather",
                                  "web_search"])
         replies = self._wire(
@@ -263,27 +265,27 @@ class ExposedToolWireBoundary(unittest.TestCase):
         listed = json.loads(replies[3]["result"]["content"][0]["text"])
         self.assertIn("wire note", [note["content"] for note in listed["notes"]])
 
-    def test_a_native_search_turn_gets_no_private_read_over_the_real_bridge(self):
-        """#678 P1: the exact bridge command of a native-search turn neither lists nor serves list_notes.
+    def test_a_native_search_turn_gets_the_private_reads_over_the_real_bridge(self):
+        """#826 (owner decision): the exact bridge command of a native-search turn lists and serves list_notes.
 
-        #701: nor the bridge's own search tools, which the CLI's own search replaces.
+        #701: not the bridge's own search tools, which the CLI's own search replaces.
         """
         self.native = True
         replies = self._wire({"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
                              {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "list_notes", "arguments": {}}})
         self.assertIn("--native-search", self.server["args"])
-        # #774: relayed writes stay offered; the private reads (list_memory, calendar_query) do not.
-        # #804: save_memory is one of those writes.  #814: the settings snapshot holds no
-        # owner material (configuration only), so the settings tools stay offered.
         self.assertEqual([tool["name"] for tool in replies[2]["result"]["tools"]],
-                         ["calendar_draft_cancel", "calendar_draft_create", "calendar_draft_update", "save_memory",
-                          "save_note", "schedule_preparation", "settings_change", "settings_read", "weather"])
-        self.assertTrue(_refused(replies[3]))
+                         ["calendar_draft_cancel", "calendar_draft_create", "calendar_draft_update", "calendar_query",
+                          "find_files", "information_use", "list_memory", "list_notes", "list_roots", "public_page_read",
+                          "read_file", "save_memory", "save_note", "schedule_preparation", "settings_change",
+                          "settings_read", "weather"])
+        self.assertFalse(_refused(replies[3]))
+        self.assertIn("notes", json.loads(replies[3]["result"]["content"][0]["text"]))
 
     def test_an_unlisted_native_tool_is_refused_by_the_real_bridge(self):
         """Denied control: invocation never exceeds exposure."""
         replies = self._wire({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                              "params": {"name": "read_file", "arguments": {"root_id": "r", "path": "a.md"}}})
+                              "params": {"name": "delegate_agent", "arguments": {"agent_id": "researcher", "task": "t"}}})
         self.assertTrue(_refused(replies[2]))
 
     def test_the_bridge_refuses_calls_once_its_work_is_no_longer_running(self):
@@ -612,18 +614,22 @@ class BridgeErrorMapping(unittest.TestCase):
         self.assertIn("result", replies[1])
         self.assertEqual([plan["tool"] for plan in calls], ["web_search"])
 
-    def test_a_search_of_only_excluded_values_is_refused_before_the_network(self):
-        """Denied control: a query made only of a value this Work saved to Memory is refused (#654 keeps N4)."""
-        replies, calls = self._serve([self._call(1, "web_search", {"query": "today news"})], provenance=["personal-space"],
+    def test_a_saved_value_goes_out_and_a_credential_never_does(self):
+        """#826: a value this Work saved to Memory goes out when the worker uses it; a credential shape is refused."""
+        replies, calls = self._serve([self._call(1, "web_search", {"query": "today news"}),
+                                      self._call(2, "web_search", {"query": "token=abcdefgh12345678"})],
+                                     provenance=["personal-space"],
                                      before=lambda store, job: store.save_memory_candidate(job, "news", "today news", work_id=job))
-        self.assertTrue(_refused(replies[1]))
-        self.assertEqual(calls, [])
+        self.assertIn("result", replies[1])
+        self.assertFalse(_refused(replies[1]))
+        self.assertTrue(_refused(replies[2]))
+        self.assertEqual([plan.get("query") for plan in calls], ["today news"])
 
     def _failure_signatures(self):
         replies, _ = self._serve([
-            self._call(1, "web_search", {"query": "today news"}),       # policy denied (taint below)
+            self._call(1, "web_search", {"query": "token=abcdefgh12345678"}),  # refused: only a credential shape
             self._call(2, "web_search", {"q": "today news"}),           # invalid arguments
-            self._call(3, "read_file", {"root_id": "r", "path": "a"}),  # tool not exposed (weather is, since #604)
+            self._call(3, "delegate_agent", {"agent_id": "r", "task": "a"}),  # tool not exposed on a CLI
             {"jsonrpc": "2.0", "id": 4, "method": "resources/list"},     # unsupported method
         ], provenance=["conversation-history"])
         return {ident: json.dumps(reply.get("error") or reply.get("result"), sort_keys=True) for ident, reply in replies.items()}

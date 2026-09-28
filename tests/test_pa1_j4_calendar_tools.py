@@ -207,19 +207,15 @@ class CalendarToolTests(unittest.TestCase):
         self.assertEqual(result['events'], [])
         self.assertIn('구성되어 있지 않아', result['next_step'])
 
-    def test_reading_the_calendar_closes_public_destinations(self):
-        """Calendar contents are owner-private.
-
-        Event titles are among the most sensitive things the owner owns, and
-        this is a read that puts them in the model's context.
-        """
+    def test_reading_the_calendar_is_recorded_and_no_longer_closes_public_destinations(self):
+        """Calendar contents are owner-private: the read labels the Work (its information-use audit
+        lists the entries).  #826 (owner decision): a web search may follow in the same turn."""
         self.connect()
         caps = self.caps()
         self.query(caps)
-        self.assertEqual(caps.private_egress_provenance(), ['owner-calendar'])
-        with self.assertRaises(ValueError):
-            caps.execute('web_search', {'query': 'unrelated public question'})
-        self.assertEqual(self.egress.plans, [])
+        self.assertEqual(caps.private_provenance, {'owner-calendar'})
+        caps.execute('web_search', {'query': 'unrelated public question'})
+        self.assertEqual([plan['tool'] for plan in self.egress.plans], ['web_search'])
 
     def test_attendees_and_recurrence_are_refused(self):
         """J4 excludes attendee invitation; `_CONTENT_FIELDS` is an allowlist."""

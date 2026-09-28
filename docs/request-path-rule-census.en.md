@@ -4,6 +4,8 @@
 
 Canonical record for ARCH-THIN-01 [#820](https://github.com/Jongtae/agentos/issues/820), under Constitution C16 and the #653 pilot posture. Owner direction (2026-09-28): finding failures one case at a time does not scale; find the root cause. On that day almost every live failure came from AgentOS layers between the owner and the AI worker, not from the model. These layers rewrote or narrowed the owner's words, overrode or hid the AI's answer, or stopped owner state from flowing.
 
+**Amendment — EGRESS-OPEN-01 [#826](https://github.com/Jongtae/agentos/issues/826) (2026-09-28).** The owner approved removing every class-g rule (A6, A7, A8, A10, A12, A13, A14, A16): "이 정보를 주는 건 엄청 큰 차이를 주는거네. 대신 어떤 정보를 이용해서 했는지만 확인 가능하도록 audit을 제공하면 될 듯. 허락할게." Each is now **Removed (owner decision #826)**. In exchange every Work carries an information-use audit (`information_use.py`), derived from its turn record, tool events and decision audit. It lists the owner information used, where it went and what came back. Invariants a–d, i and the folder grants are unchanged. The rows below keep their #820 wording for the rule itself; the disposition column is updated.
+
 This document is a census of every deterministic rule, and every judgment verdict, on the owner-request path that gates, withholds, filters, rewrites, narrows or overrides. For each one it records what the rule protects and what was done with it. Line numbers refer to the ARCH-THIN-01 head.
 
 Evidence class: a static reading of the source plus deterministic unit tests with injected transports (`tests/test_orchestrator.py` `ThinOrchestration`, `OwnerQuestion`, `SecretaryStandard`; `tests/test_agency_loop.py`; `tests/test_truthful_terminal_result.py`; `tests/test_refused_write_outcome.py`; `tests/test_truth_integrity_history.py`). No live model behaviour was observed for this change.
@@ -24,7 +26,7 @@ A rule stays only when it protects one of these pilot invariants (#653), or a bo
 | **b** | Payment needs a per-action owner approval. |
 | **c** | Irreversible external effects are never replayed or duplicated, and `unknown` external-effect statements stay truthful. This includes not calling a state change done when it failed. |
 | **d** | Owner-state provenance, and the owner's authority over canonical Memory (#597: canonical Memory vs MemoryCandidate). |
-| **g** | Private-document egress guard. `AGENTS.md` requires it: "Preserve existing private-document transmission/search guards". It is not one of a–d. It is kept, and flagged for an owner decision (see *Open for the owner*). |
+| **g** | Private-document egress guard. It is not one of a–d. Removed by owner decision #826 (2026-09-28); the per-Work information-use audit replaces it. |
 | **i** | Isolation or trust profile the owner selected (#616): sandbox and filesystem authority. |
 | **bound** | A resource bound (size, time, turns, budget). It is not a judgment about the request. |
 | **e** | None of the above. |
@@ -44,17 +46,17 @@ Dispositions:
 | A3 | `orchestrator.py` `plan_schema`, `plan_shape` | The brief schema was `{goal, context, completion_criteria}`. | A plan-written goal and criteria were required. | e | **Removed.** The brief is `{notes}` only. |
 | A4 | `orchestrator.py:542` `Attempt.brief`; `agent_runtime.py:2320` `BRIEF_HEADING` | The brief rendered as `Goal: …` / `Done when: …` above the request. | It read as the task. | e | **Reduced.** It renders as `# Orchestration notes (supplementary; they never replace or narrow the owner's request below, which is the goal in full)`. It is omitted when there are no notes. |
 | A5 | `orchestrator.py:698` `validate` | An empty `goal` made the plan invalid. | The owner's request fell back to the default worker. | e | **Removed.** Empty notes are valid. |
-| A6 | `orchestrator.py:481` `subset_or_default`; `quickstart_service.py:6588` `allowed_tools&=attempt.tools` | A planned tool subset stands only when it keeps private reads and web search apart. Any other subset, including an empty one, becomes the full toolset. | Never narrows the goal. In the live Work, the empty subset "tools none" stayed the full toolset. | g | **Kept.** |
-| A7 | `orchestrator.py:560` `Attempt.native_search`; `quickstart_service.py:1306` `cli_native_search`, `:3224` `native_search_blocking` | The CLI's own web search is off on a turn with spliced private material, a selected private-read tool, or an earlier attempt's private reads. | The worker searches through AgentOS instead. | g | **Kept.** |
-| A8 | `bounded_execution.py:379` `native_search_withheld` | Private-read bridge tools are withheld on a native-search turn. `save_memory` stays offered. | Private reads are unavailable on that attempt. | g | **Kept.** |
+| A6 | `orchestrator.py:481` `subset_or_default`; `quickstart_service.py:6588` `allowed_tools&=attempt.tools` | A planned tool subset stands only when it keeps private reads and web search apart. Any other subset, including an empty one, becomes the full toolset. | Never narrows the goal. In the live Work, the empty subset "tools none" stayed the full toolset. | g | **Removed (owner decision #826).** No tool subset exists any more: the plan schema has no `tools` field, and every attempt keeps the worker's full toolset. |
+| A7 | `orchestrator.py:560` `Attempt.native_search`; `quickstart_service.py:1306` `cli_native_search`, `:3224` `native_search_blocking` | The CLI's own web search is off on a turn with spliced private material, a selected private-read tool, or an earlier attempt's private reads. | The worker searches through AgentOS instead. | g | **Removed (owner decision #826).** Only the strict or isolated profile and a remembered CLI refusal turn it off. |
+| A8 | `bounded_execution.py:379` `native_search_withheld` | Private-read bridge tools are withheld on a native-search turn. `save_memory` stays offered. | Private reads are unavailable on that attempt. | g | **Removed (owner decision #826).** Only the bridge's own search tools step aside (A9). |
 | A9 | `bounded_execution.py:373` `NATIVE_SEARCH_REPLACED` | Bridge `web_search` and `bounded_public_research` are withheld while the CLI's own search is on. | No capability is lost: the CLI's own search replaces them. | e | **Kept:** a dedupe; it changes no capability. |
-| A10 | `quickstart_service.py:6625` | The `/search` preflight is skipped when the validated subset leaves `web_search` out. | Follows A6. | g | **Kept.** |
+| A10 | `quickstart_service.py:6625` | The `/search` preflight is skipped when the validated subset leaves `web_search` out. | Follows A6. | g | **Removed (owner decision #826)** with A6: without a subset the preflight always runs. |
 | A11 | `quickstart_service.py:210` `subscription_public_lookup_query` | A `/search` query that names a credential word is not sent as a preflight. | The worker still runs; only the AgentOS preflight is skipped. | a | **Kept.** |
-| A12 | `quickstart_service.py:6554` `pinned` | A Work carrying spliced private material, or an attachment approved for the default destination, may run only on the default worker. | Worker choice narrowed to the approved destination. | g | **Kept.** |
-| A13 | `quickstart_service.py:2561` `document_boundary`; document-job history filtering in the turn | Document excerpts go to an external model only with the approval bound to that model and those folders. | Document turns are filtered from a CLI or unapproved worker's history. | g | **Kept.** |
-| A14 | `bounded_execution.py` `CLI_PROFILES` trusted-local `unavailable` | `public_page_read`, `find_files`, `read_file` and `list_roots` are not offered on the CLI, because their approvals are bound to the direct-API model. | Fewer tools on the CLI. | g | **Kept.** |
+| A12 | `quickstart_service.py:6554` `pinned` | A Work carrying spliced private material, or an attachment approved for the default destination, may run only on the default worker. | Worker choice narrowed to the approved destination. | g | **Removed (owner decision #826).** Every available worker is offered. |
+| A13 | `quickstart_service.py:2561` `document_boundary`; document-job history filtering in the turn | Document excerpts go to an external model only with the approval bound to that model and those folders. | Document turns are filtered from a CLI or unapproved worker's history. | g | **Removed (owner decision #826)** for the CLI route. Document jobs reach a CLI's history, and a workspace summary runs on a CLI. The direct-API model's standing document-sharing consent (Settings) is unchanged. |
+| A14 | `bounded_execution.py` `CLI_PROFILES` trusted-local `unavailable` | `public_page_read`, `find_files`, `read_file` and `list_roots` are not offered on the CLI, because their approvals are bound to the direct-API model. | Fewer tools on the CLI. | g | **Removed (owner decision #826).** They are offered on trusted-local, within the folder grants (`roots`, `resolve_file`) and the owner's page approval, which the tools check on every call. Strict-isolated keeps its narrower set (i). |
 | A15 | `bounded_execution.py` strict and isolated profiles; `:1236` `environment` | The owner-selected trust profile limits tools, environment and sandbox. | Fewer tools. | i, a | **Kept.** |
-| A16 | `agent_runtime.py:925` `rebuild_lookup_value`, `:1855` `_public_task` | AgentOS-composed public lookups exclude private values (#605). | Search query words removed. | g | **Kept.** |
+| A16 | `agent_runtime.py:925` `rebuild_lookup_value`, `:1855` `_public_task` | AgentOS-composed public lookups exclude private values (#605). | Search query words removed. | g | **Removed (owner decision #826).** The worker's query goes out as written. Stored secrets and credential shapes are dropped (a), and withdrawn current-context text is removed (#627). A private context no longer refuses a lookup, and a delegated specialist looks up like its parent. |
 | A17 | `quickstart_service.py:6663` | When the envelope exceeds `MAX_PROMPT_BYTES`, only the bare request is sent. | The owner's words are still verbatim. | bound | **Kept.** Follow-up: shorten rather than drop. |
 | A18 | `agent_runtime.py:2291` `CONTEXT_MESSAGES`, `turn_context` byte budget; `quickstart_service.py:6444` `history()[-16:]` | Older turns are dropped before the request is ever cut. | Long conversations are shortened. | bound | **Kept.** |
 | A19 | `quickstart_service.py:3263` `planner_history(...)[-4:]`, `orchestrator.py:63` `CONVERSATION_CHARS` | The plan call reads a bounded conversation excerpt. | Before: it could narrow the worker through the brief. Now the worker always receives the conversation itself. | bound | **Kept.** |
@@ -128,11 +130,11 @@ The census has 63 rows. Each row is counted once, under its primary code. The e 
 | b: payment approval | 1 (plus C7 part i) | 0 | 0 | 1 | 0 |
 | c: no replay, truthful effects | 16 | 0 | 1 | 15 | 0 |
 | d: Memory authority, owner state | 4 | 0 | 0 | 4 | 0 |
-| g: private-doc egress guard | 8 | 0 | 0 | 8 | 0 |
+| g: private-doc egress guard | 8 | 8 | 0 | 0 | 0 |
 | i: isolation | 1 | 0 | 0 | 1 | 0 |
 | bound | 7 | 0 | 0 | 7 | 0 |
 | e: none | 23 | 9 | 4 | 4 | 6 |
-| **Total** | **63** | **9** | **5** | **43** | **6** |
+| **Total** | **63** | **17** | **5** | **35** | **6** |
 
 - **Every rule that protects a, b, c or d is kept.** The one reduction is C8: its owner-question branches went, and the rest is now a label.
 - **Of the 23 rules that protect nothing:**
@@ -164,7 +166,8 @@ The owner said "점심은 이미 반포6 분짜오 먹었어" (a statement: "I a
 
 ## Open for the owner
 
-- **g rows (private-document egress guards).** `AGENTS.md` requires them, so they are kept. They are not among the pilot invariants a–d. Removing them (for example, pairing private reads with the CLI's own web search, A7 and A8) would widen private-data egress. That needs an owner decision and independent review, not a thinning change.
+- **g rows (private-document egress guards).** Decided on 2026-09-28 (#826): all eight are removed, and each Work's information-use audit replaces them. The PR took independent review.
+- **Follow-up.** The direct-API model's document-sharing consent (Settings) is not a g row of this census and is unchanged. Whether to retire it too is a separate owner question.
 
 ## Follow-up (deferred e rules, outside this change)
 

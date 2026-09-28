@@ -83,13 +83,18 @@ class StrictProfileDeclaration(unittest.TestCase):
         self.assertEqual(CLI_PROFILES[STRICT_PROFILE]['runtimes']['claude-code']['tested_versions'], ('2.1.280',))
 
     def test_strict_offers_what_the_bridge_serves(self):
-        """#701/#774: the bridge is told its profile; strict is trusted-local minus every service-relayed tool."""
+        """#701/#774/#826: the bridge is told its profile; strict is trusted-local minus every service-relayed
+        tool and minus the connected-folder documents and approved pages #826 added to trusted-local only."""
         from personal_agent.agent_runtime import BROWSER_ACTIONS, HOST_RELAYED_ACTIONS
+        owner_files = {'find_files', 'read_file', 'list_roots', 'public_page_read'}
         self.assertEqual(profile_actions(STRICT_PROFILE),
-                         tuple(action for action in profile_actions(BOUNDED_PROFILE) if action not in HOST_RELAYED_ACTIONS))
+                         tuple(action for action in profile_actions(BOUNDED_PROFILE)
+                               if action not in HOST_RELAYED_ACTIONS and action not in owner_files))
         self.assertFalse(HOST_RELAYED_ACTIONS & set(profile_actions(STRICT_PROFILE)))
         self.assertTrue(HOST_RELAYED_ACTIONS <= set(route_unavailable(STRICT_PROFILE)), 'declared, never silently missing')
-        self.assertEqual({k: v for k, v in route_unavailable(STRICT_PROFILE).items() if k not in HOST_RELAYED_ACTIONS},
+        self.assertTrue(owner_files <= set(route_unavailable(STRICT_PROFILE)), 'declared, never silently missing')
+        self.assertEqual({k: v for k, v in route_unavailable(STRICT_PROFILE).items()
+                          if k not in HOST_RELAYED_ACTIONS and k not in owner_files},
                          route_unavailable(BOUNDED_PROFILE))
         self.assertFalse(HOST_RELAYED_ACTIONS & set(route_unavailable(BOUNDED_PROFILE)))
         self.assertTrue(BROWSER_ACTIONS <= HOST_RELAYED_ACTIONS)
@@ -150,6 +155,10 @@ class StrictLaunchArguments(unittest.TestCase):
         allow = ['--allowedTools', 'mcp__agentos__bounded_public_research,mcp__agentos__list_notes,'
                                    'mcp__agentos__propose_current_state,'
                                    'mcp__agentos__save_note,mcp__agentos__weather,mcp__agentos__web_search']
+        # #826: trusted-local also pre-approves the connected-folder documents and approved pages.
+        trusted_allow = ('mcp__agentos__bounded_public_research,mcp__agentos__find_files,mcp__agentos__list_notes,'
+                         'mcp__agentos__list_roots,mcp__agentos__propose_current_state,mcp__agentos__public_page_read,'
+                         'mcp__agentos__read_file,mcp__agentos__save_note,mcp__agentos__weather,mcp__agentos__web_search')
         # #623: both pre-approve exactly their bridge tools; strict also removes
         # every built-in tool.  #701: trusted-local adds the browser tools.
         browser = ',mcp__agentos__browser_open,mcp__agentos__browser_read,mcp__agentos__browser_find,' \
@@ -160,8 +169,10 @@ class StrictLaunchArguments(unittest.TestCase):
                        'mcp__agentos__list_memory,mcp__agentos__save_memory,mcp__agentos__schedule_preparation,'
                        'mcp__agentos__ask_location,'
                        # #814: the owner settings tools, relayed the same way.
-                       'mcp__agentos__settings_read,mcp__agentos__settings_change')
-        self.assertEqual(trusted[-2:], [allow[0], allow[1] + browser + owner_state])
+                       'mcp__agentos__settings_read,mcp__agentos__settings_change,'
+                       # #826: the information-use audit, relayed the same way.
+                       'mcp__agentos__information_use')
+        self.assertEqual(trusted[-2:], [allow[0], trusted_allow + browser + owner_state])
         self.assertEqual(strict[-2:], allow, 'the variadic --allowedTools stays last')
         self.assertEqual(strict[:len(trusted) - 2], trusted[:-2])
         self.assertNotIn('browser', ' '.join(strict), 'strict never pre-approves a browser tool')

@@ -687,6 +687,10 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 # #505: the owner-local approval surface.  Any owner session may
                 # see that a request is waiting; only this Mac may choose/approve.
                 return self.reply(200,{**service.local_authority_requests(),'local_surface':self.owner_local_surface()})
+            if path.startswith('/api/tasks/') and path.endswith('/information-use'):
+                # #826: which owner information one Work used and where it went.
+                audit=service.work_information_use(path[len('/api/tasks/'):-len('/information-use')])
+                return self.reply(200,audit) if audit else self.reply(404,{'error':'작업을 찾지 못했습니다.'})
             if path.startswith('/api/tasks/'):
                 return self.reply(200,service.task_progress(path.rsplit('/',1)[-1]))
             if path=='/api/connections/google/revocations':

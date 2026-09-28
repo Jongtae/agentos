@@ -6,6 +6,11 @@ only an explicit owner operation may write canonical Memory.
 
 Integration requirement for PA1-CONV-01 (#393) and PA1-INT-01 (#394)
 --------------------------------------------------------------------
+EGRESS-OPEN-01 (#826, owner decision 2026-09-28): the marker no longer closes
+public egress.  It still labels the Work's provenance, which its
+information-use audit and turn record read.  The names below (``egress
+guard``) are kept for compatibility; read them as "provenance recorded".
+
 Reading Memory or a MemoryCandidate brings private owner content into the
 current Work turn.  ``agent_runtime.Capabilities`` refuses same-turn public
 egress (``web_search``, ``public_page_read``) while ``Capabilities.evidence``

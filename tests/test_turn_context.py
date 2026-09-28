@@ -269,7 +269,8 @@ class RoutesReceiveTheSameContext(unittest.TestCase):
         self.assertNotIn('profile', self.engine.calls[-1]['context'])
         self.assertNotIn(PROFILE_HEADING, self.engine.calls[-1]['prompt'])
 
-    def test_document_rows_stay_excluded_on_the_cli_route(self):
+    def test_document_rows_reach_the_cli_route(self):
+        """#826 (owner decision): earlier document jobs are no longer filtered from a CLI worker's history."""
         self._run('secret document summary request', 'doc')
         doc_job = self.store.jobs()[0]['id']
         self.store.put('file_workspace_document_jobs', [doc_job])
@@ -277,8 +278,7 @@ class RoutesReceiveTheSameContext(unittest.TestCase):
         self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
         self._run('now on the cli', 'k3')
         call = self.engine.calls[-1]
-        self.assertNotIn('secret document summary request', call['prompt'])
-        self.assertNotIn('secret document summary request', json.dumps(call['context'], ensure_ascii=False))
+        self.assertIn('secret document summary request', call['prompt'])
         self.assertIn('ordinary follow-up', call['prompt'])
 
 
@@ -290,7 +290,7 @@ class _ProbingEngine:
         self.web_search_error = []
 
     def execute(self, engine, prompt, tools, **kwargs):
-        self.taint.append(tools.capabilities.private_egress_provenance())
+        self.taint.append(sorted(tools.capabilities.private_provenance))
         try:
             if self.taint[-1]:
                 # #654: a tainted Work still sends the worker's query.
@@ -329,7 +329,7 @@ class CrossTurnEgressGuard(unittest.TestCase):
         # #705: earlier conversation no longer turns the CLI's own search off, so
         # the AgentOS-composed bridge lookup this test covers runs on a turn whose
         # search is off for another reason.
-        self.service.cli_native_search = lambda *args: (False, 'private_turn')
+        self.service.cli_native_search = lambda *args: (False, 'refused')
         self._run('search the web for today news', 'k3')
         # #605: the label names the earlier Work's actual source.
         self.assertIn('history:personal-space', self.engine.taint[-1])
@@ -444,13 +444,16 @@ class DestinationScopedHistory(unittest.TestCase):
         self.store.enqueue(text, key, channel='telegram:1', chat_id=1)
         self.assertTrue(self.service.run_one())
 
-    def test_a_drive_answer_is_not_carried_into_a_later_cli_turn(self):
+    def test_a_drive_answer_is_carried_into_a_later_cli_turn(self):
+        """#826 (owner decision): the earlier Drive answer is part of the conversation a later CLI worker sees."""
         self._run('summarize my drive file', 'd1')
         self.assertIn('DRIVE-SECRET', self.engine.calls[-1]['prompt'], 'the Drive turn itself used the content')
         self._run('what should I do today', 'k2')
         later = self.engine.calls[-1]
-        self.assertNotIn('DRIVE-SECRET', later['prompt'])
-        self.assertNotIn('derived from DRIVE-SECRET', json.dumps(later['context'], ensure_ascii=False))
+        self.assertIn('derived from DRIVE-SECRET', json.dumps(later['context'], ensure_ascii=False))
+        # ...and the later turn's record says an earlier Work carried a Drive file.
+        record = self.store.turn_provenance(self.store.jobs()[0]['id'])
+        self.assertIn('connected-drive-file', record.get('prompt_withheld') or [])
 
 
 class OversizeRequestKeepsWorking(DestinationScopedHistory):
@@ -541,7 +544,7 @@ class _RouteFixture(unittest.TestCase):
             self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
             # #701: a native-search turn no longer offers the bridge web_search (the
             # CLI's own search replaces it); these egress checks run search-off turns.
-            self.service.cli_native_search = lambda *args: (False, 'private_turn')
+            self.service.cli_native_search = lambda *args: (False, 'refused')
         else:
             self.store.put('model', self.CONFIG)
             self.store.put('model_test', {'ok': True, 'tools_ok': True, 'time': 9999999999,

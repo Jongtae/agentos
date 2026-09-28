@@ -82,7 +82,8 @@ class OneActionSource(_Store):
             # #774: with the service's preparation scheduler wired, schedule_preparation is listed too,
             # and with its location request wired, ask_location; #814: with its settings, the settings tools.
             listed = facade(self.caps(browser=lambda: None, preparations=lambda *a: None,
-                                      location_request=lambda *a: None, settings=lambda *a: None)).definitions()
+                                      location_request=lambda *a: None, settings=lambda *a: None,
+                                      information_use=lambda *a: None)).definitions()
             with self.subTest(profile=profile):
                 self.assertEqual([tool['name'] for tool in listed], sorted(profile_actions(profile)))
                 for tool in listed:
@@ -106,7 +107,9 @@ class OneActionSource(_Store):
         self.assertEqual(hints, {'bounded_public_research': True, 'list_notes': True, 'save_note': False,
                                  'weather': True, 'web_search': True, 'calendar_query': True, 'list_memory': True,
                                  'calendar_draft_create': False, 'calendar_draft_update': False,
-                                 'calendar_draft_cancel': False, 'save_memory': False})
+                                 'calendar_draft_cancel': False, 'save_memory': False,
+                                 # #826: the connected-folder documents and approved pages.
+                                 'find_files': True, 'list_roots': True, 'read_file': True, 'public_page_read': True})
 
     def test_no_route_keeps_its_own_schema_list(self):
         """The removed three-tool fork and the two list_notes copies stay gone."""
@@ -242,13 +245,14 @@ class EffectiveAvailability(_Store):
         # #701: no registered browser profile hides the browser tools (as on the direct route).
         self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps()).definitions()],
                          sorted(set(profile_actions(BOUNDED_PROFILE)) - CONTEXT_GATED_ACTIONS - BROWSER_ACTIONS
-                                - {'schedule_preparation', 'ask_location', 'settings_read', 'settings_change'}))
+                                - {'schedule_preparation', 'ask_location', 'settings_read', 'settings_change', 'information_use'}))
         self.enable_context()
         self.assertIn('propose_current_state', [d['function']['name'] for d in self.caps().definitions()])
         self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps(browser=lambda: None,
                                                                        preparations=lambda *a: None,
                                                                        location_request=lambda *a: None,
-                                                                       settings=lambda *a: None)).definitions()],
+                                                                       settings=lambda *a: None,
+                                                                       information_use=lambda *a: None)).definitions()],
                          sorted(profile_actions(BOUNDED_PROFILE)))
         self.assertEqual([t['name'] for t in ReadOnlyAgentOSMcpTools(self.caps()).definitions()], ['list_notes'])
 
@@ -311,18 +315,16 @@ class EffectiveAvailability(_Store):
             caps.execute('delegate_agent', {'agent_id': 'scout', 'task': 'again'})
         caps.execute('delegate_agent', {'agent_id': 'researcher', 'task': 'built-in control'})
 
-    def test_an_owner_page_approval_for_the_api_model_is_not_carried_to_a_cli(self):
-        """No silent destination change: the approval names the direct-API model."""
+    def test_an_owner_page_approval_serves_the_cli_route_within_its_scope(self):
+        """#826: the owner's page approval is the grant on every route; it still bounds each read."""
         caps = self.caps(public_page_scope=['https://example.com/a'])
-        native = [definition['function']['name'] for definition in caps.definitions()]
-        self.assertIn('public_page_read', native)
         tools = AgentOSMcpTools(caps)
-        self.assertNotIn('public_page_read', [t['name'] for t in tools.definitions()])
-        with self.assertRaises(ExecutionError):
-            tools.call('public_page_read', {'url': 'https://example.com/a'})
-        self.assertEqual(route_unavailable(BOUNDED_PROFILE)['public_page_read'],
-                         'owner-page-approval-bound-to-direct-api-model')
-        self.assertEqual(self.network.plans, [])
+        self.assertIn('public_page_read', [t['name'] for t in tools.definitions()])
+        self.assertNotIn('public_page_read', route_unavailable(BOUNDED_PROFILE))
+        tools.call('public_page_read', {'url': 'https://example.com/a'})
+        with self.assertRaises(ValueError):
+            tools.call('public_page_read', {'url': 'https://example.com/b'})
+        self.assertEqual([plan['url'] for plan in self.network.plans], ['https://example.com/a'])
 
 
 class SettingsProjection(_Store):
@@ -331,14 +333,17 @@ class SettingsProjection(_Store):
         profile = AgentService(self.store).settings()['subscription_execution']
         self.assertEqual(profile, {'profile': 'trusted-local', 'mode': 'bounded-agentos-mcp', 'trust': 'trusted-local',
                                    'limitation': CLI_PROFILES[BOUNDED_PROFILE]['limitation'],
-                                   'tools': ['bounded_public_research', 'list_notes', 'propose_current_state',
+                                   'tools': ['bounded_public_research', 'find_files', 'list_notes', 'list_roots',
+                                             'propose_current_state', 'public_page_read', 'read_file',
                                              'save_note', 'weather', 'web_search', 'browser_open', 'browser_read',
                                              'browser_find', 'browser_click', 'browser_type',
                                              # #774: relayed to the service on this route.
                                              'calendar_query', 'calendar_draft_create', 'calendar_draft_update', 'calendar_draft_cancel', 'list_memory', 'save_memory', 'schedule_preparation',
                                              'ask_location',
                                              # #814: owner settings, relayed the same way.
-                                             'settings_read', 'settings_change'],
+                                             'settings_read', 'settings_change',
+                                             # #826: the Work information-use audit, relayed the same way.
+                                             'information_use'],
                                    'unavailable': route_unavailable(BOUNDED_PROFILE),
                                    # #616: the owner can choose; nothing is qualified by default.
                                    'selectable': ['trusted-local', 'strict-isolated'], 'qualified': {}})

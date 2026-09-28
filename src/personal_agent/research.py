@@ -23,11 +23,11 @@ That check crosses a shared seam this issue (PA1-RESEARCH-01 / #391) does not
 own: it must be added by PA1-CONV-01 (#393) / PA1-INT-01 (#394) when the
 research tool is routed.  It is deliberately **not** implemented here.
 
-That check now exists, and :class:`PublicResearch` IS wired into a production
+That check existed until the owner removed it (#826, 2026-09-28): the
+private-read/public-lookup separation is replaced by each Work's
+information-use audit.  :class:`PublicResearch` IS wired into a production
 request path: ``Capabilities.execute('bounded_public_research', ...)`` in
-``agent_runtime`` refuses on ``private_egress_provenance()`` before reaching
-this module (PA1-J5-01 / #458).  Read that branch's comments for the egress
-boundary this class actually runs behind -- in particular, the URLs read here
+``agent_runtime`` (PA1-J5-01 / #458).  The URLs read here
 are the ones this class's own search returned, self-approved, and NOT the
 owner-approved ``public_page_scope`` the ``public_page_read`` tool requires.
 

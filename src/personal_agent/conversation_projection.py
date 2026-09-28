@@ -70,6 +70,7 @@ TOOL_LABELS = {
     'schedule_preparation': '준비 예약',
     # OWNER-SETTINGS-01 (#814): owner settings, changed only after the owner confirms.
     'settings_read': '설정 확인', 'settings_change': '설정 변경 초안',
+    'information_use': '사용한 정보 확인',
 }
 #: A tool this catalogue does not name (for example an AgentPackage tool).
 TOOL_LABEL_FALLBACK = '도구 실행'

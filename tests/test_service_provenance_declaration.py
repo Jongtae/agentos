@@ -199,8 +199,7 @@ class WorkerProvenanceDeclarationTests(unittest.TestCase):
         The engine reaches AgentOS only through `AgentOSMcpTools`, which calls
         `Capabilities.execute` directly: `run_agent` is not in this path, so
         the evidence list is empty while the engine holds the owner's notes.
-        `/summarize` is used because the subscription branch refuses a
-        workspace summary outright.  Since #654 the facade sends the query
+        Since #654 the facade sends the query
         (no value this Work wrote is in it) and the Work records the source.
         """
         class Adapter:
@@ -228,6 +227,8 @@ class WorkerProvenanceDeclarationTests(unittest.TestCase):
                                execution_adapter=adapter)
         service.local_tools = self.egress
         service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+        # #826: a /summarize turn keeps the CLI's own search on; this check exercises the bridge search.
+        service.cli_native_search = lambda *args: (False, 'refused')
         job = self.store.enqueue('/summarize', 'subscription-provenance')
         self.assertTrue(service.run_one())
         # The notes really were spliced into the engine prompt for this turn.

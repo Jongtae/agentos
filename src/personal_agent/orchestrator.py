@@ -10,15 +10,15 @@ typed plan through ``DecisionEngine.structured``:
   model (profile, current context), the recent conversation and the prepared
   answers; the notes are supplementary and never replace or narrow the
   owner's message;
-* ``tools`` - optionally, the subset of that worker's AgentOS tools offered in
-  this attempt (validated: it can only keep private reads and web search
-  apart, see ``subset_or_default``);
 * ``reason`` - one line.
 
+The worker always keeps its full offered toolset (#826: the one reason a plan
+could narrow it, keeping private reads and web search apart, was removed by
+owner decision).
+
 Deterministic code here only **validates** the plan: the worker is in the
-catalogue and available, the model is one the catalogue lists for it, the
-tools are a subset of that worker's tools, and the Work budget still allows
-an attempt.  It never decides what a request needs.  No request, site,
+catalogue and available, the model is one the catalogue lists for it, and the
+Work budget still allows an attempt.  It never decides what a request needs.  No request, site,
 provider or category is named in this module (tests/test_no_scenario_code.py)
 and the question text is generic.
 
@@ -83,8 +83,6 @@ KIND_TIERS = {
 }
 #: Model cost tier from its rank in the route's cheapest-first list (#679).
 TIER_LOWEST, TIER_HIGHER, TIER_UNRANKED = 'lowest-cost', 'higher-cost', 'unranked'
-
-TOOLS_DEFAULT, TOOLS_SUBSET = 'worker_default', 'subset'
 
 # --- Evidence vocabulary (``orchestrator`` tool events) ----------------------
 EVENT_TOOL = 'orchestrator'
@@ -158,16 +156,11 @@ QUESTION = (
     'the worker may find useful that it would not otherwise have (for example what an earlier attempt of this Work '
     'tried and why it fell short). Notes never restate, replace, narrow or extend the owner\'s message, never tell '
     'the worker to skip looking something up or to skip a tool, and never ask it to ask the owner for something. '
-    'tools_mode is "worker_default": the worker keeps its full offered toolset; tools is then [] and tools_reason "". '
-    'The only subset AgentOS keeps is one that keeps private-read tools and web search apart: it removes either the '
-    'private-read tools or the web-search tools (web_search, bounded_public_research) and nothing else, with '
-    'tools_reason saying so; any other subset is replaced by the full toolset. The tool_descriptions fact says what '
-    'each tool does. On a worker with its own web search, web_search means that search; a private-read tool and the '
-    'worker\'s own web search are never on in the same attempt, so selecting a private-read tool turns that search '
-    'off for the attempt. When earlier attempts are listed, their replies were judged not to serve the owner\'s '
-    'message: read what each one called, what failed or never completed and why, then change the worker, the model '
-    'or the tools. A combination of worker, model and tools that already fell short is refused. reason is one short '
-    'line saying why this worker fits.')
+    'The worker keeps its full offered toolset; the tool_descriptions fact says what each tool does. On a worker '
+    'with its own web search, web_search means that search. When earlier attempts are listed, their replies were '
+    'judged not to serve the owner\'s message: read what each one called, what failed or never completed and why, '
+    'then change the worker or the model. A combination of worker and model that already fell short is refused. '
+    'reason is one short line saying why this worker fits.')
 PURPOSE = 'work-orchestration'
 
 
@@ -265,8 +258,7 @@ def worker_catalogue(service):
     passed the tool-call probe.
     """
     from .agent_runtime import BROWSER_ACTIONS
-    from .bounded_execution import (BOUNDED_PROFILE, HOST_CLI_PROFILES, ISOLATED_PROFILE, STRICT_PROFILE,
-                                    private_read_actions, profile_actions)
+    from .bounded_execution import BOUNDED_PROFILE, HOST_CLI_PROFILES, ISOLATED_PROFILE, STRICT_PROFILE, profile_actions
     from .decision_routes import RANKED_MODELS, known_models
     from .main_ai import CHECKS, KEY_META, SUBSCRIPTION_ROUTES, api_route_of, key_slot
     store = service.store
@@ -286,7 +278,6 @@ def worker_catalogue(service):
     isolated = bool(getattr(service, 'isolated_engine_adapter', None))
     profile = service.subscription_isolation()['profile']
     host_profile = profile if profile in HOST_CLI_PROFILES else STRICT_PROFILE
-    private = private_read_actions()
     package_tools = sorted({tool['id'] for package in service.runtime_packages() for tool in package['tools']})
     host_action = {tool['id']: tool.get('host_action') or tool['id']
                    for package in service.runtime_packages() for tool in package['tools']}
@@ -355,7 +346,6 @@ def worker_catalogue(service):
         # (``Capabilities.offered_tools``), so a plan never briefs a tool the worker lacks.
         tools = offered_now(tools)
         worker['tools'] = sorted(dict.fromkeys(tools))
-        worker['private_tools'] = sorted(set(worker['tools']) & private)
         worker['model_tiers'] = {model: model_tier(route_id, model, RANKED_MODELS) for model in worker['models']}
         workers.append(worker)
     if current == 'other':
@@ -368,9 +358,7 @@ def worker_catalogue(service):
                         'destination': str(config.get('endpoint') or ''), 'default': True, 'native_search': False,
                         'browser': False, **KIND_TIERS[KIND_API], 'available': ready, 'reason': '' if ready else 'not_verified',
                         'default_model': str(config.get('model') or ''), 'models': [str(config.get('model') or '')],
-                        'model_tiers': {}, 'tools': offered_now([tool for tool in package_tools if tool not in BROWSER_ACTIONS]),
-                        'private_tools': []})
-        workers[-1]['private_tools'] = sorted(set(workers[-1]['tools']) & private)
+                        'model_tiers': {}, 'tools': offered_now([tool for tool in package_tools if tool not in BROWSER_ACTIONS])})
         routes['other'] = {'kind': KIND_API, 'config': dict(config), 'key': key, 'test': None}
     tools_by_id = {tool['id']: tool for package in service.runtime_packages() for tool in package['tools']}
     return Catalogue(workers, routes, current, descriptions=tool_descriptions(tools_by_id))
@@ -393,10 +381,9 @@ class Catalogue:
     def worker(self, worker_id):
         return next((worker for worker in self.workers if worker['id'] == worker_id), None)
 
-    def available(self, pinned=False):
-        """Workers a plan may choose: every available one, or only the default when pinned."""
-        rows = [worker for worker in self.workers if worker['available']]
-        return [worker for worker in rows if worker['id'] == self.default] if pinned else rows
+    def available(self):
+        """Workers a plan may choose: every available one (#826: never pinned by spliced owner material)."""
+        return [worker for worker in self.workers if worker['available']]
 
 
 def one_line_description(text, limit=180):
@@ -433,7 +420,7 @@ def render_catalogue(workers):
         models = ', '.join([f'"" (worker default: {default})',
                             *[f'{model} ({worker["model_tiers"].get(model, TIER_UNRANKED)})'
                               for model in worker['models'] if model != worker['default_model']]])
-        tools = ', '.join(f'{tool} (private read)' if tool in worker['private_tools'] else tool for tool in worker['tools'])
+        tools = ', '.join(worker['tools'])
         lines.append(f'- worker={worker["id"]} ({worker["name"]}, {worker["kind"]}; default Main AI: '
                      f'{"yes" if worker["default"] else "no"}; cost: {worker["cost"]}; latency: {worker["latency"]}; '
                      f'own web search: {"available" if worker["native_search"] else "not available"}; browser tools: '
@@ -442,8 +429,6 @@ def render_catalogue(workers):
 
 
 def plan_schema(workers):
-    tools = sorted({tool for worker in workers for tool in worker['tools']})
-    item = {'type': 'string', 'enum': tools} if tools else {'type': 'string'}
     return {'type': 'object', 'additionalProperties': False,
             'properties': {
                 'worker': {'type': 'string', 'enum': [worker['id'] for worker in workers]},
@@ -451,94 +436,36 @@ def plan_schema(workers):
                 'brief': {'type': 'object', 'additionalProperties': False,
                           'properties': {'notes': {'type': 'string'}},
                           'required': ['notes']},
-                'tools_mode': {'type': 'string', 'enum': [TOOLS_DEFAULT, TOOLS_SUBSET]},
-                'tools': {'type': 'array', 'items': item},
-                'tools_reason': {'type': 'string'},
                 'reason': {'type': 'string'}},
-            'required': ['worker', 'model', 'brief', 'tools_mode', 'tools', 'tools_reason', 'reason']}
+            'required': ['worker', 'model', 'brief', 'reason']}
 
 
 def plan_shape(data):
     """Types only; meaning is ``Orchestration.validate``'s."""
     brief = data.get('brief')
-    strings = lambda value: isinstance(value, list) and all(isinstance(item, str) for item in value)  # noqa: E731
     return (isinstance(data.get('worker'), str) and isinstance(data.get('model'), str)
-            and isinstance(brief, dict) and isinstance(brief.get('notes'), str)
-            and data.get('tools_mode') in (TOOLS_DEFAULT, TOOLS_SUBSET) and strings(data.get('tools'))
-            and isinstance(data.get('tools_reason'), str) and isinstance(data.get('reason'), str))
-
-
-# --- the tool subset rule (#735) ----------------------------------------------
-#: Why a planned subset was replaced by the worker's full toolset.
-SUBSET_SHAPE, SUBSET_NO_REASON, SUBSET_UNKNOWN = 'shape', 'no_reason', 'not_offered'
-
-
-def search_tools():
-    """The worker's web-search tools: the ones its own web search replaces (#678/#701)."""
-    from .bounded_execution import NATIVE_SEARCH_REPLACED
-    return frozenset(NATIVE_SEARCH_REPLACED)
-
-
-def subset_or_default(worker, requested, reason):
-    """``(tools, replaced)`` for a planned subset: kept, or replaced by the full toolset (#735).
-
-    Validation, not a judgment: a subset stands only when it removes the
-    whole private-read category, or the whole web-search category, of the
-    worker's offered tools (to keep the two apart, the one reason to narrow),
-    removes nothing else, and states that reason.  Removing part of a
-    category is not a separation and is replaced too.
-    Every other subset becomes the worker's full offered toolset (None) and
-    ``replaced`` records what was asked for and why it was not kept - except
-    (#795) a subset that asks for a private-read tool: the full toolset would
-    hide it again on a turn with the CLI's own web search (#678), so it
-    becomes the kept shape that keeps the private reads (the web-search tools
-    removed) and ``replaced['kept']`` says so.
-    """
-    offered = frozenset(worker['tools'])
-    requested = frozenset(requested or ())
-    removed = offered - requested
-    if not requested <= offered:
-        why = SUBSET_UNKNOWN
-    elif not removed:
-        return None, None
-    elif removed not in (offered & frozenset(worker.get('private_tools') or ()), offered & search_tools()):
-        why = SUBSET_SHAPE
-    elif not reason:
-        why = SUBSET_NO_REASON
-    else:
-        return requested, None
-    private = offered & frozenset(worker.get('private_tools') or ())
-    # #795 review: only where the worker's own web search would hide the reads (#678), and
-    # never when the plan asked for a search tool itself (that mix is the full toolset's).
-    if worker.get('native_search') and requested & private and not requested & search_tools() and offered & search_tools():
-        return offered - search_tools(), {'requested': sorted(requested), 'why': why, 'kept': 'private_reads'}
-    return None, {'requested': sorted(requested), 'why': why}
+            and isinstance(brief, dict) and isinstance(brief.get('notes'), str) and isinstance(data.get('reason'), str))
 
 
 # --- one attempt -------------------------------------------------------------
 class Attempt:
     """One worker run of a Work: from a validated plan, or the default fallback.
 
-    ``tools`` is a frozenset (the validated subset) or None (the worker's usual
-    set).  Every attempt receives every context section (#804, #820); ``notes``
-    are the plan's optional supplementary notes, never a goal of their own.
+    The worker keeps its full offered toolset (#826).  Every attempt receives
+    every context section (#804, #820); ``notes`` are the plan's optional
+    supplementary notes, never a goal of their own.
     """
 
-    __slots__ = ('number', 'worker', 'model', 'notes', 'sections', 'tools', 'reason', 'planned',
-                 'fallback', 'digest', 'tools_reason', 'replaced', 'signature')
+    __slots__ = ('number', 'worker', 'model', 'notes', 'sections', 'reason', 'planned',
+                 'fallback', 'digest', 'signature')
 
-    def __init__(self, number, worker, *, model='', notes='', tools=None, reason='',
-                 planned=False, fallback='', tools_reason='', replaced=None):
+    def __init__(self, number, worker, *, model='', notes='', reason='', planned=False, fallback=''):
         self.number, self.worker, self.model = number, worker, model
-        self.tools_reason = tools_reason
-        #: #735: the subset the plan asked for when validation replaced it with the full toolset.
-        self.replaced = replaced
-        #: The worker, effective model and tool set this attempt ran with, fixed at validation.
+        #: The worker and effective model this attempt ran with, fixed at validation.
         self.signature = None
         self.notes, self.sections = notes, frozenset(ALWAYS_SECTIONS)
-        self.tools = None if tools is None else frozenset(tools)
         self.reason, self.planned, self.fallback = reason, planned, fallback
-        self.digest = digest({'notes': notes, 'tools': None if tools is None else sorted(self.tools)}) if planned else ''
+        self.digest = digest({'notes': notes}) if planned else ''
 
     def brief(self, adjusted=False):
         """The notes section text a worker receives, or None (#820: supplementary only).
@@ -558,20 +485,6 @@ class Attempt:
         """``value``: every attempt receives every context section (#804, #820)."""
         return value
 
-    def native_search(self, enabled, reason, private_tools):
-        """The CLI's own web search for this attempt: the existing gate, narrowed by the tool choice.
-
-        A selected private-read tool turns it off (the two are never on in the
-        same turn); a subset without ``web_search`` turns it off too.
-        """
-        if not enabled or self.tools is None:
-            return enabled, reason
-        if self.tools & frozenset(private_tools):
-            return False, 'orchestrated_private_tools'
-        if 'web_search' not in self.tools:
-            return False, 'orchestrated_no_search'
-        return enabled, reason
-
 
 class Orchestration:
     """Plan, evaluate and re-delegate one Work (#710).
@@ -580,17 +493,16 @@ class Orchestration:
     redactor, its ``goal_reached``); ``record(status, detail)`` appends one
     ``orchestrator`` event to the Work's Evidence; ``state`` is a
     ``(read, write)`` pair over the durable orchestration state used only for
-    the once-said fallback notice.  ``pinned`` restricts the plan to the
-    default worker (the turn carries material the owner approved for it).
+    the once-said fallback notice.
     """
 
     def __init__(self, judgments, catalogue, *, request, conversation='', sections=None, budget=None, record=None,
-                 state=None, pinned=False, work_id=None, policy=None):
+                 state=None, work_id=None, policy=None):
         self.judgments, self.catalogue = judgments, catalogue
         self.request, self.conversation = str(request or ''), str(conversation or '')
         self.sections = dict(sections or {})
         self.budget, self.record = budget, record or (lambda status, detail: None)
-        self.state, self.pinned, self.work_id = state, pinned, work_id
+        self.state, self.work_id = state, work_id
         self.policy = policy or DecisionPolicy()
         self.attempts = []
         self.history = []  # (attempt, evaluation, answer excerpt, factual summary)
@@ -648,7 +560,6 @@ class Orchestration:
         rows = []
         for attempt, evaluation, answer, summary in self.history:
             rows.append(f'attempt {attempt.number}: worker={attempt.worker} model={attempt.model or "default"} '
-                        f'tools={"worker default" if attempt.tools is None else ", ".join(sorted(attempt.tools)) or "none"} '
                         f'notes={one_line(attempt.notes, 300) or "none"} '
                         f'what happened={one_line(summary, 500) or "no tool was called"} '
                         f'evaluation={evaluation} ({EVALUATION_REASON.get(evaluation, evaluation)}) '
@@ -712,18 +623,14 @@ class Orchestration:
             model = worker['default_model']
         # #820: notes are optional and supplementary; the owner's message is the goal.
         notes = data['brief']['notes'].strip()[:MAX_NOTES_CHARS]
-        tools_reason = one_line(data['tools_reason'], MAX_REASON_CHARS)
-        tools, replaced = None, None
-        if data['tools_mode'] == TOOLS_SUBSET:
-            tools, replaced = subset_or_default(worker, data['tools'], tools_reason)
-        if self.signature(worker, model, tools) in self.failed:
+        if self.signature(worker, model) in self.failed:
             # #729: a combination that already fell short is not tried again unchanged.
             return None, 'repeat'
         if not self.budget_allows():
             return None, 'budget'
-        attempt = Attempt(number, worker['id'], model=model, notes=notes, tools=tools, reason=one_line(data['reason'], MAX_REASON_CHARS), planned=True,
-                          tools_reason=tools_reason if tools is not None else '', replaced=replaced)
-        attempt.signature = self.signature(worker, model, tools)
+        attempt = Attempt(number, worker['id'], model=model, notes=notes, reason=one_line(data['reason'], MAX_REASON_CHARS),
+                          planned=True)
+        attempt.signature = self.signature(worker, model)
         return attempt, ''
 
     def drop_model(self, worker_id, model):
@@ -742,10 +649,9 @@ class Orchestration:
                 worker.update(available=False, reason='default_model_refused')
 
     @staticmethod
-    def signature(worker, model, tools):
-        """Worker, effective model and effective tool set of an attempt (#729)."""
-        return (worker['id'], model or worker.get('default_model') or '',
-                frozenset(worker['tools']) if tools is None else frozenset(tools))
+    def signature(worker, model):
+        """Worker and effective model of an attempt (#729)."""
+        return (worker['id'], model or worker.get('default_model') or '')
 
     # -- evidence -------------------------------------------------------------
     def _worker_label(self, attempt):
@@ -755,9 +661,6 @@ class Orchestration:
     def _planned(self, attempt):
         self.record(PLANNED, {'attempt': attempt.number, 'worker': attempt.worker, 'model': attempt.model or None,
                               'brief_digest': attempt.digest, 'sections': sorted(attempt.sections),
-                              'tools': None if attempt.tools is None else sorted(attempt.tools),
-                              'tools_reason': self._redact(attempt.tools_reason) or None,
-                              'tools_replaced': attempt.replaced,
                               'reason': self._redact(attempt.reason),
                               'text': f'{attempt.number}번째 시도: {self._worker_label(attempt)} — {self._redact(attempt.reason)}'})
 
@@ -776,7 +679,7 @@ class Orchestration:
     # -- the loop -------------------------------------------------------------
     def first(self):
         """The first attempt: the validated plan, or the default Main AI with the raw request."""
-        candidates = self.catalogue.available(self.pinned)
+        candidates = self.catalogue.available()
         data, failure = self._ask(candidates)
         attempt, invalid = (self.validate(data, candidates, 1) if data is not None else (None, ''))
         if attempt is not None:
@@ -862,7 +765,7 @@ class Orchestration:
         worker = self.catalogue.worker(attempt.worker)
         if evaluation != REACHED and worker is not None:
             # The combination it actually ran with, even if the worker's default changed since (#735 review).
-            self.failed.add(attempt.signature or self.signature(worker, attempt.model, attempt.tools))
+            self.failed.add(attempt.signature or self.signature(worker, attempt.model))
         if evaluation == REACHED:
             stop = STOP_REACHED
         elif evaluation == OWNER_NEEDED:
@@ -880,7 +783,7 @@ class Orchestration:
             stop = ''
         following, invalid = None, ''
         if not stop:
-            candidates = self.catalogue.available(self.pinned)
+            candidates = self.catalogue.available()
             data, failure = self._ask(candidates)
             following, invalid = (self.validate(data, candidates, len(self.attempts) + 1) if data is not None
                                    else (None, ''))

@@ -1,11 +1,15 @@
-"""Native Telegram presence for the one paired conversation (PRESENCE-TG-01 / #581).
+"""Native Telegram presence for the one paired conversation (PRESENCE-TG-01 / #581, PRESENCE-TG-02 / #835).
 
 The kernel stays mechanical: Work -> Event -> tool -> Evidence -> outcome.
 This module only decides *how an already-decided turn looks in Telegram*:
 
-* a best-effort **reaction** on the owner's own message as a small "got it";
-* a **wait surface** while Work runs - nothing, ``typing…``, or an ephemeral
-  ``sendMessageDraft`` "Thinking…" placeholder with Telegram's Stop button;
+* a best-effort **reaction** on the owner's own message: 👀 ("looking") when
+  the Work starts, replaced once the outcome is decided and the answer sent
+  (``outcome_reaction``);
+* a **wait surface** while Work runs - nothing, ``typing…``, and from
+  ``draft_after`` an ephemeral ``sendMessageDraft`` with cycling dots (and the
+  observed step line, #718) plus Telegram's Stop button, with ``typing…``
+  kept alive until the answer lands;
 * the **reply anchor** and bounded **controls** of the one durable reply;
 * the **formatting** of that reply, so model Markdown never leaks as ``**``.
 
@@ -16,19 +20,22 @@ cancelled or has an unknown external effect is decided elsewhere
 (``quickstart_service`` and the existing cancellation/effect state machine)
 before anything here runs.
 
-Two rules keep this from becoming a conversation rule engine:
-
-* the semantic class comes from typed values AgentOS already has - the
-  DecisionEngine-backed follow-up relation and the routed intent - never from
-  reading the owner's words (no phrase or keyword catalogue here) and never
-  from an extra model call made only to pick an emoji;
-* the class maps deterministically to a reaction Telegram documents as
-  available.  An unknown class, or a turn whose meaning is an effect or an
-  ambiguity, gets **no** reaction rather than a guess.
+Owner feedback 2026-09-28 (#835): a fixed 👍 on every turn meant nothing.
+Until then (#581) a reaction was never allowed to read as "done".  Now a
+"done" reaction is allowed, but only *after* the terminal outcome is decided
+and only for ``succeeded``; ``partial``, ``failed``, ``unknown`` and every
+other non-success outcome removes the 👀 and shows no emoji at all, so no
+gesture can be read as success the Work did not have.  The choice is
+deterministic from the decided outcome and the Work's observed tool events -
+never from the owner's words (no phrase or keyword catalogue here) and never
+from an extra model call made only to pick an emoji - and every emoji used is
+one Telegram documents as available (``TELEGRAM_REACTION_EMOJI``, pinned by a
+test).  The same feedback replaced the "생각 중…" wait text with cycling dots.
 
 Telegram Bot API baseline verified at implementation time (2026-09-25):
 Bot API 10.3 (2026-08-24), https://core.telegram.org/bots/api -
-``setMessageReaction``, ``sendChatAction``, ``sendMessageDraft`` (``draft_id``,
+``setMessageReaction`` (an empty ``reaction`` list removes the bot's
+reaction), ``sendChatAction``, ``sendMessageDraft`` (``draft_id``,
 ``can_stop``, ``keep_on_stop``), the ``stopped_message_generation`` update
 (``MessageGenerationStopped``: ``chat``, ``draft_id``), ``ReplyParameters``,
 ``InlineKeyboardButton.disabled`` / ``DisabledButton`` and the HTML parse mode.
@@ -39,62 +46,63 @@ import re
 import time
 from dataclasses import dataclass, field
 
-from .conversation_handoff import (FOLLOWUP_CANCEL, FOLLOWUP_CORRECTION, FOLLOWUP_REFERENCE, FOLLOWUP_RETRY,
-                                   INTENT_CONVERSATION, INTENT_DRIVE_READ, INTENT_GREETING, INTENT_KNOWLEDGE,
-                                   INTENT_MAIL_SEARCH, INTENT_NOTE_LIST, INTENT_RESEARCH, INTENT_WORKSPACE_SEARCH)
+from .calendar_conversation import STATE_AWAITING_APPROVAL
 from .orchestrator import EVENT_TOOL, PLANNED
 
 # --- typed presentation vocabulary -------------------------------------------
 
-ACK_NONE = 'none'
-ACK_REACTION = 'reaction'
-
-SEMANTIC_ACKNOWLEDGE = 'acknowledge'
-SEMANTIC_AGREE = 'agree'
-SEMANTIC_CELEBRATE = 'celebrate'
-SEMANTIC_APPRECIATE = 'appreciate'
-SEMANTIC_EMPATHIZE = 'empathize'
-SEMANTIC_TOPIC_POSITIVE = 'topic_positive'
-REACTION_SEMANTICS = (SEMANTIC_ACKNOWLEDGE, SEMANTIC_AGREE, SEMANTIC_CELEBRATE, SEMANTIC_APPRECIATE,
-                      SEMANTIC_EMPATHIZE, SEMANTIC_TOPIC_POSITIVE)
-
 WAIT_NONE = 'none'
 WAIT_CHAT_ACTION = 'chat_action'
 WAIT_DRAFT = 'draft'
-#: Declared so the vocabulary matches #581.  The draft surface is sent as a
-#: rich draft carrying only Telegram's dedicated "Thinking…" block (see
-#: THINKING_DRAFT_TEXT); it is still reported as WAIT_DRAFT.
-WAIT_RICH_DRAFT = 'rich_draft'
-#: Text of the `InputRichBlockThinking` block sent with `sendRichMessageDraft`
-#: (Bot API 10.3).  The empty-text `sendMessageDraft` placeholder animates on
-#: Telegram Desktop but renders as a blank bubble on the owner's iOS client
-#: (#581 live check, 2026-09-26); the dedicated thinking block names the wait.
-THINKING_DRAFT_TEXT = '생각 중…'
+
+# --- waiting dots (PRESENCE-TG-02 / #835) ----------------------------------------
+#
+# The draft animates by cycling these frames, one per ``PresenceTiming.
+# dots_refresh``, instead of the "생각 중…" / "결과를 살펴보는 중…" text the
+# owner found stiff (2026-09-28).  It is the plain ``sendMessageDraft``: the
+# rich draft's ``InputRichBlockThinking`` renders its own "thinking" label,
+# which is exactly what the owner asked to lose.  The text is never empty:
+# an empty ``sendMessageDraft`` renders as a blank bubble on the owner's iOS
+# client (#581 live check, 2026-09-26).
+
+#: Frames of the waiting animation (U+00B7 MIDDLE DOT), in display order.
+DOTS_FRAMES = ('·', '· ·', '· · ·')
+#: ``draft_step`` text while no observed step is in flight (before the first
+#: tool call, or between two): the draft then shows the dots alone.
+NO_STEP_LINE = ''
+_TRAILING_ELLIPSIS = re.compile(r'(?:\s*(?:…|\.{2,}))+\s*$')
+
+
+def draft_frame(line, frame):
+    """The draft text: the observed step line (if any) followed by dots frame ``frame``.
+
+    A trailing ellipsis on the line is dropped, since the dots replace it.
+    Never empty.
+    """
+    dots = DOTS_FRAMES[frame % len(DOTS_FRAMES)]
+    line = _TRAILING_ELLIPSIS.sub('', str(line or '')).strip()
+    return f'{line} {dots}' if line else dots
 
 # --- live step lines (SEC-PROGRESS-01 / #718) ----------------------------------
 #
 # While a tool call of the running Work is observed in flight (its ``running``
 # tool event, or a CLI's own streamed search item), the draft names that step
-# instead of THINKING_DRAFT_TEXT.  The wording is the model's own ``status``
+# before the dots.  The wording is the model's own ``status``
 # (validated, bounded and redacted in ``agent_runtime.progress_step``); without
 # one, a generic line keyed only on the tool kind plus the host or query taken
 # from the observed arguments.  Nothing here names a site, provider or task
 # (Constitution C16), and no line is shown for a call that was not observed.
 
-#: Between two observed calls, once any call has run: the model is reading
-#: what the last call returned.  THINKING_DRAFT_TEXT stays for "before the
-#: first tool call" only.
-BETWEEN_STEPS_TEXT = '결과를 살펴보는 중…'
 #: Any other tool kind.
 DEFAULT_STEP_TEXT = '도구 실행 중'
 #: #710: the orchestrator's planned-attempt event (``orchestrator.EVENT_TOOL`` /
 #: ``PLANNED``).  #740: a re-delegated attempt is announced with this line
 #: only; the plan's worker, model and reason stay in the Work's Evidence
 #: (작업 현황), never in the conversation.  The first attempt announces
-#: nothing: the draft stays THINKING_DRAFT_TEXT until its first step.
+#: nothing: the draft shows the dots alone until its first step.
 ORCHESTRATION_TOOL = EVENT_TOOL
 ORCHESTRATION_PLANNED = PLANNED
-RETRY_STEP_TEXT = '다른 방법으로 다시 해보는 중…'
+RETRY_STEP_TEXT = '다른 방법으로 다시 해보는 중'
 #: Host action -> (line with the observed target, line without one).  The
 #: target placeholder is ``{host}`` or ``{query}``.
 FALLBACK_STEP_LINES = {
@@ -165,9 +173,9 @@ def draft_step(events, live=None):
     'id', 'step'}``, or None; it counts only when not older than that event.
     ``approval`` is true while the step in flight is a payment step: then
     the only surface is the existing approval prompt and ``text`` is None.
+    With no step in flight ``text`` is NO_STEP_LINE (the draft shows dots).
     """
     current = None          # (created, tool, call_id, step, host)
-    seen = False
     last_host = None
     for event in events or ():
         trace = event.get('trace') if isinstance(event.get('trace'), dict) else {}
@@ -182,7 +190,6 @@ def draft_step(events, live=None):
                            if attempt > 1 else None)
             continue
         if event.get('status') == 'running' and isinstance(step, dict):
-            seen = True
             current = (event.get('created') or 0, event.get('tool'), trace.get('call_id'), step,
                        step.get('host') or last_host)
             if step.get('host'):
@@ -191,20 +198,18 @@ def draft_step(events, live=None):
               and trace.get('call_id') == current[2]):
             current = None
     if isinstance(live, dict) and isinstance(live.get('step'), dict):
-        seen = True
         if live.get('at', 0) >= (current[0] if current else float('-inf')):
             current = (live.get('at', 0), None, None, live['step'], last_host) if live.get('running') else None
     if current is not None:
         if current[3].get('approval'):
             return None, True
         return step_line(current[3], current[4]), False
-    return (BETWEEN_STEPS_TEXT if seen else THINKING_DRAFT_TEXT), False
-
-ANCHOR_NONE = 'none'
-ANCHOR_OWNER_MESSAGE = 'owner_message'
+    return NO_STEP_LINE, False
 
 CONTROL_RETRY = 'retry'
 CONTROL_DETAILS = 'details'
+
+# --- reactions (PRESENCE-TG-02 / #835) -------------------------------------------
 
 #: ``ReactionTypeEmoji.emoji`` values documented by Bot API 10.3, verbatim.
 #: Bots may set only these (or a custom emoji already on the message, which
@@ -217,74 +222,82 @@ TELEGRAM_REACTION_EMOJI = frozenset((
     '🤷‍♂', '🤷', '🤷‍♀', '😡',
 ))
 
-#: Deterministic semantic class -> reaction.  Every value must be in
-#: TELEGRAM_REACTION_EMOJI (pinned by a test).
-REACTION_FOR_SEMANTICS = {
-    SEMANTIC_ACKNOWLEDGE: '👍',
-    SEMANTIC_AGREE: '👌',
-    SEMANTIC_CELEBRATE: '🎉',
-    SEMANTIC_APPRECIATE: '🙏',
-    SEMANTIC_EMPATHIZE: '❤',
-    SEMANTIC_TOPIC_POSITIVE: '😍',
-}
+#: On the owner's message when the Work starts: "looking at it".  Not "done".
+RECEIVED_REACTION = '👀'
+#: ``succeeded``: done.
+DONE_REACTION = '👌'
+#: ``succeeded`` and this Work observably saved a note or a Memory item.
+WROTE_REACTION = '✍'
+#: Remove the bot's reaction (an empty ``setMessageReaction`` list).
+CLEAR_REACTION = ''
+#: Every emoji this module sets.  Each must be in TELEGRAM_REACTION_EMOJI
+#: (pinned by a test).
+PRESENCE_REACTIONS = (RECEIVED_REACTION, DONE_REACTION, WROTE_REACTION)
 
-#: Routed intents whose turn is an ordinary question/request.  A reaction on
-#: those says only "received".  Everything else - an effect (note, calendar,
-#: settings change), an ambiguity, an unsupported capability, a command -
-#: gets no reaction, so a reaction can never be read as "done".
-_ACKNOWLEDGED_INTENTS = frozenset({INTENT_CONVERSATION, INTENT_RESEARCH, INTENT_KNOWLEDGE, INTENT_WORKSPACE_SEARCH,
-                                   INTENT_NOTE_LIST, INTENT_MAIL_SEARCH, INTENT_DRIVE_READ, INTENT_GREETING})
-
-#: DecisionEngine follow-up relation -> semantic class.  A retry is only
-#: acknowledged (it may fail again); a correction is "okay, changing it";
-#: a cancel request gets none, because whether anything was cancelled is
-#: decided by the cancellation state machine, not by a gesture.
-_RELATION_SEMANTICS = {
-    FOLLOWUP_RETRY: SEMANTIC_ACKNOWLEDGE,
-    FOLLOWUP_REFERENCE: SEMANTIC_ACKNOWLEDGE,
-    FOLLOWUP_CORRECTION: SEMANTIC_AGREE,
-    FOLLOWUP_CANCEL: None,
-}
+#: Decided outcomes that end a Work.  Anything else (queued, running, parked
+#: for a connection, Drive or context) is not decided yet and keeps 👀.
+TERMINAL_OUTCOMES = frozenset({'succeeded', 'partial', 'failed', 'unknown', 'cancelled', 'interrupted'})
+#: Tool kinds whose ``succeeded`` event with ``evidence.saved`` true is an
+#: owner record actually written (a pending MemoryCandidate is not ``saved``).
+#: The same kinds as ``AgentService.RETAINED_TOOLS``.
+RECORD_WRITE_TOOLS = frozenset({'save_note', 'save_memory'})
 
 
-@dataclass(frozen=True)
-class PresenceGesture:
-    """The typed presentation decision for one owner turn."""
-
-    ack_mode: str = ACK_NONE
-    reaction_semantics: str = None
-    reply_anchor: str = ANCHOR_OWNER_MESSAGE
-    controls: tuple = ()
-
-    @property
-    def reaction(self):
-        """The Telegram reaction, or ``None`` - never a guessed emoji."""
-        if self.ack_mode != ACK_REACTION:
-            return None
-        emoji = REACTION_FOR_SEMANTICS.get(self.reaction_semantics)
-        return emoji if emoji in TELEGRAM_REACTION_EMOJI else None
+def wrote_record(events):
+    """Did this Work observably save a note or Memory item?  From tool events only."""
+    for event in events or ():
+        trace = event.get('trace') if isinstance(event.get('trace'), dict) else {}
+        evidence = trace.get('evidence') if isinstance(trace.get('evidence'), dict) else {}
+        if event.get('tool') in RECORD_WRITE_TOOLS and event.get('status') == 'succeeded' and evidence.get('saved') is True:
+            return True
+    return False
 
 
-def turn_gesture(*, relation=None, intent=None, executes=True, semantics=None):
-    """Derive the acknowledgement for a turn from typed decisions only.
+#: Typed flags a tool result carries while its effect waits for the owner's
+#: decision (a calendar draft, a settings draft, a proposed preparation),
+#: unless ``applied`` is true.  The same fields ``agent_runtime.event_trail``
+#: and ``withheld_effect`` read.
+OWNER_DECISION_FLAGS = ('requires_owner_approval', 'requires_owner_confirmation', 'requires_owner_acceptance')
 
-    ``relation`` is the DecisionEngine-judged follow-up relation and wins when
-    present.  ``intent``/``executes`` are the routed IntentDecision.
-    ``semantics`` lets a future DecisionEngine interpretation that already
-    carries a semantic class (for example ``celebrate``) supply it; no call
-    site invents one, and an unknown value yields no reaction.
+
+def awaits_owner(events):
+    """Does an observed tool event of this Work still wait for the owner's approval?"""
+    for event in events or ():
+        trace = event.get('trace') if isinstance(event.get('trace'), dict) else {}
+        evidence = trace.get('evidence') if isinstance(trace.get('evidence'), dict) else {}
+        for record in (trace, evidence):
+            if record.get('state') == STATE_AWAITING_APPROVAL:
+                return True
+            if record.get('applied') is not True and any(record.get(flag) for flag in OWNER_DECISION_FLAGS):
+                return True
+    return False
+
+
+def outcome_reaction(outcome, events=(), *, delivered=True, blocked=False, awaiting_owner=False):
+    """The reaction that replaces 👀 once the answer was sent, or None to leave it.
+
+    Deterministic from the decided ``outcome`` (the Work status) and the
+    Work's observed tool ``events`` (``QuickStore.task_events`` shape):
+
+    * not a terminal outcome -> None: the Work is parked and will resume, so
+      👀 stays;
+    * ``succeeded``, answer ``delivered``, not a ``blocked`` projection and
+      nothing awaiting the owner -> WROTE_REACTION when a note or Memory
+      write was observed, else DONE_REACTION;
+    * every other terminal case (``partial``, ``failed``, ``unknown``,
+      ``cancelled``, ``interrupted``, a blocked reply, an answer whose
+      delivery is uncertain, or a succeeded Work whose effect or proposal
+      still waits for the owner's approval - ``awaiting_owner`` or
+      ``awaits_owner(events)``) -> CLEAR_REACTION.  No emoji at all rather
+      than a neutral one: the reply states the truth, and any gesture there
+      could be read as success (a 👌 under a calendar preview would read as
+      "scheduled").
     """
-    if semantics is not None:
-        cls = semantics if semantics in REACTION_SEMANTICS else None
-    elif relation is not None:
-        cls = _RELATION_SEMANTICS.get(relation)
-    elif intent is not None and executes and intent in _ACKNOWLEDGED_INTENTS:
-        cls = SEMANTIC_ACKNOWLEDGE
-    else:
-        cls = None
-    if cls is None:
-        return PresenceGesture()
-    return PresenceGesture(ack_mode=ACK_REACTION, reaction_semantics=cls)
+    if outcome not in TERMINAL_OUTCOMES:
+        return None
+    if outcome != 'succeeded' or blocked or not delivered or awaiting_owner or awaits_owner(events):
+        return CLEAR_REACTION
+    return WROTE_REACTION if wrote_record(events) else DONE_REACTION
 
 
 # --- timing -------------------------------------------------------------------
@@ -295,17 +308,20 @@ class PresenceTiming:
 
     These choose *which* surface to show while Work is really running; they
     never delay a ready answer.  ``chat_action_refresh`` stays under the
-    documented 5-second typing lifetime and ``draft_refresh`` under the
-    documented 30-second draft preview lifetime.
+    documented 5-second typing lifetime, and ``typing…`` is refreshed at that
+    cadence for as long as the Work runs, a draft shown or not (#835).
+    ``dots_refresh`` stays far under the documented 30-second draft preview
+    lifetime.
     """
 
     chat_action_after: float = 1.0
     draft_after: float = 5.0
     chat_action_refresh: float = 4.0
-    draft_refresh: float = 20.0
-    #: #718: at most one draft edit per this many seconds when the step line
-    #: changes; the next edit shows the latest step, never a queued old one.
-    step_refresh: float = 1.5
+    #: #835: one draft edit per this many seconds, each advancing the dots
+    #: (DOTS_FRAMES) and showing the latest observed step line (#718), never
+    #: a queued old one.  With ``typing…`` every 4 s this stays under
+    #: Telegram's guidance of about one message per second in one chat.
+    dots_refresh: float = 1.5
 
     def wait_surface(self, elapsed, *, durable_surface=False, draft_available=True):
         """The one wait surface for Work that has been waiting ``elapsed`` seconds.
@@ -339,12 +355,13 @@ class WaitState:
     chat_action_at: float = None
     draft_at: float = None
     draft_failed: bool = False
-    rich_draft_failed: bool = False
     stopped: bool = False
     shown: set = field(default_factory=set)
-    #: #718: the line the draft last showed, and the (raw, displayed) pair of
-    #: the last display-time redaction.
+    #: #718/#835: the text the draft last showed (step line and dots), the
+    #: next DOTS_FRAMES index, and the (raw, displayed) pair of the last
+    #: display-time redaction of a step line.
     draft_text: str = None
+    dots_frame: int = 0
     scrubbed: tuple = None
 
 

@@ -61,7 +61,8 @@ from personal_agent.quickstart import make_handler
 from personal_agent.quickstart_service import MEMORY_PENDING_TELEGRAM_NOTE, AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.subscription_engines import SubscriptionEngines
-from personal_agent.telegram_presence import THINKING_DRAFT_TEXT, draft_id_for
+from personal_agent.telegram_presence import (CLEAR_REACTION, DONE_REACTION, DOTS_FRAMES, RECEIVED_REACTION, WROTE_REACTION,
+                                              draft_id_for)
 
 CHAT = 5120
 GENERATION = 'eval-g1'
@@ -73,7 +74,7 @@ CAL_NOW = datetime(2026, 9, 22, 10, 0, tzinfo=ZoneInfo(ZONE)).timestamp()
 #: ``calendar-create`` (#672: no request word selects it).
 CALENDAR_REQUESTS = ('내일 오후 3시에 치과 일정 잡아줘', 'book a dentist appointment tomorrow at 3pm for 30 minutes',
                      '금요일 오전 9시 스탠드업 30분 일정 등록해줘', '다음 주 화요일 10시 반 병원 예약 일정 추가해줘')
-PRESENCE_METHODS = ('setMessageReaction', 'sendChatAction', 'sendRichMessageDraft', 'sendMessageDraft')
+PRESENCE_METHODS = ('setMessageReaction', 'sendChatAction', 'sendMessageDraft')
 #: Administrative lifecycle phrasing that must never be a routine bubble.
 LIFECYCLE_CHATTER = ('처리 중입니다', '처리가 끝났습니다', '요청을 받았습니다', '작업을 시작', '작업이 완료',
                      '결과 상태 보기', 'queued', 'running', 'completed')
@@ -275,7 +276,9 @@ class PresenceEval(unittest.TestCase):
         return [body['text'] for body in self.bubbles(since)]
 
     def reactions(self, since=0):
-        return [body['reaction'][0]['emoji'] for method, body in self.wire[since:] if method == 'setMessageReaction']
+        """Each reaction call as its emoji, or '' for a removal (#835)."""
+        return [(body['reaction'][0]['emoji'] if body['reaction'] else CLEAR_REACTION)
+                for method, body in self.wire[since:] if method == 'setMessageReaction']
 
     def callback_answers(self, since=0):
         return [body for method, body in self.wire[since:] if method == 'answerCallbackQuery']
@@ -314,8 +317,9 @@ class A_TrivialRequest(PresenceEval):
             with self.subTest(phrase=phrase):
                 start = len(self.wire)
                 job, message_id = self.turn(phrase)
-                # Owner-visible: exactly a received-reaction then one durable answer.
-                self.assertEqual(self.methods(start), ['setMessageReaction', 'sendMessage'])
+                # Owner-visible: 👀, one durable answer, then the done reaction (#835).
+                self.assertEqual(self.methods(start), ['setMessageReaction', 'sendMessage', 'setMessageReaction'])
+                self.assertEqual(self.reactions(start), [RECEIVED_REACTION, DONE_REACTION])
                 [reply] = self.bubbles(start)
                 self.assertEqual(reply['text'], self.text)
                 self.assertNotIn('reply_markup', reply)
@@ -331,7 +335,7 @@ class A_TrivialRequest(PresenceEval):
         self.connect_model()
         self.during_model = lambda job: self.service.acknowledge_long_work(now=job['created'] + 2)
         job, _ = self.turn('내일 아침 뭐 입을까?')
-        self.assertEqual(self.methods(), ['setMessageReaction', 'sendChatAction', 'sendMessage'])
+        self.assertEqual(self.methods(), ['setMessageReaction', 'sendChatAction', 'sendMessage', 'setMessageReaction'])
         self.assertEqual(len(self.bubbles()), 1)
         self.assertEqual(job['status'], 'succeeded')
 
@@ -346,7 +350,8 @@ class A_TrivialRequest(PresenceEval):
                 job, _ = self.turn('주말에 뭐 하고 놀까?')
                 self.assertEqual((job['status'], job['delivery']), ('succeeded', 'sent'))
                 self.assertEqual(len(self.bubbles(start)), 1)
-                self.assertEqual(self.methods(start)[-1], 'sendMessage')
+                # Only the (failing, best-effort) outcome reaction follows the answer.
+                self.assertEqual(self.methods(start)[-2:], ['sendMessage', 'setMessageReaction'])
         self.failing = {}
 
     def test_model_markdown_renders_as_telegram_html_not_raw_markers(self):
@@ -371,8 +376,8 @@ class B_FailedRuntime(PresenceEval):
     def test_direct_api_failure_is_one_anchored_truthful_bubble_with_bounded_recovery(self):
         self.text = '요약을 완료했습니다.'   # a success sentence that must never reach the owner
         job, message_id = self.fail_turn()
-        self.assertEqual(self.methods(), ['setMessageReaction', 'sendMessage'])
-        self.assertEqual(self.reactions(), ['👍'], 'the reaction only acknowledges receipt')
+        self.assertEqual(self.methods(), ['setMessageReaction', 'sendMessage', 'setMessageReaction'])
+        self.assertEqual(self.reactions(), [RECEIVED_REACTION, CLEAR_REACTION], 'a failure never shows a done reaction')
         [reply] = self.bubbles()
         self.assertTrue(reply['text'].startswith(TERMINAL_FAILED_HEADER))
         self.assertIn('모델 서버에 연결할 수 없습니다.', reply['text'])
@@ -451,7 +456,7 @@ class C_RetryContinuity(PresenceEval):
                 self.assertEqual(self.store.job(failed['id'])['status'], 'failed', 'history is not rewritten')
                 # The model received the ORIGINAL request, not the follow-up phrase.
                 self.assertEqual(self.model_bodies[calls]['messages'][-1]['content'], self.ORIGINAL)
-                self.assertEqual(self.methods(start), ['setMessageReaction', 'sendMessage'])
+                self.assertEqual(self.methods(start), ['setMessageReaction', 'sendMessage', 'setMessageReaction'])
                 self.assertEqual(self.texts(start), [self.text])
                 continuity = [e for e in self.events(retry['id']) if e['tool'] == 'conversation_continuity']
                 self.assertEqual([(e['trace']['relation'], e['trace']['executed']) for e in continuity],
@@ -565,13 +570,14 @@ class G_LongResearch(PresenceEval):
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
         methods = self.methods()
         self.assertEqual(methods[0], 'setMessageReaction')
-        self.assertEqual(methods[-1], 'sendMessage')
+        self.assertEqual(methods[-2:], ['sendMessage', 'setMessageReaction'])
+        self.assertEqual(self.reactions(), [RECEIVED_REACTION, DONE_REACTION])
         self.assertEqual(len(self.bubbles()), 1, 'progress never becomes a durable bubble')
-        drafts = [body for method, body in self.wire if method == 'sendRichMessageDraft']
-        self.assertEqual(len(drafts), 2, 'first draft at 6s, one refresh at 27s; 9s/14s are no-ops')
-        for body in drafts:
-            self.assertEqual(body, {'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'can_stop': True,
-                                    'rich_message': {'blocks': [{'type': 'thinking', 'text': THINKING_DRAFT_TEXT}]}})
+        drafts = [body for method, body in self.wire if method == 'sendMessageDraft']
+        # #835: one plain draft edited in place, the dots advancing at 6s, 9s, 14s and 27s.
+        self.assertEqual(drafts, [{'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'text': frame, 'can_stop': True}
+                                  for frame in DOTS_FRAMES + DOTS_FRAMES[:1]])
+        self.assertNotIn('sendRichMessageDraft', methods)
         self.assertEqual(self.bubbles()[0]['reply_parameters']['message_id'], message_id)
         self.assertIsNone(self.store.task_card(job['id']))
         self.assert_no_lifecycle_chatter(self.texts())
@@ -590,7 +596,7 @@ class G_LongResearch(PresenceEval):
             self.service.acknowledge_long_work(now=job['created'] + 30)
         job, message_id = self.research_turn('캠핑 의자 조사 좀 해줄래', EvalNet(), '의자 A가 가볍습니다.', think)
         self.assertEqual(outcomes, ['running', 'duplicate'])
-        self.assertEqual(self.methods().count('sendRichMessageDraft'), 1, 'no draft after Stop')
+        self.assertEqual(self.methods().count('sendMessageDraft'), 1, 'no draft after Stop')
         # #606 T1: Stop is checked before the next model turn or tool call.
         self.assertEqual(job['status'], 'failed', 'Stop ended the Work before its next step')
         notice, answer = self.bubbles()
@@ -729,7 +735,9 @@ class D_MissingGmail(LocalHttp, PresenceEval):
                 resumed = self.store.job(job['id'])
                 self.assertEqual((resumed['status'], resumed['message']), ('succeeded', phrase))
                 self.assertEqual(self.searches(), searches + 1)
-                self.assertEqual(self.methods(resumed_at), ['sendMessage'], 'a resumed Work is not re-acknowledged')
+                self.assertEqual(self.methods(resumed_at), ['sendMessage', 'setMessageReaction'],
+                                 'a resumed Work is not re-acknowledged; its 👀 becomes the outcome reaction')
+                self.assertEqual(self.reactions(resumed_at), [DONE_REACTION])
                 [answer] = self.texts(resumed_at)
                 self.assertIn('예약 확인 안내', answer)
 
@@ -931,7 +939,8 @@ class E_MissingFolder(LocalHttp, PresenceEval):
                 self.service.deliver_one()
                 self.assertFalse(self.service.run_one())
                 self.assertEqual(self.store.job(job['id'])['status'], 'succeeded')
-                self.assertEqual(self.methods(answer_at), ['sendMessage'])
+                self.assertEqual(self.methods(answer_at), ['sendMessage', 'setMessageReaction'])
+                self.assertEqual(self.reactions(answer_at), [DONE_REACTION])
                 self.assertEqual(self.texts(answer_at), [self.text])
                 replay = self.http('POST', '/api/folder-requests/approve', {'handoff_id': handoff})
                 self.assertEqual((replay[0], replay[1]['reason']), (409, 'no_pending_work'))
@@ -1039,7 +1048,9 @@ class F_CalendarApproval(CalendarEval):
             with self.subTest(phrase=phrase):
                 start, calls = len(self.wire), len(self.provider.calls)
                 job, _ = self.turn(phrase)
-                self.assertEqual(self.methods(start), ['sendMessage'], 'a consequential request gets no reaction')
+                # #835: 👀, the preview, then no done reaction while the effect awaits approval.
+                self.assertEqual(self.methods(start), ['setMessageReaction', 'sendMessage', 'setMessageReaction'])
+                self.assertEqual(self.reactions(start), [RECEIVED_REACTION, CLEAR_REACTION])
                 [preview] = self.texts(start)
                 self.assertTrue(preview.startswith(PREVIEW_HEADER))
                 self.assertIn(title, preview)
@@ -1052,6 +1063,7 @@ class F_CalendarApproval(CalendarEval):
                 done, _ = self.turn(approval)
                 [created] = self.texts(approved_at)
                 self.assertTrue(created.startswith(CREATED))
+                self.assertEqual(self.reactions(approved_at)[-1], DONE_REACTION, 'done only once the event exists')
                 self.assertIn(title, created)
                 self.assertEqual(len(self.provider.calls), calls + 1)
                 # Replayed approval: nothing is created twice.
@@ -1242,7 +1254,8 @@ class H_PartialResult(PresenceEval):
     def test_partial_research_is_never_collapsed_into_success(self):
         job, message_id = self.partial_research()
         self.assertEqual(job['status'], 'partial')
-        self.assertEqual(self.methods(), ['setMessageReaction', 'sendMessage'])
+        self.assertEqual(self.methods(), ['setMessageReaction', 'sendMessage', 'setMessageReaction'])
+        self.assertEqual(self.reactions(), [RECEIVED_REACTION, CLEAR_REACTION], 'partial is never done')
         [bubble] = self.bubbles()
         self.assertTrue(bubble['text'].startswith(TERMINAL_PARTIAL_HEADER))
         self.assertIn('일부 자료는 읽지 못했습니다', bubble['text'], 'the failed portion is named')
@@ -1273,7 +1286,9 @@ class H_PartialResult(PresenceEval):
         self.script = [('tool', 'bounded_public_research', {'mode': 'product_comparison', 'query': 'kettle'})]
         outcomes['partial'] = self.turn('전기포트 비교해줘')[0]
         bubbles = self.bubbles()
-        self.assertEqual(self.methods(), ['setMessageReaction', 'sendMessage'] * 3)
+        self.assertEqual(self.methods(), ['setMessageReaction', 'sendMessage', 'setMessageReaction'] * 3)
+        self.assertEqual(self.reactions(), [RECEIVED_REACTION, DONE_REACTION, RECEIVED_REACTION, CLEAR_REACTION,
+                                            RECEIVED_REACTION, CLEAR_REACTION])
         self.assertEqual([job['status'] for job in outcomes.values()], ['succeeded', 'failed', 'partial'])
         heads = [body['text'].split('\n')[0] for body in bubbles]
         self.assertEqual(heads[1:], [TERMINAL_FAILED_HEADER, TERMINAL_PARTIAL_HEADER])
@@ -1433,8 +1448,9 @@ class J_MemoryCorrection(LocalHttp, PresenceEval):
         self.assertEqual(corrected['status'], 'succeeded')
         self.assertEqual(self.canonical(), [('meeting-time', '오후')], 'superseded, not duplicated')
         # A Memory request is handled locally and is deliberately never sent to
-        # the follow-up judge (privacy guard), so it is acknowledged as received.
-        self.assertEqual(self.methods(start), ['setMessageReaction', 'sendMessage'])
+        # the follow-up judge (privacy guard).  #835: 👀, then ✍ for the observed write.
+        self.assertEqual(self.methods(start), ['setMessageReaction', 'sendMessage', 'setMessageReaction'])
+        self.assertEqual(self.reactions(start), [RECEIVED_REACTION, WROTE_REACTION])
         self.assertEqual(self.texts(start), ['바꿔 둘게요: 회의는 오후.'])
         # The retained item is linked from the exact Work that wrote it (#562).
         retained = self.task(corrected['id'])['retained']
@@ -1580,7 +1596,7 @@ class RouteAndIdentity(LocalHttp, PresenceEval):
         for text in texts:
             for worker in ('Codex', 'codex', 'Claude Code', 'eval-model', 'ollama', 'Ollama'):
                 self.assertNotIn(worker, text)
-        self.assertEqual(self.reactions(), ['👍', '👍', '👍'])
+        self.assertEqual(self.reactions(), [RECEIVED_REACTION, DONE_REACTION] * 3)
 
     def test_requested_and_reported_model_identity_stay_distinct(self):
         self.connect_model()

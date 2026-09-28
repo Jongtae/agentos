@@ -80,9 +80,9 @@ from . import information_use
 from .browser_session import BrowserProfile, ascii_host, binding_digest, registrable_domain
 from .browser_jar import unexpired
 from .cli_browser_relay import BrowserRelay
-from .telegram_presence import (BETWEEN_STEPS_TEXT, CONTROL_DETAILS, CONTROL_RETRY, THINKING_DRAFT_TEXT, WAIT_CHAT_ACTION, WAIT_DRAFT, PresenceTiming,
-                                TelegramTurnAddressing, WaitState, draft_id_for, draft_step, render_telegram_html,
-                                reply_controls_markup, turn_gesture, without_consumed)
+from .telegram_presence import (CONTROL_DETAILS, CONTROL_RETRY, NO_STEP_LINE, RECEIVED_REACTION, WAIT_CHAT_ACTION, WAIT_DRAFT,
+                                PresenceTiming, TelegramTurnAddressing, WaitState, draft_frame, draft_id_for, draft_step,
+                                outcome_reaction, render_telegram_html, reply_controls_markup, without_consumed)
 LOCAL_RESUMED_KEY='local_authority_resumed_jobs'
 LOCAL_DOCUMENT_RESUME_KEY='local_authority_document_resume_jobs'
 LOCAL_DOCUMENT_APPROVAL_TEXT=('폴더를 허용한 방금 요청을 계속하려면 연결 문서 발췌문을 외부 모델에 보내는 승인이 필요합니다. '
@@ -4045,35 +4045,76 @@ class AgentService:
             LOG.info('telegram presence %s failed: %s status=%s',method,type(exc).__name__,getattr(exc,'status',None))
             return False
 
-    def present_turn(self, job, *, relation=None, decision=None):
-        """React once to the owner's message from already-typed decisions.
+    def present_turn(self, job):
+        """React 👀 once to the owner's message when its Work starts (#835).
 
-        The semantic class is the DecisionEngine-judged follow-up relation or
-        the routed intent; no text is read and no model is called here.  A
-        resumed Work (it already answered once) is not reacted to again.
+        Every natural-language owner turn gets the same "looking" reaction:
+        nothing is read from its words and no model is called.  Only
+        `deliver_one` replaces it, after the outcome is decided
+        (`outcome_reaction`).  `present_waiting_work` usually shows it
+        first, as soon as the Work runs; this call is idempotent with that.
         """
         if not self._telegram_work(job) or not self.is_natural_language(job.get('message')):return
-        state=self.presence.setdefault(job['id'],WaitState())
-        if state.reacted:return
+        self._react_received(job,self.presence.setdefault(job['id'],WaitState()))
+
+    def _react_received(self, job, state):
+        """Set 👀 once per Work run; True when a Telegram call was made.
+
+        A resumed Work (it already answered once, for example with parked
+        connection guidance) keeps the 👀 it still has.
+        """
+        if state.reacted:return False
         state.reacted=True
-        if self._answered_before(job['id']):return
-        gesture=(turn_gesture(relation=relation) if relation is not None else
-                 turn_gesture(intent=getattr(decision,'intent',None),executes=bool(getattr(decision,'executes',False))))
+        if self._answered_before(job['id']):return False
         source=self.telegram_turns.source(job['id'])
-        if gesture.reaction and isinstance(source,int):
-            self._presence_call('set_message_reaction',job['chat_id'],source,gesture.reaction)
+        if not isinstance(source,int):return False
+        self._presence_call('set_message_reaction',job['chat_id'],source,RECEIVED_REACTION)
+        return True
+
+    def _present_outcome(self, job, *, delivered, blocked, awaiting_owner=False):
+        """Replace 👀 by the outcome reaction, after the answer was sent (#835).
+
+        Called by `deliver_one` under `self.lock` once the Work's outcome is
+        decided and its one reply was sent (or its delivery became unknown).
+        Deterministic from the decided status and observed tool events
+        (`outcome_reaction`); a "done" reaction only for `succeeded` with a
+        delivered, non-blocked reply and nothing left for the owner to approve
+        (``awaiting_owner``: pending memory candidates; a pending approval
+        prompt; a draft awaiting approval in the events); otherwise the
+        reaction is removed.  A non-terminal (parked) Work keeps 👀.
+        Best-effort like every presence call: a failure here never changes
+        Work or its delivery.
+        """
+        try:
+            if not self.is_natural_language(job.get('message')):return
+            source=self.telegram_turns.source(job['id'])
+            if not isinstance(source,int):return
+            awaiting_owner=awaiting_owner or any(
+                row['kind'] in self.APPROVAL_NOTIFICATIONS and row['state'] in ('queued','sent')
+                for row in self.store.task_notifications(job['id']))
+            emoji=outcome_reaction(job.get('status'),self.store.task_events(job['id']),delivered=delivered,
+                                   blocked=blocked,awaiting_owner=awaiting_owner)
+        except Exception as exc:  # presentation only
+            LOG.info('telegram presence outcome reaction skipped: %s',type(exc).__name__)
+            return
+        if emoji is not None:
+            self._presence_call('set_message_reaction',job['chat_id'],source,emoji)
 
     def present_waiting_work(self, now=None):
-        """Show `typing…` or a Stop-able draft for running Telegram Work.
+        """Show 👀, `typing…` and a Stop-able dots draft for running Telegram Work.
 
         The surface is chosen from elapsed time only (`PresenceTiming`); no
-        sleep is ever added.  The re-check and the send happen under
-        `self.lock`, the lock terminal delivery holds while sending, so a
-        stale `typing…` or draft can never follow the final answer.  That is
-        deliberate: releasing the lock for the call would let a draft land
-        after the answer and show "Thinking…" for up to 30 s.  The cost is
-        bounded by TELEGRAM_PRESENCE_TIMEOUT (4 s) per call, and at most one
-        presence call is made per Work per tick.
+        sleep is ever added.  `typing…` is refreshed every
+        `chat_action_refresh` for as long as the Work runs, a draft shown or
+        not (#835).  The draft advances its dots every `dots_refresh`.  The
+        re-check and the send happen under `self.lock`, the lock terminal
+        delivery holds while sending, so a stale `typing…` or draft can never
+        follow the final answer.  That is deliberate: releasing the lock for
+        the call would let a draft land after the answer and show the dots for
+        up to 30 s.  The cost is bounded by TELEGRAM_PRESENCE_TIMEOUT (4 s)
+        per call, and at most one presence call is made per Work per tick: a
+        due draft edit first, a due `typing…` on the next tick (a tick is
+        0.25 s, a draft edit at most one per 1.5 s).
 
         No explicit draft clear is needed: per the Bot API `sendMessageDraft`
         docs the draft disappears when the bot sends a message (and after a
@@ -4086,6 +4127,7 @@ class AgentService:
             rows=db.execute("SELECT id,message FROM jobs WHERE channel=? AND chat_id=? AND status='running' ORDER BY created",
                             (f"telegram:{cfg.get('generation')}",cfg['user_id'])).fetchall()
         shown=[]
+        timing=self.presence_timing
         for row in rows:
             if not self.is_natural_language(row['message']):continue
             with self.lock:
@@ -4093,51 +4135,45 @@ class AgentService:
                 if not job or job['status']!='running' or not self._telegram_work(job):continue
                 state=self.presence.setdefault(job['id'],WaitState())
                 if state.stopped:continue
-                surface=self.presence_timing.wait_surface(now-job['created'],
-                                                          durable_surface=self.store.task_card(job['id']) is not None,
-                                                          draft_available=not state.draft_failed)
+                # #835: 👀 as soon as the Work runs, before its first decision.
+                if self._react_received(job,state):continue
+                surface=timing.wait_surface(now-job['created'],
+                                            durable_surface=self.store.task_card(job['id']) is not None,
+                                            draft_available=not state.draft_failed)
+                if surface not in (WAIT_CHAT_ACTION,WAIT_DRAFT):continue
                 if surface==WAIT_DRAFT:
-                    # #718: the draft names the observed step in flight.  A
-                    # changed line is shown at most once per step_refresh and
-                    # always as the latest; an unchanged one per draft_refresh.
-                    since=None if state.draft_at is None else now-state.draft_at
-                    if since is not None and since<self.presence_timing.step_refresh:
-                        continue
-                    text=self._draft_step_text(job,state)
-                    if text is None:
+                    # #718: the draft names the observed step in flight, as the latest line.
+                    line=self._draft_step_text(job,state)
+                    if line is None:
                         continue  # a payment/approval step: the approval prompt is the only surface
-                    if since is not None and text==state.draft_text and since<self.presence_timing.draft_refresh:
-                        continue
-                    if self._send_thinking_draft(job,state,text):
-                        state.draft_at=now
-                        state.draft_text=text
-                        state.shown.add(WAIT_DRAFT)
-                        shown.append((job['id'],WAIT_DRAFT))
-                        continue
-                    # Unsupported/rejected draft: fall back to typing for this Work.
-                    state.draft_failed=True
-                if surface in (WAIT_CHAT_ACTION,WAIT_DRAFT):
-                    if state.chat_action_at is None or now-state.chat_action_at>=self.presence_timing.chat_action_refresh:
-                        state.chat_action_at=now
-                        if self._presence_call('send_chat_action',job['chat_id'],'typing'):
-                            state.shown.add(WAIT_CHAT_ACTION)
-                            shown.append((job['id'],WAIT_CHAT_ACTION))
+                    if state.draft_at is None or now-state.draft_at>=timing.dots_refresh:
+                        text=draft_frame(line,state.dots_frame)
+                        if self._send_draft(job,text):
+                            state.draft_at=now
+                            state.draft_text=text
+                            state.dots_frame+=1
+                            state.shown.add(WAIT_DRAFT)
+                            shown.append((job['id'],WAIT_DRAFT))
+                            continue
+                        # Unsupported/rejected draft: fall back to typing for this Work.
+                        state.draft_failed=True
+                if state.chat_action_at is None or now-state.chat_action_at>=timing.chat_action_refresh:
+                    state.chat_action_at=now
+                    if self._presence_call('send_chat_action',job['chat_id'],'typing'):
+                        state.shown.add(WAIT_CHAT_ACTION)
+                        shown.append((job['id'],WAIT_CHAT_ACTION))
         return shown
 
-    def _send_thinking_draft(self, job, state, text=THINKING_DRAFT_TEXT):
-        """One Stop-able draft: Telegram's dedicated thinking block first.
+    def _send_draft(self, job, text):
+        """One Stop-able plain `sendMessageDraft`: the dots after any step line (#718/#835).
 
-        A client/server that refuses the rich draft gets the plain
-        `sendMessageDraft` from then on - the empty-text placeholder before
-        the first step, the step line (#718) after; both use the same
-        `draft_id`, so Stop maps back to the Work either way.
+        The text is never empty (an empty draft is a blank bubble on the
+        owner's iOS client, #581).  The rich draft's thinking block is no
+        longer used: it renders its own "thinking" label, which the owner
+        asked to lose (2026-09-28).  The `draft_id` maps Stop back to the Work.
         """
-        draft_id=draft_id_for(job['id'])
-        if not state.rich_draft_failed:
-            if self._presence_call('send_rich_message_draft',job['chat_id'],draft_id,text,can_stop=True):
-                return True
-            state.rich_draft_failed=True
-        return self._presence_call('send_message_draft',job['chat_id'],draft_id,'' if text==THINKING_DRAFT_TEXT else text,can_stop=True)
+        return self._presence_call('send_message_draft',job['chat_id'],draft_id_for(job['id']),text or draft_frame('',0),
+                                   can_stop=True)
 
     #: Notification kinds whose prompt is the Work's only surface while pending (#718).
     APPROVAL_NOTIFICATIONS=('approval_needed','context_approval_needed','browser_approval_needed')
@@ -4145,7 +4181,8 @@ class AgentService:
     def _draft_step_text(self, job, state):
         """The draft line for running Work from its observed steps (#718), or None.
 
-        None while an approval prompt is pending or the step in flight is a
+        NO_STEP_LINE (the draft shows the dots alone) while no step is in
+        flight.  None while an approval prompt is pending or the step in flight is a
         payment step: the existing approval prompt is then the only surface.
         A step line was redacted when it was recorded; it passes this Work's
         saved-value and stored-secret redaction again before display.
@@ -4155,11 +4192,11 @@ class AgentService:
             return None
         text,approval=draft_step(self.store.task_events(job['id']),self.live_steps.get(job['id']))
         if approval:return None
-        if text in (THINKING_DRAFT_TEXT,BETWEEN_STEPS_TEXT):return text
+        if not text:return NO_STEP_LINE
         if state.scrubbed is None or state.scrubbed[0]!=text:
             try:shown=' '.join(str(self.scrub_work_text(job['id'],text)).split())
-            except Exception:shown=BETWEEN_STEPS_TEXT  # never show a line that could not be redacted
-            state.scrubbed=(text,shown or BETWEEN_STEPS_TEXT)
+            except Exception:shown=NO_STEP_LINE  # never show a line that could not be redacted
+            state.scrubbed=(text,shown or NO_STEP_LINE)
         return state.scrubbed[1]
 
     def _observe_cli_step(self, job_id, step):
@@ -6389,7 +6426,7 @@ class AgentService:
                 continuity=None if resumed or continued else self.continuity_relation(owner_prompt,connector_owner,current_work_id=job['id'])
                 if continuity:
                     relation,previous=continuity['relation'],continuity['previous']
-                    self.present_turn(job,relation=relation)
+                    self.present_turn(job)
                     if relation==FOLLOWUP_RETRY:
                         allowed,reason=self.safe_retry(previous,current_work_id=job["id"])
                         source=self.canonical_retry_source(previous) if allowed else None
@@ -6470,7 +6507,7 @@ class AgentService:
                 elif decision.intent not in (INTENT_CALENDAR_CREATE,INTENT_AMBIGUOUS) and self.calendar_conversation.has_pending(connector_owner):
                     if self.calendar_conversation.clear(connector_owner):calendar_notice+=CALENDAR_DROPPED_NOTICE+'\n\n'
                 self.conversation_focus.record(decision,job['id'])
-                self.present_turn(job,decision=decision)
+                self.present_turn(job)
                 owner=self.settings_owner(job)
                 # A parked request was promised to run once after its
                 # connection, so it is kept unless the owner withdraws it
@@ -7359,6 +7396,8 @@ class AgentService:
             with self.store.db() as db:
                 db.execute('UPDATE jobs SET delivery=? WHERE id=?',(status,job['id']))
             self.presence.pop(job['id'],None)
+            # #835: only now, with the outcome decided and the reply sent, 👀 becomes the outcome reaction.
+            self._present_outcome(job,delivered=status=='sent',blocked=bool(blocked),awaiting_owner=memory_pending)
             if markup and isinstance(message_id,int):
                 self.telegram_turns.record_reply(job['id'],job['chat_id'],message_id)
             # #818: after a reply confirmed sent (never 'unknown'), one message with

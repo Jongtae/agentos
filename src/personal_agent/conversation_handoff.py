@@ -164,33 +164,25 @@ class TelegramChannel:
     # --- presence (#581): best-effort, never Evidence -------------------------
 
     def set_message_reaction(self, chat_id, message_id, emoji):
-        """Set one emoji reaction on a message (bots may set at most one)."""
+        """Set one emoji reaction on a message (bots may set at most one); a falsy emoji removes it."""
         return self.call('setMessageReaction', {'chat_id': chat_id, 'message_id': message_id,
-                                                'reaction': [{'type': 'emoji', 'emoji': emoji}]},
+                                                'reaction': [{'type': 'emoji', 'emoji': emoji}] if emoji else []},
                          timeout=TELEGRAM_PRESENCE_TIMEOUT)
 
     def send_chat_action(self, chat_id, action='typing'):
         return self.call('sendChatAction', {'chat_id': chat_id, 'action': action},
                          timeout=TELEGRAM_PRESENCE_TIMEOUT)
 
-    def send_message_draft(self, chat_id, draft_id, text='', can_stop=True):
-        """Show an ephemeral draft; empty text is Telegram's "Thinking…" placeholder."""
+    def send_message_draft(self, chat_id, draft_id, text, can_stop=True):
+        """Show an ephemeral draft.
+
+        Callers never send empty text: Telegram's empty "Thinking…" placeholder
+        renders as a blank bubble on the owner's iOS client (#581, #835).
+        """
         body = {'chat_id': chat_id, 'draft_id': draft_id, 'text': text}
         if can_stop:
             body['can_stop'] = True
         return self.call('sendMessageDraft', body, timeout=TELEGRAM_PRESENCE_TIMEOUT)
-
-    def send_rich_message_draft(self, chat_id, draft_id, thinking_text, can_stop=True):
-        """Show an ephemeral rich draft holding only a "Thinking…" block.
-
-        The block is `InputRichBlockThinking` (`<tg-thinking>`), which Bot API
-        10.3 allows only in `sendRichMessageDraft`.
-        """
-        body = {'chat_id': chat_id, 'draft_id': draft_id,
-                'rich_message': {'blocks': [{'type': 'thinking', 'text': thinking_text}]}}
-        if can_stop:
-            body['can_stop'] = True
-        return self.call('sendRichMessageDraft', body, timeout=TELEGRAM_PRESENCE_TIMEOUT)
 
     def get_updates(self, offset, timeout=5, allowed_updates=None, limit=20):
         """Long-poll only the update kinds this conversation actually handles."""

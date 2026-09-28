@@ -30,8 +30,8 @@ from personal_agent.subscription_engines import SubscriptionEngines
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
-from personal_agent.telegram_presence import (BETWEEN_STEPS_TEXT, DEFAULT_STEP_TEXT, RETRY_STEP_TEXT, THINKING_DRAFT_TEXT,
-                                              PresenceTiming, draft_id_for, draft_step, step_line)
+from personal_agent.telegram_presence import (DEFAULT_STEP_TEXT, NO_STEP_LINE, RETRY_STEP_TEXT, PresenceTiming,
+                                              draft_frame, draft_id_for, draft_step, step_line)
 
 CHAT = 4242
 GENERATION = 'g1'
@@ -117,8 +117,10 @@ class StatusArgumentTests(unittest.TestCase):
 
 
 class StepLineTests(unittest.TestCase):
-    def test_before_any_call_the_draft_still_says_thinking(self):
-        self.assertEqual(draft_step([]), (THINKING_DRAFT_TEXT, False))
+    def test_before_any_call_the_draft_has_no_step_line(self):
+        # #835: the draft then shows the dots alone.
+        self.assertEqual(draft_step([]), (NO_STEP_LINE, False))
+        self.assertEqual(draft_frame(NO_STEP_LINE, 0), '·')
 
     def test_model_status_wins_and_generic_lines_are_keyed_on_kind_and_target(self):
         self.assertEqual(step_line({'action': 'web_search', 'status': '환율을 찾고 있어요', 'query': 'q'}), '환율을 찾고 있어요')
@@ -133,12 +135,12 @@ class StepLineTests(unittest.TestCase):
         events = [running('web_search', {'action': 'web_search', 'status': '찾는 중'}, 'c1')]
         self.assertEqual(draft_step(events), ('찾는 중', False))
         events.append(finished('web_search', 'c1'))
-        self.assertEqual(draft_step(events), (BETWEEN_STEPS_TEXT, False))
+        self.assertEqual(draft_step(events), (NO_STEP_LINE, False))
 
     def test_a_call_that_never_ran_shows_nothing(self):
         # Refused before its running event (invalid arguments, repeat path): no step exists.
         events = [finished('web_search', 'c9', status='failed')]
-        self.assertEqual(draft_step(events), (THINKING_DRAFT_TEXT, False))
+        self.assertEqual(draft_step(events), (NO_STEP_LINE, False))
         # A terminal event of another call does not close the call in flight.
         events = [running('web_search', {'action': 'web_search', 'status': '찾는 중'}, 'c1'),
                   finished('web_search', 'c2', status='failed')]
@@ -158,7 +160,7 @@ class StepLineTests(unittest.TestCase):
         events = [running('list_notes', {'action': 'list_notes'}, created=1.0), finished('list_notes', created=2.0)]
         live = {'at': 3.0, 'running': True, 'id': 'ws1', 'step': {'action': 'web_search', 'query': '환율'}}
         self.assertEqual(draft_step(events, live), ('웹 검색 중: 환율', False))
-        self.assertEqual(draft_step(events, {**live, 'running': False}), (BETWEEN_STEPS_TEXT, False))
+        self.assertEqual(draft_step(events, {**live, 'running': False}), (NO_STEP_LINE, False))
         # An older live step does not hide a newer bridge call in flight.
         events.append(running('weather', {'action': 'weather'}, created=4.0))
         self.assertEqual(draft_step(events, live), ('날씨 확인 중', False))
@@ -172,12 +174,12 @@ class OrchestratedAttemptLineTests(unittest.TestCase):
 
     def test_attempts_never_show_the_plan_text_and_a_retry_is_announced_generically(self):
         events = [self.planned(1, '1번째 시도: Codex · 기본 모델 — 현재 위치가 없어 추가 확인이 필요', 1.0)]
-        self.assertEqual(draft_step(events), (THINKING_DRAFT_TEXT, False), 'the first attempt announces nothing')
+        self.assertEqual(draft_step(events), (NO_STEP_LINE, False), 'the first attempt announces nothing')
         events += [running('web_search', {'action': 'web_search', 'query': '환율'}, 'c1', created=2.0)]
         self.assertEqual(draft_step(events), ('웹 검색 중: 환율', False))
         events += [finished('web_search', 'c1', created=3.0),
                    {'tool': 'orchestrator', 'status': 'evaluated', 'created': 4.0, 'trace': {'text': '목표 미달'}}]
-        self.assertEqual(draft_step(events), (BETWEEN_STEPS_TEXT, False), 'an evaluation is not a step')
+        self.assertEqual(draft_step(events), (NO_STEP_LINE, False), 'an evaluation is not a step')
         events += [self.planned(2, '2번째 시도: Claude Code · 기본 모델 — 다른 경로', 5.0)]
         text, _ = draft_step(events)
         self.assertEqual(text, RETRY_STEP_TEXT)
@@ -189,11 +191,11 @@ class OrchestratedAttemptLineTests(unittest.TestCase):
         """#753: attempt 1 planned after a preflight step does not keep that step's line."""
         events = [running('web_search', {'action': 'web_search', 'query': 'q'}, 'c0', created=0.5),
                   self.planned(1, '1번째 시도: Codex · 기본 모델 — 이유', 1.0)]
-        self.assertEqual(draft_step(events), (BETWEEN_STEPS_TEXT, False))
+        self.assertEqual(draft_step(events), (NO_STEP_LINE, False))
 
     def test_a_fallback_attempt_announces_nothing(self):
         events = [{'tool': 'orchestrator', 'status': 'fallback', 'created': 1.0, 'trace': {'text': '기본 AI로 진행'}}]
-        self.assertEqual(draft_step(events), (THINKING_DRAFT_TEXT, False))
+        self.assertEqual(draft_step(events), (NO_STEP_LINE, False))
 
 
 class LiveCliParsingTests(unittest.TestCase):
@@ -369,8 +371,7 @@ class _TelegramCase(unittest.TestCase):
         return self.store.jobs()[0]['id']
 
     def drafts(self):
-        return [body['rich_message']['blocks'][0]['text'] for method, body in self.calls
-                if method == 'sendRichMessageDraft']
+        return [body['text'] for method, body in self.calls if method == 'sendMessageDraft']
 
 
 class ScriptedLoopDraftTests(_TelegramCase):
@@ -429,12 +430,14 @@ class ScriptedLoopDraftTests(_TelegramCase):
         # at +10 s, model turn 3 at +13 s.
         self.ticks = {'model': [6, 9, 13], 'list_notes': [8], 'list_memory': [(9.2, 10)]}
         job = self.run_turn('메모랑 기억 좀 정리해줘')
-        self.assertEqual(self.drafts(), [THINKING_DRAFT_TEXT, '저장한 메모를 훑어보고 있어요', '기억 확인 중', BETWEEN_STEPS_TEXT])
-        draft_ids = {body['draft_id'] for method, body in self.calls if method == 'sendRichMessageDraft'}
+        # #835: each edit advances the dots; the step line (if any) comes first.
+        self.assertEqual(self.drafts(), ['·', '저장한 메모를 훑어보고 있어요 · ·', '기억 확인 중 · · ·', '·'])
+        draft_ids = {body['draft_id'] for method, body in self.calls if method == 'sendMessageDraft'}
         self.assertEqual(draft_ids, {draft_id_for(job['id'])}, 'one draft, edited in place (Stop maps back)')
         for method, body in self.calls:
-            if method == 'sendRichMessageDraft':
+            if method == 'sendMessageDraft':
                 self.assertTrue(body['can_stop'])
+        self.assertNotIn('sendRichMessageDraft', [method for method, _body in self.calls])
         # The status is recorded on the call's own running event, never passed to the tool.
         steps = [event['trace'].get('step') for event in self.store.task_events(job['id']) if event['status'] == 'running']
         self.assertIn({'action': 'list_notes', 'status': '저장한 메모를 훑어보고 있어요'}, steps)
@@ -444,8 +447,8 @@ class ScriptedLoopDraftTests(_TelegramCase):
         # Draft at +6; +6.5 inside the interval (first step skipped); +7.6 shows the latest (second step).
         self.ticks = {'model': [6], 'list_notes': [6.5], 'list_memory': [7.6]}
         self.run_turn('두 단계 해줘')
-        self.assertEqual(self.drafts(), [THINKING_DRAFT_TEXT, '둘째 단계'])
-        self.assertEqual(PresenceTiming().step_refresh, 1.5)
+        self.assertEqual(self.drafts(), ['·', '둘째 단계 · ·'])
+        self.assertEqual(PresenceTiming().dots_refresh, 1.5)
 
     def test_stop_ends_step_drafts(self):
         self.script = [[('list_notes', {'status': '메모 보는 중'})], [('list_memory', {'status': '기억 보는 중'})], '끝']
@@ -464,7 +467,7 @@ class ScriptedLoopDraftTests(_TelegramCase):
         self.tick = tick
         self.run_turn('긴 조사 부탁해')
         self.assertEqual(outcomes, ['running'])
-        self.assertEqual(self.drafts(), [THINKING_DRAFT_TEXT, '메모 보는 중'], 'no draft after Stop')
+        self.assertEqual(self.drafts(), ['·', '메모 보는 중 · ·'], 'no draft after Stop')
 
     def test_a_stored_secret_in_the_status_never_reaches_the_draft(self):
         self.store.secret('decision_model_key', SECRET)
@@ -485,7 +488,7 @@ class ScriptedLoopDraftTests(_TelegramCase):
         saved = [e for e in self.store.task_events(job['id']) if e['tool'] == 'save_note' and e['status'] == 'succeeded']
         self.assertTrue(saved, 'the note write ran, so its value is a saved private value of this Work')
         shown = self.drafts()
-        self.assertEqual(shown, [THINKING_DRAFT_TEXT, '[가림] 메모 다시 확인 중'])
+        self.assertEqual(shown, ['·', '[가림] 메모 다시 확인 중 · ·'])
         steps = [event['trace']['step'] for event in self.store.task_events(job['id'])
                  if event['status'] == 'running' and event['tool'] == 'list_notes']
         self.assertNotIn('4719', json.dumps(steps, ensure_ascii=False), 'redacted before it is recorded')
@@ -512,7 +515,7 @@ class ScriptedLoopDraftTests(_TelegramCase):
                 self.service.acknowledge_long_work(now=job['created'] + 8)
         self.tick = tick
         self.run_turn('사물함 정보 보여줘')
-        self.assertEqual(self.drafts(), [THINKING_DRAFT_TEXT, '[가림] 확인 중'])
+        self.assertEqual(self.drafts(), ['·', '[가림] 확인 중 · ·'])
 
     def test_pending_approval_prompt_is_the_only_surface(self):
         self.script = [[('list_notes', {'status': '메모 보는 중'})], '끝']
@@ -526,7 +529,7 @@ class ScriptedLoopDraftTests(_TelegramCase):
             original_tick(hook)
         self.tick = tick
         self.run_turn('메모 보여줘')
-        self.assertEqual(self.drafts(), [THINKING_DRAFT_TEXT])
+        self.assertEqual(self.drafts(), ['·'])
 
 
 CLI_WITH_SEARCH = '''#!{python}

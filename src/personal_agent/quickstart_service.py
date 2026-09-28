@@ -8,6 +8,7 @@ import sys
 import threading
 from pathlib import Path
 import time
+from types import SimpleNamespace
 import hashlib
 from urllib.parse import urlsplit
 from .local_tools import LocalTools, normalize_public_url
@@ -2412,7 +2413,9 @@ class AgentService:
             elif job.get('status')=='awaiting_drive':waits.append('연결 선택 대기')
             elif job.get('status')=='awaiting_connection':waits.append('연결 대기')
             for notification in self.store.task_notifications(job['id']):
-                if notification['kind'] in ('approval_needed','context_approval_needed') and notification['state'] in ('queued','sent'):
+                # #845 review: every typed approval wait (including a pending browser step) is an owner wait,
+                # so the web never shows the typing bubble while the Work is asking the owner something.
+                if notification['kind'] in self.APPROVAL_NOTIFICATIONS and notification['state'] in ('queued','sent'):
                     waits.append('승인 대기')
             artifacts=[{'id':item['id'],'kind':'저장된 결과' if 'path' not in item else '파일 결과','path':item.get('path'),'workspace_id':item.get('workspace_id'),'created':item.get('created'),'state':item.get('state','current')} for item in self.store.task_artifacts(job['id'])]
             retained_rows.append((job['id'],events))
@@ -2420,6 +2423,10 @@ class AgentService:
             # The same typed qualifier the transcript and model context use
             # (#494), so the card cannot disagree with them.
             task['qualifier']=turn_qualifier(job.get('status'))
+            # #845: the web's transient typing bubble shows the same observed step
+            # line as the Telegram draft (#718) while the Work runs. Read model
+            # only, computed per poll from recorded events; never stored.
+            if kind=='active':task['step_line']=self._draft_step_text(job,SimpleNamespace(scrubbed=None)) or ''
             # #571: expose the class of the last failed CLI run (e.g. 'auth')
             # so the owner sees the right recovery, not raw CLI output.
             for event in reversed(events):

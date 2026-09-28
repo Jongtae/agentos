@@ -406,6 +406,17 @@ details.technical details>summary{color:var(--muted)}
 .turn-body.danger{background:var(--danger-soft);border-color:var(--danger-line)}
 .turn-body.unknown{background:var(--unknown-soft);border-color:#d4d4e6}
 .turn-body.run{background:var(--run-soft);border-color:#c9d7f2}
+.turn-body.typing{display:inline-flex;flex-direction:column;align-items:flex-start;gap:6px;min-height:0;max-width:70ch}
+.typing-step{margin:0;font-size:var(--fs-2);color:var(--ink-2)}
+.typing-attention{margin:0;font-size:var(--fs-2);color:var(--muted)}
+.turn-body.typing .rich{color:var(--ink-2)}
+.typing-dots{display:inline-flex;align-items:center;gap:5px;height:calc(var(--fs-3) * 1.6)}
+.typing-dots i{display:block;width:7px;height:7px;border-radius:50%;background:var(--muted);animation:typing-bob 1.2s ease-in-out infinite}
+.typing-dots i:nth-child(2){animation-delay:.15s}
+.typing-dots i:nth-child(3){animation-delay:.3s}
+@keyframes typing-bob{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-3px);opacity:1}}
+@keyframes typing-pulse{0%,100%{opacity:.4}50%{opacity:.9}}
+@media(prefers-reduced-motion:reduce){.typing-dots i{animation:typing-pulse 2.4s ease-in-out infinite}}
 .turn-outcome{font-size:var(--fs-2);font-weight:650;margin-bottom:6px}
 .turn-body.attention .turn-outcome{color:var(--attn)}
 .turn-body.danger .turn-outcome{color:var(--danger)}

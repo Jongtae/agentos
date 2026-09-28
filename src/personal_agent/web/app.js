@@ -97,6 +97,14 @@ Object.assign(I18N["ja"],{"AI 설정":"AI 設定","작업에서 사용하는 AI�
 Object.assign(I18N["en"],{"저장한 모델 사용":"Use saved model","{count}개 모델이 목록에 있습니다 ({source}). 목록에 있어도 계정에서 쓸 수 있는지는 사용을 누를 때 확인 판단 한 번으로 확인합니다.":"{count} models are listed ({source}). Being listed does not mean your account can use it; Use sends one check judgment first.","모델 저장":"Save model","모델을 저장했습니다. 아직 대화 해석 경로는 바뀌지 않았습니다.":"Model saved. The conversation interpretation route has not changed yet."});
 Object.assign(I18N["zh-CN"],{"저장한 모델 사용":"使用已保存的模型","{count}개 모델이 목록에 있습니다 ({source}). 목록에 있어도 계정에서 쓸 수 있는지는 사용을 누를 때 확인 판단 한 번으로 확인합니다.":"列表中有 {count} 个模型（{source}）。在列表中不代表账户可以使用；按“使用”时会先发送一次确认判断。","모델 저장":"保存模型","모델을 저장했습니다. 아직 대화 해석 경로는 바뀌지 않았습니다.":"已保存模型。对话解读路径尚未改变。"});
 Object.assign(I18N["ja"],{"저장한 모델 사용":"保存したモデルを使用","{count}개 모델이 목록에 있습니다 ({source}). 목록에 있어도 계정에서 쓸 수 있는지는 사용을 누를 때 확인 판단 한 번으로 확인합니다.":"{count} 件のモデルが一覧にあります（{source}）。一覧にあってもアカウントで使えるとは限りません。「使用」を押すと確認の判断を一度送ります。","모델 저장":"モデルを保存","모델을 저장했습니다. 아직 대화 해석 경로는 바뀌지 않았습니다.":"モデルを保存しました。会話の解釈経路はまだ変わっていません。"});
+
+// #781 compact preference copy, all supported locales.
+Object.assign(I18N["en"],{"AI 선택":"Choose AI","선택된 AI 없음":"No AI selected","모델 확인 안 됨":"Model unknown","로그인":"Sign-in","상태 확인":"Check status","전송 대상":"Sent to","사용 가능한 도구":"Available tools","따로 지정":"Separate configuration","기본 AI 따라가기":"Follow Main AI","요청에 맞는 AI와 도구를 고르고 결과를 확인합니다.":"Chooses AI and tools for each request and checks the result.","파일 접근 범위":"File access","검증 후 작업 폴더로 제한":"Verify and limit to work folder","작업 폴더 밖 접근 허용":"Allow access beyond work folder","작업 폴더 밖 접근을 허용했습니다. 다음 요청부터 적용됩니다.":"Access beyond the work folder is allowed from the next request.","접근 범위 확인 필요":"Check access scope","격리 다시 확인 필요":"Isolation needs verification","작업 폴더로 제한":"Limited to work folder","작업 폴더 밖 접근 가능":"May access beyond work folder","실행 환경이 달라져 요청을 실행하지 않습니다. 다시 검증하거나 접근 범위를 변경하세요.":"The environment changed, so requests are blocked. Verify again or change the access scope.","AI는 검증된 환경에서 작업 폴더와 전달받은 도구 결과를 읽습니다.":"In the verified environment, AI reads the work folder and supplied tool results.","AI 도구가 작업 폴더 밖의 파일을 읽을 수 있습니다.":"AI tools may read files outside the work folder.","실행 프로필: {profile}":"Execution profile: {profile}","이 연결은 변경 목록에 없습니다. 상태를 확인하거나 다른 AI를 선택하세요.":"This connection is not in the chooser. Check its status or choose another AI.","설치 확인 필요":"Check installation","로그인 상태 확인 필요":"Check sign-in status","토큰 저장됨 · 로그인 확인 전":"Token saved · sign-in not checked","실행 환경에서 인증 관리":"Authentication managed by runtime","변경에서 로그인 방법을 확인하세요.":"Open Change for sign-in instructions.","새 키 적용 전":"New key not applied","연결 확인됨":"Connection verified","키 저장됨 · 연결 확인 전":"Key saved · connection not checked","대체 AI 사용 설정":"Fallback AI configured"});
+Object.assign(I18N["ja"],{"AI 선택":"AI を選択","선택된 AI 없음":"AI 未選択","모델 확인 안 됨":"モデル未確認","로그인":"サインイン","상태 확인":"状態を確認","전송 대상":"送信先","사용 가능한 도구":"利用できるツール","따로 지정":"個別に指定","기본 AI 따라가기":"メイン AI に従う","요청에 맞는 AI와 도구를 고르고 결과를 확인합니다.":"リクエストに合う AI とツールを選び、結果を確認します。","파일 접근 범위":"ファイルへのアクセス","검증 후 작업 폴더로 제한":"検証して作業フォルダに制限","작업 폴더 밖 접근 허용":"作業フォルダ外へのアクセスを許可","작업 폴더 밖 접근을 허용했습니다. 다음 요청부터 적용됩니다.":"次のリクエストから作業フォルダ外へのアクセスを許可します。","접근 범위 확인 필요":"アクセス範囲の確認が必要","격리 다시 확인 필요":"隔離の再確認が必要","작업 폴더로 제한":"作業フォルダに制限","작업 폴더 밖 접근 가능":"作業フォルダ外にもアクセス可能","실행 환경이 달라져 요청을 실행하지 않습니다. 다시 검증하거나 접근 범위를 변경하세요.":"実行環境が変わったため、リクエストは実行されません。再検証するかアクセス範囲を変更してください。","AI는 검증된 환경에서 작업 폴더와 전달받은 도구 결과를 읽습니다.":"検証済みの環境で、AI は作業フォルダと渡されたツール結果を読みます。","AI 도구가 작업 폴더 밖의 파일을 읽을 수 있습니다.":"AI ツールは作業フォルダ外のファイルを読むことがあります。","실행 프로필: {profile}":"実行プロファイル: {profile}","이 연결은 변경 목록에 없습니다. 상태를 확인하거나 다른 AI를 선택하세요.":"この接続は選択肢にありません。状態を確認するか別の AI を選んでください。","설치 확인 필요":"インストールの確認が必要","로그인 상태 확인 필요":"サインイン状態の確認が必要","토큰 저장됨 · 로그인 확인 전":"トークン保存済み · サインイン未確認","실행 환경에서 인증 관리":"実行環境が認証を管理","변경에서 로그인 방법을 확인하세요.":"「変更」からサインイン方法を確認してください。","새 키 적용 전":"新しいキーは未適用","연결 확인됨":"接続確認済み","키 저장됨 · 연결 확인 전":"キー保存済み · 接続未確認","대체 AI 사용 설정":"代替 AI を設定"});
+Object.assign(I18N["zh-CN"],{"AI 선택":"选择 AI","선택된 AI 없음":"未选择 AI","모델 확인 안 됨":"模型尚未确认","로그인":"登录","상태 확인":"检查状态","전송 대상":"发送至","사용 가능한 도구":"可用工具","따로 지정":"单独设置","기본 AI 따라가기":"跟随主要 AI","요청에 맞는 AI와 도구를 고르고 결과를 확인합니다.":"根据请求选择 AI 和工具并检查结果。","파일 접근 범위":"文件访问范围","검증 후 작업 폴더로 제한":"验证并限制到工作文件夹","작업 폴더 밖 접근 허용":"允许访问工作文件夹之外","작업 폴더 밖 접근을 허용했습니다. 다음 요청부터 적용됩니다.":"下一次请求起允许访问工作文件夹之外。","접근 범위 확인 필요":"需确认访问范围","격리 다시 확인 필요":"需重新验证隔离","작업 폴더로 제한":"限制到工作文件夹","작업 폴더 밖 접근 가능":"可访问工作文件夹之外","실행 환경이 달라져 요청을 실행하지 않습니다. 다시 검증하거나 접근 범위를 변경하세요.":"运行环境已改变，无法执行请求。请重新验证或更改访问范围。","AI는 검증된 환경에서 작업 폴더와 전달받은 도구 결과를 읽습니다.":"AI 在经过验证的环境中读取工作文件夹和提供的工具结果。","AI 도구가 작업 폴더 밖의 파일을 읽을 수 있습니다.":"AI 工具可能读取工作文件夹之外的文件。","실행 프로필: {profile}":"运行配置：{profile}","이 연결은 변경 목록에 없습니다. 상태를 확인하거나 다른 AI를 선택하세요.":"此连接不在选择列表中。请检查状态或选择其他 AI。","설치 확인 필요":"需检查安装","로그인 상태 확인 필요":"需检查登录状态","토큰 저장됨 · 로그인 확인 전":"令牌已保存 · 尚未检查登录","실행 환경에서 인증 관리":"由运行环境管理认证","변경에서 로그인 방법을 확인하세요.":"打开“更改”查看登录方法。","새 키 적용 전":"新密钥尚未应用","연결 확인됨":"连接已确认","키 저장됨 · 연결 확인 전":"密钥已保存 · 尚未检查连接","대체 AI 사용 설정":"已配置备用 AI"});
+Object.assign(I18N.en,{"판단 AI":"Judgment AI"});
+Object.assign(I18N.ja,{"판단 AI":"判断 AI"});
+Object.assign(I18N["zh-CN"],{"판단 AI":"判断 AI"});
 // I18N-CATALOG-END
 let currentLanguage='en',TIME_MINUTE,TIME_CLOCK,TIME_ABSOLUTE,TIME_RELATIVE,TIME_DAY,TIME_YEAR;
 function t(source,vars){let text=String(source??'');if(currentLanguage!=='ko'){const entry=I18N[currentLanguage]?.[text];if(entry!==undefined)text=entry;}if(vars)text=text.replace(/\{(\w+)\}/g,(match,key)=>key in vars?String(vars[key]):match);return text;}
@@ -361,15 +369,15 @@ function viewShown(){if(activeView==='settings'&&activeSettings==='privacy'){voi
 function openItem(kind,id,{replace=false,from=null}={}){if(!ITEM_KINDS.includes(kind)||!id)return;if(from)itemReturn=from;activeView='item';if(activeItem?.kind!==kind||activeItem?.id!==id){itemState=null;itemDeletePending=false;memoryCandidateReview=null;setFeedback('item-feedback','');}activeItem={kind,id};const hash=itemHref(kind,id);if(location.hash!==hash)history[replace?'replaceState':'pushState'](null,'',hash);renderNavigation();renderItem();void loadItem();}
 function itemLink(kind,id,text,className='link-button'){const link=element('a',text,className);link.href=itemHref(kind,id);link.dataset.focusKey='item:'+kind+':'+id;link.onclick=event=>{if(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey||event.button)return;event.preventDefault();openItem(kind,id,{from:{view:activeView,settings:activeSettings,scroll:window.scrollY}});};return link;}
 let pendingScroll=null;
-function renderNavigation(){if(typeof paintJumpLatest==='function')paintJumpLatest();document.querySelectorAll('[data-view-panel]').forEach(panel=>panel.hidden=panel.dataset.viewPanel!==activeView);document.querySelectorAll('[data-view]').forEach(button=>{const current=button.dataset.view===activeView;button.classList.toggle('active',current);if(current)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});document.querySelectorAll('[data-settings-panel]').forEach(panel=>panel.hidden=panel.dataset.settingsPanel!==activeSettings);document.querySelectorAll('[data-settings]').forEach(button=>{const selected=button.dataset.settings===activeSettings;button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected));button.tabIndex=selected?0:-1;});}
+function renderNavigation(){if(typeof paintJumpLatest==='function')paintJumpLatest();document.querySelectorAll('[data-view-panel]').forEach(panel=>panel.hidden=panel.dataset.viewPanel!==activeView);document.querySelectorAll('[data-view]').forEach(button=>{const current=button.dataset.view===activeView;button.classList.toggle('active',current);if(current)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');});document.querySelectorAll('[data-settings-panel]').forEach(panel=>panel.hidden=panel.dataset.settingsPanel!==activeSettings);document.querySelectorAll('[data-settings]').forEach(button=>{const selected=activeView==='settings'&&button.dataset.settings===activeSettings;button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected));button.tabIndex=button.dataset.settings===activeSettings?0:-1;});}
 document.querySelectorAll('[data-view]').forEach(button=>button.onclick=()=>navigate(button.dataset.view));
 $('item-back').onclick=()=>{const back=itemReturn;itemReturn=null;if(back){pendingScroll=Number.isFinite(back.scroll)?back.scroll:null;history.back();}else navigate('tasks');};
-const settingsNav=$('settings-nav'),settingsNavWide=window.matchMedia('(min-width: 1041px)');
+const settingsNav=$('settings-nav'),settingsNavWide=window.matchMedia('(min-width: 621px)');
 function updateSettingsNavOrientation(){settingsNav.setAttribute('aria-orientation',settingsNavWide.matches?'vertical':'horizontal');}
 updateSettingsNavOrientation();
 settingsNavWide.addEventListener('change',updateSettingsNavOrientation);
 document.querySelectorAll('[data-settings]').forEach(button=>{button.onclick=()=>navigate('settings',button.dataset.settings);button.onkeydown=event=>{const vertical=settingsNav.getAttribute('aria-orientation')==='vertical',arrows=vertical?['ArrowUp','ArrowDown']:['ArrowLeft','ArrowRight'];if(![...arrows,'Home','End'].includes(event.key))return;event.preventDefault();const tabs=[...document.querySelectorAll('[data-settings]')],index=tabs.indexOf(button),forward=event.key===arrows[1],next=event.key==='Home'?tabs[0]:event.key==='End'?tabs[tabs.length-1]:tabs[(index+(forward?1:-1)+tabs.length)%tabs.length];navigate('settings',next.dataset.settings);next.focus();};});
-$('brand-home').onclick=event=>{event.preventDefault();navigate('tasks');};
+
 $('trace-jump-latest').onclick=()=>{// Instant: smooth scrolling can stop short while content-visibility sizes resolve.
  window.scrollTo(0,0);traceUnseen=0;paintJumpLatest();$('task-list').querySelector('.turn-pair')?.querySelector('.turn.user')?.focus({preventScroll:true});};
 window.addEventListener('popstate',()=>{const route=routeFromLocation();if(route.item){openItem(route.item.kind,route.item.id,{replace:true});return;}activeView=route.view;activeSettings=route.settings;activeItem=null;if(location.hash.startsWith('#records'))history.replaceState(null,'','#settings/privacy');renderNavigation();viewShown();if(pendingScroll!==null){const y=pendingScroll;pendingScroll=null;requestAnimationFrame(()=>window.scrollTo(0,y));}});
@@ -378,33 +386,55 @@ function invalidateModelLoad(){modelLoadRevision++;modelLoaded=false;}
 function invalidateRootsLoad(){rootsLoadRevision++;}
 function invalidateFileWorkspaceLoad(){fileWorkspaceLoadRevision++;}
 
+// Recompose existing setting rows into compact, peer preference groups.
+function aiFact(label,value,actions=null,description='',kind='neutral'){
+ const row=settingsRow(t(label),description,value,kind,actions);row.className+=' ai-fact';return row;
+}
 function renderExecutionConnection(settings){
  aiSettings=settings;const main=settings?.main_ai||{},box=$('active-ai'),execution=settings?.subscription_execution||{};
  const fingerprint=JSON.stringify([main,settings?.decision_route,execution,settings?.model,settings?.model_ready]);if(box.dataset.state===fingerprint)return;box.dataset.state=fingerprint;
- const focused=rememberFocus(box),notice=$('active-ai-feedback')?[$('active-ai-feedback').textContent,$('active-ai-feedback').classList.contains('error')]:null;box.replaceChildren();
- const heading=element('div',undefined,'settings-section-heading ai-settings-intro');heading.append(element('h3',t('기본 AI')),element('p',t('작업에서 사용하는 AI입니다. 현재 선택과 상태가 여기에 표시됩니다.')));box.append(heading);
- const view=mainAiView(settings),actions=element('div',undefined,'settings-inline-confirm');
- if(view.checkable)actions.append(focusKey(settingsAction(t('확인'),event=>checkMainAi(event.currentTarget)),'ai-check'));
- actions.append(focusKey(settingsAction(main.current?t('변경'):t('선택'),event=>openAiChooser(event.currentTarget)),'ai-change'));
- const routes=element('section',undefined,'ai-route-card');
- const mainCard=settingsRow(view.title,view.description,view.state,view.kind,actions);mainCard.className='settings-row ai-route-main';if(!main.current)mainCard.dataset.routeState='unconfigured';routes.append(mainCard);
- const judgment=judgmentView(settings),judgmentActions=element('div',undefined,'settings-inline-confirm');
- if(judgment.followable)judgmentActions.append(focusKey(settingsAction(t('확인'),event=>followMainAi(event.currentTarget)),'judgment-check'));
- if(judgment.cancelable)judgmentActions.append(focusKey(settingsAction(t('확인 취소'),event=>cancelJudgmentCheck(event.currentTarget)),'judgment-cancel'));
- judgmentActions.append(focusKey(settingsAction(t('고급'),event=>openJudgmentChooser(event.currentTarget)),'judgment-advanced'));
- const judgmentRow=settingsRow(t('판단 AI (대화 해석)'),judgment.description,judgment.state,judgment.kind,judgmentActions);judgmentRow.className='settings-row ai-route-judgment subordinate';routes.append(judgmentRow);box.append(routes);
- // #616: the host CLI's trust profile, from the route declaration; switching is explicit and strict isolation is saved only after it verifies.
- const selectedId=(settings?.subscription_engines||{}).selected||'';
- if(selectedId&&Array.isArray(execution.selectable)&&execution.selectable.includes('strict-isolated')){const strict=execution.trust==='strict-isolated',unknown=execution.trust==='unknown',stale=unknown||(strict&&execution.requalify_needed===true),versions=Object.entries(execution.qualified||{}).map(([id,row])=>id+' '+(row?.version||'?')).join(', ');const choose=(profile,label,done)=>settingsAction(label,event=>busy(event.currentTarget,async()=>{aiFeedback('');try{await api('/api/subscription-engines/isolation',{profile});box.dataset.state='';await refresh();aiFeedback(done);}catch(error){aiFeedback(error.message,true);}}));const isolation=element('div',undefined,'settings-inline-confirm');if(!strict||stale)isolation.append(choose('strict-isolated',stale?t('다시 검증'):t('검증 후 엄격 격리 사용'),t('엄격 격리를 검증했습니다. 다음 요청부터 적용됩니다.')));if(strict||unknown)isolation.append(choose('trusted-local',t('신뢰된 로컬 사용'),t('신뢰된 로컬로 전환했습니다. 다음 요청부터 적용됩니다.')));const description=unknown?t('저장된 실행 프로필을 알 수 없어 요청을 실행하지 않습니다. 프로필을 다시 선택하세요.'):stale?t('엄격 격리를 검증할 때와 CLI·플랫폼·경로가 달라져 요청을 실행하지 않습니다. 다시 검증하거나 신뢰된 로컬을 선택하세요.'):strict?t('엄격 격리: CLI는 작업 폴더와 AgentOS가 전달한 도구 결과만 읽습니다. 검증한 CLI 버전에서만 실행합니다.'):t('신뢰된 로컬: CLI의 자체 도구가 AgentOS가 추적하지 않는 이 컴퓨터의 파일을 읽을 수 있습니다.');const state=unknown?t('프로필 확인 필요'):stale?t('검증 다시 필요'):strict?t('엄격 격리'):t('신뢰된 로컬');const row=settingsRow(t('CLI 실행 격리'),description+' '+t('제한: {limitation}',{limitation:execution.limitation||'-'})+' '+t('검증한 CLI 버전: {versions}',{versions:versions||t('검증 전')}),state,stale?'attention':strict?'active':'neutral',isolation);row.className+=' subordinate';box.append(row);}
+ const focused=rememberFocus(box),opened=[...box.querySelectorAll('details[open]')].map(node=>node.dataset.disclosure),notice=$('active-ai-feedback')?[$('active-ai-feedback').textContent,$('active-ai-feedback').classList.contains('error')]:null;box.replaceChildren();
+ const view=mainAiView(settings),currentRoute=mainAiRoutes(settings)[main.current]||{},mainGroup=element('section',undefined,'ai-preference-group');mainGroup.setAttribute('aria-label',t('기본 AI'));
+ mainGroup.append(aiFact('기본 AI',view.title,focusKey(settingsAction(main.current?t('변경'):t('AI 선택'),event=>openAiChooser(event.currentTarget)),'ai-change')));
+ if(main.current){
+  mainGroup.append(aiFact('모델',view.model||t('모델 확인 안 됨')));
+  mainGroup.append(aiFact(currentRoute.kind==='subscription'?'로그인':'상태',view.state,view.checkable?focusKey(settingsAction(t('상태 확인'),event=>checkMainAi(event.currentTarget)),'ai-check'):null,view.description,view.kind));
+  if(view.destination)mainGroup.append(aiFact('전송 대상',view.destination));
+  if(currentRoute.agency)mainGroup.append(aiFact('사용 가능한 도구',agencyText(currentRoute)));
+ }else mainGroup.append(element('p',view.description,'ai-group-note'));
+ box.append(mainGroup);
+ const judgment=judgmentView(settings),decision=settings?.decision_route||{},effective=decision.effective||{},active=decision.active||{},judgmentGroup=element('section',undefined,'ai-preference-group');judgmentGroup.setAttribute('aria-label',t('판단 AI'));
+ const judgmentActions=[];
+ if(judgment.followable)judgmentActions.push(focusKey(settingsAction(t('상태 확인'),event=>followMainAi(event.currentTarget)),'judgment-check'));
+ if(judgment.cancelable)judgmentActions.push(focusKey(settingsAction(t('확인 취소'),event=>cancelJudgmentCheck(event.currentTarget)),'judgment-cancel'));
+ judgmentGroup.append(aiFact('판단 AI',t(decision.mode==='explicit'?'따로 지정':decision.mode==='off'?'사용 안 함':'기본 AI 따라가기'),focusKey(settingsAction(t('설정'),event=>openJudgmentChooser(event.currentTarget)),'judgment-advanced')));
+ const effectiveModel=effective.model||active.requested_model;
+ if(effectiveModel&&effective.state!=='off')judgmentGroup.append(aiFact('모델',effectiveModel));
+ judgmentGroup.append(aiFact('상태',judgment.state,judgmentActions,judgment.description,judgment.kind));
+ judgmentGroup.append(element('p',t('요청에 맞는 AI와 도구를 고르고 결과를 확인합니다.'),'ai-group-note'));box.append(judgmentGroup);
+ const selectedId=(settings?.subscription_engines||{}).selected||'',lines=[];
+ if(selectedId&&Array.isArray(execution.selectable)&&execution.selectable.includes('strict-isolated')){
+  const strict=execution.trust==='strict-isolated',unknown=!['strict-isolated','trusted-local'].includes(execution.trust),stale=strict&&execution.requalify_needed===true;
+  const access=element('section',undefined,'ai-preference-group'),options=element('details',undefined,'settings-disclosure ai-access-options');options.dataset.disclosure='access';options.append(element('summary',t('변경')));
+  const choose=(profile,label,done)=>settingsAction(t(label),event=>busy(event.currentTarget,async()=>{aiFeedback('');try{await api('/api/subscription-engines/isolation',{profile});box.dataset.state='';await refresh();aiFeedback(t(done));}catch(error){aiFeedback(error.message,true);}}));
+  if(!strict||stale)options.append(choose('strict-isolated',stale?'다시 검증':'검증 후 작업 폴더로 제한','엄격 격리를 검증했습니다. 다음 요청부터 적용됩니다.'));
+  if(strict||unknown)options.append(choose('trusted-local','작업 폴더 밖 접근 허용','작업 폴더 밖 접근을 허용했습니다. 다음 요청부터 적용됩니다.'));
+  const label=unknown?'접근 범위 확인 필요':stale?'격리 다시 확인 필요':strict?'작업 폴더로 제한':'작업 폴더 밖 접근 가능';
+  const description=unknown?'저장된 실행 프로필을 알 수 없어 요청을 실행하지 않습니다. 프로필을 다시 선택하세요.':stale?'실행 환경이 달라져 요청을 실행하지 않습니다. 다시 검증하거나 접근 범위를 변경하세요.':strict?'AI는 검증된 환경에서 작업 폴더와 전달받은 도구 결과를 읽습니다.':'AI 도구가 작업 폴더 밖의 파일을 읽을 수 있습니다.';
+  access.append(aiFact('파일 접근 범위',t(label),options,t(description),unknown||stale?'attention':'neutral'));box.append(access);
+  lines.push(t('실행 프로필: {profile}',{profile:execution.trust||'-'}),t('제한: {limitation}',{limitation:execution.limitation||'-'}),t('검증한 CLI 버전: {versions}',{versions:Object.entries(execution.qualified||{}).map(([id,row])=>id+' '+(row?.version||'?')).join(', ')||t('검증 전')}));
+ }
+ if(main.last_check?.checked_at)lines.push(t('마지막 확인 {time}',{time:TIME_ABSOLUTE.format(new Date(main.last_check.checked_at*1000))}));
+ if(currentRoute.model_note)lines.push(t(currentRoute.model_note));
+ if(currentRoute.model_selectable===false&&currentRoute.model)lines.push(t('확인하고 사용을 누르면 작업 모델을 지웁니다.'));
+ lines.push(t('판단 AI 방식: {mode}',{mode:decision.mode||'follow_main'}),t('판단 AI 경로: {route}',{route:effective.transport||active.transport||'none'}));
+ const detail=settingsDisclosure(t('기술 정보'),lines);detail.dataset.disclosure='technical';box.append(detail);
+ for(const node of box.querySelectorAll('details'))if(opened.includes(node.dataset.disclosure))node.open=true;
  const feedback=element('p',undefined,'field-feedback');feedback.id='active-ai-feedback';feedback.setAttribute('role','status');feedback.setAttribute('aria-live','polite');box.append(feedback);
  if(aiNotice){feedback.textContent=aiNotice[0];feedback.classList.toggle('error',aiNotice[1]);aiNotice=null;}else if(notice){feedback.textContent=notice[0];feedback.classList.toggle('error',notice[1]);}
- const model=settings?.model||{},selectedRoute=mainAiRoutes(settings)[selectedId]||{},lines=selectedId?[t('경로: 구독 CLI ({id})',{id:selectedId}),t('요청 모델: {model}',{model:selectedRoute.model||t('CLI 기본값')}),t('파일 작업공간 요약은 구독 CLI에서 지원하지 않습니다.')]:model.model?[t('경로: 직접 API ({provider})',{provider:model.provider||t('제공자 미상')}),t('모델: {model}',{model:model.model}),t('저장된 설정 확인: {state}',{state:settings?.model_ready?t('완료'):t('필요')})]:[t('모델 정보 미제공')];
- const route=settings?.decision_route||{},active=route.active||{};lines.push(t('판단 AI 방식: {mode}',{mode:route.mode||'follow_main'}),t('판단 AI 경로: {route}',{route:active.transport||'none'}));if(active.requested_model)lines.push(t('판단 AI 요청 모델: {model}',{model:active.requested_model}));
- lines.push(t('현재 사용 중 표시는 작업을 실행하는 기본 AI만 가리킵니다. 판단 AI는 따로 표시합니다.'));
- box.append(settingsDisclosure(t('기술 세부 정보'),lines));restoreFocus(box,focused);
+ restoreFocus(box,focused);
 }
-// #619: Settings › AI shows the Main AI (기본 AI) that runs Work before the subordinate Judgment AI
-// (판단 AI, 대화 해석) that follows it by default. Changing either happens in a <dialog> whose order is fixed;
+// Settings › AI shows Main AI and Judgment AI as peer roles; following is a preference. Changing either happens in a <dialog> whose order is fixed;
 // nothing re-sorts. Rendering calls no model and runs no CLI; only the owner's explicit actions call the server.
 const MAIN_AI_GROUPS=[['구독',['codex','claude-code']],['API',['openai','anthropic','openrouter']]];
 let aiSettings=null,aiChoice='',aiKeyEditing='',aiKeyRemoving='',aiNotice=null;const aiModelDraft={};
@@ -419,22 +449,20 @@ function agencyText(route){
 function mainAiRoutes(settings){const main=settings?.main_ai||{};return Object.fromEntries((main.routes||[]).map(route=>[route.id,route]));}
 function mainAiView(settings){
  const main=settings?.main_ai||{},current=main.current||'',route=mainAiRoutes(settings)[current],last=main.last_check||{};
- const checked=last.checked_at?t('마지막 확인 {time}',{time:TIME_MINUTE.format(new Date(last.checked_at*1000))}):'';
- if(!current)return {title:t('선택되지 않음'),description:t('작업에 사용할 AI를 선택하면 시작할 수 있습니다.'),state:t('설정 필요'),kind:'neutral',checkable:false};
- if(current==='other'){const other=main.other||{};return {title:directRouteName(other),description:t('{model} 모델. 이 연결은 변경 목록에 없습니다. 계속 쓰려면 확인하고, 바꾸려면 변경을 누르세요.',{model:other.model||'-'})+' '+t('전송 대상: {destination}',{destination:other.destination||'-'}),state:t('확인 필요'),kind:'attention',checkable:true};}
+ if(!current)return {title:t('선택된 AI 없음'),description:t('작업에 사용할 AI를 선택하면 시작할 수 있습니다.'),state:t('설정 필요'),kind:'neutral',checkable:false};
+ if(current==='other'){const other=main.other||{};return {title:directRouteName(other),model:other.model,destination:other.destination,description:t('이 연결은 변경 목록에 없습니다. 상태를 확인하거나 다른 AI를 선택하세요.'),state:t('확인 필요'),kind:'attention',checkable:true};}
  if(!route)return {title:current,description:t('선택된 연결을 이 컴퓨터에서 확인할 수 없습니다. 자동 전환하지 않습니다.'),state:t('확인 필요'),kind:'attention',checkable:false};
- const destination=t('전송 대상: {destination}',{destination:t(route.destination)});
- if(route.kind==='subscription'){const login=route.login?.state||'unchecked';
-  if(!route.installed)return {title:t('{name} · 구독 계정',{name:route.name}),description:t('선택한 CLI를 찾지 못했습니다. 다른 AI로 자동 전환하지 않습니다.'),state:t('확인 필요'),kind:'attention',checkable:false};
-  if(login==='signed-out')return {title:t('{name} · 구독 계정',{name:route.name}),description:t('로그인되어 있지 않아 요청이 실패합니다. 변경에서 로그인 방법을 확인하세요.')+' '+destination,state:t('로그인 필요'),kind:'attention',checkable:true};
-  const workModel=route.model_selectable===false?t('작업 모델: {model}',{model:route.model||t('CLI 기본값')})+' ('+t(route.model_note||'-')+(route.model?' '+t('확인하고 사용을 누르면 작업 모델을 지웁니다.'):'')+')':t('작업 모델: {model}',{model:route.model||t('CLI 기본값')})+(route.model_note?' ('+t(route.model_note)+')':'');
-  return {title:t('{name} · 구독 계정',{name:route.name}),description:[checked||t('로그인 확인 전'),workModel,destination,agencyText(route)].filter(Boolean).join(' · '),state:t('현재 사용 중'),kind:'active',checkable:login!=='sidecar'};}
- const ready=settings?.model_ready===true,parts=[t('{model} 모델',{model:route.model||'-'})];if(checked)parts.push(checked);parts.push(destination);if(agencyText(route))parts.push(agencyText(route));
- let description=parts.join(' · ');
- if(!route.key?.saved)description+=' '+t('저장된 API 키가 없어 요청이 실패합니다.');
- else if(route.key?.pending)description+=' '+t('새로 저장한 키는 변경에서 확인하고 사용을 눌러야 적용됩니다.');
- if(!ready&&last.error)description+=' '+t('마지막 확인 실패: {reason}',{reason:last.error});
- return {title:t('{name} · API',{name:route.name}),description,state:ready&&route.key?.saved?t('현재 사용 중'):t('확인 필요'),kind:ready&&route.key?.saved?'active':'attention',checkable:true};
+ const view={title:t(route.kind==='subscription'?'{name} · 구독 계정':'{name} · API',{name:route.name}),model:route.model||t(route.kind==='subscription'?'CLI 기본값':'모델 확인 안 됨'),destination:t(route.destination||''),description:'',state:t('확인 필요'),kind:'neutral',checkable:true};
+ if(route.kind==='subscription'){
+  const login=route.login?.state||'unchecked',failed=route.check?.state==='failed'&&!(login==='signed-in'&&Number(route.login?.checked_at)>Number(route.check?.checked_at));
+  if(!route.installed)return {...view,description:t('선택한 CLI를 찾지 못했습니다. 다른 AI로 자동 전환하지 않습니다.'),state:t('설치 확인 필요'),kind:'attention',checkable:false};
+  const states={'signed-in':'로그인 확인됨','signed-out':'로그인 필요',unchecked:'로그인 확인 전',unknown:'로그인 상태 확인 필요','token-saved':'토큰 저장됨 · 로그인 확인 전',sidecar:'실행 환경에서 인증 관리'};
+  return {...view,state:t(states[login]||'로그인 상태 확인 필요'),kind:['signed-out','unknown'].includes(login)?'attention':'neutral',checkable:login!=='sidecar',description:login==='signed-out'?t('변경에서 로그인 방법을 확인하세요.'):failed?t('마지막 확인 실패: {reason}',{reason:t(DECISION_FAILURE_TEXT[route.check.failure]||route.check.failure||'확인 실패')}):'',...(failed?{kind:'attention'}:{})};
+ }
+ if(!route.key?.saved)return {...view,state:t('키 없음'),kind:'attention',description:t('저장된 API 키가 없어 요청이 실패합니다.')};
+ if(route.key?.pending)return {...view,state:t('새 키 적용 전'),kind:'attention',description:t('새로 저장한 키는 변경에서 확인하고 사용을 눌러야 적용됩니다.')};
+ if(last.state==='failed')return {...view,state:t('확인 필요'),kind:'attention',description:last.error?t('마지막 확인 실패: {reason}',{reason:last.error}):t('마지막 확인 실패')};
+ return {...view,state:t(last.state==='ok'&&settings?.model_ready===true?'연결 확인됨':'키 저장됨 · 연결 확인 전')};
 }
 function judgmentView(settings){
  const route=settings?.decision_route||{},mode=route.mode||'follow_main',active=route.active||{transport:'none'},follow=route.follow||{};
@@ -444,16 +472,16 @@ function judgmentView(settings){
  const effective=route.effective;
  const effectiveAnswers=effective&&['active','fallback','checking'].includes(effective.state);
  if(mode==='follow_main'&&!settings?.main_ai?.current&&!follow.available&&!effectiveAnswers)return {description:t('대화 이해 AI는 기본 AI가 선택되면 기본 경로로 사용됩니다.'),state:t('기본 AI 대기'),kind:'neutral'};
- if(effective){const kinds={active:'active',fallback:'attention',attention:'attention',off:'neutral',checking:'neutral'},states={active:'사용 중',fallback:'대체 경로 사용 중',attention:'확인 필요',off:'사용 안 함',checking:'확인 중'};
+ if(effective){const kinds={active:'active',fallback:'attention',attention:'attention',off:'neutral',checking:'neutral'},states={active:'확인됨',fallback:'대체 AI 사용 설정',attention:'확인 필요',off:'사용 안 함',checking:'확인 중'};
   const where=effective.destination&&effective.state!=='off'?' · '+destination(effective.destination):'';
   // #685: the Main AI switch queues the Judgment AI qualification; it runs in the background and can be cancelled.
   const checking=effective.state==='checking',job=route.qualification||{};
   return {description:effectiveJudgmentText(effective)+where,state:t(states[effective.state]||'확인 필요'),kind:kinds[effective.state]||'attention',followable:mode==='follow_main'&&Boolean(follow.available)&&effective.state!=='active'&&!checking,cancelable:checking&&job.state!=='cancelling'};}
  if(mode==='off')return {description:t('판단 AI를 쓰지 않습니다. 판단이 필요한 기능은 건너뜁니다.'),state:t('사용 안 함'),kind:'neutral'};
- if(mode==='explicit'){const usable=active.available!==false;return {description:t('따로 지정: {route}',{route:decisionActiveTitle(active)})+' · '+destination(active.destination),state:usable?t('사용 중'):t('확인 필요'),kind:usable?'active':'attention'};}
+ if(mode==='explicit'){const usable=active.available!==false;return {description:t('따로 지정: {route}',{route:decisionActiveTitle(active)})+' · '+destination(active.destination),state:usable?t('확인됨'):t('확인 필요'),kind:usable?'active':'attention'};}
  if(!follow.available)return {description:t('기본 AI를 따라갈 수 없습니다: {reason}',{reason:t(follow.reason||'-')})+' '+t('판단이 필요한 기능은 건너뜁니다.'),state:t('설정 안 됨'),kind:'neutral'};
  if(active.source==='follow'&&active.available)return {description:t('기본 AI와 같은 계정의 가벼운 모델 ({model})',{model:active.requested_model||'-'})+' · '+destination(active.destination),state:t('확인됨'),kind:'active'};
- if(active.source==='default'&&active.transport==='direct_api')return {description:t('기본값: 저장된 OpenAI 키로 {model}을(를) 씁니다.',{model:active.requested_model||'gpt-4o-mini'})+' '+destination(active.destination),state:t('사용 중'),kind:'active',followable:true};
+ if(active.source==='default'&&active.transport==='direct_api')return {description:t('기본값: 저장된 OpenAI 키로 {model}을(를) 씁니다.',{model:active.requested_model||'gpt-4o-mini'})+' '+destination(active.destination),state:t('대체 AI 사용 설정'),kind:'attention',followable:true};
  const failed=route.follow_check?.state==='failed'?' '+t('마지막 확인 실패: {reason}',{reason:t(DECISION_FAILURE_TEXT[route.follow_check.failure]||route.follow_check.failure||'확인 실패')}):'';
  return {description:t('기본 AI를 따라 {model}을(를) 쓰려면 확인이 필요합니다.',{model:follow.model||'-'})+' '+destination(follow.destination)+failed,state:t('확인 필요'),kind:'attention',followable:true};
 }

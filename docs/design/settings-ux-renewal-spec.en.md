@@ -6,7 +6,7 @@
 - Owner request, 2026-09-28: document UI/UX improvements and how to implement them.
 - Evidence class: design specification based on owner feedback, two supplied screenshots, and source inspection at `00ccf640e69208c7d911469e7521bda5b54392c4`.
 - English is canonical; [Korean companion](settings-ux-renewal-spec.ko.md) presents the same decisions for owner review.
-- This delivery changes documentation and a standalone design prototype only; production application files are unchanged. The implementation units in section 12 are proposed, not activated by this document. Previously merged work remains historical evidence, not proof that this specification is implemented.
+- This delivery changes documentation and a standalone design prototype only; production application files are unchanged. The owner activated the four implementation units on 2026-09-28 in #780 after reviewing the prototype; delivery-plan.yaml selects their execution order. Previously merged work remains historical evidence, not proof that this specification is implemented.
 
 **Outcome:** the owner can understand the current configuration, make the intended change, and return to work without reading execution internals or assembling the AI workflow.
 
@@ -255,9 +255,9 @@ Reuse `tests/test_settings_ui.py`, `tests/test_ui_quality.py` and `tests/test_ma
 
 Public evidence uses synthetic configuration and redacted data. Preserve owner screenshots outside the repository. A prototype is design evidence; the running application is local UI evidence; provider authentication and real external work are separate evidence classes.
 
-## 12. Proposed implementation units and order
+## 12. Owner-activated implementation units and order
 
-These names are planning labels. Do not create an autonomous queue or mark them active through specification delivery. Each activated unit needs an issue, a branch from fresh main, explicit file ownership and its own acceptance mapping.
+Owner activation #780 selects this finite sequence (#781–#784). Each unit needs a branch from fresh main, exclusive shared frontend ownership, and its own acceptance mapping; its predecessor must merge first. Specification delivery alone did not activate them.
 
 | Order | Proposed unit | Deliverable / acceptance | Dependencies and ownership |
 | --- | --- | --- | --- |

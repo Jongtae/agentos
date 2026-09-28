@@ -8,6 +8,7 @@ import sys
 import threading
 from pathlib import Path
 import time
+from types import SimpleNamespace
 import hashlib
 from urllib.parse import urlsplit
 from .local_tools import LocalTools, normalize_public_url
@@ -2418,6 +2419,10 @@ class AgentService:
             # The same typed qualifier the transcript and model context use
             # (#494), so the card cannot disagree with them.
             task['qualifier']=turn_qualifier(job.get('status'))
+            # #845: the web's transient typing bubble shows the same observed step
+            # line as the Telegram draft (#718) while the Work runs. Read model
+            # only, computed per poll from recorded events; never stored.
+            if kind=='active':task['step_line']=self._draft_step_text(job,SimpleNamespace(scrubbed=None)) or ''
             # #571: expose the class of the last failed CLI run (e.g. 'auth')
             # so the owner sees the right recovery, not raw CLI output.
             for event in reversed(events):

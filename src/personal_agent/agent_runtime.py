@@ -1343,6 +1343,28 @@ EFFECT_FREE_READS=frozenset({'list_roots','find_files','read_file','list_notes',
                              # A navigation or read in the owner's browser session (#656): no form is submitted.
                              'browser_open','browser_read','browser_find'})
 
+#: #787: the declared effect classes of a ``browser_open`` that only loads a
+#: page.  The declaration is the model's, recorded on every event of the call
+#: as ``declared_effect`` (``declared_effect()``); it can only narrow what counts
+#: as an effect for that one action.  A click or typing, a declared ``mutate``
+#: or ``payment``, and a call with no recorded declaration stay effects.
+PAGE_LOAD_EFFECTS=frozenset({'read','navigate'})
+
+def declared_effect(action,args):
+ """``{'declared_effect': value}`` of a browser call's valid declared effect, else ``{}`` (#787)."""
+ value=args.get('effect') if action in BROWSER_ACTIONS and isinstance(args,dict) else None
+ return {'declared_effect':value} if isinstance(value,str) and value in EFFECT['enum'] else {}
+
+def page_load_only(action,detail):
+ """Whether one recorded call only loaded a page: a ``browser_open`` declared ``read``/``navigate`` (#787).
+
+ ``detail`` is the call's recorded event detail.  Only ``browser_open``
+ qualifies: it navigates by URL and submits nothing and presses nothing.
+ """
+ if action!='browser_open' or not isinstance(detail,dict):return False
+ value=detail.get('declared_effect')
+ return isinstance(value,str) and value in PAGE_LOAD_EFFECTS
+
 #: Public network reads that may be retried once after a transient failure.
 NETWORK_READS=frozenset({'web_search','public_page_read','weather'})
 TRANSIENT_READ_TEXT='공개 조회가 일시적인 네트워크 오류로 실패해 한 번 다시 시도했습니다.'
@@ -3012,7 +3034,9 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     if action in SEARCH_BACKED_ACTIONS:last_search=keyed
     # #656: typed browser text is replaced before this (or any) record.
     running={'scope':scope,'call_id':call['id'],'attempt':attempt,'host_action':action,'arguments':recorded_arguments(action,args,getattr(capabilities,'judgment_text',None)),
-             'step':progress_step(action,args,status,getattr(capabilities,'judgment_text',None))}
+             'step':progress_step(action,args,status,getattr(capabilities,'judgment_text',None)),
+             # #787: the declared effect of a browser call, on every event of the call.
+             **declared_effect(action,args)}
     if kind:
      alternatives.append({'kind':kind,'action':action});running['alternative']=kind
     record(name,'running',json.dumps(running,ensure_ascii=False))
@@ -3030,7 +3054,8 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     # A tool that declined or deferred returned normally, so this loop used to
     # count it as a fully successful call and the turn reported success (#488).
     withheld=withheld_effect(name,result)
-    trace={'scope':scope,'call_id':call['id'],'attempt':attempt,'host_action':action,'evidence':evidence_summary(name,result)}
+    trace={'scope':scope,'call_id':call['id'],'attempt':attempt,'host_action':action,'evidence':evidence_summary(name,result),
+           **declared_effect(action,args)}
     if withheld:
      failed=True;trail.append((action,'withheld'));failures.append((name,withheld.reason))
      if withheld.advanced:successful+=1
@@ -3065,7 +3090,8 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
      # connection, login or approval) is where a different path helps.
      if result['retry'] in ('permanent','transient') and not result.get('requires'):path_failed=True
     else:invalid_calls.add(name if isinstance(name,str) else 'unknown')
-    record(name,'failed',json.dumps({'scope':scope,'call_id':call['id'],'attempt':attempt,**result},ensure_ascii=False))
+    record(name,'failed',json.dumps({'scope':scope,'call_id':call['id'],'attempt':attempt,**result,
+                                     **(declared_effect(action,args) if validated else {})},ensure_ascii=False))
    if validated:observations[call['id']]=(name,action,trail[-1][1],result)
    # #657: a result that ran carries its ref, the id a completion claim cites
    # (a provider that hides tool call ids from the model still shows this).

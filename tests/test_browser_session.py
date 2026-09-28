@@ -1130,6 +1130,21 @@ class LoopTests(unittest.TestCase):
         caps.close_browser()
         self.assertTrue(driver.closed)
 
+    def test_every_event_of_a_browser_call_keeps_its_declared_effect(self):
+        """#787: the direct route records the model's declared effect on each event of a browser call."""
+        script = Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/checkout', effect='read')]},
+                        {'tool_calls': [call('2', 'browser_find', text='카드번호')]},
+                        {'tool_calls': [call('3', 'browser_type', target='카드번호', text='4111111111111111', effect='mutate')]},
+                        {'content': '결제 단계는 승인이 필요합니다.'})
+        caps = self.caps(script, FakeDriver(), browser_approvals=Approvals())
+        run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': '결제해줘'}], '', caps, self.record)
+        declared = [(tool, status, json.loads(detail).get('declared_effect')) for tool, status, detail in self.events
+                    if tool.startswith('browser_')]
+        self.assertEqual(declared, [('browser_open', 'running', 'read'), ('browser_open', 'succeeded', 'read'),
+                                    ('browser_find', 'running', None), ('browser_find', 'succeeded', None),
+                                    ('browser_type', 'running', 'mutate'), ('browser_type', 'failed', 'mutate')])
+        caps.close_browser()
+
     def test_the_same_step_on_the_same_page_is_refused_and_on_a_changed_page_runs(self):
         """#657: a browser repeat is keyed on (action, target, input, page digest), not on the memo."""
         script = Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/account', effect='navigate')]},

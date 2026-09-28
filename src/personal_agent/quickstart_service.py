@@ -27,7 +27,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       TELEGRAM_RESULT_PREVIEW_CHARS, TERMINAL_FAILED_HEADER,
                                       TERMINAL_ANSWER_WITHHELD, TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
                                       BlockedTurn, ConversationProjection, context_message,
-                                      owner_cause, report_statement, terminal_text, turn_qualifier,
+                                      owner_cause, report_statement, terminal_text, tried_statement, turn_qualifier,
                                       verified_portion)
 from .subscription_engines import SubscriptionEngines
 from .bounded_execution import TOOL_INCOMPLETE, TOOL_INCOMPLETE_TEXT, incomplete_bridge_calls
@@ -248,10 +248,16 @@ RETRY_REFUSED_RAN_CURRENT='retry-refused-ran-current'
 RETRY_EFFECT_TOOLS=frozenset({'save_note','save_memory','delegate_agent',
                               'calendar_draft_create','calendar_draft_update','calendar_draft_cancel',
                               # #656: a browser step in the owner's session may have added to a cart or submitted a form.
+                              # #787: a browser_open declared read/navigate only loaded a page (``effect_calls``).
                               'browser_open','browser_click','browser_type',
                               # #774: a Telegram prompt already reached the owner.
                               'ask_location'})
 EFFECT_RETRY_REFUSAL='이전 요청이 상태를 바꾸는 작업을 시도해 자동으로 다시 실행하지 않았습니다.'
+#: #787: the next step of a Work whose last worker attempt failed, chosen from
+#: its own recorded state: a typed setup/approval need, the ``safe_retry`` gate.
+FAILED_NEXT_SETUP='필요한 연결이나 승인을 마친 뒤 다시 요청해 주세요.'
+FAILED_NEXT_RETRY='다시 시도하면 같은 요청을 한 번 다시 실행합니다.'
+FAILED_NEXT_REVIEW='실행 기록을 확인한 뒤 필요하면 요청을 바꿔 다시 보내 주세요.'
 ALREADY_RETRIED_REFUSAL='이 요청은 이미 한 번 다시 시도했습니다. 같은 요청을 중복으로 실행하지 않았습니다.'
 #: #730 review: the factual note the worker reads before the owner's current
 #: message when the earlier Work called effect tools (names, hosts, outcome only).
@@ -1265,7 +1271,7 @@ class AgentService:
             name=trace.get('host_action') if trace.get('host_action') in RETRY_EFFECT_TOOLS else event.get('tool')
             if name in ignore:continue
             unknown=self._unknown_effect(trace)
-            if name not in RETRY_EFFECT_TOOLS and not unknown:continue
+            if not self.effect_calls(event) and not unknown:continue
             key=(str(name),self._event_host(trace))
             state=calls.setdefault(key,set())
             state.add('unknown' if unknown else event.get('status'))
@@ -1276,6 +1282,47 @@ class AgentService:
                      else 'observed: succeeded' if 'succeeded' in states else 'observed: failed')
             lines.append(f'- {name}'+(f' (host: {host})' if host else '')+f': outcome {outcome}')
         return '\n'.join([head,*lines,RETRY_EFFECT_NOTE_TAIL])
+
+    def failed_attempt_report(self, job, failure):
+        """The owner report of a Work whose last worker attempt failed and nothing followed (#787), or None.
+
+        Built only from this Work's own recorded events, never model prose:
+        the failed steps and the worker failure in owner words
+        (``owner_cause``), the steps its workers tried and whether each was
+        observed to complete (``tried_statement``), why AgentOS handed the
+        request to no other worker (the orchestrator's last recorded
+        evaluation text), and a next step (``report_statement``): a typed
+        setup/approval need, else what ``safe_retry`` allows.  None when no
+        worker attempt was recorded.  Generic: no request, site or category.
+        """
+        from .agent_runtime import agency_report
+        events=self.store.task_events(job['id'])
+        with self.store.db() as db:
+            ran=db.execute("SELECT 1 FROM tool_events WHERE job_id=? AND tool IN ('subscription_engine','model') LIMIT 1",
+                           (job['id'],)).fetchone() is not None
+        if not ran:return None
+        failures,tried,stopped,setup=[],[],None,False
+        for event in events:
+            trace=event.get('trace') if isinstance(event.get('trace'),dict) else {}
+            tool,status=event.get('tool'),event.get('status')
+            if tool==ORCHESTRATION_EVENT:
+                if status=='evaluated' and isinstance(trace.get('text'),str):stopped=trace['text']
+                continue
+            # AgentOS's own bookkeeping, not a step a worker tried.
+            if tool in ('local_authority','conversation_continuity'):continue
+            if status=='failed':
+                failures.append((tool,self._redact_reason(trace.get('error') or trace.get('code')) or ''))
+                if trace.get('requires'):setup=True
+            if tool!='subscription_engine' and status in ('succeeded','failed'):
+                host=self._event_host(trace) or ''
+                tried.append((tool,host[:80],status))
+        if not any(tool=='subscription_engine' for tool,_reason in failures):
+            failures.append(('model',self._redact_reason(failure) or ''))
+        allowed,_reason=self.safe_retry({**job,'status':'failed'})
+        step=FAILED_NEXT_SETUP if setup else FAILED_NEXT_RETRY if allowed else FAILED_NEXT_REVIEW
+        parts=(owner_cause(failures),tried_statement(tried),stopped,
+               report_statement(agency_report(job.get('message') or '',[],[],[],step)))
+        return '\n'.join(part for part in parts if part) or None
 
     def safe_retry(self, previous, current_work_id=None):
         """Whether replaying this Work's original request is demonstrably safe."""
@@ -1305,16 +1352,27 @@ class AgentService:
         sources=work_source_records(self.store).get(previous['id'])
         if isinstance(sources,list) and ({'owner-settings',ENGINE_UNMEDIATED}&set(sources)):
             return False,'이전 요청이 설정 변경 또는 AgentOS가 중개하지 않은 엔진 작업을 포함해 자동으로 다시 실행하지 않았습니다.'
-        effectful=RETRY_EFFECT_TOOLS
-        for event in events:
-            trace=event.get('trace') or {}
-            # AgentPackage tool ids may alias an AgentOS write through
-            # trace.host_action, so checking only the public tool id can
-            # accidentally replay a completed mutation.
-            host_action=trace.get('host_action') if isinstance(trace,dict) else None
-            if event.get('tool') in effectful or host_action in effectful:
-                return False,EFFECT_RETRY_REFUSAL
+        # AgentPackage tool ids may alias an AgentOS write through
+        # trace.host_action, so checking only the public tool id can
+        # accidentally replay a completed mutation (``effect_calls``).
+        if any(self.effect_calls(event) for event in events):
+            return False,EFFECT_RETRY_REFUSAL
         return True,None
+
+    @staticmethod
+    def effect_calls(event):
+        """The ``RETRY_EFFECT_TOOLS`` names one recorded tool event may have changed state with.
+
+        Its public tool id and its ``host_action`` both count.  #787: a
+        ``browser_open`` whose call declared ``read`` or ``navigate``
+        (``page_load_only``) only loaded a page, the same rule the
+        re-delegation step uses; an undeclared open, a click or typing stays.
+        """
+        from .agent_runtime import page_load_only
+        trace=event.get('trace') if isinstance(event.get('trace'),dict) else {}
+        names={name for name in (event.get('tool'),trace.get('host_action')) if isinstance(name,str) and name in RETRY_EFFECT_TOOLS}
+        if names=={'browser_open'} and page_load_only(trace.get('host_action') or event.get('tool'),trace):return set()
+        return names
 
     def canonical_retry_source(self, previous):
         """Return the original Work request behind a retry chain.
@@ -2848,12 +2906,13 @@ class AgentService:
         tool evidence AgentOS recorded for this attempt.  A raised worker
         failure is ``worker_failed``.  An attempt that ran any action outside
         the effect-free reads, or left an unknown effect, is never
-        re-delegated (C8), and no judgment is asked for it.
+        re-delegated (C8), and no judgment is asked for it.  #787: a
+        ``browser_open`` counts as a read only when the call declared ``read``
+        or ``navigate`` (``page_load_only``); a click, typing, a declared
+        ``mutate``/``payment`` or an undeclared open stays an effect.
         """
         if orchestration is None or attempt is None or not orchestration.orchestrated:return None
-        from .agent_runtime import EFFECT_FREE_READS, INTERNAL_STATE_ACTIONS
-        # A navigation in the owner's browser session counts as an effect here,
-        # as it does for the retry rule (``safe_retry``): it is never repeated.
+        from .agent_runtime import EFFECT_FREE_READS, INTERNAL_STATE_ACTIONS, page_load_only
         repeatable=(EFFECT_FREE_READS-{'browser_open'})|INTERNAL_STATE_ACTIONS
         with self.store.db() as db:
             rows=db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? AND id>? ORDER BY id',(job_id,since or 0)).fetchall()
@@ -2868,7 +2927,7 @@ class AgentService:
             except (TypeError,ValueError):data={}
             data=data if isinstance(data,dict) else {}
             action=data.get('host_action') or row['tool']
-            if action not in repeatable:effect=True
+            if action not in repeatable and not page_load_only(action,data):effect=True
             if row['tool'] not in called:called.append(row['tool'])
             if row['status']=='succeeded':
                 evidence=data.get('evidence') if isinstance(data.get('evidence'),dict) else {}
@@ -6409,20 +6468,34 @@ class AgentService:
                     transcript=calendar_notice+self.projection.blocked_reply(self.connector_owner_id(job),exc.kind,response)
                 else:
                     transcript=calendar_notice+'이 요청은 완료하지 못했습니다: '+response
+                # #607: a run that failed (or was stopped / timed out) after an
+                # action whose effect is unknown is not a plain failure: the
+                # unknown effect stays visible and retry refuses to replay it.
+                outcome='unknown' if self._work_has_unknown_effect(job['id']) else 'failed'
+                # #787: a worker attempt failed and nothing followed; the owner reads
+                # what was tried, what failed and the next step, not only the error.
+                report=None
+                if outcome=='failed' and not isinstance(exc,BlockedTurn):
+                    try:report=self.failed_attempt_report(job,response)
+                    except Exception:
+                        LOG.warning('failed-attempt report could not be built job=%s',job['id'])
+                    if report:transcript=calendar_notice+TERMINAL_FAILED_HEADER+'\n\n'+report
                 if prep.preparation_of(job.get('request_key')):
                     # #659: see the success path; nothing unscrubbed is persisted.
                     response,transcript=self.scrub_work_text(job['id'],response),self.scrub_work_text(job['id'],transcript)
+                    report=self.scrub_work_text(job['id'],report) if report else report
                 # Tool reads of a failed run are also read back from its
                 # durable tool events; this records what was declared so far
                 # plus the run-time labels of a worker that had started.
                 self.record_work_sources(job['id'],work_sources|set(getattr(work_capabilities[0],'private_provenance',()) or ()))
                 with self.store.db() as db:
+                    # #787 review: an unknown effect recorded while the report was built still wins.
+                    if outcome=='failed' and self._work_has_unknown_effect(job['id']):
+                        outcome,report='unknown',None
+                        transcript=calendar_notice+'이 요청은 완료하지 못했습니다: '+response
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id,delivery_projection) VALUES (?,?,?,?,?,?,?)',('assistant',transcript,job['channel'],time.time(),job.get('workspace_id'),job['id'],'blocked-turn' if isinstance(exc,BlockedTurn) else None))
-                    # #607: a run that failed (or was stopped / timed out) after an
-                    # action whose effect is unknown is not a plain failure: the
-                    # unknown effect stays visible and retry refuses to replay it.
-                    outcome='unknown' if self._work_has_unknown_effect(job['id']) else 'failed'
-                    db.execute("UPDATE jobs SET status=?,error=?,delivery=? WHERE id=?",(outcome,response,'pending' if job['chat_id'] else 'none',job['id']))
+                    db.execute("UPDATE jobs SET status=?,error=?,delivery=?,owner_cause=COALESCE(?,owner_cause) WHERE id=?",
+                               (outcome,response,'pending' if job['chat_id'] else 'none',report,job['id']))
                 self.record_turn_provenance(job['id'],goal=self.work_goal(job['id'],work_capabilities[0],outcome))
             self.update_task_card(job,outcome)
             # #709: a login page during this run: show the window now that the

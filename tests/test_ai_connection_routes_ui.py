@@ -124,8 +124,8 @@ const checks=[];
 
 
 class ConnectionRouteUiTests(unittest.TestCase):
-    def test_ai_tab_is_one_card_with_dialog_choosers(self):
-        # #619 AC1: one card; no static API form, "다른 연결 방법" or per-row disclosures on the scan path.
+    def test_ai_tab_has_peer_preferences_with_dialog_choosers(self):
+        # #781: compact peer groups; credential editing remains in accessible dialogs.
         html = (WEB / "index.html").read_text(encoding="utf-8")
         items = Elements(html).items
         by_id = {attrs["id"]: (tag, attrs) for tag, attrs in items if "id" in attrs}
@@ -137,7 +137,9 @@ class ConnectionRouteUiTests(unittest.TestCase):
         self.assertEqual(by_id["ai-chooser"][0], "dialog")
         self.assertEqual(by_id["judgment-chooser"][0], "dialog")
         self.assertEqual(by_id["ai-chooser"][1]["aria-labelledby"], "ai-chooser-title")
-        # The explicit Judgment routes (#580) live in the 고급 dialog, not on the scan path.
+        self.assertIn("<h1>AI</h1>", pane)
+        self.assertNotIn("<h2>AI 설정</h2>", pane)
+        # Explicit Judgment routes remain in their settings dialog.
         self.assertLess(html.index('id="judgment-chooser"'), html.index('id="decision-route"'))
         self.assertIn("확인하고 사용", pane)
 

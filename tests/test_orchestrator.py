@@ -1159,6 +1159,164 @@ class CatalogueData(Harness):
         self.assertEqual(worker_catalogue(self.service).worker('claude-code')['reason'], 'signed_out')
 
 
+INVALID_OUTPUT = '엔진이 요구된 구조화된 응답을 반환하지 않았습니다.'
+
+
+def bridge_step(record, tool, declared=None, *, status='succeeded', host='page.example.test'):
+    """One browser call as the MCP bridge records it: its running event, then its result (#787)."""
+    extra = {'declared_effect': declared} if declared else {}
+    record(tool, 'running', json.dumps({'scope': 'subscription-mcp-bridge', 'host_action': tool,
+                                        'step': {'action': tool, 'host': host}, **extra}))
+    result = ({'evidence': {'state': 'page', 'url': f'https://{host}/', 'title': 'Page'}} if status == 'succeeded'
+              else {'code': 'tool_failed', 'retry': 'permanent', 'effect': 'none', 'error': '실행하지 못했습니다.'})
+    record(tool, status, json.dumps({'scope': 'subscription-mcp-bridge', 'host_action': tool, **result, **extra}))
+
+
+class ReadIsNotAnEffect(Harness):
+    """ORCH-05 (#787): a page load the worker declared read/navigate is repeatable; a state change is not."""
+
+    def attempt_with(self, *steps, plans=None):
+        def run(tools):
+            if len(self.engine.turns) == 1:
+                for tool, declared in steps:
+                    bridge_step(tools.capabilities.record, tool, declared)
+        self.engine.before = run
+        self.engine.fail = [ExecutionError(INVALID_OUTPUT, failure_class='invalid-output')]
+        self.script(plans or [plan('codex', 'Look it up.'), plan('openai', 'Answer directly.')])
+        return self.run_work('알려줘', key=f'read-effect-{len(self.asked_plans)}-{steps}')
+
+    def test_a_failed_attempt_that_only_loaded_a_page_is_redelegated(self):
+        for declared in ('read', 'navigate'):
+            with self.subTest(declared=declared):
+                self.engine.turns.clear()
+                job, row = self.attempt_with(('browser_open', declared), ('browser_read', None), ('browser_find', None))
+                first = self.events(job, 'evaluated')[0][1]
+                self.assertEqual((first['outcome'], first['next'], first['stop']), ('worker_failed', 'redelegate', None))
+                self.assertEqual(row['status'], 'succeeded')
+                self.assertEqual(row['response'], 'api answer')
+
+    def test_a_failed_attempt_that_may_have_changed_state_is_not_redelegated(self):
+        for steps in ((('browser_open', 'read'), ('browser_click', 'navigate')),
+                      (('browser_open', 'read'), ('browser_type', 'read')),
+                      (('browser_open', 'mutate'),),
+                      (('browser_open', 'payment'),),
+                      # A record with no declaration (written before #787) stays an effect.
+                      (('browser_open', None),)):
+            with self.subTest(steps=steps):
+                self.engine.turns.clear()
+                self.asked_plans.clear()
+                bodies = len(self.transport.bodies)
+                job, row = self.attempt_with(*steps)
+                last = self.events(job, 'evaluated')[-1][1]
+                self.assertEqual((last['outcome'], last['next'], last['stop']), ('worker_failed', 'stop', 'effect'))
+                self.assertEqual(len(self.asked_plans), 1, 'no re-plan after a possible state change')
+                self.assertEqual(len(self.transport.bodies), bodies, 'no other worker ran')
+                self.assertEqual(row['status'], 'failed')
+
+    def test_a_failed_final_attempt_reports_what_was_tried_what_failed_and_the_next_step(self):
+        from personal_agent.conversation_projection import TERMINAL_FAILED_HEADER
+        from personal_agent.quickstart_service import FAILED_NEXT_REVIEW
+        job, row = self.attempt_with(('browser_open', 'navigate'), plans=[plan('codex', 'Look it up.')])
+        self.assertEqual(self.events(job, 'evaluated')[-1][1]['stop'], 'replan_failed')
+        self.assertEqual(row['status'], 'failed')
+        report = row['owner_cause']
+        self.assertTrue(report)
+        self.assertIn('구독 CLI 실행: ' + INVALID_OUTPUT, report)
+        self.assertIn('시도한 단계: 브라우저 페이지 열기 (page.example.test) 완료', report)
+        self.assertIn('판단 AI가 새 계획을 내지 못해 더 맡기지 않았습니다.', report)
+        # The next step says what the retry gate allows: a trusted-local CLI turn is not replayed blindly.
+        self.assertIn('다음 단계 제안: ' + FAILED_NEXT_REVIEW, report)
+        self.assertFalse(self.service.safe_retry(row)[0])
+        with self.store.db() as db:
+            said = db.execute("SELECT content FROM messages WHERE job_id=? AND role='assistant'", (job,)).fetchone()[0]
+        self.assertEqual(said, TERMINAL_FAILED_HEADER + '\n\n' + report)
+        bubble = self.service.telegram_result_text(None, report, 'failed')
+        self.assertIn(report, bubble)
+
+    def test_the_report_after_a_state_change_names_the_effect_stop_and_no_retry(self):
+        from personal_agent.quickstart_service import FAILED_NEXT_REVIEW
+        job, row = self.attempt_with(('browser_open', 'read'), ('browser_click', 'mutate'))
+        report = row['owner_cause']
+        self.assertIn('브라우저에서 누르기 (page.example.test) 완료', report)
+        self.assertIn('되돌릴 수 없는 작업이 실행되어 같은 요청을 다시 맡기지 않았습니다.', report)
+        self.assertIn('다음 단계 제안: ' + FAILED_NEXT_REVIEW, report)
+        self.assertFalse(self.service.safe_retry(row)[0])
+        # Without the unmediated-turn gate, the recorded click alone refuses the retry.
+        self.assertFalse(self.service.effect_calls({'tool': 'browser_open', 'trace': {'host_action': 'browser_open',
+                                                                                     'declared_effect': 'read'}}))
+        self.assertTrue(any(self.service.effect_calls(event) for event in self.store.task_events(job)))
+
+    def test_the_next_step_follows_a_typed_need_then_the_retry_gate(self):
+        from personal_agent.quickstart_service import FAILED_NEXT_RETRY, FAILED_NEXT_SETUP
+        job = self.store.enqueue('알려줘', 'next-step')
+        with self.store.db() as db:
+            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                       (job, 'subscription_engine', 'failed', json.dumps({'error': INVALID_OUTPUT}), 1.0))
+        with mock.patch.object(self.service, 'safe_retry', return_value=(True, None)):
+            self.assertTrue(self.service.failed_attempt_report(self.store.job(job), INVALID_OUTPUT)
+                            .endswith('다음 단계 제안: ' + FAILED_NEXT_RETRY))
+            with self.store.db() as db:
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           (job, 'calendar_query', 'failed', json.dumps({'host_action': 'calendar_query', 'code': 'needs_setup',
+                                                                        'requires': 'connector', 'error': '연결이 필요합니다.'}), 2.0))
+            report = self.service.failed_attempt_report(self.store.job(job), INVALID_OUTPUT)
+        self.assertTrue(report.endswith('다음 단계 제안: ' + FAILED_NEXT_SETUP))
+        self.assertIn('일정 조회: 연결이 필요합니다.', report)
+        self.assertIn('일정 조회 실패', report)
+
+    def test_a_malformed_declaration_is_an_effect(self):
+        from personal_agent.agent_runtime import page_load_only
+        for value in ({'x': 1}, ['read'], 'Read', ' read', None, 1):
+            with self.subTest(value=value):
+                self.assertFalse(page_load_only('browser_open', {'declared_effect': value}))
+        self.assertFalse(page_load_only('browser_click', {'declared_effect': 'read'}))
+        self.assertTrue(page_load_only('browser_open', {'declared_effect': 'navigate'}))
+
+    def test_a_worker_failure_before_any_attempt_keeps_the_plain_failure(self):
+        # A Work with no recorded worker attempt has nothing observed to report.
+        job = self.store.enqueue('알려줘', 'no-attempt')
+        self.assertIsNone(self.service.failed_attempt_report(self.store.job(job), 'x'))
+
+
+class RetryReadIsNotAnEffect(Harness):
+    """#787: ``safe_retry`` uses the same page-load rule as re-delegation."""
+
+    def failed_work(self, *events):
+        job = self.store.enqueue('다시 해볼 요청', f'retry-{len(events)}-{json.dumps(events)}')
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='failed' WHERE id=?", (job,))
+            for tool, host_action, declared in events:
+                detail = {'host_action': host_action, **({'declared_effect': declared} if declared else {})}
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           (job, tool, 'succeeded', json.dumps(detail), 1.0))
+        return self.store.job(job)
+
+    def test_only_a_declared_page_load_is_replayable(self):
+        from personal_agent.quickstart_service import EFFECT_RETRY_REFUSAL
+        cases = [((('browser_open', 'browser_open', 'read'),), True),
+                 ((('browser_open', 'browser_open', 'navigate'), ('browser_read', 'browser_read', None)), True),
+                 # A package tool id aliasing the open keeps the declaration of its host action.
+                 ((('package_open', 'browser_open', 'navigate'),), True),
+                 ((('browser_open', 'browser_open', None),), False),
+                 ((('browser_open', 'browser_open', 'mutate'),), False),
+                 ((('browser_open', 'browser_open', 'payment'),), False),
+                 ((('browser_open', 'browser_open', 'read'), ('browser_click', 'browser_click', 'read')), False),
+                 ((('browser_type', 'browser_type', 'navigate'),), False),
+                 # A public id naming the open cannot hide a write behind its host action.
+                 ((('browser_open', 'save_note', 'read'),), False)]
+        for events, allowed in cases:
+            with self.subTest(events=events):
+                self.assertEqual(self.service.safe_retry(self.failed_work(*events)),
+                                 (True, None) if allowed else (False, EFFECT_RETRY_REFUSAL))
+
+    def test_the_retry_note_lists_only_steps_that_may_have_changed_state(self):
+        note = self.service.retry_effect_note(self.failed_work(('browser_open', 'browser_open', 'read'),
+                                                               ('browser_click', 'browser_click', 'mutate')))
+        self.assertIn('- browser_click', note)
+        self.assertNotIn('browser_open', note)
+        self.assertIsNone(self.service.retry_effect_note(self.failed_work(('browser_open', 'browser_open', 'navigate'))))
+
+
 class OrchestrationUnit(unittest.TestCase):
     def catalogue(self):
         workers = [{'id': 'a', 'kind': 'subscription', 'name': 'A', 'destination': '', 'default': True, 'available': True,

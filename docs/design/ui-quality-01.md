@@ -291,3 +291,7 @@ The consolidated re-review approved the head with minor follow-ups. These are fi
 
 One follow-up remains. Replace the substring-style regression tests with checks
 of the rendered output.
+
+## Compact settings amendment — #780
+
+The owner-selected [settings specification](settings-ux-renewal-spec.en.md) supersedes earlier segmented/settings-within-settings navigation: one logo-free sidebar and a white content pane, 720–840px settings width, neutral grouped rows, values/actions aligned right, independent Main AI and Judgment AI groups. Normal AI verification uses plain text; attention remains explicit. Preserve four-language selection, login-screen language and logout.

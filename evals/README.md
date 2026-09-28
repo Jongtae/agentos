@@ -1,5 +1,7 @@
 # AgentOS continuous evaluation loop (EVAL-LOOP-01, #821)
 
+> Owner decision 2026-09-28: sweeps run on Codex only by default, because the Claude subscription limit is shared with development work. Pass `--worker claude-code` or `--worker both` explicitly when Claude capacity allows.
+
 Machines, not the owner, should find the failures. This folder runs owner-realistic, multi-turn conversations against **isolated AgentOS sandboxes**. The sandboxes run on the owner's Codex and Claude Code subscriptions. Each run is scored with deterministic checks and a secretary-rubric judge, and every sweep produces a trend report that groups failures by root cause.
 
 This is development tooling. It is never imported by `src/personal_agent` and never installed into the AgentOS runtime. A sweep result is a **live local observation** of the exact code checkout, seed and subscription workers it ran with. It is not a calibrated quality score (see Limitations).
@@ -69,7 +71,7 @@ Judge spend is capped per day (default **USD 10**; `--cap-usd` or `AGENTOS_EVAL_
 ```sh
 cd evals
 ~/.local/share/agentos-evals/venv/bin/python -m agentos_eval sweep \
-    --seed owner --worker both --instances 3 --epochs 3
+    --seed owner --worker codex --instances 3 --epochs 3
 ```
 
 - `--worker codex|claude-code|both`: `both` runs every scenario once per worker, so a sweep covers both subscriptions. This also tests engine replaceability.
@@ -183,7 +185,7 @@ A suggested schedule (not installed by this change) is a morning and an evening 
 
 ```cron
 30 6,19 * * *  cd "$HOME/Documents/new agentos 26.09/evals" && \
-  $HOME/.local/share/agentos-evals/venv/bin/python -m agentos_eval sweep --seed owner --worker both --instances 3 --epochs 3 \
+  $HOME/.local/share/agentos-evals/venv/bin/python -m agentos_eval sweep --seed owner --worker codex --instances 3 --epochs 3 \
   >> $HOME/.local/share/agentos-evals/sweep.log 2>&1
 ```
 

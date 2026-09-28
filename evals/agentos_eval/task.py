@@ -44,7 +44,7 @@ def workers_for(worker):
     return (worker,)
 
 
-def dataset(scenario_ids='', split='', worker='both', include_local=True):
+def dataset(scenario_ids='', split='', worker='codex', include_local=True):
     ids = [item for item in scenario_ids.split(',') if item] if isinstance(scenario_ids, str) else list(scenario_ids)
     loaded = scenario_module.load(include_local=include_local, split=split or None, ids=ids or None)
     samples = []
@@ -109,7 +109,7 @@ def secretary(judge='grader', budget_path=None, seed=None):
 
 
 @task
-def agentos_secretary(scenarios='', split='', worker='both', instances=3, seed='', judge='',
+def agentos_secretary(scenarios='', split='', worker='codex', instances=3, seed='', judge='',
                       turn_timeout=900, judgment_timeout=300, include_local=True, keep_sandboxes=False):
     """Multi-turn owner scenarios against fresh AgentOS sandboxes, on Codex and/or Claude Code."""
     seed = seed or os.environ.get('AGENTOS_EVAL_SEED', '')

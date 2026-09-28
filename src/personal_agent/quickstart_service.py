@@ -3379,8 +3379,15 @@ class AgentService:
             failed_steps='; '.join(part for part in (failed_steps,self._redact_reason(failed) or '') if part)
             summary+='; the worker itself failed: '+(self._redact_reason(failed) or 'failed')[:200]
         elif result is not None:
-            # #820: the direct route's own outcome judgment (#657) is the one judgment; no second check.
+            # #820: the direct route's own outcome judgment (#657) is the one judgment.  A run that
+            # asked none (ordinary conversation: no external tool ran) gets it here, as a CLI attempt
+            # does (#820 review).  Only a verdict that the reply did not serve changes the run's own
+            # outcome; an unavailable one keeps it.
             evaluation=orchestration.evaluate_run(result,owner_needed=owner_needed)
+            if evaluation==REACHED and getattr(result,'judgment',None) is None and not effect \
+                    and orchestration.budget_allows():
+                if orchestration.evaluate_answer(answer,'\n'.join(observed),failed_steps)==NOT_REACHED:
+                    evaluation=NOT_REACHED
         elif owner_needed:
             evaluation='owner_needed'
         elif effect or not orchestration.budget_allows():

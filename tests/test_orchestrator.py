@@ -1701,18 +1701,37 @@ class SecretaryStandard(Harness):
         self.assertIn('the reply\'s own claims are not evidence', GOAL_REACHED_PROPOSITION)
         self.assertIn('current fact the observations do not show', GOAL_REACHED_PROPOSITION)
 
-    def test_a_direct_route_answer_its_own_rule_accepted_is_not_judged_again(self):
-        """#820: the direct route's own outcome judgment (#657) is the one judgment; no criteria re-check."""
+    def test_a_tool_less_direct_reply_gets_the_one_judgment_and_is_re_delegated_when_short(self):
+        """#820 review P1: a direct run that asked no judgment (no external tool) is judged once, like a CLI attempt."""
         # run_agent's own execution check (#606) asks the model once more; it answers the same.
         self.transport.answers = ['일반적인 조언입니다.', '일반적인 조언입니다.']
+        self.engine.answers = ['구체적인 선택지와 출처입니다.']
         self.script([plan('openai', 'Name options.'), plan('codex', 'Look them up.')], goals=[False, True])
         job, row = self.run_work('추천해줘')
         outcomes = [detail['outcome'] for _status, detail in self.events(job, 'evaluated')]
-        self.assertEqual(outcomes, ['reached'])
-        self.assertEqual(self.engine.turns, [])
+        self.assertEqual(outcomes, ['not_reached', 'reached'])
+        self.assertEqual(len(self.engine.turns), 1, 'the second attempt ran')
         self.assertEqual(row['status'], 'succeeded')
-        self.assertEqual(row['response'], '일반적인 조언입니다.')
-        self.assertEqual(self.asked_goals, [])
+        self.assertEqual(row['response'], '구체적인 선택지와 출처입니다.')
+        self.assertEqual(self.asked_goals[0].facts['reply'], '일반적인 조언입니다.')
+        self.assertNotIn('completion_criteria', self.asked_goals[0].facts)
+
+    def test_a_tool_less_direct_reply_is_kept_when_the_judgment_is_unavailable(self):
+        self.transport.answers = ['답입니다.', '답입니다.']
+        self.script([plan('openai', 'Answer.')], goals=[])
+        job, row = self.run_work('질문')
+        self.assertEqual(self.events(job, 'evaluated')[-1][1]['outcome'], 'reached')
+        self.assertEqual(row['status'], 'succeeded')
+        self.assertEqual(row['response'], '답입니다.')
+
+    def test_the_outcome_judgment_reads_a_long_reply_whole(self):
+        """#820 review P2: no claim in a long reply is hidden from the one judgment."""
+        reply = '앞부분. ' + '가' * 5000 + ' 중간에 예약을 완료했습니다. ' + '나' * 5000 + ' 끝부분.'
+        self.engine.answers = [reply]
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        self.run_work('알려줘')
+        self.assertEqual(self.asked_goals[0].facts['reply'], reply)
+        self.assertFalse(self.asked_goals[0].too_large())
 
     def test_an_owner_request_not_to_look_things_up_is_honoured_by_the_standard(self):
         from personal_agent.agent_runtime import CORE_INSTRUCTIONS

@@ -65,8 +65,9 @@ ATTEMPTS_CHARS = 1800
 ANSWER_EXCERPT_CHARS = 600
 OBSERVATION_CHARS = 3800
 FAILURE_CHARS = 600
-#: The worker's reply as the outcome judgment reads it (#820).
-REPLY_CHARS = 1800
+#: The worker's reply as the outcome judgment reads it (#820): whole.  It is the
+#: delivered answer's own cap, so no claim in the reply is hidden from the judgment.
+REPLY_CHARS = 24000
 #: #804: the owner model the plan call reads (redacted, then cut).
 PROFILE_FACT_CHARS = 1200
 CURRENT_CONTEXT_FACT_CHARS = 1200
@@ -826,10 +827,8 @@ class Orchestration:
         if not (self.may_judge() if final else self.budget_allows()):
             return NOT_JUDGED
         observed = str(observations or 'none')[:OBSERVATION_CHARS]
-        # Redacted before it is cut; the reply keeps its head and its tail, where a question usually is.
-        reply = self._redact(answer)
-        if len(reply) > REPLY_CHARS:
-            reply = reply[:REPLY_CHARS // 2] + ' … ' + reply[-REPLY_CHARS // 2:]
+        # Redacted, then bounded only by the delivered answer's own cap (#820 review): every claim is judged.
+        reply = self._redact(answer)[:REPLY_CHARS]
         try:
             judged = goal_reached(self.request, observed, str(failed or '')[:FAILURE_CHARS], work_id=self.work_id,
                                   answer=reply, conversation=self._redact(self.conversation)[-CONVERSATION_CHARS:])

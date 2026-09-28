@@ -2771,8 +2771,9 @@ GOAL_JUDGMENTS=2
 #: owner's request, which is never cut (`goal_reached` widens its bound by it).
 GOAL_OBSERVATION_CHARS=3800
 GOAL_FAILURE_CHARS=600
-#: #820: the reply and the recent conversation the outcome judgment reads.
-GOAL_REPLY_CHARS=1800
+#: #820: the reply and the recent conversation the outcome judgment reads.  The reply is
+#: whole: this is the delivered answer's own cap, so no claim is hidden from the judgment.
+GOAL_REPLY_CHARS=24000
 GOAL_CONVERSATION_CHARS=1500
 REPORT_ITEM_CHARS=200
 REPORT_ITEMS=3
@@ -2908,8 +2909,7 @@ def goal_judgment(judgments,goal,claim,observations,failures,work_id=None,redact
  share=max(300,GOAL_OBSERVATION_CHARS//max(1,len(refs)))
  observed='\n'.join(clean(_observation_text(ref,observations[ref][0],observations[ref][3]))[:share] for ref in refs)[:GOAL_OBSERVATION_CHARS]
  failed=clean('; '.join(f'{tool}: {reason or "failed"}' for tool,reason in failures))[:GOAL_FAILURE_CHARS]
- reply=clean(claim.get('summary') or '')
- if len(reply)>GOAL_REPLY_CHARS:reply=reply[:GOAL_REPLY_CHARS//2]+' … '+reply[-GOAL_REPLY_CHARS//2:]
+ reply=clean(claim.get('summary') or '')[:GOAL_REPLY_CHARS]
  recent=clean(conversation or '')[-GOAL_CONVERSATION_CHARS:]
  try:judged=judgments.goal_reached(clean(goal,private=False),observed,failed,work_id=work_id,answer=reply,conversation=recent)
  except Exception:return 'unavailable'

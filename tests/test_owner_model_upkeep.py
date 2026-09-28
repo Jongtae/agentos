@@ -7,6 +7,7 @@ call and the #597 ``explicit_memory_request`` judgment); the real
 loop of ``tests/test_orchestrator.Harness`` run unchanged.  No live model.
 """
 import json
+import threading
 import time
 import unittest
 
@@ -42,13 +43,15 @@ class Upkeep(Harness):
         def judge(context, proposition):
             if context.purpose == 'goal-reached':
                 return BinaryDecision(OUTCOME_DECIDED, True, fixture_confidence())
-            if context.purpose == 'explicit-memory-request':
+            if context.purpose == 'explicit-memory-fact':
                 self.judged.append(context)
                 if self.explicit:
                     return BinaryDecision(OUTCOME_DECIDED, self.explicit.pop(0), fixture_confidence())
             return None
         self.fixture = FixtureDecisionEngine(structured=structured, judge=judge)
         self.service.use_decision_engine(self.fixture)
+        # The run is off-thread in production; here it runs in place so each test reads its result.
+        self.service.owner_model_spawn = lambda target: target()
 
     def finished(self, text, answer='an answer', status='succeeded'):
         """A settled Work with one pending upkeep, as the success path leaves it."""
@@ -202,7 +205,7 @@ class Apply(Upkeep):
         self.assertEqual(dict(candidate), {'state': 'accepted', 'work_key': self.store._work_binding(job)})
         [(status, detail)] = self.evidence(job)
         self.assertEqual(status, om.EVENT_RECORDED)
-        self.assertEqual(detail['memory_request'], 'yes')
+        self.assertEqual(detail['memory_requests'], ['yes'])
         self.assertEqual([(item['memory_key'], item['kind'], item['outcome'], item['memory_id'])
                           for item in detail['applied']],
                          [('profile.place.work', 'stated', 'memory', memory['id'])])
@@ -241,7 +244,7 @@ class Apply(Upkeep):
         self.assertEqual(self.judged, [], 'no #597 judgment is asked for an inference')
         [(_status, detail)] = self.evidence(job)
         self.assertEqual(detail['applied'][0]['refused_because'], om.REFUSED_INFERRED)
-        self.assertIsNone(detail['memory_request'])
+        self.assertEqual(detail['memory_requests'], [])
 
     def test_out_of_enum_oversized_and_non_profile_proposals_are_dropped(self):
         job = self.finished('나는 판교에서 일해')
@@ -269,14 +272,39 @@ class Apply(Upkeep):
             db.execute('DELETE FROM owner_model_upkeep WHERE job_id=?', (earlier,))
         job = self.finished('나는 판교에서 일하고 분당에 살아')
         self.answers = [[proposal('profile.place.work', ' 판교 '), proposal('profile.place.home', '분당'),
-                         proposal('profile.place.gym', '판교'), proposal('profile.place.gym', '분당')]]
+                         proposal('profile.place.gym', '분당'), proposal('profile.place.pool', '분당')]]
         self.explicit = [False]
         self.service.run_owner_model_upkeep()
         [(_status, detail)] = self.evidence(job)
         self.assertEqual([item['memory_key'] for item in detail['applied']], ['profile.place.gym'])
-        self.assertEqual([(item['memory_key'], item['reason']) for item in detail['dropped']],
-                         [('profile.place.work', 'duplicate'), ('profile.place.home', 'duplicate'),
-                          ('profile.place.gym', 'duplicate')])
+        self.assertEqual([(item['key_digest'], item['reason']) for item in detail['dropped']],
+                         [(om.key_digest('profile.place.work'), 'duplicate'),
+                          (om.key_digest('profile.place.home'), 'duplicate'),
+                          (om.key_digest('profile.place.pool'), 'duplicate')])
+
+    def test_a_current_value_under_another_key_is_a_duplicate(self):
+        # #805 review P2-3: the same content under a different key would be a second canonical row.
+        self.store.save_memory('profile.place.work', '판교', work_id='w0')
+        job = self.finished('나는 판교에서 일해')
+        self.answers = [[proposal('profile.place.office', '판교')]]
+        self.explicit = [True]
+        self.service.run_owner_model_upkeep()
+        self.assertEqual([row['memory_key'] for row in self.store.memories(MEMORY_OWNER)], ['profile.place.work'])
+        self.assertEqual(self.judged, [], 'a duplicate is dropped before any judgment')
+        [(_status, detail)] = self.evidence(job)
+        self.assertEqual(detail['dropped'], [{'key_digest': om.key_digest('profile.place.office'), 'reason': 'duplicate'}])
+
+    def test_what_the_work_already_wrote_is_a_duplicate(self):
+        # #805 review P2-3: the worker's own save_memory (Memory or candidate, any key) is not written again.
+        job = self.finished('나는 판교에서 일하고 분당에 살아')
+        self.store.save_memory('home', '분당', work_id=job)
+        self.store.save_memory_candidate(job, 'work', '판교')
+        self.answers = [[proposal('profile.place.work', '판교'), proposal('profile.place.home', '분당')]]
+        self.explicit = [True, True]
+        self.service.run_owner_model_upkeep()
+        self.assertEqual(self.store.memories(MEMORY_OWNER, key_prefix='profile.'), [])
+        [(_status, detail)] = self.evidence(job)
+        self.assertEqual([item['reason'] for item in detail['dropped']], ['duplicate', 'duplicate'])
 
     def test_a_contradiction_of_an_unnamed_memory_is_not_silently_superseded(self):
         self.store.save_memory('profile.place.work', '서울역', work_id='w0')
@@ -313,13 +341,27 @@ class Budget(Upkeep):
         status = self.service.owner_model_request({'operation': 'set', 'enabled': True})
         self.assertEqual((status['enabled'], status['pending'], status['daily_calls']), (True, 1, om.DEFAULT_DAILY_CALLS))
 
-    def test_a_stated_run_counts_its_memory_judgment(self):
+    def test_every_model_call_counts_against_the_cap(self):
         job = self.finished('나는 판교에서 일해')
         self.answers = [[proposal('profile.place.work', '판교'), proposal('profile.place.home', '판교 근처')]]
-        self.explicit = [False]
+        self.explicit = [False, False]
         self.service.run_owner_model_upkeep()
-        self.assertEqual(len(self.judged), 1, 'one #597 judgment per run')
-        self.assertEqual(self.upkeep_rows()[job]['calls'], 2)
+        self.assertEqual(len(self.judged), 2, 'one #597 judgment per stated fact')
+        self.assertEqual(self.upkeep_rows()[job]['calls'], 3)
+        self.assertEqual(self.service.owner_model_request()['calls_last_24h'], 3)
+
+    def test_the_remaining_budget_is_checked_before_each_call(self):
+        # #805 review P3a: with two calls left, the proposal and one judgment run; the next fact stays a candidate.
+        self.service.owner_model_request({'operation': 'set', 'daily_calls': 2})
+        job = self.finished('나는 판교에서 일하고 분당에 살아')
+        self.answers = [[proposal('profile.place.work', '판교'), proposal('profile.place.home', '분당')]]
+        self.explicit = [True, True]
+        self.service.run_owner_model_upkeep()
+        self.assertEqual(len(self.judged), 1)
+        [(_status, detail)] = self.evidence(job)
+        self.assertEqual([(item['outcome'], item.get('refused_because')) for item in detail['applied']],
+                         [('memory', None), ('candidate', om.REFUSED_BUDGET)])
+        self.assertEqual(self.service.owner_model_request()['calls_last_24h'], 2)
 
     def test_controls_are_validated(self):
         for body in ({'operation': 'set', 'enabled': 'no'}, {'operation': 'set', 'daily_calls': -1},
@@ -354,11 +396,128 @@ class Evidence(Upkeep):
         self.assertIn(om.EVENT_TOOL, AgentService.LOCAL_NON_TOOL_EVENTS)
 
 
+class Review(Upkeep):
+    """#805 independent review findings."""
+
+    def test_a_category_word_does_not_name_a_key(self):
+        # P1: "prefer" once named every profile.preference.* key, so another preference was superseded.
+        from personal_agent.agent_runtime import memory_write_refusal
+        self.store.save_memory('profile.preference.drink', 'oat latte', work_id='w0')
+        job = self.finished('Remember I prefer quiet cafes for work')
+        approval = self.store.issue_memory_approval(job, 'Remember I prefer quiet cafes for work')
+        self.assertEqual(memory_write_refusal(self.store, job, approval, 'profile.preference.drink', 'quiet cafes'),
+                         'replaces-a-memory-the-request-did-not-name')
+        named = self.finished('Remember my drink is cold brew now')
+        approval = self.store.issue_memory_approval(named, 'Remember my drink is cold brew now')
+        self.assertIsNone(memory_write_refusal(self.store, named, approval, 'profile.preference.drink', 'cold brew'),
+                          'the fact word still names the key')
+
+    def test_the_upkeep_cannot_supersede_through_a_category_word(self):
+        self.store.save_memory('profile.preference.drink', 'oat latte', work_id='w0')
+        job = self.finished('Remember I prefer quiet cafes for work')
+        self.answers = [[proposal('profile.preference.drink', 'quiet cafes', category='preference',
+                                  supersedes='profile.preference.drink')]]
+        self.explicit = [True]
+        self.service.run_owner_model_upkeep()
+        self.assertEqual([row['content'] for row in self.store.memories(MEMORY_OWNER)], ['oat latte'])
+        [(_status, detail)] = self.evidence(job)
+        self.assertEqual(detail['applied'][0]['refused_because'], 'replaces-a-memory-the-request-did-not-name')
+
+    def test_the_memory_judgment_is_asked_per_fact(self):
+        # P2-2: one yes never covers another stated proposal.
+        job = self.finished('나는 판교에서 일하고 분당에 살아')
+        self.answers = [[proposal('profile.place.work', '판교'), proposal('profile.place.home', '분당')]]
+        self.explicit = [True, False]
+        self.service.run_owner_model_upkeep()
+        self.assertEqual([context.facts['proposed_memory'] for context in self.judged],
+                         ['profile.place.work = 판교', 'profile.place.home = 분당'])
+        self.assertTrue(all(context.facts['owner_message'] == '나는 판교에서 일하고 분당에 살아' for context in self.judged))
+        self.assertEqual([row['memory_key'] for row in self.store.memories(MEMORY_OWNER)], ['profile.place.work'])
+        [candidate] = self.store.memory_candidates(MEMORY_OWNER, work_id=job)
+        self.assertEqual(candidate['memory_key'], 'profile.place.home')
+        [(_status, detail)] = self.evidence(job)
+        self.assertEqual(detail['memory_requests'], ['yes', 'no'])
+
+    def test_supersedes_only_its_own_key(self):
+        # P3e.
+        job = self.finished('나는 판교에서 일해')
+        self.answers = [[proposal('profile.place.work', '판교', supersedes='profile.place.home')]]
+        self.service.run_owner_model_upkeep()
+        [(_status, detail)] = self.evidence(job)
+        self.assertEqual(detail['dropped'], [{'key_digest': om.key_digest('profile.place.work'), 'reason': 'supersedes'}])
+
+    def test_a_claim_a_crash_left_expires_as_interrupted(self):
+        # P3b.
+        job = self.finished('나는 판교에서 일해')
+        with self.store.db() as db:
+            db.execute('UPDATE owner_model_upkeep SET state=?,claimed=?,calls=1 WHERE job_id=?',
+                       (om.STATE_CLAIMED, time.time() - om.CLAIM_STALE_SECONDS - 5, job))
+        self.assertFalse(self.service.run_owner_model_upkeep())
+        self.assertEqual(self.upkeep_rows()[job]['state'], om.STATE_EXPIRED)
+        self.assertEqual(self.evidence(job), [(om.EVENT_EXPIRED, {'reason': 'interrupted'})])
+        self.assertEqual(self.structured_calls(), [])
+
+    def test_the_run_is_off_the_work_thread_and_single_flight(self):
+        # P2-4: the tick returns while the judgment is still running; nothing else is claimed meanwhile.
+        entered, release, threads = threading.Event(), threading.Event(), []
+
+        def blocking(context, question, schema):
+            if context.purpose != om.PURPOSE:
+                return None
+            entered.set()
+            release.wait(5)
+            return StructuredDecision(OUTCOME_DECIDED, {'proposals': []}, fixture_confidence(0.9))
+        self.service.use_decision_engine(FixtureDecisionEngine(structured=blocking))
+
+        def spawn(target):
+            thread = threading.Thread(target=target, daemon=True)
+            threads.append(thread)
+            thread.start()
+        self.service.owner_model_spawn = spawn
+        first, second = self.finished('나는 판교에서 일해'), self.finished('나는 분당에 살아')
+        self.assertTrue(self.service.run_owner_model_upkeep())
+        self.assertTrue(entered.wait(5))
+        self.assertIsNot(threads[0], threading.current_thread())
+        self.assertFalse(self.service.run_owner_model_upkeep(), 'single-flight: a run is in flight')
+        rows = self.upkeep_rows()
+        self.assertEqual((rows[first]['state'], rows[second]['state']), (om.STATE_CLAIMED, om.STATE_PENDING))
+        release.set()
+        threads[0].join(5)
+        self.assertEqual(self.upkeep_rows()[first]['state'], om.STATE_DONE)
+        self.assertTrue(self.service.run_owner_model_upkeep())
+        threads[1].join(5)
+        self.assertEqual(self.upkeep_rows()[second]['state'], om.STATE_DONE)
+
+    def test_the_idle_check_and_the_claim_are_one_transaction(self):
+        job = self.finished('나는 판교에서 일해')
+        self.store.enqueue('다른 요청', 'om-busy')
+        self.assertIsNone(self.service.owner_model.claim_due(time.time()))
+        self.assertEqual(self.upkeep_rows()[job]['state'], om.STATE_PENDING)
+
+    def test_no_call_starts_after_the_deadline(self):
+        self.finished('나는 판교에서 일해')
+        clock = [time.time()]
+        self.service.owner_model.clock = lambda: clock[0]
+
+        def late(context, question, schema):
+            clock[0] += om.RUN_SECONDS + 1
+            return StructuredDecision(OUTCOME_DECIDED, {'proposals': [proposal('profile.place.work', '판교')]},
+                                      fixture_confidence(0.9))
+        seen = []
+        self.service.use_decision_engine(FixtureDecisionEngine(structured=late,
+                                                               judge=lambda c, p: seen.append(c) or None))
+        self.service.run_owner_model_upkeep()
+        self.assertEqual(seen, [], 'the per-fact judgment is not started past the deadline')
+        self.assertEqual(self.store.memories(MEMORY_OWNER), [])
+
+
 class Unit(unittest.TestCase):
     def test_validate_bounds_and_duplicates(self):
-        kept, dropped = om.validate([proposal('profile.a', 'v'), proposal('profile.a', 'w')], set(), set())
+        kept, dropped = om.validate([proposal('profile.a', 'v'), proposal('profile.a', 'w'),
+                                     proposal('profile.b', ' V ')], set(), set())
         self.assertEqual([item['memory_key'] for item in kept], ['profile.a'])
-        self.assertEqual(dropped, [{'memory_key': 'profile.a', 'reason': 'duplicate'}])
+        self.assertEqual([item['reason'] for item in dropped], ['duplicate', 'duplicate'])
+        self.assertNotIn('profile.a', json.dumps(dropped), 'a dropped key is kept only as a digest')
         self.assertEqual(om.validate('nope', set(), set()), ([], []))
         for key in ('profile.', 'profile.a b', 'Profile.a', 'profile.' + 'k' * 160):
             self.assertFalse(om.profile_key(key), key)

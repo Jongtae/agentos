@@ -528,6 +528,14 @@ MEMORY_REQUEST_PROPOSITION = ('The owner\'s latest message explicitly instructs 
                               'casual remark or a generic "don\'t forget"), when the statement is hedged, '
                               'uncertain or hypothetical rather than asserted, when they ask for a note, file or '
                               'reminder instead, or when it is unclear. This judgment does not write anything.')
+#: #805 review: the #597 question asked per proposed owner-model fact.
+MEMORY_FACT_PROPOSITION = ('The owner\'s latest message itself asks the assistant to remember the proposed memory, or '
+                           'asserts it in the first person and without hedging as a durable fact about the owner or '
+                           'their household for the assistant to use from now on. The proposed value must be what '
+                           'the owner said in that message, not an inference, a summary of an answer or a one-off '
+                           'plan. It is false when the message does not say it, when it is hedged, uncertain or '
+                           'hypothetical, when it is about someone else, when the owner asks not to remember it, or '
+                           'when it is unclear. This judgment does not write anything.')
 #: SEC-ATTN-01 (#659): is the owner's own message the acceptance of this preparation?
 PREPARATION_REQUEST_PROPOSITION = ('The owner\'s latest message itself asks the assistant to remind them of something, or '
                                    'to prepare or look something up for them ahead of a later time or on a repeating '
@@ -767,7 +775,7 @@ class ConversationJudgments:
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
                         source=decision.confidence.provider or decision.outcome)
 
-    def owner_model_proposals(self, request, answer, profile, clock, work_id=None):
+    def owner_model_proposals(self, request, answer, profile, clock, work_id=None, cancelled=None):
         """``(data, decision)``: durable owner-model proposals from one finished Work (#805).
 
         One ``structured`` call over the owner's request (owner words, never
@@ -783,11 +791,26 @@ class ConversationJudgments:
                  'final_answer_excerpt': self.redact(answer)[:ANSWER_CHARS] or 'none',
                  'owner_profile': self.redact(profile)[:PROFILE_CHARS] or 'none',
                  'clock': self.redact(clock)[:CLOCK_CHARS] or 'unknown'}
-        context = self._context(PURPOSE, facts, work_id=work_id, uncut='owner_request')
+        context = self._context(PURPOSE, facts, work_id=work_id, uncut='owner_request', cancelled=cancelled)
         method = getattr(self.engine, 'structured', None)
         decision = (method(context, QUESTION, SCHEMA, shape) if method is not None
                     else StructuredDecision(OUTCOME_UNAVAILABLE))
         return self.policy.structured(decision), decision
+
+    def explicit_memory_fact(self, utterance, memory_key, content, work_id=None, cancelled=None):
+        """Does ``utterance`` itself ask to keep, or assert, this one proposed fact (#597, #805 review)?
+
+        Asked per fact, so one yes never covers another proposal.  A yes lets
+        AgentOS issue the owner-request memory approval for that fact; the
+        value-coverage and key-replacement checks still decide.
+        """
+        context = self._context('explicit-memory-fact', {'owner_message': utterance,
+                                                         'proposed_memory': f'{memory_key} = {content}'},
+                                work_id=work_id, uncut='owner_message', cancelled=cancelled)
+        decision = self.engine.judge(context, MEMORY_FACT_PROPOSITION)
+        verdict = self.policy.binary(decision)
+        return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
+                        source=decision.confidence.provider or decision.outcome)
 
     def explicit_preparation_request(self, utterance, proposal):
         """Is ``utterance`` the owner's own request for ``proposal`` (#659)?

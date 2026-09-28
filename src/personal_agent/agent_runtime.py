@@ -363,10 +363,20 @@ def memory_write_refusal(store,job_id,approval,memory_key,content):
   replaced=next((row for row in page if row['memory_key']==memory_key),None)
   if len(page)<101:break
   offset+=101
- if replaced and not (owner_covers(memory_key,owner_words,whole=False)
+ name=memory_key_name(memory_key)
+ if replaced and not ((name and owner_covers(name,owner_words,whole=False))
                       or owner_covers(replaced['content'],owner_words,whole=False)):
   return 'replaces-a-memory-the-request-did-not-name'
  return None
+
+#: #805 review: words that name a key's namespace or category, never the fact.
+#: "I prefer quiet cafes" must not name ``profile.preference.drink``.
+KEY_NAMESPACE_WORDS=('profile','identity','place','routine','schedule','preference')
+
+def memory_key_name(memory_key):
+ """The words of ``memory_key`` that name its fact: namespace and category words
+ (and their inflections, by the same ``owner_said`` rule) removed (#805)."""
+ return ' '.join(word for word in memory_words(memory_key) if not owner_said(word,KEY_NAMESPACE_WORDS))
 
 # --- Private provenance at the routing site (#449; required by #391) -------
 #

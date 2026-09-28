@@ -366,8 +366,11 @@ class AgentService:
         self.current_state=CurrentContext(store,self.context_observations)
         # #659: owner-accepted preparations, run by the existing work loop.
         self.preparations=prep.Preparations(store)
-        # #805: post-Work owner-model upkeep, run by the same loop when idle.
+        # #805: post-Work owner-model upkeep, claimed by the same loop when idle
+        # and run off the work thread, one at a time.
         self.owner_model=om.Upkeep(store)
+        self.owner_model_flight=threading.Lock()
+        self.owner_model_spawn=lambda target:threading.Thread(target=target,name='agentos-owner-model',daemon=True).start()
         self.presence_timing=PresenceTiming()
         self.presence={}
         # #718: the CLI's own streamed step per running Work (presentation only, never persisted).
@@ -692,46 +695,71 @@ class AgentService:
                 and prep.preparation_of(key) is None and continuation_request(key) is None)
 
     def run_owner_model_upkeep(self, now=None):
-        """One work-loop tick of the #805 upkeep: at most one pending Work, only when idle.
+        """One work-loop tick of the #805 upkeep: claim at most one pending Work and run it off-thread.
 
         Nothing pending is one indexed query and no model call.  Paused, over
-        the rolling daily cap, or with a Work queued or running, it waits.
+        the rolling cap, or with a Work queued or running, it waits.  The run
+        is single-flight: while one is in flight nothing else is claimed, and
+        the work thread never waits on its judgment calls (#805 review).
         """
+        if not self.owner_model_flight.acquire(blocking=False):return False
         try:
-            return self._owner_model_upkeep(now)
+            upkeep=self.owner_model
+            now=upkeep.clock() if now is None else now
+            # Only with no run in flight can a still-claimed row be a crash's leftover.
+            upkeep.expire_interrupted(now)
+            row=upkeep.claim_due(now)
+            if row is None:
+                self.owner_model_flight.release()
+                return False
+            self.owner_model_spawn(lambda:self._owner_model_run(row,now))
         except Exception as exc:  # noqa: BLE001 - never stop the work loop
             LOG.warning('owner-model upkeep failed kind=%s',type(exc).__name__)
+            self._release_owner_model_flight()
             return False
-
-    def _owner_model_upkeep(self, now):
-        upkeep=self.owner_model
-        now=upkeep.clock() if now is None else now
-        row=upkeep.due(now)
-        if row is None or not upkeep.claim(row['job_id'],now):return False
-        job=self.store.job(row['job_id'])
-        if now-row['created']>om.MAX_PENDING_SECONDS:
-            upkeep.finish(row['job_id'],om.STATE_EXPIRED,0,om.EVENT_EXPIRED,{'reason':'expired'},now)
-            return True
-        if not job or job.get('status') not in ('succeeded','partial'):
-            upkeep.finish(row['job_id'],om.STATE_GONE,0,om.EVENT_UNAVAILABLE,{'reason':'work-not-finished'},now)
-            return True
-        work_id=job['id']
-        # Every fact is redacted by the judgment redaction scoped to the source Work:
-        # stored secrets and credential shapes always, and its saved private values
-        # (#605 set) from the model-stated facts.
-        judgments=ConversationJudgments(self.decision_judge.engine,policy=self.decision_judge.policy,
-                                        redactor=lambda text,private=True:(self.scrub_work_text(work_id,text) if private
-                                                                            else self._redact_known_secrets(text)))
-        try:
-            clock=current_context_render({key:value for key,value in (self.current_state.snapshot() or {}).items()
-                                           if key in CLOCK_KEYS})
-        except Exception:
-            clock=''
-        state,calls,status,detail=upkeep.run(job,judgments,answer=job.get('response') or '',
-                                             profile=self.owner_profile_snapshot(),clock=clock,now=now)
-        upkeep.finish(work_id,state,calls,status,detail,now)
-        LOG.info('owner-model upkeep work=%s state=%s calls=%s applied=%s',work_id,state,calls,len(detail.get('applied') or ()))
         return True
+
+    def _release_owner_model_flight(self):
+        try:self.owner_model_flight.release()
+        except RuntimeError:pass
+
+    def _owner_model_run(self, row, now):
+        """One claimed upkeep, off the work thread; it releases the single-flight lock."""
+        upkeep=self.owner_model
+        work_id=row['job_id']
+        try:
+            job=self.store.job(work_id)
+            if row['expired']:
+                upkeep.finish(work_id,om.STATE_EXPIRED,0,om.EVENT_EXPIRED,{'reason':'expired'},now)
+                return
+            if not job or job.get('status') not in ('succeeded','partial'):
+                upkeep.finish(work_id,om.STATE_GONE,0,om.EVENT_UNAVAILABLE,{'reason':'work-not-finished'},now)
+                return
+            # Every fact is redacted by the judgment redaction scoped to the source Work:
+            # stored secrets and credential shapes always, and its saved private values
+            # (#605 set) from the model-stated facts.
+            judgments=ConversationJudgments(self.decision_judge.engine,policy=self.decision_judge.policy,
+                                            redactor=lambda text,private=True:(self.scrub_work_text(work_id,text) if private
+                                                                                else self._redact_known_secrets(text)))
+            try:
+                clock=current_context_render({key:value for key,value in (self.current_state.snapshot() or {}).items()
+                                               if key in CLOCK_KEYS})
+            except Exception:
+                clock=''
+            # The hard deadline: no model call starts after it (each call has its adapter's own timeout).
+            deadline=upkeep.clock()+om.RUN_SECONDS
+            cancelled=lambda:self.stop.is_set() or upkeep.clock()>deadline
+            state,calls,status,detail=upkeep.run(job,judgments,answer=job.get('response') or '',
+                                                 profile=self.owner_profile_snapshot(),clock=clock,
+                                                 remaining=row['remaining'],cancelled=cancelled)
+            upkeep.finish(work_id,state,calls,status,detail,upkeep.clock())
+            LOG.info('owner-model upkeep work=%s state=%s calls=%s applied=%s',work_id,state,calls,len(detail.get('applied') or ()))
+        except Exception as exc:  # noqa: BLE001 - a background run never raises
+            LOG.warning('owner-model upkeep run failed work=%s kind=%s',work_id,type(exc).__name__)
+            try:upkeep.finish(work_id,om.STATE_UNAVAILABLE,None,om.EVENT_UNAVAILABLE,{'reason':'run-failed'},upkeep.clock())
+            except Exception:pass
+        finally:
+            self._release_owner_model_flight()
 
     def owner_model_request(self, body=None):
         """The owner's upkeep controls (#805): ``read`` or ``set`` (pause switch, daily call cap)."""
@@ -6809,7 +6837,7 @@ class AgentService:
                 self.deliver_notification()
                 # #709: close and settle in-flow logins (decisions, owner closes, timeouts).
                 self.process_browser_logins()
-                # #805: one pending owner-model upkeep, only when no Work is queued or running.
+                # #805: claim one pending owner-model upkeep when idle; it runs off this thread.
                 self.run_owner_model_upkeep()
                 self.stop.wait(.3)
         def poll():

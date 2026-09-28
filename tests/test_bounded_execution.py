@@ -33,10 +33,11 @@ class _Capabilities:
 # The fixture's definitions are ungated: #627's propose_current_state is a
 # declared profile action (Capabilities offers it only while context is on).
 # #774: the owner-state tools are relayed to the service on the trusted-local route.
+# #814: so are the owner settings tools.
 BOUNDED_NAMES = ['ask_location', 'bounded_public_research', 'browser_click', 'browser_find', 'browser_open', 'browser_read', 'browser_type',
                  'calendar_draft_cancel', 'calendar_draft_create', 'calendar_draft_update', 'calendar_query', 'list_memory',
-                 'list_notes', 'propose_current_state', 'save_memory', 'save_note', 'schedule_preparation', 'weather',
-                 'web_search']
+                 'list_notes', 'propose_current_state', 'save_memory', 'save_note', 'schedule_preparation',
+                 'settings_change', 'settings_read', 'weather', 'web_search']
 
 
 class BoundedExecutionTests(unittest.TestCase):

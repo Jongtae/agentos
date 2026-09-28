@@ -243,6 +243,13 @@ def RELAYED_PREPARATIONS(*_args, **_kwargs):
     raise ToolError(RELAY_UNAVAILABLE_TEXT, 'browser_relay_unavailable')
 
 
+def RELAYED_SETTINGS(*_args, **_kwargs):
+    """The bridge's ``Capabilities.settings`` placeholder (#814): ``settings_read`` and
+    ``settings_change`` are listed, and their calls go to the service, which holds the owner
+    settings and their confirmation.  Never run in the bridge."""
+    raise ToolError(RELAY_UNAVAILABLE_TEXT, 'browser_relay_unavailable')
+
+
 def RELAYED_LOCATION_REQUEST(*_args, **_kwargs):
     """The bridge's ``Capabilities.location_request`` placeholder (#774): ``ask_location`` is
     listed, and its calls go to the service, which holds the paired Telegram chat.  Never run in the bridge."""

@@ -550,6 +550,11 @@ class Orchestration:
                 f'({int(self.sections.get("history") or 0)} earlier messages), owner_profile, current_context, '
                 f'prepared ({f"{len(prepared)} chars" if prepared else "empty"})')
 
+    def _owner_context(self):
+        """#829: the owner model the worker was given (profile, current context), for the outcome judgment."""
+        return (f"owner_profile: {self._owner_fact('profile', PROFILE_FACT_CHARS)}\n"
+                f"current_context: {self._owner_fact('current_context', CURRENT_CONTEXT_FACT_CHARS)}")
+
     def _owner_fact(self, name, limit):
         """#804: an always-given section as the plan call reads it: redacted, then cut."""
         return self._redact(self.sections.get(name) or '')[:limit] or 'none'
@@ -734,7 +739,8 @@ class Orchestration:
         reply = self._redact(answer)[:REPLY_CHARS]
         try:
             judged = goal_reached(self.request, observed, str(failed or '')[:FAILURE_CHARS], work_id=self.work_id,
-                                  answer=reply, conversation=self._redact(self.conversation)[-CONVERSATION_CHARS:])
+                                  answer=reply, conversation=self._redact(self.conversation)[-CONVERSATION_CHARS:],
+                                  owner_context=self._owner_context())
         except Exception:
             return UNJUDGED
         verdict = getattr(judged, 'outcome', None)

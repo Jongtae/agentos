@@ -258,3 +258,7 @@ WAI-ARIA의 대화상자·라디오 패턴, HTML 기본 `dialog`와 `details`, N
 
 - 제품 기준: [Presence 경험 계약](../presence-experience-contract.en.md), [개발 헌법 C16](../development-constitution.en.md#c16-ai-is-the-engine-agentos-orchestrates-it-does-not-implement-requests), [기존 UI 설계](ui-quality-01.md).
 - 공개 지침과 재사용 검토: [영문 정본 3절 및 14절](settings-ux-renewal-spec.en.md).
+
+## 구현 착수 결정 · 2026-09-28
+
+소유자가 이 명세에 따른 구현과 PR 수정·머지를 위임했습니다. [#780](https://github.com/Jongtae/agentos/issues/780)의 네 작업 단위 #781–#784를 순서대로 진행합니다. 위 시안은 여전히 설계 예시이며 실제 구현·검증·머지 근거는 각 PR에서 구분합니다.

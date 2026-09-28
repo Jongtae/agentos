@@ -29,6 +29,18 @@ MAX_OUTPUT_BYTES = 96_000
 MAX_STREAM_BYTES = 8_000_000
 FINAL_RECORD_TOO_LARGE = f'엔진의 최종 응답 기록이 안전한 크기 제한({MAX_OUTPUT_BYTES // 1000}KB)을 초과했습니다.'
 STREAM_TOO_LARGE = f'엔진 출력 전체가 안전한 크기 제한({MAX_STREAM_BYTES // 1_000_000}MB)을 초과했습니다.'
+
+
+def jsonl_lines(text):
+    """The records of a CLI's JSON Lines output: split on ``\\n`` only (#796).
+
+    JSON Lines separates records with ``\\n`` (``\\r\\n`` tolerated).
+    ``str.splitlines`` also splits on U+2028, U+2029 and U+0085, which JSON
+    leaves unescaped and which Codex (serde_json) and Claude Code (Node) both
+    write raw, so a tool result quoting such a page cut its record in two.
+    Blank lines are dropped.
+    """
+    return [line.removesuffix('\r') for line in (text or '').split('\n') if line.strip()]
 # One CLI turn may use up to the Work's whole shared budget (agent_runtime
 # WORK_DEADLINE_SECONDS); the remaining budget always bounds it (#607 AX-10).
 # The earlier fixed 120 s cap (#118) cut off multi-step browser work.
@@ -750,7 +762,7 @@ def cli_metadata(engine_id, raw):
     absent: a missing model is "not reported", never guessed."""
     meta = {'reported_model': None, 'usage': None, 'tool_calls': [], 'num_turns': None, 'cost_usd': None}
     records = []
-    lines = (raw or '').splitlines()
+    lines = jsonl_lines(raw)
     # Keep the head (init record) and the tail (result record) of a long stream.
     for line in (lines if len(lines) <= 5000 else lines[:1000] + lines[-4000:]):
         # Tool results can be large and carry nothing this summary reads.
@@ -844,7 +856,7 @@ def failure_details(engine_id, stdout, stderr, prompt=None):
     neither is observable, the last stderr line is the only evidence.
     """
     status, message = None, ''
-    lines = (stdout or '')[-MAX_OUTPUT_BYTES:].splitlines()
+    lines = jsonl_lines((stdout or '')[-MAX_OUTPUT_BYTES:])
     for line in reversed(lines):
         try:
             record = json.loads(line)
@@ -1592,7 +1604,7 @@ class BoundedExecutionAdapter:
         raw = raw or ''
         if len(raw.encode()) > MAX_STREAM_BYTES:
             raise ExecutionError(STREAM_TOO_LARGE)
-        lines = [line for line in raw.splitlines() if line.strip()]
+        lines = jsonl_lines(raw)
         if engine_id == 'claude-code':
             # The result record is the last line of the stream.
             lines = lines[-1:]

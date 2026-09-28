@@ -77,7 +77,9 @@ class IsolatedEngineSidecar:
         if len(stdout.encode("utf-8")) > MAX_OUTPUT_BYTES:
             raise SidecarError("engine output exceeded limit")
         try:
-            records = [json.loads(line) for line in stdout.splitlines() if line.strip()]
+            # JSON Lines split on "\n" only: splitlines() would also cut a record
+            # at a raw U+2028/U+2029/U+0085, which JSON leaves unescaped (#796).
+            records = [json.loads(line) for line in stdout.split("\n") if line.strip()]
         except json.JSONDecodeError as exc:
             raise SidecarError("engine returned invalid JSON") from exc
         for record in reversed(records):

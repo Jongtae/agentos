@@ -47,6 +47,7 @@ import tempfile
 import time
 
 from .bounded_execution import (ExecutionError, bounded_run, cli_metadata, failure_details, is_not_signed_in,  # noqa: F401
+                                jsonl_lines,
                                 kill_process_group, strict_launch_arguments)
 from .decision import (DECISION_SYSTEM, MAX_CONTEXT_CHARS, NO_CANDIDATE, OUTCOME_CANCELLED,
                        OUTCOME_DECIDED, OUTCOME_MALFORMED, OUTCOME_REJECTED, OUTCOME_TIMEOUT,
@@ -317,7 +318,7 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
         Codex ``exec --json`` ends with the last ``agent_message`` whose text
         is the ``--output-schema`` answer.  Anything else is malformed.
         """
-        lines = [line for line in stdout.splitlines() if line.strip()]
+        lines = jsonl_lines(stdout)
         records = []
         for line in lines:
             try:

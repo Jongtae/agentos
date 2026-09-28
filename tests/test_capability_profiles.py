@@ -80,9 +80,9 @@ class OneActionSource(_Store):
         for profile, facade in FACADES.items():
             # #701: with a browser profile registered, trusted-local lists its browser tools too.
             # #774: with the service's preparation scheduler wired, schedule_preparation is listed too,
-            # and with its location request wired, ask_location.
+            # and with its location request wired, ask_location; #814: with its settings, the settings tools.
             listed = facade(self.caps(browser=lambda: None, preparations=lambda *a: None,
-                                      location_request=lambda *a: None)).definitions()
+                                      location_request=lambda *a: None, settings=lambda *a: None)).definitions()
             with self.subTest(profile=profile):
                 self.assertEqual([tool['name'] for tool in listed], sorted(profile_actions(profile)))
                 for tool in listed:
@@ -242,12 +242,13 @@ class EffectiveAvailability(_Store):
         # #701: no registered browser profile hides the browser tools (as on the direct route).
         self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps()).definitions()],
                          sorted(set(profile_actions(BOUNDED_PROFILE)) - CONTEXT_GATED_ACTIONS - BROWSER_ACTIONS
-                                - {'schedule_preparation', 'ask_location'}))
+                                - {'schedule_preparation', 'ask_location', 'settings_read', 'settings_change'}))
         self.enable_context()
         self.assertIn('propose_current_state', [d['function']['name'] for d in self.caps().definitions()])
         self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps(browser=lambda: None,
                                                                        preparations=lambda *a: None,
-                                                                       location_request=lambda *a: None)).definitions()],
+                                                                       location_request=lambda *a: None,
+                                                                       settings=lambda *a: None)).definitions()],
                          sorted(profile_actions(BOUNDED_PROFILE)))
         self.assertEqual([t['name'] for t in ReadOnlyAgentOSMcpTools(self.caps()).definitions()], ['list_notes'])
 
@@ -335,7 +336,9 @@ class SettingsProjection(_Store):
                                              'browser_find', 'browser_click', 'browser_type',
                                              # #774: relayed to the service on this route.
                                              'calendar_query', 'calendar_draft_create', 'calendar_draft_update', 'calendar_draft_cancel', 'list_memory', 'save_memory', 'schedule_preparation',
-                                             'ask_location'],
+                                             'ask_location',
+                                             # #814: owner settings, relayed the same way.
+                                             'settings_read', 'settings_change'],
                                    'unavailable': route_unavailable(BOUNDED_PROFILE),
                                    # #616: the owner can choose; nothing is qualified by default.
                                    'selectable': ['trusted-local', 'strict-isolated'], 'qualified': {}})

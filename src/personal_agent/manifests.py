@@ -10,8 +10,10 @@ HOST_ACTIONS={'web_search','public_page_read','bounded_public_research','weather
               # SEC-ATTN-01 (#659): an owner-accepted preparation (reminder/prepare).
               'schedule_preparation',
               # #774: ask the owner for a current position in the paired Telegram chat.
-              'ask_location'}
-WRITE_ACTIONS={'save_note','save_memory','delegate_agent','calendar_draft_create','calendar_draft_update','calendar_draft_cancel','browser_click','browser_type','propose_current_state','schedule_preparation','ask_location'}
+              'ask_location',
+              # #814: owner settings read, and a change drafted for the owner to confirm.
+              'settings_read','settings_change'}
+WRITE_ACTIONS={'save_note','save_memory','delegate_agent','calendar_draft_create','calendar_draft_update','calendar_draft_cancel','browser_click','browser_type','propose_current_state','schedule_preparation','ask_location','settings_change'}
 #: #627: declared host actions ``Capabilities.offered_tools`` offers only while
 #: the owner has current context on.  Off, every route's surface is exactly the
 #: pre-#627 one; the declarations (CLI profiles, Settings, the Claude

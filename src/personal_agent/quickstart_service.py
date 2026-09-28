@@ -253,7 +253,9 @@ RETRY_EFFECT_TOOLS=frozenset({'save_note','save_memory','delegate_agent',
                               # #787: a browser_open declared read/navigate only loaded a page (``effect_calls``).
                               'browser_open','browser_click','browser_type',
                               # #774: a Telegram prompt already reached the owner.
-                              'ask_location'})
+                              'ask_location',
+                              # #814: a settings draft and its confirmation message.
+                              'settings_change'})
 EFFECT_RETRY_REFUSAL='이전 요청이 상태를 바꾸는 작업을 시도해 자동으로 다시 실행하지 않았습니다.'
 #: #795: ``bounded_execution.cli_metadata`` keeps at most this many of the tool
 #: calls a CLI reported; a list that long may have dropped some, so it cannot
@@ -400,7 +402,8 @@ class AgentService:
         self.isolated_mcp_proxy=IsolatedMcpProxy(self.isolated_mcp_registry)
         # Settings reads connection state only from the authoritative
         # boundaries below (#506); the retired CapabilityRegistry is not read.
-        self.settings_orchestrator=SettingsOrchestrator(store,connections=self.settings_connection_rows)
+        # #814: owner settings change only through this service's own setters.
+        self.settings_orchestrator=SettingsOrchestrator(store,connections=self.settings_connection_rows,service=self)
         self.personal_knowledge_orchestrator=PersonalKnowledgeOrchestrator(store)
         # Routing authority.  The classifier's local rules claim exact and
         # local-only turns; anything else is a bounded capability-need
@@ -483,8 +486,13 @@ class AgentService:
         self._local_selections={}
         self._local_approve_lock=threading.Lock()
 
-    def conversation_settings_request(self, body, owner_id='local-owner', channel='http'):
-        """The only settings policy entry point for every local channel."""
+    def conversation_settings_request(self, body, owner_id='local-owner', channel='http', owner_typed=True, notify=None):
+        """The only settings policy entry point for every local channel.
+
+        #814 review: ``owner_typed`` is False for a Work whose message AgentOS
+        ran (it can never confirm or cancel a draft by text); ``notify`` is the
+        follow-up to that conversation for a setter applied off-thread.
+        """
         if not isinstance(body, dict):
             raise ValueError('설정 요청을 확인하세요.')
         operation=body.get('operation', 'text')
@@ -499,8 +507,48 @@ class AgentService:
         if operation == 'recovery':
             return self.settings_orchestrator.recovery(owner_id, body.get('subject'))
         if operation == 'text':
-            return self.settings_orchestrator.handle_text(owner_id, channel, body.get('text'))
+            return self.settings_orchestrator.handle_text(owner_id, channel, body.get('text'), owner_typed=owner_typed, notify=notify)
         raise ValueError('검토된 설정 요청을 확인하세요.')
+
+    @staticmethod
+    def settings_owner(job):
+        """The settings/knowledge owner of one conversation (the text route and #814 drafts)."""
+        return f"channel:{job['channel']}:{job.get('chat_id') or 'local'}"
+
+    def settings_tools(self, job):
+        """``settings_read`` / ``settings_change`` bound to one Work (#814).
+
+        A change is a draft bound to this conversation; the owner confirms it
+        here (Telegram button, ``/settings 확인 <id>``), never the model.
+        """
+        return self.settings_orchestrator.work_tools(self.settings_owner(job),job['channel'],job['id'],
+                                                     telegram=answerable_work(job))
+
+    def settings_followup(self, job, text):
+        """#814 review P2-3: the result of a setter applied off-thread, told to the confirming conversation.
+
+        One assistant transcript row on the Work's channel, and the same text
+        to the paired Telegram chat when the Work came from it (best effort).
+        """
+        with self.store.db() as db:
+            db.execute('INSERT INTO messages(role,content,channel,created,workspace_id) VALUES (?,?,?,?,?)',
+                       ('assistant',text,job['channel'],time.time(),job.get('workspace_id')))
+        cfg=self.store.config('telegram',{})
+        if (cfg.get('enabled') and job.get('channel')==f"telegram:{cfg.get('generation')}"
+                and job.get('chat_id')==cfg.get('user_id')):
+            try:self.telegram.send_message(job['chat_id'],text)
+            except ProviderError:LOG.warning('settings follow-up not delivered work=%s',job.get('id'))
+
+    def queue_settings_confirmation(self, job):
+        """Offer this Work's settings drafts to the paired owner once, with buttons (#814)."""
+        rows=self.settings_orchestrator.pending_for_work(job['id'])
+        if rows:self.queue_notification(job,'settings_change_proposed',fingerprint=self.settings_orchestrator.drafts_digest(rows))
+
+    def offered_settings_drafts(self, notification):
+        """The exact drafts a confirmation message shows, or [] if they changed or expired (#814)."""
+        rows=self.settings_orchestrator.pending_for_work(notification['job_id'])
+        if not rows or self.settings_orchestrator.drafts_digest(rows)!=notification.get('fingerprint'):return []
+        return rows
 
     def personal_knowledge_request(self, body, owner_id='local-owner', channel='http'):
         if not isinstance(body,dict) or body.get('operation','retrieve')!='retrieve':
@@ -5397,6 +5445,16 @@ class AgentService:
                     self.store.update_notification(notification['id'],'cancelled')
                     return True
                 reply_markup=self.memory_prompt_markup(notification['id'],memory_prompt)
+            elif notification['kind']=='settings_change_proposed':
+                # #814: the exact drafts of one Work; changed or expired since -> not offered.
+                settings_drafts=self.offered_settings_drafts(notification)
+                if not settings_drafts:
+                    self.store.update_notification(notification['id'],'cancelled')
+                    return True
+                reply_markup={'inline_keyboard':[[
+                    {'text':'적용','callback_data':f"p7s:{notification['id']}:confirm"},
+                    {'text':'바꾸지 않음','callback_data':f"p7s:{notification['id']}:cancel"},
+                ]]}
             elif notification['kind']==prep.NOTIFY_KIND:
                 # #719: one watch run the owner needs; the watch can be stopped from here.
                 watch_text=self.watch_notification_text(notification)
@@ -5409,6 +5467,7 @@ class AgentService:
             try:
                 text=(prep.proposal_text(proposals,remaining) if notification['kind']=='preparation_proposed' else
                       self.memory_prompt_text(notification['job_id'],memory_prompt) if notification['kind']==MEMORY_CANDIDATES_KIND else
+                      self.settings_orchestrator.confirmation_text(settings_drafts) if notification['kind']=='settings_change_proposed' else
                       watch_text if notification['kind']==prep.NOTIFY_KIND else
                       LOCAL_DOCUMENT_APPROVAL_TEXT if notification['kind']=='approval_needed'
                       and self.document_resume_eligible(notification.get('job_id'))
@@ -5517,8 +5576,65 @@ class AgentService:
         except ProviderError:
             pass
 
+    @staticmethod
+    def _callback_authorized(cfg, generation, sender, chat):
+        """A tap from the paired owner's private chat of the current bot generation."""
+        return bool(cfg.get('enabled') and cfg.get('generation')==generation and isinstance(sender,int)
+                    and sender==cfg.get('user_id') and chat.get('type')=='private' and chat.get('id')==sender)
+
+    def ingest_settings_callback(self, callback, generation):
+        """#814: the owner's apply/cancel for one Work's settings drafts.
+
+        Exact: this notification, sent, this chat and message, the Work from
+        this chat and generation, and the drafts still exactly the set the
+        message offered (ids and digests).  The notification is consumed under
+        the lock; the drafts are applied after it through the orchestrator's
+        confirm (its own exactly-once state machine), so a slow Main/Judgment
+        AI check does not hold the service lock.
+        """
+        message=callback.get('message',{}) if isinstance(callback.get('message'),dict) else {}
+        sender=callback.get('from',{}).get('id') if isinstance(callback.get('from'),dict) else None
+        callback_id=callback.get('id')
+        parts=str(callback.get('data') or '').split(':')
+        rows,job,notification=[],None,None
+        with self.lock:
+            cfg=self.store.config('telegram',{})
+            authorized=self._callback_authorized(cfg,generation,sender,message.get('chat',{}) if isinstance(message.get('chat'),dict) else {})
+            if authorized and len(parts)==3 and parts[2] in ('confirm','cancel'):
+                notification=self.store.notification(parts[1])
+                job=self.store.job(notification['job_id']) if notification else None
+                exact=(notification and notification['kind']=='settings_change_proposed' and notification['state']=='sent'
+                       and notification['generation']==generation and notification['chat_id']==sender
+                       and notification['message_id']==message.get('message_id') and job
+                       and job['channel']==f"telegram:{generation}" and job['chat_id']==sender)
+                rows=self.offered_settings_drafts(notification) if exact else []
+                if rows:self.store.update_notification(notification['id'],'settings_'+parts[2]+'ing')
+        if not authorized:return
+        # #814 review P2-3: the tap is answered first; a slow setter then runs off this poll thread.
+        if isinstance(callback_id,str):
+            text=('적용을 시작했습니다.' if rows and parts[2]=='confirm' else '처리했습니다.' if rows else '처리할 수 있는 요청이 아닙니다.')
+            try:self.telegram.answer_callback_query(callback_id,text,show_alert=False)
+            except ProviderError:pass
+        if not rows:return
+        lines=[]
+        owner,channel=self.settings_owner(job),job['channel']
+        for row in rows:
+            try:
+                result=(self.settings_orchestrator.confirm(owner,channel,row['id'],row['digest'],
+                                                           notify=lambda text,job=job:self.settings_followup(job,text))
+                        if parts[2]=='confirm' else self.settings_orchestrator.cancel(owner,channel,row['id']))
+                lines.append(result.get('response') or '처리했습니다.')
+            except ValueError as exc:
+                lines.append(f"{row['effect']}: {exc}")
+        LOG.info('settings drafts %s by owner button work=%s count=%s',parts[2],job['id'],len(rows))
+        self.store.update_notification(notification['id'],'settings_confirmed' if parts[2]=='confirm' else 'settings_canceled')
+        try:self.telegram.edit_message_text(sender,notification['message_id'],'\n'.join(lines),{'inline_keyboard':[]})
+        except ProviderError:pass
+
     def ingest_callback(self, callback, generation):
         """Accept only paired-owner, exact-message task and approval callbacks."""
+        if isinstance(callback.get('data'),str) and callback['data'].startswith('p7s:'):
+            return self.ingest_settings_callback(callback,generation)
         with self.lock:
             cfg=self.store.config('telegram',{})
             sender=callback.get('from',{}).get('id')
@@ -5526,8 +5642,7 @@ class AgentService:
             chat=message.get('chat',{}) if isinstance(message,dict) else {}
             callback_id=callback.get('id')
             data=callback.get('data','')
-            authorized=(cfg.get('enabled') and cfg.get('generation')==generation and isinstance(sender,int)
-                        and sender==cfg.get('user_id') and chat.get('type')=='private' and chat.get('id')==sender)
+            authorized=self._callback_authorized(cfg,generation,sender,chat)
             changed=False
             #: (text, show_alert) for this tap's answerCallbackQuery.  Detail is
             #: shown as the tap's own alert (#581) instead of a new bubble.
@@ -5929,10 +6044,10 @@ class AgentService:
                     parsed=self.parse_context_request(text)
                     if parsed:
                         event_ids,text=parsed
-                        task_id=self.store.enqueue(text,f'tg:{generation}:{update_id}',f'telegram:{generation}',sender,db=db)
+                        task_id=self.store.enqueue(text,f'tg:{generation}:{update_id}',f'telegram:{generation}',sender,db=db,owner_typed=True)
                         self.store.attach_context(task_id,event_ids,self.context_assistant_id(),db)
                     else:
-                        task_id=self.store.enqueue(text,f'tg:{generation}:{update_id}',f'telegram:{generation}',sender,db=db)
+                        task_id=self.store.enqueue(text,f'tg:{generation}:{update_id}',f'telegram:{generation}',sender,db=db,owner_typed=True)
                         if guided_context_requested:
                             db.execute("UPDATE jobs SET status='awaiting_context' WHERE id=?",(task_id,))
                             guided_context=True
@@ -6136,7 +6251,7 @@ class AgentService:
                     if self.calendar_conversation.clear(connector_owner):calendar_notice+=CALENDAR_DROPPED_NOTICE+'\n\n'
                 self.conversation_focus.record(decision,job['id'])
                 self.present_turn(job,decision=decision)
-                owner=f"channel:{job['channel']}:{job.get('chat_id') or 'local'}"
+                owner=self.settings_owner(job)
                 # A parked request was promised to run once after its
                 # connection, so it is kept unless the owner withdraws it
                 # (#473).  Whether a turn withdraws it is a semantic judgment
@@ -6196,8 +6311,11 @@ class AgentService:
                             label=INTENT_LABELS[INTENT_KNOWLEDGE],what='found no matching saved item')
                 elif decision.intent==INTENT_SETTINGS:
                     work_sources.add('owner-settings')
+                    # #814 review P1: only a message the owner typed confirms or cancels a draft.
                     result=self.conversation_settings_request({'operation':'text','text':decision.argument},
-                                                              owner_id=owner, channel=job['channel'])
+                                                              owner_id=owner, channel=job['channel'],
+                                                              owner_typed=job.get('owner_typed')==1,
+                                                              notify=lambda text,job=job:self.settings_followup(job,text))
                     response=self.settings_response(result)
                 elif decision.intent==INTENT_CALENDAR_CREATE:
                     work_sources.add('owner-calendar')
@@ -6443,6 +6561,8 @@ class AgentService:
                                                           'calendar_owner':self.connector_owner_id(job),
                                                           'preparations':self.preparation_scheduler(job,prompt),
                                                           'location_request':self.location_requester(job),
+                                                          # #814: settings read / confirm-before-apply drafts.
+                                                          'settings':self.settings_tools(job),
                                                           'judgments':self.decision_judge,'secret_redactor':self._redact_known_secrets}
                                                          if cli_browser else {}),
                                                       **self.work_lookup_options(job,prompt,CLI_LOOKUP_HINT))
@@ -6707,6 +6827,8 @@ class AgentService:
                                                       preparations=self.preparation_scheduler(job,prompt),
                                                       # #774: ask the owner for a current position in the paired chat.
                                                       location_request=self.location_requester(job),
+                                                      # #814: owner settings read, and changes the owner confirms.
+                                                      settings=self.settings_tools(job),
                                                       # #657: completion is judged from observations.
                                                       judgments=self.decision_judge,
                                                       # Pilot boundary 1: stored secrets never reach the judgment.
@@ -6927,6 +7049,8 @@ class AgentService:
             if context_approval_needed[0]:self.queue_notification(job,'context_approval_needed')
             # #659: preparations this Work proposed wait for the owner's yes.
             self.queue_preparation_proposal(job)
+            # #814: settings changes this Work drafted wait for the owner's confirm.
+            self.queue_settings_confirmation(job)
             # The result delivery below is the one terminal Telegram bubble.
             # Do not append a second generic completion notification.
             return True
@@ -7027,6 +7151,8 @@ class AgentService:
         self.recover_interrupted_work()
         # #685: a Judgment AI qualification cut off by the restart is requeued once or fails as interrupted.
         self.decision_routes.recover_qualification()
+        # #814 review: a settings draft a restart cut off mid-apply is settled unknown (never re-applied).
+        self.settings_orchestrator.reconcile()
         def work():
             while not self.stop.is_set():
                 # #659: one indexed query; nothing due costs no model or network call.

@@ -124,6 +124,8 @@ The deterministic checks are:
 - **`memory`:** each `expect.memory_any` group appears in a new Memory row or MemoryCandidate.
 - **`preparation`:** a new reminder or preparation exists, when `expect.preparation` is set.
 
+Before the judge prompt leaves the machine, it passes through AgentOS's own deterministic redaction. That is the `SECRET_PATTERN` credential shapes plus the literal values of every stored secret in the seed's and the live profile's `connections.json`. No secret reaches the judge provider.
+
 The **rubric judge** sees the scenario, the owner turns (with any situation notes), the delivered answers and the recorded owner-state changes. It scores each of the scenario's dimensions 2, 1, 0 or null:
 
 | Dimension | Meaning |
@@ -141,7 +143,7 @@ Every failure is `kind:name` (`rubric:context_carry`, `check:not_failed`, `infra
 
 ## Reports
 
-Reports go to `~/.local/share/agentos-evals/reports/<run id>.json` and `.md`. Each run is compared with the previous report:
+Reports go to `~/.local/share/agentos-evals/reports/<run id>.json` and `.md`. Each run is compared with the previous report **of the same cohort**, meaning the same scenario × worker pairs and epochs. A targeted re-run is therefore never compared with a full sweep. A sample that errored before scoring stays in the denominator as `infra:sample_error`. The comparison shows:
 
 - the pass-rate delta;
 - regressions: a check or rubric rate dropping by 10 points or more;

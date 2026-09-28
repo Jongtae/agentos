@@ -5,6 +5,7 @@ Failures are clustered by ``kind:name`` (a rubric dimension, a deterministic
 check or an infrastructure failure), and each report is compared with the
 previous one so a regression or a new cluster stands out.
 """
+import hashlib
 import json
 import time
 from collections import Counter, defaultdict
@@ -16,11 +17,25 @@ REGRESSION_DROP = 0.10
 
 
 def records_from_samples(samples, scorer=SCORER):
-    """Per-run records from Inspect eval-log samples (duck-typed: ``id``, ``epoch``, ``scores``)."""
+    """Per-run records from Inspect eval-log samples (duck-typed: ``id``, ``epoch``, ``scores``).
+
+    A sample that errored before it was scored stays in the denominator as an
+    ``infra:sample_error`` failure, so an outage never improves a pass rate.
+    """
     records = []
     for sample in samples or []:
         score = (getattr(sample, 'scores', None) or {}).get(scorer)
         if score is None:
+            meta = getattr(sample, 'metadata', None) or {}
+            scenario = meta.get('scenario') if isinstance(meta.get('scenario'), dict) else {}
+            error = getattr(sample, 'error', None)
+            reason = str(getattr(error, 'message', None) or error or 'not scored')[:200]
+            records.append({'scenario': scenario.get('id') or str(getattr(sample, 'id', '')).split('@')[0],
+                            'source': scenario.get('source'), 'split': scenario.get('split'),
+                            'worker': meta.get('worker'), 'checks': {}, 'judge_status': 'not_scored',
+                            'failures': [{'kind': 'infra', 'name': 'sample_error', 'reason': reason}],
+                            'sample_id': str(getattr(sample, 'id', '')), 'epoch': getattr(sample, 'epoch', 1),
+                            'value': {'passed': 0.0}})
             continue
         meta = dict(getattr(score, 'metadata', None) or {})
         records.append({**meta, 'sample_id': str(getattr(sample, 'id', '')), 'epoch': getattr(sample, 'epoch', 1),
@@ -69,6 +84,17 @@ def clusters(records):
     return sorted(result, key=lambda row: (-row['count'], row['key']))
 
 
+def cohort(records):
+    """Which population a report measured: its (scenario, worker) pairs and epochs.
+
+    Trends compare only reports of the same cohort, so a targeted re-run of
+    one scenario is never compared with a full sweep.
+    """
+    pairs = sorted({(str(record.get('scenario')), str(record.get('worker'))) for record in records})
+    epochs = max((record.get('epoch') or 1 for record in records), default=0)
+    return hashlib.sha256(json.dumps([pairs, epochs]).encode()).hexdigest()[:12]
+
+
 def aggregate(records, run=None):
     by_worker = defaultdict(list)
     by_scenario = defaultdict(list)
@@ -76,7 +102,7 @@ def aggregate(records, run=None):
         by_worker[record.get('worker') or 'unknown'].append(record)
         by_scenario[record.get('scenario')].append(record)
     judge = Counter(record.get('judge_status') or 'unknown' for record in records)
-    return {'run': dict(run or {}), 'generated_at': time.time(), 'totals': _group(records),
+    return {'run': dict(run or {}), 'cohort': cohort(records), 'generated_at': time.time(), 'totals': _group(records),
             'by_worker': {worker: _group(rows) for worker, rows in sorted(by_worker.items())},
             'scenarios': {scenario: {'runs': len(rows), 'pass_rate': _rate([row['value'].get('passed', 0) for row in rows]),
                                      'source': rows[0].get('source'), 'split': rows[0].get('split')}
@@ -147,22 +173,25 @@ def render_markdown(report):
     return '\n'.join(lines) + '\n'
 
 
-def latest_report(folder):
+def latest_report(folder, of_cohort=None):
+    """The newest report in ``folder``, of ``of_cohort`` when given."""
     folder = Path(folder)
     reports = sorted(folder.glob('*.json')) if folder.is_dir() else []
     for path in reversed(reports):
         try:
-            return json.loads(path.read_text(encoding='utf-8'))
+            data = json.loads(path.read_text(encoding='utf-8'))
         except (OSError, ValueError):
             continue
+        if of_cohort is None or data.get('cohort') == of_cohort:
+            return data
     return None
 
 
 def write_report(records, folder, run):
     """Aggregate, compare with the previous report, write ``<run id>.json`` and ``.md``; returns the paths."""
     folder = Path(folder)
-    previous = latest_report(folder)
     report = aggregate(records, run)
+    previous = latest_report(folder, report['cohort'])
     report['trend'] = compare(report, previous)
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     json_path = folder / f"{run['id']}.json"

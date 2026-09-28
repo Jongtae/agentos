@@ -27,6 +27,7 @@ from inspect_ai.solver import Generate, TaskState, solver
 from agentos_eval import scenarios as scenario_module
 from agentos_eval.budget import JudgeBudget, estimate_tokens
 from agentos_eval.paths import eval_home
+from agentos_eval.redaction import Redactor
 from agentos_eval.runner import WORKERS, run_scenario
 from agentos_eval.sandbox import SandboxPool
 from agentos_eval.scoring import (JUDGE_MAX_TOKENS, JUDGE_SYSTEM, combine, deterministic_checks, judge_prompt,
@@ -74,15 +75,16 @@ def agentos_blackbox(pool, turn_timeout=900, judgment_timeout=300):
 
 
 @scorer(metrics={'*': [mean()]})
-def secretary(judge='grader', budget_path=None):
+def secretary(judge='grader', budget_path=None, seed=None):
     budget = JudgeBudget.from_environ(budget_path or eval_home() / 'judge-budget.json')
+    redact = Redactor.for_seed(seed)
 
     async def score(state: TaskState, target: Target):
         scenario, run = state.metadata['scenario'], state.metadata.get('run') or {'error': 'solver did not run'}
         checks, failures = deterministic_checks(scenario, run)
         judgment, judge_status = None, 'skipped'
         if judge != 'none' and not run.get('error'):
-            prompt = judge_prompt(scenario, run)
+            prompt = redact(judge_prompt(scenario, run))
             reserved = budget.reserve(estimate_tokens(JUDGE_SYSTEM + prompt), JUDGE_MAX_TOKENS)
             if reserved is None:
                 judge_status = 'budget_refused'
@@ -95,9 +97,10 @@ def secretary(judge='grader', budget_path=None):
                     budget.settle(reserved, usage.input_tokens if usage else None, usage.output_tokens if usage else None)
                     judgment = parse_judgment(output.completion, scenario['rubric'])
                     judge_status = 'judged'
-                except ValueError as exc:
+                except Exception as exc:  # noqa: BLE001 - a judge outage must stay in the denominator
                     judge_status = 'judge_error'
-                    failures = [*failures, {'kind': 'infra', 'name': 'judge', 'reason': str(exc)[:200]}]
+                    failures = [*failures, {'kind': 'infra', 'name': 'judge',
+                                            'reason': redact(f'{type(exc).__name__}: {exc}')[:200]}]
         value, metadata = combine(scenario, run, checks, failures, judgment, judge_status)
         explanation = (judgment or {}).get('summary') or '; '.join(f"{row['name']}: {row['reason']}" for row in failures)
         return Score(value=value, answer=(state.output.completion or '')[:500], explanation=explanation or 'ok',
@@ -116,7 +119,7 @@ def agentos_secretary(scenarios='', split='', worker='both', instances=3, seed='
     include_local = str(include_local).lower() not in ('0', 'false', 'no')
     return Task(dataset=dataset(scenarios, split, worker, include_local),
                 solver=agentos_blackbox(pool, int(turn_timeout), int(judgment_timeout)),
-                scorer=secretary('none' if judge == 'none' else 'grader'),
+                scorer=secretary('none' if judge == 'none' else 'grader', seed=Path(seed).expanduser() if seed else None),
                 model='none/none',
                 model_roles=None if judge == 'none' else {'grader': judge},
                 metadata={'worker': worker, 'instances': int(instances), 'seed': bool(seed), 'judge': judge})

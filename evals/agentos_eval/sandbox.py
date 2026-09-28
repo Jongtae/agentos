@@ -95,6 +95,9 @@ def sanitize_database(path):
             db.execute("UPDATE jobs SET status='interrupted' WHERE status IN ('queued','running')")
         if 'preparations' in tables:
             db.execute("UPDATE preparations SET state='cancelled' WHERE state IN ('proposed','scheduled','running')")
+        if 'owner_model_upkeep' in tables:
+            # The owner's own pending upkeep must not run (and call a model) inside every sandbox.
+            db.execute("UPDATE owner_model_upkeep SET state='expired' WHERE state IN ('pending','claimed')")
         if 'telegram_notifications' in tables:
             db.execute("DELETE FROM telegram_notifications WHERE state IN ('queued','sent')")
         db.commit()

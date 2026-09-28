@@ -398,9 +398,15 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(trend['new_clusters'], ['check:not_failed', 'rubric:context_carry'])
         self.assertEqual(report.compare(previous, current)['resolved_clusters'], ['check:not_failed', 'rubric:context_carry'])
 
-    def test_write_report_compares_with_the_previous_file(self):
+    def test_write_report_compares_with_the_previous_report_of_the_same_cohort(self):
         with tempfile.TemporaryDirectory() as folder:
-            report.write_report([record('a', 'codex', True)], folder, {'id': '20260928T0700-aaaaaa'})
+            same = [record('a', 'codex', True), record('b', 'codex', True), record('b', 'claude-code', True),
+                    record('c', 'claude-code', True)]
+            report.write_report(same, folder, {'id': '20260928T0700-aaaaaa'})
+            # A targeted re-run of one scenario is its own cohort: no false regression against the full sweep.
+            _, _, targeted = report.write_report([record('a', 'codex', False)], folder, {'id': '20260928T0800-cccccc'})
+            self.assertIsNone(targeted['trend']['previous_run'])
+            self.assertEqual(targeted['trend']['regressions'], [])
             json_path, md_path, result = report.write_report(self.records(), folder, {'id': '20260928T1900-bbbbbb'})
             self.assertEqual(result['trend']['previous_run'], '20260928T0700-aaaaaa')
             self.assertEqual(json.loads(json_path.read_text())['run']['id'], '20260928T1900-bbbbbb')
@@ -417,10 +423,15 @@ class ReportTest(unittest.TestCase):
             id, epoch, scores = 'a@codex', 2, {'secretary': Score()}
 
         class Unscored:
-            id, epoch, scores = 'b@codex', 1, None
+            id, epoch, scores, error = 'b@claude-code', 1, None, 'RuntimeError: provider down'
+            metadata = {'scenario': {'id': 'b', 'source': 'bundled', 'split': 'dev'}, 'worker': 'claude-code'}
         rows = report.records_from_samples([Sample(), Unscored()])
-        self.assertEqual(rows, [{'scenario': 'a', 'worker': 'codex', 'failures': [], 'sample_id': 'a@codex', 'epoch': 2,
-                                 'value': {'passed': 1.0}}])
+        self.assertEqual(rows[0], {'scenario': 'a', 'worker': 'codex', 'failures': [], 'sample_id': 'a@codex', 'epoch': 2,
+                                   'value': {'passed': 1.0}})
+        # An unscored sample stays in the denominator as an infra failure.
+        self.assertEqual((rows[1]['scenario'], rows[1]['worker'], rows[1]['value'], rows[1]['failures'][0]['name']),
+                         ('b', 'claude-code', {'passed': 0.0}, 'sample_error'))
+        self.assertEqual(report.aggregate(rows)['totals']['pass_rate'], 0.5)
 
 
 class SandboxTest(unittest.TestCase):
@@ -437,6 +448,8 @@ class SandboxTest(unittest.TestCase):
         db.execute('CREATE TABLE config(key TEXT PRIMARY KEY, value TEXT)')
         db.execute('CREATE TABLE jobs(id TEXT, status TEXT)')
         db.execute('CREATE TABLE preparations(id TEXT, state TEXT)')
+        db.execute('CREATE TABLE owner_model_upkeep(job_id TEXT, state TEXT)')
+        db.executemany('INSERT INTO owner_model_upkeep VALUES (?,?)', [('j3', 'pending'), ('j4', 'done')])
         db.executemany('INSERT INTO config VALUES (?,?)', [
             ('telegram', json.dumps({'enabled': True, 'user_id': 1})), ('file_roots', '[{"path": "/Users/o"}]'),
             ('file_workspace', '{}'), ('local_access', 'true')])
@@ -464,6 +477,7 @@ class SandboxTest(unittest.TestCase):
             self.assertEqual(dict(db.execute('SELECT id, status FROM jobs')),
                              {'j1': 'interrupted', 'j2': 'interrupted', 'j3': 'succeeded'})
             self.assertEqual(dict(db.execute('SELECT id, state FROM preparations')), {'p1': 'cancelled', 'p2': 'delivered'})
+            self.assertEqual(dict(db.execute('SELECT job_id, state FROM owner_model_upkeep')), {'j3': 'expired', 'j4': 'done'})
             db.close()
             # The source is untouched.
             source_db = sqlite3.connect(source / 'private' / 'quickstart.db')
@@ -546,6 +560,24 @@ class SandboxTest(unittest.TestCase):
                 sandbox.Sandbox(folder, port=8787).start()
             with self.assertRaises(ValueError):
                 sandbox.SandboxPool(size=0, root=folder)
+
+
+class RedactionTest(unittest.TestCase):
+    def test_judge_prompt_text_loses_stored_secret_values_and_credential_shapes(self):
+        from agentos_eval.redaction import Redactor, secret_values
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / 'private').mkdir()
+            (Path(folder) / 'private' / 'connections.json').write_text(json.dumps({'claude_code_token': 'owner-token-12345',
+                                                                                  'short': 'abc'}))
+            values = secret_values([folder, Path(folder) / 'missing'])
+            self.assertEqual(values, {'owner-token-12345'})
+            redact = Redactor(values)
+            text = redact('내 토큰은 owner-token-12345 이고 키는 sk-abcdefghijklmnop, password: hunter22 야')
+            self.assertNotIn('owner-token-12345', text)
+            self.assertNotIn('sk-abcdefghijklmnop', text)
+            self.assertNotIn('hunter22', text)
+            self.assertIn('[redacted]', text)
+            self.assertEqual(redact('점심은 김치찌개'), '점심은 김치찌개')
 
 
 class CliTest(unittest.TestCase):

@@ -22,7 +22,7 @@ from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent import preparations as prep
 from personal_agent.settings_orchestrator import (BUSY_MESSAGE, CREDENTIAL_VALUE_MESSAGE, FOLLOW_REQUESTED_MESSAGE,
-                                                  NOT_OWNER_TYPED_MESSAGE, STUCK_APPLYING_SECONDS, SettingsError,
+                                                  NOT_OWNER_TYPED_MESSAGE, SettingsError,
                                                   canonical_timezone)
 
 CHAT, GENERATION = 77, 'gen-1'
@@ -484,18 +484,88 @@ class ReviewRemediation(ConversationConfirmation):
         self.assertEqual(len(followup), 1)
         self.assertIn('바꿨습니다', followup[0]['text'])
 
-    def test_p3_stuck_applying_is_failed_with_an_audit_row(self):
-        draft = self.draft('current_context', 'enabled', 'on')
+    def test_a_draft_cut_off_mid_apply_by_a_restart_is_in_doubt_not_failed(self):
+        """Codex P2 (restart): the setter may or may not have committed; the owner is told to check."""
+        draft = self.draft('current_context', 'timezone', 'Asia/Seoul')
         rows = self.store.config('settings_change_drafts')
         rows[draft['draft_id']].update(state='applying', applying_at=self.clock[0])
         self.store.put('settings_change_drafts', rows)
+        # A restart: a new service over the same store starts with nothing in flight.
+        restarted = AgentService(self.store, ModelAdapter(self._model), self._telegram)
+        restarted.settings_orchestrator.now = lambda: self.clock[0]
+        restarted.settings_orchestrator.reconcile()
+        row = self.store.config('settings_change_drafts')[draft['draft_id']]
+        self.assertEqual(row['state'], 'unknown')
+        audit = self.store.config('settings_audit')[-1]
+        self.assertEqual((audit['terminal'], audit['error_class']), ('unknown', 'interrupted'))
+        read = restarted.settings_orchestrator.read('owner')
+        self.assertIn('현재 값을 확인', read['response'])
+        self.assertIn('시간대', read['response'])
+        with self.assertRaisesRegex(SettingsError, '알 수 없습니다'):
+            restarted.settings_orchestrator.confirm('owner', 'http', draft['draft_id'], draft['digest'])
+        self.assertEqual(self.context()['timezone'], '', 'an in-doubt draft is never re-applied')
+
+    def test_an_in_process_apply_is_not_mistaken_for_an_interrupted_one(self):
+        started, release = threading.Event(), threading.Event()
+        original = self.service.set_current_context
+        def slow(body):
+            started.set(); release.wait(5); return original(body)
+        self.service.set_current_context = slow
+        draft = self.draft('current_context', 'enabled', 'on')
+        worker = threading.Thread(target=self.settings.confirm, args=('owner', 'http', draft['draft_id'], draft['digest']))
+        worker.start()
+        self.assertTrue(started.wait(5))
         self.settings.read('owner')
         self.assertEqual(self.store.config('settings_change_drafts')[draft['draft_id']]['state'], 'applying')
-        self.clock[0] += STUCK_APPLYING_SECONDS + 1
-        self.settings.read('owner')
-        self.assertEqual(self.store.config('settings_change_drafts')[draft['draft_id']]['state'], 'failed')
-        audit = self.store.config('settings_audit')[-1]
-        self.assertEqual((audit['terminal'], audit['error_class']), ('failed', 'stuck-applying'))
+        release.set(); worker.join(5)
+        self.assertEqual(self.store.config('settings_change_drafts')[draft['draft_id']]['state'], 'applied')
+
+    def test_concurrent_confirms_of_one_setting_are_compare_and_apply(self):
+        """Codex P2: two drafts with the same ``before``; the second is refused as stale, never applied."""
+        first = self.draft('current_context', 'timezone', 'Asia/Seoul')
+        second = self.draft('current_context', 'timezone', 'Europe/Paris')
+        self.assertEqual(first['before'], second['before'])
+        entered, release = threading.Event(), threading.Event()
+        original = self.service.set_current_context
+        def slow(body):
+            entered.set(); release.wait(5); return original(body)
+        self.service.set_current_context = slow
+        outcomes = {}
+        def confirm(draft):
+            try:outcomes[draft['draft_id']] = self.settings.confirm('owner', 'http', draft['draft_id'], draft['digest'])['state']
+            except SettingsError as exc:outcomes[draft['draft_id']] = str(exc)
+        one = threading.Thread(target=confirm, args=(first,)); one.start()
+        self.assertTrue(entered.wait(5))
+        two = threading.Thread(target=confirm, args=(second,)); two.start()
+        two.join(0.3)
+        self.assertTrue(two.is_alive(), 'the second compare-and-apply waits for the first')
+        release.set(); one.join(5); two.join(5)
+        self.assertEqual(outcomes[first['draft_id']], 'applied')
+        self.assertIn('바뀌었', outcomes[second['draft_id']])
+        self.assertEqual(self.context()['timezone'], 'Asia/Seoul')
+        states = {key: row['state'] for key, row in self.store.config('settings_change_drafts').items()}
+        self.assertEqual((states[first['draft_id']], states[second['draft_id']]), ('applied', 'failed'))
+
+    def test_the_off_thread_apply_holds_the_category_lock_until_it_commits(self):
+        self.service.main_ai.save_key({'provider': 'openai', 'key': OPENAI_KEY})
+        self.service.activate_main_ai({'route': 'openai'})
+        self.service.main_ai.save_key({'provider': 'openrouter', 'key': OPENROUTER_KEY})
+        self.service.activate_main_ai({'route': 'openrouter'})
+        started, release = self.slow_openai_probe()
+        route = self.draft('main_ai', 'route', 'openai')
+        again = self.draft('main_ai', 'route', 'openai')
+        self.settings.confirm('owner', 'http', route['draft_id'], route['digest'], notify=lambda text: None)
+        self.assertTrue(started.wait(5))
+        waiter = {}
+        def confirm_second():
+            try:waiter['state'] = self.settings.confirm('owner', 'http', again['draft_id'], again['digest'])['state']
+            except SettingsError as exc:waiter['state'] = str(exc)
+        second = threading.Thread(target=confirm_second); second.start()
+        second.join(0.3)
+        self.assertTrue(second.is_alive())
+        release.set(); self.settings.thread.join(5); second.join(10)
+        self.assertEqual(self.service.main_ai.current(), 'openai')
+        self.assertIn('바뀌었', waiter['state'], 'refused as stale after the first committed')
 
     def test_p3_non_string_fields_are_settings_errors(self):
         for intent in ({'category': ['main_ai'], 'setting': 'route', 'value': 'openai'},

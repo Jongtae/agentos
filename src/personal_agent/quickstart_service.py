@@ -6954,6 +6954,8 @@ class AgentService:
         self.recover_interrupted_work()
         # #685: a Judgment AI qualification cut off by the restart is requeued once or fails as interrupted.
         self.decision_routes.recover_qualification()
+        # #814 review: a settings draft a restart cut off mid-apply is settled unknown (never re-applied).
+        self.settings_orchestrator.reconcile()
         def work():
             while not self.stop.is_set():
                 # #659: one indexed query; nothing due costs no model or network call.

@@ -760,6 +760,22 @@ class CliNativeSearch(unittest.TestCase):
         self.assertEqual((second['action'], [row['url'] for row in second['results']]),
                          ('open_page', ['https://weather.example/seoul']))
 
+    def test_a_real_codex_exec_turn_records_the_query_and_no_invented_source(self):
+        """#854: the captured codex-cli 0.153.4 stream (sanitized fixture) exposes no URL in the search item.
+
+        The only URL of the turn is markdown prose in the final agent_message:
+        the model's own claim, never recorded as a reported source.
+        """
+        from pathlib import Path
+        raw = (Path(__file__).parent / 'fixtures' / 'codex_exec_web_search.jsonl').read_text()
+        self.assertIn('https://time.example/zone/seoul', raw, 'the fixture carries the prose link that must not be recorded')
+        meta = cli_metadata('codex', raw)
+        self.assertEqual(len(meta['native_searches']), 1)
+        search = meta['native_searches'][0]
+        self.assertEqual((search['id'], search['action'], search['queries'], search['results'], search['state']),
+                         ('item_1', 'search', ['current UTC offset Asia/Seoul'], [], 'succeeded'))
+        self.assertNotIn('time.example', json.dumps(meta['native_searches']))
+
     def test_claude_stream_websearch_results_and_a_refusal_are_parsed(self):
         lines = [
             {'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'id': 'tu_1', 'name': 'WebSearch',

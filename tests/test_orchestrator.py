@@ -2084,3 +2084,28 @@ class CliHostActions(unittest.TestCase):
         self.assertEqual(AgentService.cli_host_actions(cli_metadata('claude-code', claude + '\n' + result)), ('Bash',))
         self.assertIsNone(AgentService.cli_host_actions(cli_metadata('claude-code', claude)), 'no result record')
 
+
+
+class CatalogueMatchesOffered(Harness):
+    """#812 (Work 33d1d85f): a plan never briefs a context-gated tool the turn does not offer."""
+
+    def test_a_package_alias_of_a_gated_action_is_hidden_on_every_worker(self):
+        """#812 review: gating follows the host action, so an alias is hidden too, on the API workers as well."""
+        from personal_agent.orchestrator import worker_catalogue
+        packages = self.service.runtime_packages()
+        alias = {'id': 'remember_where', 'host_action': 'propose_current_state', 'mode': 'write'}
+        with mock.patch.object(self.service, 'runtime_packages',
+                               return_value=[*packages, {'id': 'pkg', 'enabled': True, 'tools': [alias]}]):
+            catalogue = worker_catalogue(self.service)
+            for worker in catalogue.workers:
+                with self.subTest(worker=worker['id']):
+                    self.assertNotIn('remember_where', worker['tools'])
+                    self.assertNotIn('propose_current_state', worker['tools'])
+            self.service.context_observations.set_controls({'enabled': True})
+            self.assertIn('remember_where', worker_catalogue(self.service).worker('openai')['tools'])
+
+    def test_propose_current_state_is_listed_only_while_current_context_is_on(self):
+        from personal_agent.orchestrator import worker_catalogue
+        self.assertNotIn('propose_current_state', worker_catalogue(self.service).worker('codex')['tools'])
+        self.service.context_observations.set_controls({'enabled': True})
+        self.assertIn('propose_current_state', worker_catalogue(self.service).worker('codex')['tools'])

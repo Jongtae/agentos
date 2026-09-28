@@ -291,6 +291,13 @@ def worker_catalogue(service):
     host_profile = profile if profile in HOST_CLI_PROFILES else STRICT_PROFILE
     private = private_read_actions()
     package_tools = sorted({tool['id'] for package in service.runtime_packages() for tool in package['tools']})
+    host_action = {tool['id']: tool.get('host_action') or tool['id']
+                   for package in service.runtime_packages() for tool in package['tools']}
+
+    def offered_now(tools):
+        # #812: a context-gated host action (propose_current_state, or a package alias
+        # of it) is hidden while current context is off, as ``Capabilities.offered_tools``.
+        return [tool for tool in tools if context_on or host_action.get(tool, tool) not in CONTEXT_GATED_ACTIONS]
     workers, routes = [], {}
     for row in status.get('routes') or ():
         route_id = row['id']
@@ -349,7 +356,7 @@ def worker_catalogue(service):
         # #812: the catalogue lists only what a turn is actually offered: a context-gated
         # action (propose_current_state) is hidden while the owner has current context off
         # (``Capabilities.offered_tools``), so a plan never briefs a tool the worker lacks.
-        tools = [tool for tool in tools if context_on or tool not in CONTEXT_GATED_ACTIONS]
+        tools = offered_now(tools)
         worker['tools'] = sorted(dict.fromkeys(tools))
         worker['private_tools'] = sorted(set(worker['tools']) & private)
         worker['model_tiers'] = {model: model_tier(route_id, model, RANKED_MODELS) for model in worker['models']}
@@ -364,7 +371,7 @@ def worker_catalogue(service):
                         'destination': str(config.get('endpoint') or ''), 'default': True, 'native_search': False,
                         'browser': False, **KIND_TIERS[KIND_API], 'available': ready, 'reason': '' if ready else 'not_verified',
                         'default_model': str(config.get('model') or ''), 'models': [str(config.get('model') or '')],
-                        'model_tiers': {}, 'tools': [tool for tool in package_tools if tool not in BROWSER_ACTIONS],
+                        'model_tiers': {}, 'tools': offered_now([tool for tool in package_tools if tool not in BROWSER_ACTIONS]),
                         'private_tools': []})
         workers[-1]['private_tools'] = sorted(set(workers[-1]['tools']) & private)
         routes['other'] = {'kind': KIND_API, 'config': dict(config), 'key': key, 'test': None}

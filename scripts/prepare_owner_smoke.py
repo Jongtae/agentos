@@ -422,10 +422,14 @@ def record_probe(data: Path, work: str, probe: str, recorded_at: datetime.dateti
         # A direct-route Work keeps its exact shape (orchestrator rows stay in other_events).
         bridge_steps, attempts, verdict = [], [], None
     goal_judgment = (main or {}).get("judgment")
-    if cli_route and goal_judgment is None and verdict:
+    # An orchestrated CLI or mixed-route Work: the orchestrator's final
+    # verdict is the Work's judgment; a direct attempt's own conclusion
+    # (``finish``) stays as that attempt's evidence.
+    final_by_verdict = cli_route and verdict is not None
+    if final_by_verdict:
         goal_judgment = verdict["outcome"]
     checks = {
-        "succeeded_iff_judged_done_claim": (None if cli_route and not tool_calls
+        "succeeded_iff_judged_done_claim": (None if cli_route and (final_by_verdict or not tool_calls)
                                             else (outcome == "succeeded") == judged_done or not tool_calls),
         "cited_refs_all_succeeded": cited_ok if finish and finish["status"] == "done" else None,
         "repeat_paths_refused": sum(1 for row in tool_calls + bridge_steps if row.get("code") == "repeat_path"),
@@ -447,7 +451,9 @@ def record_probe(data: Path, work: str, probe: str, recorded_at: datetime.dateti
         "models": models,
         "tool_calls": tool_calls,
         **({"bridge_steps": bridge_steps} if bridge_steps else {}),
-        **({"orchestration": {"attempts": attempts, "verdict": verdict}} if attempts else {}),
+        **({"orchestration": {"attempts": attempts, "verdict": verdict,
+                              **({"direct_attempt_judgment": main.get("judgment")}
+                                 if final_by_verdict and main is not None else {})}} if attempts else {}),
         "alternatives_tried": (main or {}).get("alternatives_tried"),
         "nudges": (main or {}).get("nudges"),
         "claim_rejections": rejections,

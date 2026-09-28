@@ -419,6 +419,23 @@ class ProbeRecordCliRouteTests(unittest.TestCase):
         self.assertEqual(record['goal_judgment'], 'not_reached')
         self.assertFalse(record['checks']['succeeded_iff_verdict_reached'])
 
+    def test_a_mixed_route_work_is_judged_by_the_final_verdict(self):
+        """#788 review: a direct attempt judged ``no`` then a CLI attempt that
+        reached the goal; the final verdict, not the earlier direct
+        conclusion, is the Work's judgment."""
+        with self.store.db() as db:
+            first = db.execute("SELECT MIN(id) FROM tool_events WHERE job_id=?", (self.job,)).fetchone()[0]
+            db.execute('INSERT INTO tool_events(id,job_id,tool,status,detail,created) VALUES (?,?,?,?,?,?)',
+                       (first - 1, self.job, 'model', 'concluded',
+                        json.dumps({'scope': 'main', 'outcome': 'partial', 'judgment': 'no',
+                                    'claim': {'status': 'done', 'evidence_refs': []}}), time.time()))
+        record = self.record()
+        self.assertEqual(record['finish']['status'], 'done')
+        self.assertEqual(record['goal_judgment'], 'reached')
+        self.assertEqual(record['orchestration']['direct_attempt_judgment'], 'no')
+        self.assertIsNone(record['checks']['succeeded_iff_judged_done_claim'])
+        self.assertTrue(record['checks']['succeeded_iff_verdict_reached'])
+
     def test_omit_text_hashes_step_titles_url_paths_status_text_and_reasons(self):
         record = self.record(omit_text=True)
         text = json.dumps(record, ensure_ascii=False)

@@ -227,6 +227,55 @@ console.log(JSON.stringify({checks:40}));
         # #619: both OpenRouter completion paths only save the key and re-read.
         self.assertEqual(app.count("await openRouterSaved()") + app.count("void openRouterSaved()"), 2)
 
+    def test_changed_settings_destination_starts_at_top_without_erasing_caller_scroll(self):
+        # #783: exercise production navigate(), rather than a duplicate navigation model.
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is required for the navigation interaction check")
+        script = r"""
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const app=fs.readFileSync(process.argv[1],'utf8');
+const start=app.indexOf('function navigate('),end=app.indexOf('function viewShown(',start);
+assert(start>=0&&end>start,'the production navigation function is available');
+const scrolls=[],historyCalls=[],events=[];
+const location={hash:'#settings/external'};
+const ctx={activeView:'settings',activeSettings:'external',activeItem:{id:'previous'},location,
+ window:{scrollY:740,scrollTo(x,y){scrolls.push([x,y]);this.scrollY=y;events.push('scroll:'+y);}},
+ history:Object.fromEntries(['pushState','replaceState'].map(method=>[method,(state,title,hash)=>{historyCalls.push([method,state,title,hash]);location.hash=hash;events.push(method);} ])),
+ renderNavigation(){events.push('render');},viewShown(){events.push('shown');}};
+vm.createContext(ctx);vm.runInContext(app.slice(start,end),ctx);
+ctx.navigate('settings','privacy');
+assert.deepEqual(scrolls,[[0,0]],'a changed settings pane starts at the primary controls');
+assert.equal(ctx.window.scrollY,0);assert.equal(ctx.activeSettings,'privacy');assert.equal(ctx.activeItem,null);
+assert.deepEqual(historyCalls,[['pushState',null,'','#settings/privacy']]);
+assert(events.indexOf('render')<events.indexOf('scroll:0'),'show the destination before scrolling it');
+
+ctx.window.scrollY=320;ctx.navigate('settings','privacy');ctx.navigate('settings');
+assert.equal(scrolls.length,1,'selecting the same destination preserves its current scroll');
+assert.equal(ctx.window.scrollY,320);assert.equal(historyCalls.length,1,'unchanged hashes do not add history');
+
+ctx.navigate('tasks');
+assert.equal(ctx.activeView,'tasks');assert.equal(ctx.window.scrollY,0);
+assert.deepEqual(historyCalls.at(-1),['pushState',null,'','#tasks']);
+const beforeProject=scrolls.length;
+ctx.navigate('settings','files');ctx.window.scrollTo(0,560);
+assert.deepEqual(scrolls.slice(beforeProject),[[0,0],[0,560]],'a Work/project caller may scroll to its target after navigation');
+assert.equal(ctx.window.scrollY,560);assert.equal(ctx.activeSettings,'files');
+assert.deepEqual(historyCalls.at(-1),['pushState',null,'','#settings/files']);
+
+ctx.navigate('settings','ai',{replace:true});
+assert.deepEqual(historyCalls.at(-1),['replaceState',null,'','#settings/ai'],'replacement history remains explicit');
+const historyCount=historyCalls.length,scrollCount=scrolls.length;
+ctx.navigate('settings','ai',{replace:true});ctx.navigate('item');
+assert.equal(historyCalls.length,historyCount);assert.equal(scrolls.length,scrollCount);
+assert.equal(ctx.activeView,'settings');assert.equal(ctx.activeSettings,'ai','item navigation stays on its dedicated path');
+"""
+        result = subprocess.run(
+            [node, "-e", script, str(ROOT / 'src/personal_agent/web/app.js')],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_project_detail_and_result_save_actions_remain_available(self):
         app = (ROOT / 'src/personal_agent/web/app.js').read_text()
         html = (ROOT / 'src/personal_agent/web/index.html').read_text()

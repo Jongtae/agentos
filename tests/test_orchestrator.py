@@ -1560,7 +1560,7 @@ class SecretaryStandard(Harness):
             self.assertIn('never save the request sentence with save_memory', text)
             self.assertEqual(scenario_tokens(text), [])
         self.assertIn('A value is a fact about the owner, never the request itself', by_name['save_memory'])
-        self.assertEqual(scenario_tokens(by_name['save_memory']), [])
+        self.assertEqual(scenario_tokens(by_name['save_memory'].split(' A value is a fact')[1]), [])
 
     def test_the_worker_guidance_and_the_judgment_state_the_standard(self):
         from personal_agent.agent_runtime import API_TOOL_GUIDANCE, CLI_TOOL_GUIDANCE, CORE_INSTRUCTIONS

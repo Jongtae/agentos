@@ -57,7 +57,7 @@ def _group(records):
         for name, ok in (record.get('checks') or {}).items():
             checks[name].append(1.0 if ok else 0.0)
         for key, value in record['value'].items():
-            if key.startswith('rubric_') and key != 'rubric_mean':
+            if key.startswith('rubric_') and key != 'rubric_mean' and value == value:
                 rubric[key[len('rubric_'):]].append(value)
     return {'runs': runs, 'passed': passed, 'pass_rate': _rate([record['value'].get('passed', 0) for record in records]),
             'checks': {name: {'n': len(values), 'pass_rate': _rate(values)} for name, values in sorted(checks.items())},

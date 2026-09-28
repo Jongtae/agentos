@@ -13,6 +13,7 @@ deterministic check or an infrastructure failure), so twenty scenarios that
 fail for one reason show up as one cluster, not twenty cases.
 """
 import json
+import math
 import re
 
 from .scenarios import RUBRIC
@@ -153,6 +154,9 @@ def rubric_failures(judgment):
     return rows
 
 
+CHECK_NAMES = ('delivered', 'not_failed', 'memory', 'preparation')
+
+
 def combine(scenario, run, checks, failures, judgment=None, judge_status='skipped'):
     """The score value (all floats, for Inspect) and the metadata the report reads."""
     value = {f'check_{name}': 1.0 if ok else 0.0 for name, ok in checks.items()}
@@ -163,7 +167,11 @@ def combine(scenario, run, checks, failures, judgment=None, judge_status='skippe
         failures = [*failures, *rubric_failures(judgment)]
     rubric_scores = [value[key] for key in value if key.startswith('rubric_')]
     value['checks_pass'] = 1.0 if checks and all(checks.values()) else 0.0
-    value['rubric_mean'] = sum(rubric_scores) / len(rubric_scores) if rubric_scores else 0.0
+    value['rubric_mean'] = sum(rubric_scores) / len(rubric_scores) if rubric_scores else math.nan
+    # Inspect's per-key metrics need every score to carry the same keys; a key that
+    # does not apply to this scenario is NaN, which Inspect counts as unscored.
+    for key in [f'check_{name}' for name in CHECK_NAMES] + [f'rubric_{dim}' for dim in RUBRIC]:
+        value.setdefault(key, math.nan)
     value['passed'] = 1.0 if value['checks_pass'] and not failures else 0.0
     metadata = {'scenario': scenario['id'], 'source': scenario.get('source', 'bundled'), 'split': scenario['split'],
                 'worker': run.get('worker'), 'checks': checks, 'failures': failures, 'judge_status': judge_status,

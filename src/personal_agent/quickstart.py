@@ -27,7 +27,7 @@ from .quickstart_store import QuickStore
 from .calendar import CalendarConnector
 from .calendar_oauth import CalendarOAuth, EncryptedCalendarSecretStore, calendar_transport
 from .google_calendar import GoogleCalendar
-from .quickstart_service import AgentService, CALENDAR_CONNECT_PATH, GMAIL_CONNECT_PATH, LOCAL_ADDRESS_HOST
+from .quickstart_service import AgentService, CALENDAR_CONNECT_PATH, GMAIL_CONNECT_PATH, LOCAL_ADDRESS_HOST, OwnerLocalRequired
 from .subscription_engines import SubscriptionEngines
 from .conversation_handoff import ConversationHandoffError, local_refusal_text
 from .plugins import PluginRegistry
@@ -848,8 +848,16 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                         return self.reply(200,handler(body))
                     except ConversationHandoffError as exc:
                         return self.reply(409,{'error':local_refusal_text(exc.reason),'reason':exc.reason})
-                if path=='/api/files/roots':return self.reply(200,service.save_roots(body))
-                if path=='/api/file-workspace':return self.reply(200,service.configure_file_workspace(body))
+                if path in ('/api/files/roots','/api/file-workspace'):
+                    # #779: adding, replacing or widening a Mac folder from
+                    # Settings needs this Mac, as #505's folder approval does.
+                    # Removing a folder only reduces authority, so any owner
+                    # session may, like declining a folder request.
+                    save=service.save_roots if path=='/api/files/roots' else service.configure_file_workspace
+                    try:
+                        return self.reply(200,save(body,local_surface=self.owner_local_surface()))
+                    except OwnerLocalRequired as exc:
+                        return self.reply(403,{'error':str(exc),'reason':exc.reason})
                 if path=='/api/context-inbox/config':return self.reply(200,service.context_inbox().configure(body))
                 if path=='/api/context-inbox/capture':return self.reply(200,service.context_inbox().capture(body))
                 if path=='/api/context-inbox/delete':return self.reply(200,service.context_inbox().delete(body.get('id')))

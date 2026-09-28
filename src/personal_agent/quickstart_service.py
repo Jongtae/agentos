@@ -86,6 +86,19 @@ LOCAL_DOCUMENT_APPROVAL_TEXT=('폴더를 허용한 방금 요청을 계속하려
 LOCAL_KEPT_WORKSPACE_TEXT=('설정에서 이미 결과 저장 폴더가 연결되어 있어 선택한 폴더로 바꾸지 않았습니다. '
                            '기존 결과 저장 폴더로 방금 요청을 이어서 처리합니다.')
 LOCAL_DOCUMENT_RESUMED_TEXT='문서 공유를 승인했습니다. 폴더를 허용한 요청을 한 번만 이어서 처리합니다.'
+#: #779: the Settings folder routes' "this Mac only" refusal, in the pattern of
+#: the #505 folder-request refusal.  The web UI keys its translation on it.
+SETTINGS_FOLDER_LOCAL_TEXT=('Mac에서 계속: 폴더 추가와 변경은 이 Mac에서 AgentOS를 열어 진행합니다. '
+                            '연결된 폴더를 빼는 것은 여기서도 할 수 있습니다.')
+
+
+class OwnerLocalRequired(Exception):
+    """A Settings folder change that adds or widens authority, asked off this Mac (#779)."""
+
+    reason='owner_local_surface'
+
+    def __init__(self):
+        super().__init__(SETTINGS_FOLDER_LOCAL_TEXT)
 
 LOG=logging.getLogger('personal_agent.service')
 
@@ -2137,8 +2150,26 @@ class AgentService:
                     and result.get('fingerprint')==self.model_fingerprint(config)
                     and isinstance(result.get('time'),(int,float)))
 
-    def save_roots(self, body):
-        from pathlib import Path
+    def save_roots(self, body, local_surface=True):
+        """Replace the Settings read-folder list.
+
+        ``local_surface`` is False for an owner session that is not this Mac
+        reached directly (#779).  Such a session may only keep a subset of the
+        stored folders, exactly as stored: removing a folder reduces authority,
+        like declining a folder request.  A new, replaced or re-spelled path
+        raises ``OwnerLocalRequired`` before anything is written.  The check and
+        the write share the service lock, so a concurrent removal on the Mac
+        cannot turn a remote "keep" back into an add.
+        """
+        with self.lock:
+            if not local_surface:
+                paths=body.get('paths') if isinstance(body,dict) else None
+                stored={root.get('path') for root in self.store.config('file_roots',[]) if isinstance(root,dict)}
+                if not isinstance(paths,list) or not all(isinstance(p,str) and p in stored for p in paths):
+                    raise OwnerLocalRequired()
+            return self._save_roots(body)
+
+    def _save_roots(self, body):
         paths=body.get('paths')
         if not isinstance(paths,list) or len(paths)>8 or any(not isinstance(p,str) for p in paths):raise ValueError('폴더는 최대 8개까지 연결할 수 있습니다.')
         roots=[];stored={root.get('path'):root for root in self.store.config('file_roots',[])}
@@ -2155,12 +2186,27 @@ class AgentService:
         self.store.put('document_sharing',{})
         return {'roots':[{**root,'blocked':folder_grants.blocked(root['path'],self.store)} for root in roots]}
 
-    def configure_file_workspace(self, body):
+    def configure_file_workspace(self, body, local_surface=True):
+        """Replace the reference folders and the result folder.
+
+        Off this Mac (#779) only a removal is accepted: the same result folder,
+        exactly as stored, and a subset of the stored reference folders.
+        Setting or changing the result folder, or adding a reference, raises
+        ``OwnerLocalRequired`` before anything is written.
+        """
         if not isinstance(body,dict): raise ValueError('파일 작업공간 정보를 확인하세요.')
         files=FileWorkspace(self.store)
-        files.configure(body.get('references',[]),body.get('workspace',''))
-        self.store.put('document_sharing',{})
-        return files.projection()
+        with self.lock:
+            if not local_surface:
+                status=files.status()
+                stored={ref.get('path') for ref in status.get('references',[]) if isinstance(ref,dict)}
+                references=body.get('references')
+                if not (isinstance(references,list) and all(isinstance(p,str) and p in stored for p in references)
+                        and status.get('workspace') and body.get('workspace')==status.get('workspace')):
+                    raise OwnerLocalRequired()
+            files.configure(body.get('references',[]),body.get('workspace',''))
+            self.store.put('document_sharing',{})
+            return files.projection()
 
     def record_work_sources(self, job_id, labels):
         """Widen one Work's durable source record (#605); never narrows it.

@@ -28,7 +28,7 @@ from personal_agent.file_workspace import FileWorkspace
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart import make_handler
 from personal_agent.quickstart_service import (LOCAL_DOCUMENT_APPROVAL_TEXT, LOCAL_DOCUMENT_RESUMED_TEXT, LOCAL_KEPT_WORKSPACE_TEXT,
-                                              AgentService, GMAIL_CONNECT_PATH)
+                                              SETTINGS_FOLDER_LOCAL_TEXT, AgentService, GMAIL_CONNECT_PATH)
 from personal_agent.quickstart_store import QuickStore
 
 CHAT = 505
@@ -911,6 +911,80 @@ class HttpSurfaceTests(HandoffTestCase):
         self.assertTrue(self.store.claimed())
         self.assertTrue(self.store.config('local_access'))
 
+    #: #779: an owner session that is not this Mac reached directly.
+    OFF_MAC = (('public tunnel host', {'Host': MOBILE_HOST}),
+               ('X-Forwarded-For', {'X-Forwarded-For': '198.51.100.7'}),
+               ('CF-Connecting-IP', {'CF-Connecting-IP': '198.51.100.7'}),
+               ('Forwarded', {'Forwarded': 'for=198.51.100.7;proto=https'}))
+
+    def test_settings_folder_routes_add_only_on_this_mac_but_remove_anywhere(self):
+        base, session = self.serve()
+        research, notes, results, extra = (self.folder(name) for name in ('research', 'notes', 'results', 'extra'))
+        # Direct loopback on the Mac keeps today's behaviour for both routes.
+        status, reply = self.call(base, '/api/files/roots', session, {'paths': [str(research), str(notes)]})
+        self.assertEqual(status, 200, reply)
+        status, reply = self.call(base, '/api/file-workspace', session,
+                                  {'references': [str(research), str(notes)], 'workspace': str(results)})
+        self.assertEqual(status, 200, reply)
+        roots = self.roots()
+        workspace = FileWorkspace(self.store).status()
+        refs = [ref['path'] for ref in workspace['references']]
+        self.assertEqual(len(roots), 2)
+        self.assertEqual(len(refs), 2)
+        sharing = {'approved': True, 'marker': 'unchanged'}
+        self.store.put('document_sharing', sharing)
+
+        widening_roots = ({'paths': [*roots, str(extra)]},       # add
+                          {'paths': [roots[0], str(extra)]},      # replace
+                          {'paths': [str(extra)]},                # replace all
+                          {'paths': [roots[0] + '/', roots[1]]},  # a re-spelled path is not "kept"
+                          {'paths': 'not-a-list'})
+        widening_workspace = ({'references': [*refs, str(extra)], 'workspace': workspace['workspace']},  # add
+                              {'references': refs, 'workspace': str(extra)},                           # change
+                              {'references': [refs[0]], 'workspace': str(extra)},                      # change
+                              {'references': [str(extra)], 'workspace': workspace['workspace']},       # replace
+                              {'references': refs})                                                    # no result folder
+        host = base.split('//', 1)[1]
+        for label, extra_headers in self.OFF_MAC:
+            headers = {**session, 'Host': host, **extra_headers}
+            for path, bodies in (('/api/files/roots', widening_roots), ('/api/file-workspace', widening_workspace)):
+                for body in bodies:
+                    with self.subTest(via=label, path=path, body=body):
+                        status, reply = self.call(base, path, headers, body)
+                        self.assertEqual(status, 403, reply)
+                        self.assertEqual(reply['reason'], 'owner_local_surface')
+                        self.assertIn('Mac에서 계속', reply['error'])
+                        # No Grant change and nothing written.
+                        self.assertEqual(self.roots(), roots)
+                        self.assertEqual(FileWorkspace(self.store).status(), workspace)
+                        self.assertEqual(self.store.config('document_sharing'), sharing)
+
+        # Removing a folder only reduces authority, so any owner session may.
+        mobile = {**session, 'Host': MOBILE_HOST}
+        status, reply = self.call(base, '/api/files/roots', mobile, {'paths': [roots[1]]})
+        self.assertEqual(status, 200, reply)
+        self.assertEqual(self.roots(), [roots[1]])
+        status, reply = self.call(base, '/api/file-workspace', mobile,
+                                  {'references': [refs[1]], 'workspace': workspace['workspace']})
+        self.assertEqual(status, 200, reply)
+        self.assertEqual([ref['path'] for ref in FileWorkspace(self.store).status()['references']], [refs[1]])
+        self.assertEqual(FileWorkspace(self.store).status()['workspace'], workspace['workspace'])
+        relayed = {**session, 'Host': host, 'X-Forwarded-For': '198.51.100.7'}
+        status, reply = self.call(base, '/api/files/roots', relayed, {'paths': []})
+        self.assertEqual((status, self.roots()), (200, []))
+        # A folder removed remotely cannot come back remotely.
+        status, reply = self.call(base, '/api/files/roots', relayed, {'paths': [roots[1]]})
+        self.assertEqual(status, 403, reply)
+        self.assertEqual(self.roots(), [])
+
+        # The Mac can still add, replace and set the result folder.
+        status, reply = self.call(base, '/api/files/roots', session, {'paths': [str(extra)]})
+        self.assertEqual((status, self.roots()), (200, [str(extra.resolve())]))
+        status, reply = self.call(base, '/api/file-workspace', session,
+                                  {'references': [str(research)], 'workspace': str(notes)})
+        self.assertEqual(status, 200, reply)
+        self.assertEqual(FileWorkspace(self.store).status()['workspace'], str(notes.resolve()))
+
     def test_an_unauthenticated_caller_is_refused(self):
         self.park_read()
         base, _session = self.serve()
@@ -938,6 +1012,14 @@ class FilesPaneTests(unittest.TestCase):
         self.assertIn('void loadFolderRequests();', app)
         # A remote (tunnel/phone) surface offers only "continue on the Mac" and decline.
         self.assertIn("if(!data.local_surface){actions.append(folderRequestDeny(request))", app)
+
+    def test_the_settings_folder_refusal_is_translated_in_every_locale(self):
+        # #779: the UI translates the server's refusal by its Korean text, so
+        # the two must not drift apart.
+        app = (self.WEB / 'app.js').read_text(encoding='utf-8')
+        self.assertEqual(app.count(json.dumps(SETTINGS_FOLDER_LOCAL_TEXT, ensure_ascii=False) + ':'), 3)
+        self.assertIn("folderSaveRefused('roots-feedback',error)", app)
+        self.assertIn("folderSaveRefused('file-workspace-feedback',error)", app)
 
 
 if __name__ == '__main__':

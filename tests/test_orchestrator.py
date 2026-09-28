@@ -1550,7 +1550,7 @@ class SecretaryStandard(Harness):
 
     def test_the_watch_and_memory_tool_descriptions_state_the_standing_wish_default(self):
         """#846: the tool text carries the default cadence and the value-not-request rule, with no task names."""
-        from personal_agent.agent_runtime import DEFINITIONS, SCHEDULE_PREPARATION_DESCRIPTION
+        from personal_agent.agent_runtime import DEFINITIONS, PROFILE_KEY_GUIDANCE, SCHEDULE_PREPARATION_DESCRIPTION
         from test_no_scenario_code import scenario_tokens
         by_name = {tool['function']['name']: tool['function']['description'] for tool in DEFINITIONS}
         for text in (SCHEDULE_PREPARATION_DESCRIPTION, by_name['schedule_preparation']):
@@ -1560,7 +1560,8 @@ class SecretaryStandard(Harness):
             self.assertIn('never save the request sentence with save_memory', text)
             self.assertEqual(scenario_tokens(text), [])
         self.assertIn('A value is a fact about the owner, never the request itself', by_name['save_memory'])
-        self.assertEqual(scenario_tokens(by_name['save_memory'].split(' A value is a fact')[1]), [])
+        # PROFILE_KEY_GUIDANCE is pre-existing key text; the save_memory sentence itself names no task.
+        self.assertEqual(scenario_tokens(by_name['save_memory'].replace(PROFILE_KEY_GUIDANCE, '')), [])
 
     def test_the_worker_guidance_and_the_judgment_state_the_standard(self):
         from personal_agent.agent_runtime import API_TOOL_GUIDANCE, CLI_TOOL_GUIDANCE, CORE_INSTRUCTIONS

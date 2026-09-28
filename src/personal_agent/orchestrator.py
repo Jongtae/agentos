@@ -273,6 +273,11 @@ def worker_catalogue(service):
     from .decision_routes import RANKED_MODELS, known_models
     from .main_ai import CHECKS, KEY_META, SUBSCRIPTION_ROUTES, api_route_of, key_slot
     store = service.store
+    from .manifests import CONTEXT_GATED_ACTIONS
+    try:
+        context_on = bool(service.context_observations.settings()['enabled'])
+    except Exception:
+        context_on = False
     status = service.main_ai.status()
     current = status.get('current') or ''
     checks = store.config(CHECKS, {})
@@ -341,6 +346,10 @@ def worker_catalogue(service):
             model = str(config.get('model') or '')
             worker.update(available=ready, reason=reason, default_model=model, models=[model] if model else [])
             routes[route_id] = {'kind': KIND_API, 'config': config, 'key': key, 'test': test}
+        # #812: the catalogue lists only what a turn is actually offered: a context-gated
+        # action (propose_current_state) is hidden while the owner has current context off
+        # (``Capabilities.offered_tools``), so a plan never briefs a tool the worker lacks.
+        tools = [tool for tool in tools if context_on or tool not in CONTEXT_GATED_ACTIONS]
         worker['tools'] = sorted(dict.fromkeys(tools))
         worker['private_tools'] = sorted(set(worker['tools']) & private)
         worker['model_tiers'] = {model: model_tier(route_id, model, RANKED_MODELS) for model in worker['models']}

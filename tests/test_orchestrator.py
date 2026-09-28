@@ -2084,3 +2084,13 @@ class CliHostActions(unittest.TestCase):
         self.assertEqual(AgentService.cli_host_actions(cli_metadata('claude-code', claude + '\n' + result)), ('Bash',))
         self.assertIsNone(AgentService.cli_host_actions(cli_metadata('claude-code', claude)), 'no result record')
 
+
+
+class CatalogueMatchesOffered(Harness):
+    """#812 (Work 33d1d85f): a plan never briefs a context-gated tool the turn does not offer."""
+
+    def test_propose_current_state_is_listed_only_while_current_context_is_on(self):
+        from personal_agent.orchestrator import worker_catalogue
+        self.assertNotIn('propose_current_state', worker_catalogue(self.service).worker('codex')['tools'])
+        self.service.context_observations.set_controls({'enabled': True})
+        self.assertIn('propose_current_state', worker_catalogue(self.service).worker('codex')['tools'])

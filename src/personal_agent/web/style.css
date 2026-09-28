@@ -563,3 +563,13 @@ details.technical details>summary{color:var(--muted)}
  .ai-fact .settings-row-action{min-height:44px}
  .rail-foot .language-picker select{min-height:44px}
 }
+
+/* Existing settings editors are revealed in place; state and receipts stay visible. */
+#roots-add,#projects,#developer-settings{margin:16px 0}
+#roots-add>summary,#projects>summary,#developer-settings>summary{padding:8px 0;font-weight:600}
+#roots-add .folder-add{margin-top:8px}
+#projects[open]>summary,#developer-settings[open]>summary{margin-bottom:12px}
+.search-account{min-width:0}
+.search-account>summary{min-height:36px;padding:7px 10px;border-radius:4px;background:var(--surface-3)}
+.search-account .button-row{margin-top:8px;justify-content:flex-end;flex-wrap:wrap}
+@media(max-width:620px){.settings-row-action,.settings-row-actions>button,.search-account>summary{min-height:44px;white-space:normal}.settings-row-actions{max-width:100%;flex-wrap:wrap}.settings-row-body,.settings-row-description{overflow-wrap:anywhere}}

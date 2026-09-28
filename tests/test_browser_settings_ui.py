@@ -34,13 +34,14 @@ class Element {
  set id(value){this._id=value;ids.set(value,this);} get id(){return this._id;}
  set textContent(value){this._text=String(value);this.children=[];} get textContent(){return this._text+this.children.map(node=>typeof node==='string'?node:node.textContent).join('');}
  append(...nodes){this.children.push(...nodes);} replaceChildren(...nodes){this._text='';this.children=[];this.append(...nodes);}
- setAttribute(key,value){this.attrs[key]=value;} focus(){} get isConnected(){return true;}
+ setAttribute(key,value){this.attrs[key]=value;} focus(){if(!this.disabled)document.activeElement=this;} get isConnected(){return true;}
+ contains(node){return node===this||descendants(this).includes(node);}
  get classList(){const node=this;return {toggle(name,on){node._cls=Boolean(on);},add(){},remove(){},contains:()=>Boolean(node._cls)};}
  querySelector(selector){return descendants(this).find(node=>selector[0]==='.'?node.className.split(' ').includes(selector.slice(1)):node.tag===selector.replace(/\[.*$/,''))||null;}
  querySelectorAll(selector){return descendants(this).filter(node=>selector==='[data-focus-key]'?Boolean(node.dataset.focusKey):node.tag===selector);}
 }
 function descendants(node){return node.children.flatMap(child=>typeof child==='string'?[]:[child,...descendants(child)]);}
-for(const id of ['browser-status','browser-feedback','browser-login-form','browser-login-url'])new Element('div').id=id;
+for(const id of ['browser-status','browser-feedback','browser-login-form','browser-login-url','browser-login-open','browser-login-cancel'])new Element('div').id=id;
 const $=id=>ids.get(id),document={getElementById:$,createElement:tag=>new Element(tag),activeElement:null,body:null};
 const part=(start,end)=>app.slice(app.indexOf(start),app.indexOf(end));
 const source='var lastState=null;'+part('const LANGUAGES=','function normalizeEndpoint(')+part('function formatTimeParts(','// Formatted result text.')+
@@ -57,13 +58,30 @@ const checks=[];
 (async()=>{
  render({available:false,unavailable_reason:'platform',message:'x',sessions:[],pending_steps:[]});
  assert(text().includes('macOS에서만 제공됩니다'));assert(text().includes('사용할 수 없음'));assert(!/Playwright|설치 명령|playwright install/.test(text()));
- assert.equal($('browser-login-form').hidden,true);assert.equal(buttons().length,0);
+ assert.equal($('browser-login-form').hidden,true);assert.equal($('browser-login-open').hidden,true);assert.equal(buttons().length,0);
  render({available:false,unavailable_reason:'dependency',sessions:[],pending_steps:[]});
  assert(text().includes('pyobjc-framework-WebKit'));
  checks.push('unavailable off macOS or without PyObjC, with no install hint and no login form');
 
  render(available());
- assert.equal($('browser-login-form').hidden,false);
+ assert.equal($('browser-login-form').hidden,true,'a supported browser starts with current status, not a login form');
+ assert.equal($('browser-login-open').hidden,false,'an explicit login entry is available');
+ $('browser-login-open').onclick();
+ assert.equal($('browser-login-form').hidden,false,'the explicit action opens the login form');
+ assert.equal(document.activeElement,$('browser-login-url'),'opening focuses the site address');
+ const draftInput=$('browser-login-url');draftInput.value='https://shop.test/login';
+ render(available({login_window_open:true}));
+ assert.equal($('browser-login-form').hidden,false,'observed status does not close an active editor');
+ assert.equal($('browser-login-url'),draftInput,'the input node survives status refresh');
+ assert.equal(draftInput.value,'https://shop.test/login','the address draft survives status refresh');
+ $('browser-login-cancel').onclick();
+ assert.equal($('browser-login-form').hidden,true,'closing hides the editor');
+ assert.equal(document.activeElement,$('browser-login-open'),'closing returns focus to the login action');
+ assert.equal(draftInput.value,'https://shop.test/login','closing keeps the address for reopening');
+ $('browser-login-open').onclick();assert.equal($('browser-login-url').value,'https://shop.test/login');
+ assert.equal(calls.length,0,'opening and closing do not contact the browser');
+ checks.push('site login is explicit, with draft preservation and focus return');
+ render(available());
  assert(text().includes('사이트별 로그인 쿠키를 이 컴퓨터에 암호화해 저장하고, 암호화 키는 macOS 키체인에 둡니다. 이 정보는 AI에 전달하지 않습니다.'));
  assert(text().includes('저장 위치: /data/private/browser-profile/session-jar.enc'));
  assert(text().includes('암호화 키: macOS 키체인 (서비스 personal-agentos.browser-jar)'));
@@ -143,7 +161,7 @@ class BrowserSettingsUiTests(unittest.TestCase):
         result = subprocess.run([node, "-e", DOM_CHECKS, str(WEB / "app.js")], capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout.strip().splitlines()[-1])
-        self.assertEqual(report["passed"], 7, report)
+        self.assertEqual(report["passed"], 8, report)
 
 
 if __name__ == "__main__":

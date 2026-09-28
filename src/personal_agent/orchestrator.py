@@ -44,6 +44,8 @@ availability) and cost/latency tiers.  See docs/decision-layer.en.md
 import hashlib
 import json
 
+# #804/#833: the owner-model fact bounds and renderer shared with the direct route's outcome judgment.
+from .agent_runtime import CURRENT_CONTEXT_FACT_CHARS, PROFILE_FACT_CHARS, owner_context_fact
 from .decision import MAX_CONTEXT_CHARS, OUTCOME_DECIDED, OUTCOME_MALFORMED, DecisionContext, DecisionPolicy
 
 #: AgentOS context sections of a turn (``agent_runtime.turn_context``).
@@ -68,9 +70,6 @@ FAILURE_CHARS = 600
 #: The worker's reply as the outcome judgment reads it (#820): whole.  It is the
 #: delivered answer's own cap, so no claim in the reply is hidden from the judgment.
 REPLY_CHARS = 24000
-#: #804: the owner model the plan call reads (redacted, then cut).
-PROFILE_FACT_CHARS = 1200
-CURRENT_CONTEXT_FACT_CHARS = 1200
 
 KIND_SUBSCRIPTION = 'subscription'
 KIND_API = 'api'
@@ -551,9 +550,11 @@ class Orchestration:
                 f'prepared ({f"{len(prepared)} chars" if prepared else "empty"})')
 
     def _owner_context(self):
-        """#829: the owner model the worker was given (profile, current context), for the outcome judgment."""
-        return (f"owner_profile: {self._owner_fact('profile', PROFILE_FACT_CHARS)}\n"
-                f"current_context: {self._owner_fact('current_context', CURRENT_CONTEXT_FACT_CHARS)}")
+        """#829: the owner model the worker was given (profile, current context), for the outcome judgment.
+
+        #833: rendered by the shared ``owner_context_fact`` so the direct route's
+        judgment reads the same fact; the plan call's redaction (``_redact``) applies."""
+        return owner_context_fact(self.sections, self._redact)
 
     def _owner_fact(self, name, limit):
         """#804: an always-given section as the plan call reads it: redacted, then cut."""

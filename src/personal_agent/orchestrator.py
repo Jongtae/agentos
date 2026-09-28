@@ -5,9 +5,10 @@ the owner's Judgment AI (the DecisionEngine route, #580/#679) returns one
 typed plan through ``DecisionEngine.structured``:
 
 * ``worker`` - which configured AI route runs the request, and ``model``;
-* ``brief`` - the goal written for that worker, the AgentOS context sections
-  it needs (profile, current context, prepared answers, history) and the
-  observable completion criteria;
+* ``brief`` - the goal written for that worker, the extra AgentOS context
+  sections it needs (prepared answers, history) and the observable completion
+  criteria.  The owner model - the profile and the current-context snapshot -
+  is always given, to the worker and to the plan call (#804);
 * ``tools`` - optionally, the subset of that worker's AgentOS tools offered in
   this attempt;
 * ``reason`` - one line.
@@ -42,8 +43,12 @@ import json
 
 from .decision import MAX_CONTEXT_CHARS, OUTCOME_DECIDED, OUTCOME_MALFORMED, DecisionContext, DecisionPolicy
 
-#: AgentOS context sections a brief may select (``agent_runtime.turn_context``).
+#: AgentOS context sections of a turn (``agent_runtime.turn_context``).
 SECTIONS = ('profile', 'current_context', 'prepared', 'history')
+#: #804: the owner model every attempt and the plan call carry, whatever the brief selects.
+ALWAYS_SECTIONS = ('profile', 'current_context')
+#: The extra sections a brief selects.
+SELECTABLE_SECTIONS = tuple(name for name in SECTIONS if name not in ALWAYS_SECTIONS)
 #: Re-delegations after the first attempt (so at most three attempts per Work).
 MAX_REDELEGATIONS = 2
 #: An attempt is started only while the Work's deadline leaves at least this.
@@ -60,6 +65,9 @@ ATTEMPTS_CHARS = 1800
 ANSWER_EXCERPT_CHARS = 600
 OBSERVATION_CHARS = 3800
 FAILURE_CHARS = 600
+#: #804: the owner model the plan call reads (redacted, then cut).
+PROFILE_FACT_CHARS = 1200
+CURRENT_CONTEXT_FACT_CHARS = 1200
 
 KIND_SUBSCRIPTION = 'subscription'
 KIND_API = 'api'
@@ -144,11 +152,13 @@ QUESTION = (
     'personal secretary would deliver for the owner\'s situation: the specific options or result, the current '
     'facts they depend on from cited sources, and their fit to what the conversation says; when the answer depends '
     'on facts that change over time or depend on place, the brief asks the worker to look them up and never rules '
-    'that out unless the owner asked not to look anything up. The owner\'s request '
-    'may continue recent_conversation: resolve what it refers to or leaves unsaid from that conversation and write '
-    'it into brief.goal, and select history when the request continues it; do not brief the worker to ask the '
-    'owner for something the conversation already says. brief.context lists only '
-    'the AgentOS context sections the worker needs; brief.completion_criteria lists the observable specifics that '
+    'that out unless the owner asked not to look anything up. owner_profile and current_context are the owner\'s '
+    'standing facts and current time and situation; the worker always receives them, so fit the brief to them. '
+    'Only when the owner\'s request refers to or continues recent_conversation, resolve what it refers to or leaves '
+    'unsaid from that conversation and write it into brief.goal, and select history; a new request is its own '
+    'topic and is not narrowed to the previous one. Do not brief the worker to ask the owner for something the '
+    'conversation or the owner\'s facts already say. brief.context lists only the extra AgentOS context sections '
+    'the worker needs (history, prepared); brief.completion_criteria lists the observable specifics that '
     'show the goal is met at that level (for example named options with their current facts and sources), not '
     'only that an answer was given. tools_mode is "worker_default": the worker keeps its full offered toolset and chooses among '
     'the tools itself; tools is then [] and tools_reason "". The only subset AgentOS keeps is one that keeps '
@@ -427,7 +437,8 @@ def plan_schema(workers):
                 'model': {'type': 'string'},
                 'brief': {'type': 'object', 'additionalProperties': False,
                           'properties': {'goal': {'type': 'string'},
-                                         'context': {'type': 'array', 'items': {'type': 'string', 'enum': list(SECTIONS)}},
+                                         'context': {'type': 'array',
+                                                     'items': {'type': 'string', 'enum': list(SELECTABLE_SECTIONS)}},
                                          'completion_criteria': {'type': 'array', 'items': {'type': 'string'}}},
                           'required': ['goal', 'context', 'completion_criteria']},
                 'tools_mode': {'type': 'string', 'enum': [TOOLS_DEFAULT, TOOLS_SUBSET]},
@@ -500,7 +511,8 @@ class Attempt:
     """One worker run of a Work: from a validated plan, or the default fallback.
 
     ``tools`` is a frozenset (the validated subset) or None (the worker's usual
-    set); ``sections`` is the set of context sections the worker receives.
+    set); ``sections`` is the set of context sections the worker receives,
+    always including ``ALWAYS_SECTIONS`` (#804).
     """
 
     __slots__ = ('number', 'worker', 'model', 'goal', 'criteria', 'sections', 'tools', 'reason', 'planned',
@@ -514,7 +526,7 @@ class Attempt:
         self.replaced = replaced
         #: The worker, effective model and tool set this attempt ran with, fixed at validation.
         self.signature = None
-        self.goal, self.criteria, self.sections = goal, tuple(criteria), frozenset(sections)
+        self.goal, self.criteria, self.sections = goal, tuple(criteria), frozenset(sections) | frozenset(ALWAYS_SECTIONS)
         self.tools = None if tools is None else frozenset(tools)
         self.reason, self.planned, self.fallback = reason, planned, fallback
         self.digest = digest({'goal': goal, 'criteria': list(criteria), 'sections': sorted(self.sections),
@@ -533,7 +545,7 @@ class Attempt:
         return '\n'.join(lines)
 
     def section(self, name, value):
-        """``value`` when this attempt's brief selected the section ``name``, else None."""
+        """``value`` when this attempt's brief selected the section ``name`` or it is always given (#804), else None."""
         return value if name in self.sections else None
 
     def native_search(self, enabled, reason, private_tools):
@@ -612,13 +624,17 @@ class Orchestration:
 
     def _sections_text(self):
         parts = []
-        for name in SECTIONS:
+        for name in SELECTABLE_SECTIONS:
             value = self.sections.get(name)
             if name == 'history':
                 parts.append(f'history ({int(value or 0)} earlier messages)')
             else:
                 parts.append(f'{name} ({len(value)} chars)' if value else f'{name} (empty)')
-        return ', '.join(parts)
+        return ', '.join(parts) + '; always given: ' + ', '.join(ALWAYS_SECTIONS)
+
+    def _owner_fact(self, name, limit):
+        """#804: an always-given section as the plan call reads it: redacted, then cut."""
+        return self._redact(self.sections.get(name) or '')[:limit] or 'none'
 
     def _attempts_text(self):
         if not self.history:
@@ -645,7 +661,12 @@ class Orchestration:
         request = self._redact(self.request, private=False)
         workers = render_catalogue(candidates)
         tools_text = render_tool_descriptions(candidates, getattr(self.catalogue, 'descriptions', {}))
+        # #804: the owner model the worker is always given, so the plan fits it too.
+        profile = self._owner_fact('profile', PROFILE_FACT_CHARS)
+        current = self._owner_fact('current_context', CURRENT_CONTEXT_FACT_CHARS)
         facts = {'owner_request': request,
+                 'owner_profile': profile,
+                 'current_context': current,
                  # Redacted before it is cut, so a cut never leaves part of a secret (#740 review).
                  'recent_conversation': self._redact(self.conversation)[-CONVERSATION_CHARS:] or 'none',
                  'context_sections': self._sections_text(),
@@ -654,7 +675,8 @@ class Orchestration:
                  'budget': self._budget_text(),
                  'previous_attempts': self._redact(self._attempts_text())}
         context = DecisionContext(PURPOSE, facts, work_id=self.work_id,
-                                  max_chars=MAX_CONTEXT_CHARS + len(request) + len(workers) + len(tools_text))
+                                  max_chars=MAX_CONTEXT_CHARS + len(request) + len(workers) + len(tools_text)
+                                  + len(profile) + len(current))
         try:
             decision = method(context, QUESTION, plan_schema(candidates), plan_shape)
         except Exception:
@@ -688,6 +710,7 @@ class Orchestration:
             return None, 'brief'
         if any(name not in SECTIONS for name in brief['context']):
             return None, 'sections'
+        # #804: an always-given section named in the brief changes nothing.
         criteria = [one_line(item, MAX_CRITERION_CHARS) for item in brief['completion_criteria'] if item.strip()][:MAX_CRITERIA]
         tools_reason = one_line(data['tools_reason'], MAX_REASON_CHARS)
         tools, replaced = None, None

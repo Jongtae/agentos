@@ -534,8 +534,8 @@ class AgentService:
     def current_context_text(self, job):
         """The bounded current-context snapshot every route carries for this Work (#627).
 
-        None while the owner has current context off and nothing was
-        requested for this Work: the turn is then exactly the old text flow.
+        #804: with current context off it is the clock only (local date,
+        weekday, time and zone) unless a location was requested for this Work.
         Built before the route call, after admission; a failure here never
         blocks the turn (context is an aid, not a precondition).
         """
@@ -6183,7 +6183,8 @@ class AgentService:
                             # #627: the same current-context snapshot as the direct route.
                             # #678: the CLI's own web search, when this turn may use it.
                             def cli_context(native):
-                                # #710: only the sections this attempt's brief selected, and the brief.
+                                # #710: the sections this attempt's brief selected, and the brief; #804: the profile and
+                                # current context always (``orchestrator.ALWAYS_SECTIONS``).
                                 context=turn_context([*(history[:-1] if section('history',True) else []),{'role':'user','content':current_request}],'cli',
                                                      current_context=section('current_context',section_values['current_context']),
                                                      profile=section('profile',section_values['profile']),
@@ -6384,7 +6385,8 @@ class AgentService:
                             checked=attempt_test if isinstance(attempt_test,dict) else self.store.config('model_test',{})
                             if checked.get('runtime_model'):
                                 runtime_config['model']=checked['runtime_model']
-                            # #710: only the sections this attempt's brief selected, and the brief.
+                            # #710: the sections this attempt's brief selected, and the brief; #804: the profile and
+                            # current context always (``orchestrator.ALWAYS_SECTIONS``).
                             api_context=turn_context(history if section('history',True) else history[-1:],'api',
                                                      current_context=section('current_context',section_values['current_context']),
                                                      profile=section('profile',section_values['profile']),

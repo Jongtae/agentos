@@ -9,13 +9,15 @@ CT-16, CT-18).
 import json
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from personal_agent.agent_runtime import MEMORY_OWNER
 from personal_agent.context_observations import FRESHNESS_SECONDS, RETENTION_SECONDS, ContextObservations
-from personal_agent.current_context import (SNAPSHOT_BYTES, SNAPSHOT_ENTRIES, ContextRefusal, CurrentContext,
+from personal_agent.current_context import (CLOCK_KEYS, CLOCK_LEGEND, SNAPSHOT_BYTES, SNAPSHOT_ENTRIES, ContextRefusal,
+                                            CurrentContext,
                                             PROFILE_OWNER, local_day_end, mark_conflicts, parse_until,
                                             redact_known_secrets, render)
 from personal_agent.memory_service import MemoryService
@@ -321,7 +323,7 @@ class ExpiryAndControls(ContextCase):
         self.obs.set_controls({'enabled': False})
         self.assertEqual(self.context.hypotheses(), [])
         self.assertEqual(self.propose(job, predicate='work_mode', value='office')['reason'], 'context_paused')
-        self.assertIsNone(self.context.snapshot(job), 'off: the old text flow, no section')
+        self.assertEqual(set(self.context.snapshot(job)) - CLOCK_KEYS, set(), 'off: the clock only (#804)')
         self.now += 60
         self.obs.set_controls({'enabled': True, 'clear': True})
         self.assertEqual(self.claims(), [])
@@ -487,15 +489,44 @@ class Snapshot(ContextCase):
         self.now += FRESHNESS_SECONDS
         self.assertEqual(self.context.snapshot(job)['locations'][0]['status'], 'stale')
 
-    def test_unknown_timezone_is_stated_not_guessed(self):
+    def test_an_unset_owner_zone_gives_the_clock_in_the_host_zone_said_to_be_the_hosts(self):
+        """#804: the turn always knows the time; a hypothesis interval still never guesses the zone."""
         self.enable(timezone='')
-        body = self.context.snapshot()
-        self.assertEqual(body['timezone'], 'unknown')
-        self.assertNotIn('local_time', body)
+        with mock.patch('personal_agent.current_context.host_zone', return_value=(SEOUL, ZoneInfo(SEOUL))):
+            body = self.context.snapshot()
+        self.assertEqual((body['timezone'], body['timezone_source']), (SEOUL, 'host'))
+        self.assertTrue(body['local_time'].startswith('2026-09-21T12:00+09:00 Mon'))
+        job, _ = self.request('오늘 재택이야')
+        self.assertEqual(self.propose(job, predicate='work_mode', value='remote')['reason'], 'timezone_unknown')
+
+    def test_off_gives_the_clock_only(self):
+        """#804: context off still carries the clock: no location, anchor or hypothesis."""
+        self.enable()
+        self.anchors()
+        self.live()
+        job, _ = self.request('오늘 점심 추천해줘')
+        self.propose(job, predicate='work_mode', value='office', place_ref='profile:place.work')
+        self.obs.set_controls({'enabled': False})
+        body = self.context.snapshot(job)
+        self.assertEqual(set(body), {'version', 'as_of', 'timezone', 'local_time'})
+        self.assertEqual(body['timezone'], SEOUL, 'the owner\'s zone setting is kept while off')
+        self.assertEqual(body['local_time'], '2026-09-21T12:00+09:00 Mon')
+        text = self.context.render(job)
+        self.assertTrue(text.startswith(CLOCK_LEGEND))
+        self.assertNotIn('37.57', text)
+        self.assertNotIn('profile:place', text)
+        with self.store.db() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM current_context_exposures').fetchone()[0], 0,
+                             'a clock-only snapshot records no exposure')
+        self.obs.set_controls({'timezone': ''})
+        with mock.patch('personal_agent.current_context.host_zone', return_value=('host-local', ZoneInfo('UTC'))):
+            body = self.context.snapshot(job)
+        self.assertEqual((body['timezone'], body['timezone_source'], body['local_time']),
+                         ('host-local', 'host', '2026-09-21T03:00+00:00 Mon'))
 
     def test_off_sends_nothing_except_a_location_requested_for_this_work(self):
         job, _ = self.request('여기 날씨', telegram=True)
-        self.assertIsNone(self.context.snapshot(job))
+        self.assertNotIn('locations', self.context.snapshot(job))
         self.obs.open_location_request(job, CHAT, GENERATION)
         self.message_id += 1
         self.assertEqual(self.ingest({'message_id': self.message_id, 'location': dict(POINT)}),
@@ -505,7 +536,7 @@ class Snapshot(ContextCase):
         self.assertNotIn('hypotheses', body)
         self.assertNotIn('anchors', body)
         other, _ = self.request('다른 일')
-        self.assertIsNone(self.context.snapshot(other), 'task scope serves only its task')
+        self.assertEqual(set(self.context.snapshot(other)) - CLOCK_KEYS, set(), 'task scope serves only its task')
 
     def test_the_snapshot_is_bounded_in_entries_and_bytes(self):
         self.enable()
@@ -564,3 +595,40 @@ class TurnContextSection(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class HostZoneFallback(unittest.TestCase):
+    """#804 review: a container's unset UTC default is never presented as the owner's local clock."""
+
+    def zone(self, environ, real='/usr/share/zoneinfo/UTC', offset=0, store=None):
+        from datetime import timedelta, timezone as dt_timezone
+        from personal_agent.current_context import host_zone
+        local = dt_timezone(timedelta(hours=offset))
+        with mock.patch('os.path.realpath', return_value=real), \
+                mock.patch('personal_agent.current_context.datetime') as dt:
+            dt.now.return_value.astimezone.return_value.tzinfo = local
+            return host_zone(store, environ)
+
+    def test_an_unset_utc_default_is_unknown(self):
+        with self.assertRaises(LookupError):
+            self.zone({})
+
+    def test_an_explicit_utc_or_a_real_host_zone_is_kept(self):
+        self.assertEqual(self.zone({'TZ': 'UTC'})[0], 'UTC')
+        self.assertEqual(self.zone({}, real='/var/db/timezone/zoneinfo/Asia/Seoul', offset=9)[0], 'Asia/Seoul')
+
+    def test_the_owners_calendar_zone_wins(self):
+        store = mock.Mock()
+        store.config.return_value = 'Asia/Seoul'
+        self.assertEqual(self.zone({}, store=store)[0], 'Asia/Seoul')
+
+    def test_an_unknown_zone_leaves_no_local_time_in_the_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            from personal_agent.current_context import CurrentContext
+            context = CurrentContext(QuickStore(Path(tmp) / 's'))
+            with mock.patch('personal_agent.current_context.host_zone', side_effect=LookupError('unset')):
+                body = context.snapshot(now=1790000000.0)
+        self.assertEqual(body['timezone'], 'unknown')
+        self.assertNotIn('local_time', body)
+        self.assertNotIn('timezone_source', body)
+        self.assertIn('as_of', body)

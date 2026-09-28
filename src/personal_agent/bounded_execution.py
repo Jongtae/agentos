@@ -366,6 +366,9 @@ def codex_bridge_timeout_argument(seconds):
 #: #701: bridge actions the CLI's own web search replaces on a native-search
 #: turn, so the model searches with Codex's or Claude's own tool instead.
 NATIVE_SEARCH_REPLACED = frozenset({'web_search', 'bounded_public_research'})
+#: #804: labelled private-store actions that only write and return no stored
+#: content, so a native-search turn still offers them.
+NATIVE_SEARCH_WRITES = frozenset({'save_memory'})
 
 
 def native_search_withheld():
@@ -379,9 +382,12 @@ def native_search_withheld():
     it reaches the CLI, and native search stays as the pre-turn gate decided.
     The bridge's own public search tools are withheld too
     (``NATIVE_SEARCH_REPLACED``): the CLI's own search is preferred.
+    #804: ``save_memory`` stays offered.  It writes what the owner stated and
+    its result carries no stored memory content, so it is not a read; it
+    keeps its ``owner-memory`` provenance label (``list_memory`` stays withheld).
     """
     from .agent_runtime import BROWSER_ACTIONS, PRIVATE_PROVENANCE
-    return (frozenset(PRIVATE_PROVENANCE) - BROWSER_ACTIONS) | NATIVE_SEARCH_REPLACED
+    return (frozenset(PRIVATE_PROVENANCE) - BROWSER_ACTIONS - NATIVE_SEARCH_WRITES) | NATIVE_SEARCH_REPLACED
 
 
 def turn_actions(profile, native_search=False, only=None):

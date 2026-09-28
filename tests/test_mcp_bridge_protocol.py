@@ -271,9 +271,10 @@ class ExposedToolWireBoundary(unittest.TestCase):
                              {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "list_notes", "arguments": {}}})
         self.assertIn("--native-search", self.server["args"])
         # #774: relayed writes stay offered; the private reads (list_memory, calendar_query) do not.
+        # #804: save_memory is one of those writes.
         self.assertEqual([tool["name"] for tool in replies[2]["result"]["tools"]],
-                         ["calendar_draft_cancel", "calendar_draft_create", "calendar_draft_update", "save_note",
-                          "schedule_preparation", "weather"])
+                         ["calendar_draft_cancel", "calendar_draft_create", "calendar_draft_update", "save_memory",
+                          "save_note", "schedule_preparation", "weather"])
         self.assertTrue(_refused(replies[3]))
 
     def test_an_unlisted_native_tool_is_refused_by_the_real_bridge(self):

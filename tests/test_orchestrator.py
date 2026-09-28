@@ -230,7 +230,9 @@ class RoutingAndBriefs(Harness):
         [(_s, evaluated)] = self.events(first, 'evaluated')
         self.assertEqual((evaluated['outcome'], evaluated['next'], evaluated['stop']), ('reached', 'stop', 'reached'))
         [(_s, planned)] = self.events(second, 'planned')
-        self.assertEqual((planned['worker'], planned['model'], planned['sections']), ('openai', None, ['profile']))
+        # #804: the profile and current context are always given, whatever the brief selects.
+        self.assertEqual((planned['worker'], planned['model'], planned['sections']),
+                         ('openai', None, ['current_context', 'profile']))
 
     def test_the_brief_selects_the_context_sections_the_worker_receives(self):
         self.store.put('model', self.store.config('model', {}))
@@ -995,7 +997,8 @@ class PlannerHistory(Harness):
 
     def test_the_question_asks_the_brief_to_resolve_the_conversation(self):
         self.assertIn('recent_conversation', QUESTION)
-        self.assertIn('do not brief the worker to ask the owner for something the conversation already says', QUESTION)
+        self.assertIn('Do not brief the worker to ask the owner for something the conversation or the owner\'s facts '
+                      'already say', QUESTION)
 
 
 class OwnerQuestion(Harness):
@@ -1819,6 +1822,110 @@ class StreamErrorsInTheTurnRecord(Harness):
         stored = json.dumps(errors, ensure_ascii=False)
         self.assertNotIn(OPENAI_KEY, stored)
         self.assertNotIn('비밀 요청 문장 그대로 반복', stored)
+
+
+class OwnerModelAlwaysOn(Harness):
+    """#804: the profile and the current-context snapshot reach every worker and the plan call."""
+
+    def setUp(self):
+        super().setUp()
+        from personal_agent.agent_runtime import MEMORY_OWNER
+        from personal_agent.memory_service import MemoryService
+        MemoryService(self.store, private_read_sink=MemoryService.NO_EGRESS_GUARD).remember_profile(
+            MEMORY_OWNER, 'settings', 'profile.place.work', '판교 사무실')
+
+    @mock.patch.dict('os.environ', {'TZ': 'Asia/Seoul'})  # #804: a host zone, not the CI's unset UTC
+    def test_both_routes_get_the_owner_model_when_the_brief_selects_no_section(self):
+        from personal_agent.agent_runtime import CURRENT_CONTEXT_HEADING, PROFILE_HEADING
+        self.script([plan('codex', 'Recommend lunch.', context=()), plan('openai', 'Recommend lunch.', context=())],
+                    goals=[True])
+        self.run_work('점심 추천해줘')
+        prompt = self.engine.turns[-1]['prompt']
+        self.run_work('저녁 추천해줘')
+        system = self.transport.bodies[0]['messages'][0]['content']
+        for text in (prompt, system):
+            self.assertIn(PROFILE_HEADING + '\n', text)
+            self.assertIn('판교 사무실', text)
+            self.assertIn(CURRENT_CONTEXT_HEADING + '\n', text)
+            self.assertIn('"local_time":', text, 'the clock, with current context off')
+        self.assertEqual(self.engine.turns[-1]['context']['conversation'], [], 'history is still the brief\'s choice')
+
+    @mock.patch.dict('os.environ', {'TZ': 'Asia/Seoul'})  # #804: a host zone, not the CI's unset UTC
+    def test_the_plan_call_reads_the_owner_model_and_selects_only_the_extra_sections(self):
+        self.script([plan('codex', 'Answer.', context=())], goals=[True])
+        self.run_work('오늘 점심 추천해줘')
+        context, _question, schema = self.asked_plans[0]
+        self.assertIn('판교 사무실', context.facts['owner_profile'])
+        self.assertIn('"local_time":', context.facts['current_context'])
+        self.assertIn('always given: profile, current_context', context.facts['context_sections'])
+        self.assertEqual(schema['properties']['brief']['properties']['context']['items']['enum'], ['prepared', 'history'])
+        self.assertFalse(context.too_large())
+
+    def test_a_native_search_turn_offers_save_memory_but_not_list_memory(self):
+        self.script([plan('codex', 'Acknowledge.')], goals=[True])
+        self.run_work('난 오늘 판교로 출근했어')
+        turn = self.engine.turns[-1]
+        self.assertTrue(turn['native_search'])
+        self.assertIn('save_memory', turn['offered'])
+        self.assertNotIn('list_memory', turn['offered'])
+        self.assertNotIn('save_memory', private_read_actions(), 'a write does not turn the CLI\'s own search off')
+
+
+class OwnerModelUnit(unittest.TestCase):
+    def test_an_attempt_always_carries_the_owner_model(self):
+        attempt = Attempt(1, 'a', goal='g', sections=(), planned=True)
+        self.assertEqual(attempt.section('profile', 'P'), 'P')
+        self.assertEqual(attempt.section('current_context', 'C'), 'C')
+        self.assertIsNone(attempt.section('history', True))
+        self.assertIsNone(attempt.section('prepared', 'R'))
+
+    def test_the_owner_model_facts_are_redacted_and_bounded(self):
+        from personal_agent.orchestrator import CURRENT_CONTEXT_FACT_CHARS, PROFILE_FACT_CHARS
+        seen = []
+        engine = FixtureDecisionEngine(structured=lambda context, question, schema: seen.append(context))
+        catalogue = OrchestrationUnit.catalogue(None)
+        orchestration = Orchestration(ConversationJudgments(engine), catalogue, request='요청', conversation='x' * 9000,
+                                      sections={'profile': '가' * 5000, 'current_context': '나' * 5000})
+        orchestration.first()
+        [context] = seen
+        self.assertEqual(len(context.facts['owner_profile']), PROFILE_FACT_CHARS)
+        self.assertEqual(len(context.facts['current_context']), CURRENT_CONTEXT_FACT_CHARS)
+        self.assertFalse(context.too_large())
+        orchestration = Orchestration(ConversationJudgments(engine), catalogue, request='요청')
+        orchestration.first()
+        self.assertEqual((seen[-1].facts['owner_profile'], seen[-1].facts['current_context']), ('none', 'none'))
+
+    def test_the_question_keeps_a_new_request_its_own_topic(self):
+        self.assertIn('Only when the owner\'s request refers to or continues recent_conversation', QUESTION)
+        self.assertIn('a new request is its own topic and is not narrowed to the previous one', QUESTION)
+        self.assertIn('the worker always receives them', QUESTION)
+        self.assertIn('brief.context lists only the extra AgentOS context sections the worker needs (history, prepared)',
+                      QUESTION)
+
+
+class StatedProfileInLookups(unittest.TestCase):
+    """#804 review: an owner-stated, accepted profile fact may shape a lookup; other written values stay out (#605 N4)."""
+
+    def test_only_an_accepted_profile_fact_is_not_a_lookup_exclusion(self):
+        from personal_agent.agent_runtime import owner_stated_profile
+        self.assertTrue(owner_stated_profile('profile.place.work', {'state': 'current', 'id': 'm1'}))
+        self.assertFalse(owner_stated_profile('profile.place.work', {'state': 'pending', 'requires_owner_approval': True}))
+        self.assertFalse(owner_stated_profile('passport', {'state': 'current', 'id': 'm2'}))
+
+    def test_work_written_values_skips_only_accepted_profile_facts(self):
+        from personal_agent.agent_runtime import work_written_values
+        with tempfile.TemporaryDirectory() as tmp:
+            store = QuickStore(Path(tmp) / 's')
+            job = store.enqueue('판교 카카오뱅크로 출근했어', 'k1')
+            stated = store.save_memory_candidate(job, 'profile.place.work', '판교 카카오뱅크')
+            store.save_memory_candidate(job, 'profile.food.likes', '추론된 선호')
+            store.save_memory_candidate(job, 'passport', '여권번호 M1234')
+            with store.db() as db:
+                db.execute("UPDATE memory_candidates SET state='accepted' WHERE id=?", (stated['id'],))
+            written = work_written_values(store, job)
+            self.assertNotIn('판교 카카오뱅크', written)
+            self.assertIn('추론된 선호', written, 'a pending inference stays excluded')
+            self.assertIn('여권번호 M1234', written)
 
 
 class UnmediatedEngine(Harness):

@@ -2911,6 +2911,8 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
  finish_offered=True
  definitions=[*definitions,FINISH_DEFINITION]
  sources=[];executions=[];failed=False;successful=0;invalid_calls=set()
+ # #818: memory proposals recorded; they neither advance nor fail the Work (as in outcome_from_events).
+ proposals=0
  # (tool, note) for calls that ran but whose own Evidence says they are incomplete.
  incomplete=[]
  # AgentOS-rendered text for calls whose result was observed (#598 H1).
@@ -2988,7 +2990,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
   actual=actual or NOT_REPORTED
   calls=message.get('tool_calls') or []
   record('model','responded',json.dumps({'scope':scope,'model':actual,'requested_model':requested,'tool_calls':recorded_calls(calls,capabilities.tools,getattr(capabilities,'judgment_text',None)),'has_text':bool(message.get('content'))},ensure_ascii=False))
-  if not calls and not successful and not failed and not checked_direct:
+  if not calls and not successful and not failed and not proposals and not checked_direct:
    checked_direct=True
    messages.append(message)
    messages.append({'role':'system','content':'Execution check: NO tool has run for the current request. The preceding assistant text is only a draft. If the latest user requested an action, retrieval, saving, or delegation, actually call the appropriate tool now. Never say saved, searched, read, or delegated without execution. If this is ordinary conversation or requires no tool, return the final answer directly. Do not work on older requests.'})
@@ -3115,6 +3117,11 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
      # 'error' is the field the owner-visible cause is built from; without it
      # the turn would report a failure it could not explain.
      record(name,'failed',json.dumps({**trace,'error':withheld.reason},ensure_ascii=False))
+    elif proposed:
+     proposals+=1;trail.append((action,'proposed'))
+     observed=verified_text(name,result)
+     if observed and observed not in verified:verified.append(observed)
+     record(name,'succeeded',json.dumps(trace,ensure_ascii=False))
     else:
      successful+=1
      # A call that ran but whose typed Evidence says it is incomplete (a
@@ -3129,7 +3136,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
       note=' '.join(QUALIFIER_NOTES[label] for label in gaps)
       failed=True;trail.append((action,'incomplete'))
       incomplete.append((name,note));failures.append((name,note))
-     else:trail.append((action,'proposed' if proposed else 'succeeded'))
+     else:trail.append((action,'succeeded'))
      record(name,'succeeded',json.dumps(trace,ensure_ascii=False))
    except (ValueError,TypeError,AttributeError,OSError,ProviderError) as exc:
     action=(capabilities.tools.get(name) or {}).get('host_action',name) if validated else None

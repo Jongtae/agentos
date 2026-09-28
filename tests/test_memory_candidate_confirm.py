@@ -141,14 +141,20 @@ class TelegramConfirmTests(unittest.TestCase):
                                       'message': {'message_id': message_id,
                                                   'chat': {'id': chat or sender, 'type': 'private'}}}, GENERATION)
 
+    def open_candidates(self, job_id):
+        return [row for row in self.store.memory_candidates() if row['state'] == 'pending']
+
+    def binding(self, row):
+        return json.loads(self.store.notification(row['id'])['fingerprint'])
+
     def test_the_owner_gets_the_answer_then_one_confirm_prompt(self):
         job, prompt, row = self.offered()
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
         self.assertEqual(prompt['text'], f'기억해 둘까요?\n• place.work: {VALUE}')
-        buttons = prompt['reply_markup']['inline_keyboard'][0]
-        self.assertEqual([button['text'] for button in buttons], ['기억하기', '아니요'])
-        self.assertEqual([button['callback_data'] for button in buttons],
-                         [f"p7m:{row['id']}:accept", f"p7m:{row['id']}:reject"])
+        buttons = prompt['reply_markup']['inline_keyboard']
+        self.assertEqual([[button['text'] for button in line] for line in buttons], [['기억하기', '아니요']])
+        self.assertEqual([button['callback_data'] for button in buttons[0]],
+                         [f"p7m:{row['id']}:1:accept", f"p7m:{row['id']}:1:reject"])
         self.assertEqual(row['state'], 'sent')
         self.assertIsInstance(row['message_id'], int)
         # Queued once: a second delivery pass sends nothing more.
@@ -157,55 +163,59 @@ class TelegramConfirmTests(unittest.TestCase):
         self.assertEqual(len(self.notification(job['id'])), 1)
 
     def test_accept_writes_canonical_memory_through_the_approval_path(self):
-        job, prompt, row = self.offered()
+        job, _prompt, row = self.offered()
         self.assertEqual(self.store.memories(), [])
-        self.tap(f"p7m:{row['id']}:accept", row['message_id'])
+        self.tap(f"p7m:{row['id']}:1:accept", row['message_id'])
         [memory] = self.store.memories()
         self.assertEqual((memory['memory_key'], memory['content']), (KEY, VALUE))
         [candidate] = self.store.memory_candidates(include_decided=True)
         self.assertEqual((candidate['state'], candidate['resulting_memory_id']), ('accepted', memory['id']))
         [edit] = self.edits()
         self.assertEqual(edit['message_id'], row['message_id'])
-        self.assertTrue(edit['text'].startswith('기억해 두었습니다.'), edit['text'])
-        self.assertIn(VALUE, edit['text'])
+        self.assertEqual(edit['text'], f'기억해 둘까요?\n• place.work: {VALUE} → 기억함\n'
+                                       '기억한 내용은 내 기록에서 고치거나 지울 수 있습니다.')
         self.assertEqual(edit['reply_markup'], {'inline_keyboard': []})
-        self.assertEqual(self.notification(job['id'])[0]['state'], 'memory_accepted')
-        # Consumed once: the same tap again changes nothing.
-        self.tap(f"p7m:{row['id']}:reject", row['message_id'])
+        self.assertEqual(self.notification(job['id'])[0]['state'], 'memory_decided')
+        # Consumed once: the same message again changes nothing.
+        self.tap(f"p7m:{row['id']}:1:reject", row['message_id'])
         self.assertEqual(len(self.store.memories()), 1)
         self.assertEqual(len(self.edits()), 1)
         self.assertEqual(self.answers()[-1], '처리할 수 있는 요청이 아닙니다.')
 
     def test_reject_leaves_memory_untouched(self):
-        job, _prompt, row = self.offered()
-        self.tap(f"p7m:{row['id']}:reject", row['message_id'])
+        _job, _prompt, row = self.offered()
+        self.tap(f"p7m:{row['id']}:1:reject", row['message_id'])
         self.assertEqual(self.store.memories(), [])
         [candidate] = self.store.memory_candidates(include_decided=True)
         self.assertEqual(candidate['state'], 'rejected')
-        self.assertTrue(self.edits()[-1]['text'].startswith('기억하지 않았습니다.'))
-        self.tap(f"p7m:{row['id']}:accept", row['message_id'])
+        self.assertTrue(self.edits()[-1]['text'].endswith('→ 기억 안 함'), self.edits()[-1]['text'])
+        self.tap(f"p7m:{row['id']}:1:accept", row['message_id'])
         self.assertEqual(self.store.memories(), [], 'a used message cannot accept later')
 
-    def test_other_chat_other_message_and_stale_taps_are_refused(self):
-        job, _prompt, row = self.offered()
-        self.tap(f"p7m:{row['id']}:accept", row['message_id'], sender=OTHER)
-        self.tap(f"p7m:{row['id']}:accept", row['message_id'] + 1)
-        self.tap(f"p7m:{row['id']}:accept", row['message_id'], chat=OTHER)
-        self.service.ingest_callback({'id': 'cb', 'from': {'id': CHAT}, 'data': f"p7m:{row['id']}:accept",
+    def test_other_chat_other_message_and_malformed_taps_are_refused(self):
+        _job, _prompt, row = self.offered()
+        self.tap(f"p7m:{row['id']}:1:accept", row['message_id'], sender=OTHER)
+        self.tap(f"p7m:{row['id']}:1:accept", row['message_id'] + 1)
+        self.tap(f"p7m:{row['id']}:1:accept", row['message_id'], chat=OTHER)
+        self.tap(f"p7m:{row['id']}:2:accept", row['message_id'])
+        self.tap(f"p7m:{row['id']}:accept", row['message_id'])
+        self.service.ingest_callback({'id': 'cb', 'from': {'id': CHAT}, 'data': f"p7m:{row['id']}:1:accept",
                                       'message': {'message_id': row['message_id'], 'chat': {'id': CHAT, 'type': 'private'}}},
                                      'g0')
         self.assertEqual(self.store.memories(), [])
         self.assertEqual(self.edits(), [])
-        # Stale: the owner decided the candidate in 내 기록 before tapping.
+
+    def test_a_candidate_decided_elsewhere_is_reported_outdated(self):
+        job, _prompt, row = self.offered()
         [candidate] = self.store.memory_candidates()
         self.service.memory_candidate_request({'operation': 'reject', 'work_ref': candidate['work_ref'],
                                                'id': candidate['id'], 'content_digest': candidate['content_digest']})
-        self.tap(f"p7m:{row['id']}:accept", row['message_id'])
+        self.tap(f"p7m:{row['id']}:1:accept", row['message_id'])
         self.assertEqual(self.store.memories(), [])
-        self.assertEqual(self.notification(job['id'])[0]['state'], 'sent')
-        self.assertEqual(self.answers()[-1], '처리할 수 있는 요청이 아닙니다.')
+        self.assertIn('→ 그 사이 바뀌어 처리하지 않음', self.edits()[-1]['text'])
+        self.assertIn('처리하지 않은 항목이 있습니다', self.answers()[-1])
 
-    def test_a_changed_set_is_not_offered(self):
+    def test_a_set_with_nothing_pending_is_not_offered(self):
         job_id = self.turn()
         self.service.deliver_one()
         [candidate] = self.store.memory_candidates()
@@ -214,6 +224,84 @@ class TelegramConfirmTests(unittest.TestCase):
         self.assertTrue(self.service.deliver_notification())
         self.assertEqual(len(self.sends()), before)
         self.assertEqual(self.notification(job_id)[0]['state'], 'cancelled')
+
+    # --- P2-1: #805 upkeep adds candidates to the same Work asynchronously ---------
+
+    def test_an_upkeep_candidate_added_before_the_send_neither_cancels_nor_joins_the_prompt(self):
+        job_id = self.turn()
+        self.service.deliver_one()
+        self.store.save_memory_candidate(job_id, 'profile.routine.commute', '지하철')   # #805 upkeep, same Work
+        self.assertTrue(self.service.deliver_notification())
+        [row] = self.notification(job_id)
+        self.assertEqual(row['state'], 'sent')
+        self.assertEqual(self.sends()[-1]['text'], f'기억해 둘까요?\n• place.work: {VALUE}')
+
+    def test_an_upkeep_candidate_added_after_the_send_does_not_break_the_tap(self):
+        _job, _prompt, row = self.offered()
+        self.store.save_memory_candidate(_job['id'], 'profile.routine.commute', '지하철')
+        self.tap(f"p7m:{row['id']}:1:accept", row['message_id'])
+        self.assertEqual([(m['memory_key'], m['content']) for m in self.store.memories()], [(KEY, VALUE)])
+        self.assertEqual([c['memory_key'] for c in self.open_candidates(_job['id'])], ['profile.routine.commute'],
+                         'the later candidate is left to 내 기록, never accepted by this tap')
+
+    # --- P2-2: an old button never overwrites a newer Memory unseen ---------------
+
+    def test_a_memory_changed_after_the_send_refuses_the_tap(self):
+        job, _prompt, row = self.offered()
+        self.store.save_memory(KEY, '여의도 본사')      # the owner changed it elsewhere
+        self.tap(f"p7m:{row['id']}:1:accept", row['message_id'])
+        self.assertEqual([m['content'] for m in self.store.memories()], ['여의도 본사'])
+        self.assertIn('→ 그 사이 바뀌어 처리하지 않음', self.edits()[-1]['text'])
+        self.assertIn('처리하지 않은 항목이 있습니다', self.edits()[-1]['text'])
+        self.assertEqual([c['state'] for c in self.store.memory_candidates(include_decided=True)], ['pending'])
+
+    def test_the_prompt_shows_the_value_it_would_replace(self):
+        self.store.save_memory(KEY, '서울 역삼 오피스')
+        job, prompt, row = self.offered()
+        self.assertEqual(prompt['text'], f'기억해 둘까요?\n• place.work: {VALUE} (현재: 서울 역삼 오피스)')
+        self.tap(f"p7m:{row['id']}:1:accept", row['message_id'])
+        self.assertEqual([m['content'] for m in self.store.memories()], [VALUE], 'the shown value is what it replaced')
+
+    def test_buttons_expire(self):
+        job, _prompt, row = self.offered()
+        binding = self.binding(row)
+        binding['sent'] -= 86401
+        self.store.update_notification(row['id'], 'sent', fingerprint=json.dumps(binding))
+        self.tap(f"p7m:{row['id']}:1:accept", row['message_id'])
+        self.assertEqual(self.store.memories(), [])
+        self.assertEqual(self.notification(job['id'])[0]['state'], 'expired')
+        self.assertEqual(self.edits()[-1]['reply_markup'], {'inline_keyboard': []})
+        self.assertIn('확인 시간이 지나', self.edits()[-1]['text'])
+
+    def test_the_sweep_closes_an_expired_prompt_without_a_tap(self):
+        job, _prompt, row = self.offered()
+        sent = self.binding(row)['sent']
+        self.service.expire_memory_prompts(now=sent + 100)
+        self.assertEqual(self.notification(job['id'])[0]['state'], 'sent')
+        self.service._memory_prompt_sweep = 0
+        self.service.expire_memory_prompts(now=sent + 86401)
+        self.assertEqual(self.notification(job['id'])[0]['state'], 'expired')
+        self.assertEqual(self.edits()[-1]['reply_markup'], {'inline_keyboard': []})
+
+    def test_each_candidate_is_decided_on_its_own(self):
+        job_id = self.store.enqueue('두 가지', 'two', channel=f'telegram:{GENERATION}', chat_id=CHAT)
+        self.store.save_memory_candidate(job_id, KEY, VALUE)
+        self.store.save_memory_candidate(job_id, 'profile.food_preference', '매운 음식')
+        self.service.queue_memory_candidates(self.store.job(job_id))
+        self.assertTrue(self.service.deliver_notification())
+        [row] = self.notification(job_id)
+        prompt = self.sends()[-1]
+        self.assertEqual(prompt['text'], f'기억해 둘까요?\n1. place.work: {VALUE}\n2. food_preference: 매운 음식')
+        self.assertEqual([[button['text'] for button in line] for line in prompt['reply_markup']['inline_keyboard']],
+                         [['1 기억하기', '1 아니요'], ['2 기억하기', '2 아니요'], ['모두 기억하기', '모두 아니요']])
+        self.tap(f"p7m:{row['id']}:2:reject", row['message_id'])
+        self.assertEqual(self.notification(job_id)[0]['state'], 'sent', 'one is still open')
+        self.assertEqual([[button['text'] for button in line] for line in self.edits()[-1]['reply_markup']['inline_keyboard']],
+                         [['1 기억하기', '1 아니요']])
+        self.tap(f"p7m:{row['id']}:a:accept", row['message_id'])
+        self.assertEqual([(m['memory_key'], m['content']) for m in self.store.memories()], [(KEY, VALUE)])
+        self.assertEqual(self.notification(job_id)[0]['state'], 'memory_decided')
+        self.assertTrue(self.edits()[-1]['text'].endswith('기억한 내용은 내 기록에서 고치거나 지울 수 있습니다.'))
 
     def test_a_web_work_offers_nothing_on_telegram(self):
         job_id = self.turn(channel=False)
@@ -224,11 +312,29 @@ class TelegramConfirmTests(unittest.TestCase):
         job_id = self.store.enqueue('x', 'bounded', channel=f'telegram:{GENERATION}', chat_id=CHAT)
         for index in range(7):
             self.store.save_memory_candidate(job_id, f'profile.item{index}', '가' * 300)
-        shown, remaining = self.service.offered_memory_candidates(job_id)
-        self.assertEqual((len(shown), remaining), (5, 2))
-        text = self.service.memory_candidates_text(shown, remaining)
+        self.service.queue_memory_candidates(self.store.job(job_id))
+        self.assertTrue(self.service.deliver_notification())
+        text = self.sends()[-1]['text']
+        self.assertEqual(len(text.splitlines()), 1 + 5 + 1)
         self.assertTrue(all(len(line) <= 200 for line in text.splitlines()), text)
         self.assertIn('그 밖의 후보 2개는 내 기록에서 확인할 수 있습니다.', text)
+        self.assertTrue(all(len(button['callback_data'].encode()) <= 64
+                            for line in self.sends()[-1]['reply_markup']['inline_keyboard'] for button in line))
+
+    # --- P3: the in-process outcome agrees with the event-derived one --------------
+
+    def test_a_proposal_does_not_lift_a_failed_turn_to_partial(self):
+        self.plan = [('calendar_query', {'start': '2026-09-24T00:00:00+09:00', 'end': '2026-09-25T00:00:00+09:00',
+                                         'timezone': 'Asia/Seoul'}),
+                     ('save_memory', {'memory_key': KEY, 'content': VALUE})]
+        job_id = self.store.enqueue('내일 일정 알려줘', 'p3', channel=f'telegram:{GENERATION}', chat_id=CHAT)
+        self.service.run_one()
+        job = self.store.job(job_id)
+        with self.store.db() as db:
+            rows = [tuple(row) for row in db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? ORDER BY id',
+                                                     (job_id,))]
+        self.assertEqual(outcome_from_events(rows)[0], 'failed')
+        self.assertEqual(job['status'], 'failed', job.get('error'))
 
 
 class GuidanceTests(unittest.TestCase):

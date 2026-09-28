@@ -443,6 +443,13 @@ class QuickStore:
                 value=dict(row);value['work_ref']='workref:'+value.pop('work_key');results.append(value)
             return results
 
+    def current_memory(self, memory_key, owner_id='local-owner'):
+        """The current Memory row under ``memory_key`` (the one an approval's expected-current check names), or None (#818)."""
+        with self.db() as db:
+            row=db.execute("SELECT * FROM memories WHERE owner_key=? AND memory_key=? AND state='current' ORDER BY created DESC LIMIT 1",
+                           (self._memory_binding(owner_id),memory_key)).fetchone()
+            return self._memory_row(row) if row else None
+
     def memory(self, memory_id, owner_id='local-owner', current_only=True):
         if not isinstance(memory_id,str) or not memory_id:return None
         query='SELECT * FROM memories WHERE id=? AND owner_key=?'+(" AND state='current'" if current_only else '')
@@ -1096,8 +1103,11 @@ class QuickStore:
             row=db.execute("SELECT * FROM telegram_notifications WHERE state='queued' ORDER BY created LIMIT 1").fetchone()
             return dict(row) if row else None
 
-    def update_notification(self, notification_id, state, message_id=None):
+    def update_notification(self, notification_id, state, message_id=None, fingerprint=None):
         with self.db() as db:
+            if fingerprint is not None:
+                # #818: a memory prompt's binding is recorded with what the send showed.
+                db.execute('UPDATE telegram_notifications SET fingerprint=? WHERE id=?',(fingerprint,notification_id))
             if message_id is None:
                 db.execute('UPDATE telegram_notifications SET state=? WHERE id=?',(state,notification_id))
             else:

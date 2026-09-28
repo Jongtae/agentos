@@ -17,7 +17,9 @@ Scenario fields:
 - ``expect`` (optional deterministic expectations): ``memory_any`` (a list of
   groups; each group is a list of alternative substrings and one of them must
   appear in a new Memory row or MemoryCandidate), ``preparation`` (a new
-  preparation/reminder must exist), ``allow_status`` (extra terminal statuses
+  preparation/reminder must exist), ``no_memory_of_request`` (no new Memory
+  row or MemoryCandidate may hold an owner turn's sentence as its content: a
+  request is not a fact about the owner, #846), ``allow_status`` (extra terminal statuses
   that count as not failed, e.g. ``awaiting_context``);
 - ``good_secretary``: what a good secretary would do, for the judge;
 - ``tags``: free labels for grouping.
@@ -45,7 +47,7 @@ RUBRIC = {
 
 SPLITS = ('dev', 'heldout')
 _ID = re.compile(r'^[a-z0-9][a-z0-9-]{2,79}$')
-_EXPECT_KEYS = {'memory_any', 'preparation', 'allow_status'}
+_EXPECT_KEYS = {'memory_any', 'preparation', 'no_memory_of_request', 'allow_status'}
 _TURN_KEYS = {'say', 'note', 'note_in_message'}
 _KEYS = {'id', 'title', 'split', 'turns', 'rubric', 'expect', 'good_secretary', 'tags'}
 
@@ -105,7 +107,9 @@ def validate(raw, origin='scenario'):
     return {'id': ident, 'title': str(raw.get('title') or ident), 'split': split, 'turns': normalized_turns,
             'rubric': list(dict.fromkeys(rubric)),
             'expect': {'memory_any': [[item.strip() for item in group] for group in memory_any],
-                       'preparation': expect.get('preparation') is True, 'allow_status': list(allow_status)},
+                       'preparation': expect.get('preparation') is True,
+                       'no_memory_of_request': expect.get('no_memory_of_request') is True,
+                       'allow_status': list(allow_status)},
             'good_secretary': str(raw.get('good_secretary') or ''), 'tags': list(tags)}
 
 

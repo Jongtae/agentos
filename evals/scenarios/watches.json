@@ -1,0 +1,55 @@
+[
+ {
+  "id": "standing-wish-becomes-watch",
+  "title": "A standing wish after a result becomes a proposed watch",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "다음 주 수요일 저녁 7시 강남 근처 이탈리안 식당 예약 가능한 곳 있어?"
+   },
+   {
+    "say": "괜찮은 데 자리 나면 알려줘. 화요일 저녁까지만."
+   }
+  ],
+  "rubric": [
+   "context_carry",
+   "follow_through",
+   "honest_unverified"
+  ],
+  "expect": {
+   "preparation": true
+  },
+  "good_secretary": "After answering once, treats the second turn as a standing wish: proposes one watch that checks availability about three times a day (morning, afternoon, evening) until Tuesday evening and tells the owner only when a table opens, phrased as one question, and says exactly what it will check and until when.",
+  "tags": [
+   "watch",
+   "follow-through"
+  ]
+ },
+ {
+  "id": "standing-wish-is-not-a-memory",
+  "title": "The request sentence of a standing wish is not saved as a memory",
+  "split": "heldout",
+  "turns": [
+   {
+    "say": "새로 나온 무선 청소기 하나 사려고 하는데 지금 얼마쯤 해?"
+   },
+   {
+    "say": "이번 달 안에 20만원 아래로 내려가면 알려줘."
+   }
+  ],
+  "rubric": [
+   "context_carry",
+   "follow_through",
+   "honest_unverified"
+  ],
+  "expect": {
+   "preparation": true,
+   "no_memory_of_request": true
+  },
+  "good_secretary": "Proposes a price watch with about three checks a day until the end of the month that reports only when the price drops below the threshold, as one question. Does not store the owner's request sentence as a memory; at most a fact about the owner in their own words.",
+  "tags": [
+   "watch",
+   "memory"
+  ]
+ }
+]

@@ -1424,6 +1424,19 @@ class OwnerStateOnTheCliRoute(Harness):
         self.assertEqual(memories, 0)
         self.assertEqual([row['content'] for row in candidates], ['성남 백현동'])
 
+    def test_the_request_sentence_is_refused_at_the_save_boundary(self):
+        """#846: a worker that saves the owner's wish sentence as a value makes no candidate at all."""
+        request = '값이  내려가면 알려줘.'
+        results = []
+        self.engine.before = lambda tools: results.append(tools.call('save_memory', {
+            'memory_key': 'profile.wish', 'content': ' 값이 내려가면 알려줘. '}))
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        self.run_work(request)
+        with self.store.db() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM memories').fetchone()[0], 0)
+            self.assertEqual(db.execute('SELECT count(*) FROM memory_candidates').fetchone()[0], 0)
+        self.assertIn('value-is-the-request', json.dumps(results))
+
 
 class HostRelayRouting(unittest.TestCase):
     """#774: the relay serves browser and owner-state tools, and nothing else."""
@@ -1548,6 +1561,21 @@ class SecretaryStandard(Harness):
         self.assertIn('owner_profile:', context.facts['owner_context'])
         self.assertIn('current_context:', context.facts['owner_context'])
 
+    def test_the_watch_and_memory_tool_descriptions_state_the_standing_wish_default(self):
+        """#846: the tool text carries the default cadence and the value-not-request rule, with no task names."""
+        from personal_agent.agent_runtime import DEFINITIONS, PROFILE_KEY_GUIDANCE, SCHEDULE_PREPARATION_DESCRIPTION
+        from test_no_scenario_code import scenario_tokens
+        by_name = {tool['function']['name']: tool['function']['description'] for tool in DEFINITIONS}
+        for text in (SCHEDULE_PREPARATION_DESCRIPTION, by_name['schedule_preparation']):
+            self.assertIn('about three checks a day', text)
+            self.assertIn('every_minutes around 360 to 480', text)
+            self.assertIn('hourly or closer only when the owner asks for it or the deadline is within hours', text)
+            self.assertIn('never save the request sentence with save_memory', text)
+            self.assertEqual(scenario_tokens(text), [])
+        self.assertIn('A value is a fact about the owner, never the request itself', by_name['save_memory'])
+        # PROFILE_KEY_GUIDANCE is pre-existing key text; the save_memory sentence itself names no task.
+        self.assertEqual(scenario_tokens(by_name['save_memory'].replace(PROFILE_KEY_GUIDANCE, '')), [])
+
     def test_the_worker_guidance_and_the_judgment_state_the_standard(self):
         from personal_agent.agent_runtime import API_TOOL_GUIDANCE, CLI_TOOL_GUIDANCE, CORE_INSTRUCTIONS
         from personal_agent.conversation_handoff import GOAL_REACHED_PROPOSITION
@@ -1555,6 +1583,10 @@ class SecretaryStandard(Harness):
         self.assertIn('look them up and cite the sources', CORE_INSTRUCTIONS)
         for guidance in (API_TOOL_GUIDANCE, CLI_TOOL_GUIDANCE):
             self.assertIn('ordinary conversation that needs no current facts', guidance)
+        # #846: a standing wish about something that changes is proposed as a watch, never saved as the request.
+        self.assertIn('propose a watch (schedule_preparation with every_minutes and until, about three checks a day by default)',
+                      CORE_INSTRUCTIONS)
+        self.assertIn('never the request sentence itself', CORE_INSTRUCTIONS)
         self.assertIn('capable personal secretary', GOAL_REACHED_PROPOSITION)
         self.assertIn('read in the light of the recent conversation', GOAL_REACHED_PROPOSITION)
         self.assertIn('the reply\'s own claims are not evidence', GOAL_REACHED_PROPOSITION)

@@ -56,8 +56,9 @@ RECURRENCES = ('daily', 'weekdays', 'weekly')
 RECURRENCE_WINDOW = 'window'
 MIN_EVERY_MINUTES, MAX_EVERY_MINUTES = 5, 12 * 60
 #: A watch never spans more than a day and never runs more than this often.
-MAX_WINDOW_SECONDS = 24 * 3600
-MAX_WINDOW_RUNS = 48
+#: #846: a standing wish runs to the owner's deadline (days or weeks); about three checks a day for a month.
+MAX_WINDOW_SECONDS = 31 * 86400
+MAX_WINDOW_RUNS = 96
 #: ``delivery_mode``: every result is delivered, or only a ``notify`` decision is.
 DELIVERY_ALWAYS, DELIVERY_WHEN_NEEDED = 'always', 'when_needed'
 DECISION_NOTIFY, DECISION_QUIET = 'notify', 'quiet'
@@ -142,7 +143,7 @@ REFUSALS = {
     'due_too_far': '1년 이내의 시각만 예약할 수 있습니다.',
     'invalid_recurrence': 'recurrence는 비우거나 daily, weekdays, weekly 중 하나입니다.',
     'invalid_window': (f'every_minutes는 {MIN_EVERY_MINUTES}~{MAX_EVERY_MINUTES} 사이의 정수이고, until은 due보다 늦고 '
-                       f'due부터 {MAX_WINDOW_SECONDS // 3600}시간 이내인 RFC3339 시각입니다. recurrence와 함께 쓰지 않습니다.'),
+                       f'due부터 {MAX_WINDOW_SECONDS // 86400}일 이내인 RFC3339 시각입니다. recurrence와 함께 쓰지 않습니다.'),
     'invalid_max_runs': f'max_runs는 1~{MAX_WINDOW_RUNS} 사이의 정수입니다.',
     'invalid_delivery': 'delivery when_needed는 kind prepare에만 쓸 수 있습니다.',
     'too_many': f'진행 중인 준비가 {MAX_ACTIVE}개를 넘어 더 만들지 않았습니다. 설정에서 필요 없는 준비를 정리해 주세요.',

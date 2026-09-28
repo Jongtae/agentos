@@ -754,8 +754,10 @@ class WindowTests(_WatchCase):
         self.assertEqual(prep.normalize_window(10, until(3600), None, due, 'Asia/Seoul', self.now), (600, due + 3600, 6), 'slots before the deadline')
         self.assertEqual(prep.normalize_window('10', until(3600), 3, due, 'Asia/Seoul', self.now)[2], 3)
         self.assertEqual(prep.normalize_window(5, until(86400), None, due, 'Asia/Seoul', self.now)[2], prep.MAX_WINDOW_RUNS)
+        # #846: about three checks a day up to a deadline weeks away fits the window.
+        self.assertEqual(prep.normalize_window(480, until(30 * 86400), None, due, 'Asia/Seoul', self.now)[2], 90)
         for every, span, runs in ((4, 3600, None), (721, 3600, None), (10, 0, None), (10, -600, None),
-                                  (10, 86400 + 60, None), (True, 3600, None), (10, 3600, 0), (10, 3600, 49)):
+                                  (10, 31 * 86400 + 60, None), (True, 3600, None), (10, 3600, 0), (10, 3600, 97)):
             with self.assertRaises(prep.PreparationRefusal, msg=(every, span, runs)):
                 prep.normalize_window(every, until(span), runs, due, 'Asia/Seoul', self.now)
         with self.assertRaises(prep.PreparationRefusal):
@@ -1007,6 +1009,22 @@ class WatchAcceptanceTests(_WatchCase):
         self.assertEqual((listed['every_minutes'], listed['max_runs'], listed['run_count'], listed['delivery']),
                          (10, 6, 0, 'when_needed'))
         self.assertIn('Asia/Seoul', listed['until_local'])
+
+    def test_a_three_a_day_watch_until_a_deadline_is_accepted_as_a_proposal(self):
+        """#846: the guidance's default cadence (every_minutes ~420 with until) is within the validated window."""
+        self.judge = watch_engine([], preparation=False)
+        self.service.use_decision_engine(self.judge)
+        self.script = [{'content': None, 'tool_calls': [call('1', 'schedule_preparation', kind='prepare',
+                                                             goal='바뀌었는지 확인', due=self.due_iso(600),
+                                                             every_minutes='420', until=self.due_iso(600 + 20 * 3600),
+                                                             delivery='when_needed')]},
+                       {'content': '하루 세 번 확인하고 필요할 때만 알려 드릴까요?'}]
+        self.receive('바뀌면 알려줘')
+        [row] = self.rows()
+        [result] = [json.loads(m['content']) for m in self.model_calls[-1]['messages'] if m['role'] == 'tool']
+        self.assertEqual((row['state'], row['every_seconds'], row['delivery_mode']), ('proposed', 420 * 60, 'when_needed'))
+        self.assertEqual((result['every_minutes'], result['delivery']), (420, 'when_needed'))
+        self.assertNotIn('refused_because', json.dumps(result))
 
     def test_the_owners_own_request_schedules_it(self):
         _work, row, _result = self.propose_watch(preparation=True)

@@ -32,6 +32,10 @@ def _texts(rows, *keys):
                 yield value
 
 
+def _normalized(text):
+    return ' '.join(str(text or '').split()).casefold()
+
+
 def deterministic_checks(scenario, run):
     """``(checks, failures)``: check name -> bool, and the failure rows."""
     failures = []
@@ -77,6 +81,17 @@ def deterministic_checks(scenario, run):
         checks['preparation'] = bool(diff.get('preparations'))
         if not checks['preparation']:
             failures.append({'kind': 'check', 'name': 'preparation', 'reason': 'no reminder/preparation was created'})
+    if scenario['expect'].get('no_memory_of_request'):
+        # #846: a standing wish is a watch, not a memory; the request sentence must not become a value.
+        said = {_normalized(turn.get('say')) for turn in turns if (turn.get('say') or '').strip()}
+        said |= {_normalized(turn['say']) for turn in scenario.get('turns') or [] if turn.get('say')}
+        stored = [_normalized(text) for text in _texts([*diff.get('memories', []), *diff.get('candidates', [])],
+                                                       'content', 'value')]
+        echoed = [text for text in stored if text in said]
+        checks['no_memory_of_request'] = not echoed
+        for text in echoed:
+            failures.append({'kind': 'check', 'name': 'no_memory_of_request',
+                             'reason': f'a new memory/candidate is the owner\'s request sentence: {text[:80]}'})
     return checks, failures
 
 
@@ -110,7 +125,8 @@ def judge_prompt(scenario, run):
     for label, rows, keys in (('new memory', diff.get('memories', []), ('content',)),
                               ('new memory candidate (awaiting owner confirmation)', diff.get('candidates', []),
                                ('content', 'value')),
-                              ('new reminder/preparation', diff.get('preparations', []), ('goal', 'due_local', 'state'))):
+                              ('new reminder/preparation', diff.get('preparations', []),
+                               ('kind', 'goal', 'due_local', 'every_minutes', 'until_local', 'delivery', 'state'))):
         for row in rows[:10]:
             lines.append(f'- {label}: ' + ' / '.join(str(row.get(key)) for key in keys if row.get(key)))
     if not any(diff.get(key) for key in ('memories', 'candidates', 'preparations')):
@@ -154,7 +170,7 @@ def rubric_failures(judgment):
     return rows
 
 
-CHECK_NAMES = ('harness', 'delivered', 'not_failed', 'memory', 'preparation')
+CHECK_NAMES = ('harness', 'delivered', 'not_failed', 'memory', 'preparation', 'no_memory_of_request')
 
 
 def combine(scenario, run, checks, failures, judgment=None, judge_status='skipped'):

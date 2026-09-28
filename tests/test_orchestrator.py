@@ -1794,3 +1794,19 @@ class StreamRedaction(unittest.TestCase):
         [error] = cli_metadata('codex', raw)['stream_errors']
         self.assertNotIn('ABCDEFGHIJKLMNOPQRSTUVWX1234', error)
 
+
+
+class StreamErrorsInTheTurnRecord(Harness):
+    def test_a_stream_error_echoing_the_request_or_a_secret_is_not_stored(self):
+        """#792 review: the stored turn record passes the service redaction, not only the pattern pass."""
+        self.engine.fail = [ExecutionError('no answer', failure_class='invalid-output',
+                                           meta={'stream_errors': [f'rejected: 비밀 요청 문장 그대로 반복 key {OPENAI_KEY}',
+                                                                   f'bad key {OPENAI_KEY}']})]
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        job, _row = self.run_work('비밀 요청 문장 그대로 반복')
+        errors = self.store.turn_provenance(job).get('stream_errors')
+        self.assertEqual(len(errors or []), 2, 'the errors are recorded, redacted')
+        self.assertIn('bad key', errors[1])
+        stored = json.dumps(errors, ensure_ascii=False)
+        self.assertNotIn(OPENAI_KEY, stored)
+        self.assertNotIn('비밀 요청 문장 그대로 반복', stored)

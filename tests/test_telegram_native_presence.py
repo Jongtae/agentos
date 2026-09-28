@@ -608,6 +608,9 @@ class OutcomeReactionTests(unittest.TestCase):
         self.assertEqual(outcome_reaction('succeeded'), DONE_REACTION)
         self.assertEqual(outcome_reaction('succeeded', [write_event('save_note')]), WROTE_REACTION)
         self.assertEqual(outcome_reaction('succeeded', [write_event('save_memory')]), WROTE_REACTION)
+        aliased = {'tool': 'package.save_fact', 'status': 'succeeded',
+                   'trace': {'host_action': 'save_memory', 'evidence': {'saved': True}}}
+        self.assertEqual(outcome_reaction('succeeded', [aliased]), WROTE_REACTION)
         # A pending MemoryCandidate, a failed write or another tool is not a write.
         for events in ([write_event('save_memory', saved=False)], [write_event('save_note', status='failed')],
                        [write_event('save_note', status='running')], [write_event('web_search')],
@@ -658,6 +661,14 @@ class OutcomeReactionServiceTests(NativePresenceTestCase):
         # present_turn later in the same run does not react twice.
         self.service.present_turn(self.store.job(job_id))
         self.assertEqual(len(self.reactions()), 1)
+
+    def test_superseded_parked_work_clears_looking_reaction(self):
+        job_id, message_id = self.receive('연결 후 이어서 해줘')
+        self.service.present_turn(self.store.job(job_id))
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='awaiting_connection',delivery='pending' WHERE id=?", (job_id,))
+        self.service.cancel_superseded_work([job_id], notify=False)
+        self.assertEqual(self.reactions()[-1], {'chat_id': CHAT, 'message_id': message_id, 'reaction': []})
 
     def settle(self, status, response='결과', delivery='pending'):
         job_id, _ = self.receive('요청')

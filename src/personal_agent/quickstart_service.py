@@ -3574,6 +3574,7 @@ class AgentService:
         jobs=[job for job in (self.store.job(work_id) for work_id in cancelled) if job]
         for job in jobs:
             self.update_task_card(job,'superseded')
+            self._present_outcome(job,delivered=False,blocked=False)
         if jobs and notify:
             self._notify_owner(self.connector_owner_id(jobs[0]),SUPERSEDED_WORK_ERROR)
         return cancelled
@@ -3642,6 +3643,8 @@ class AgentService:
             db.execute('BEGIN IMMEDIATE')
             db.execute("UPDATE jobs SET delivery='cancelled' WHERE id=? AND status='awaiting_connection' AND delivery='pending'",(work_id,))
             db.execute("UPDATE jobs SET status='failed',error=? WHERE id=? AND status='awaiting_connection'",(text,work_id))
+        job=self.store.job(work_id)
+        if job:self._present_outcome(job,delivered=False,blocked=False)
 
     def deny_connector_work(self, connector_id, owner_id, reason='denied'):
         """Fail the parked Work explicitly after a refused or failed connection."""
@@ -3653,6 +3656,8 @@ class AgentService:
             db.execute('BEGIN IMMEDIATE')
             db.execute("UPDATE jobs SET delivery='cancelled' WHERE id=? AND status='awaiting_connection' AND delivery='pending'",(work_id,))
             db.execute("UPDATE jobs SET status='failed',error=? WHERE id=? AND status='awaiting_connection'",(text,work_id))
+        job=self.store.job(work_id)
+        if job:self._present_outcome(job,delivered=False,blocked=False)
         self._notify_owner(owner_id,text)
         return work_id
 
@@ -4537,6 +4542,9 @@ class AgentService:
             for work_id in work_ids:
                 db.execute("UPDATE jobs SET delivery='cancelled' WHERE id=? AND status IN ('awaiting_connection','awaiting_drive') AND delivery='pending'",(work_id,))
                 db.execute("UPDATE jobs SET status='failed',error=? WHERE id=? AND status IN ('awaiting_connection','awaiting_drive')",(text,work_id))
+        for work_id in work_ids:
+            job=self.store.job(work_id)
+            if job:self._present_outcome(job,delivered=False,blocked=False)
         return work_ids
 
     @staticmethod

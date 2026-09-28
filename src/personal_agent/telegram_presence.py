@@ -248,7 +248,8 @@ def wrote_record(events):
     for event in events or ():
         trace = event.get('trace') if isinstance(event.get('trace'), dict) else {}
         evidence = trace.get('evidence') if isinstance(trace.get('evidence'), dict) else {}
-        if event.get('tool') in RECORD_WRITE_TOOLS and event.get('status') == 'succeeded' and evidence.get('saved') is True:
+        tool = trace.get('host_action') or event.get('tool')
+        if tool in RECORD_WRITE_TOOLS and event.get('status') == 'succeeded' and evidence.get('saved') is True:
             return True
     return False
 

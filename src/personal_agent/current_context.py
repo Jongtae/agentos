@@ -135,6 +135,22 @@ def zone(name):
         return None
 
 
+def host_zone():
+    """``(name, tzinfo)`` of the host's local zone, for the turn's clock only (#804).
+
+    The calendar's resolver (``resolve_local_timezone``: ``TZ``, then the
+    host's ``/etc/localtime``) without the owner's calendar setting; a host
+    offset with no IANA name is labelled ``host-local``.  Never used for a
+    hypothesis interval: an unknown owner zone is still not guessed there.
+    """
+    from .calendar_conversation import resolve_local_timezone
+    name = resolve_local_timezone()
+    local = datetime.now().astimezone().tzinfo
+    if name == 'UTC' and local.utcoffset(None) != timedelta(0):
+        return 'host-local', local
+    return name, ZoneInfo(name)
+
+
 def local_day_end(source_at, timezone_name):
     """Unix time of the local midnight that ends the source utterance's day.
 
@@ -507,20 +523,29 @@ class CurrentContext:
         """The bounded current-context snapshot for one Work, or None.
 
         With context use off only a location explicitly requested for this
-        Work (task scope) is shown; otherwise nothing is sent and the turn is
-        exactly the old text flow (CT-18).
+        Work (task scope) is shown (CT-18); otherwise the snapshot is the clock
+        only (#804): as_of, the zone and the local date, time and weekday - no
+        location, anchor or hypothesis.  The zone is the owner's setting, else
+        the host's (``timezone_source: host``).
         """
         now = self.now() if now is None else now
         settings = self.observations.settings()
         observations = [e for e in self.observations.usable(now=now, job_id=job_id) if e['kind'] != 'text_edit']
         enabled = settings['enabled']
-        if not enabled and not observations:
-            return None
         snap = {'version': SNAPSHOT_VERSION, 'as_of': iso(now), 'timezone': settings['timezone'] or 'unknown'}
         tz = zone(settings['timezone'])
+        if tz is None:
+            # #804: the turn always knows the time; the host's zone, said to be the host's.
+            try:
+                snap['timezone'], tz = host_zone()
+                snap['timezone_source'] = 'host'
+            except Exception:
+                tz = None
         if tz is not None:
             local = datetime.fromtimestamp(now, tz)
             snap['local_time'] = local.isoformat(timespec='minutes') + ' ' + local.strftime('%a')
+        if not enabled and not observations:
+            return snap
         job = self.store.job(job_id) if job_id else None
         if job:
             telegram = str(job.get('channel') or '').startswith('telegram:')
@@ -599,6 +624,8 @@ class CurrentContext:
         for item in body.get('hypotheses', []):
             if item['predicate'] == 'current_place' and item.get('value'):
                 rows.append((item['ref'], '1', [item['value']]))
+        if not rows:
+            return  # #804: a clock-only snapshot exposed no location text.
         with self.store.db() as db:
             db.execute('BEGIN IMMEDIATE')
             for ref, revision, strings in rows:
@@ -653,6 +680,12 @@ LEGEND = ('Refs are opaque. Pass a location ref to weather(location_ref) instead
           'propose_current_state.')
 
 
+#: #804: the legend and keys of a clock-only snapshot (context off: no refs to explain).
+CLOCK_LEGEND = 'The clock at this turn: local_time is the local date, time and weekday in timezone.'
+CLOCK_KEYS = frozenset({'version', 'as_of', 'timezone', 'timezone_source', 'local_time'})
+
+
 def render(body):
     """The section text: one legend line and the compact JSON snapshot."""
-    return LEGEND + '\n' + json.dumps(body, ensure_ascii=False, separators=(',', ':'))
+    legend = CLOCK_LEGEND if set(body) <= CLOCK_KEYS else LEGEND
+    return legend + '\n' + json.dumps(body, ensure_ascii=False, separators=(',', ':'))

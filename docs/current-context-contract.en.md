@@ -6,6 +6,8 @@ Owner-requested direction, 2026-09-26; adoption issue [#625](https://github.com/
 
 Outcome: **the assistant uses what the owner has already supplied, together with source time and relevant observations, to do useful work with fewer repeated questions.** It may estimate the current situation, but does not turn an estimate into a measurement, durable fact, consent or completed action.
 
+**Amendment (#804, 2026-09-28).** With current context off, every turn still carries the clock only: `as_of`, the local date, weekday and time, and the zone (the owner's setting, else the host's local zone, marked `timezone_source: host`). No location, anchor or hypothesis is added while off, except a location requested for that Work as before. An unknown owner zone is still not guessed for a hypothesis interval.
+
 First scope: one owner, Telegram volunteered location and conversation time, temporary work-mode/current-place hypotheses, existing weather and local-information requests. Two implementation issues: [#626 input](https://github.com/Jongtae/agentos/issues/626), then [#627 state and consumption](https://github.com/Jongtae/agentos/issues/627). Existing #605/#606/#607 remain their owners; this is not a replacement program, second scheduler or prerequisite for already-completed #604.
 
 ## Decision ledger: settled versus not selected

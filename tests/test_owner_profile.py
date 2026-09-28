@@ -74,6 +74,20 @@ class ProfileJudgmentAndGuidance(unittest.TestCase):
         self.assertIn('"profile." memory_key', API_TOOL_GUIDANCE)
         self.assertIn('owner profile section', API_TOOL_GUIDANCE)
 
+    def test_save_memory_asks_the_ai_to_save_what_the_owner_states(self):
+        """#804: a stated durable fact is saved; #597 still decides Memory or candidate."""
+        described = {tool['function']['name']: tool['function']['description'] for tool in DEFINITIONS}
+        save_memory, list_memory = described['save_memory'], described['list_memory']
+        self.assertIn('When the owner states a durable fact about themselves', save_memory)
+        self.assertIn('where they live or work, a preference, an allergy, a routine', save_memory)
+        self.assertIn('AgentOS decides whether it becomes Memory or a candidate the owner confirms', save_memory)
+        self.assertIn('Never save an inference as a fact, and never save a credential', save_memory)
+        for text in (save_memory, list_memory, API_TOOL_GUIDANCE):
+            self.assertNotIn('explicit owner request', text)
+            self.assertNotIn('explicitly owner-authorized', text)
+            self.assertNotIn('explicit owner-authorized', text)
+        self.assertIn('save_memory when the owner states a durable fact about themselves', API_TOOL_GUIDANCE)
+
 
 class ProfileFactsInConversation(_OwnerSurface):
     def propose(self, key, content):

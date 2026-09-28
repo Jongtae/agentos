@@ -360,10 +360,11 @@ class SubscriptionServiceTests(unittest.TestCase):
             # private-read bridge tool (list_notes) is offered to it; #701: nor the
             # bridge's own search tools, which the CLI's search replaces.  The
             # browser tools stay (served by this service through the relay).
-            # A native-search turn offers no private read (#678), now including Memory and calendar reads (#774).
+            # A native-search turn offers no private read (#678), now including Memory and calendar reads (#774);
+            # #804: save_memory is a write with no stored content in its result, so it stays offered.
             self.assertEqual(adapter.call[2], [name for name in BOUNDED_NAMES if name not in
                                                ('propose_current_state', 'list_notes', 'web_search', 'bounded_public_research',
-                                                'calendar_query', 'list_memory', 'save_memory')])
+                                                'calendar_query', 'list_memory')])
             self.assertEqual(store.job(job)['response'], 'engine answer')
 
     def test_summary_regression_sends_approved_notes_to_subscription_engine(self):

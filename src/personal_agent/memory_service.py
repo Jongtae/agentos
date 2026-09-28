@@ -60,7 +60,7 @@ _PROFILE_ROWS_CAP = 500
 #: Tool-description text the runtime may append to ``save_memory`` so the
 #: model lands profile facts under this namespace (wired by the runtime owner).
 PROFILE_KEY_GUIDANCE = ('For a durable owner profile fact - an allergy, food preference, home/work '
-                        'place or preferred store the owner states - use a memory_key that starts '
+                        'place, routine or preferred store the owner states - use a memory_key that starts '
                         'with "profile." followed by dot-separated segments, for example '
                         'profile.allergy.peanut, profile.food_preference, profile.place.home, '
                         'profile.store.books. One current value per key; saving a key again '

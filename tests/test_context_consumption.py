@@ -21,6 +21,7 @@ from pathlib import Path
 
 from personal_agent.agent_runtime import (CURRENT_CONTEXT_HEADING, Capabilities, ToolError, lookup_sources, run_agent)
 from personal_agent.bounded_execution import AgentOSMcpTools, ExecutionResult, profile_actions
+from personal_agent.current_context import CLOCK_KEYS
 from personal_agent.memory_service import MemoryService
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
@@ -46,8 +47,8 @@ def snapshot_in(text):
 
 def lunch_or_weather(snapshot, request):
     """The scripted worker's choices, made only from the snapshot it was given."""
-    if snapshot is None:
-        return []
+    if snapshot is None or set(snapshot) <= CLOCK_KEYS:
+        return []  # #804: a clock-only snapshot gives the worker no place to use
     anchors = {item['ref']: item['label'] for item in snapshot.get('anchors', [])}
     if '근처' in request:
         # The worker copies the snapshot's coordinates into its own query text.
@@ -348,12 +349,13 @@ class _ConsumptionCase:
         self.assertNotIn(SECRET, json.dumps(self.service.current_state.status(), ensure_ascii=False))
 
     def test_context_off_is_the_old_text_flow(self):
-        """CT-18: no section, no proposal tool, no lookup from context."""
+        """CT-18: no location, no proposal tool, no lookup from context; #804: the clock only."""
         self.message_id += 1
         self.share_live_location()
         self.turn('여기 비 와?')
-        self.assertIsNone(snapshot_in(self.worker_inputs[-1]['text']))
-        self.assertNotIn(CURRENT_CONTEXT_HEADING, self.worker_inputs[-1]['text'])
+        snapshot = snapshot_in(self.worker_inputs[-1]['text'])
+        self.assertEqual(set(snapshot) - CLOCK_KEYS, set(), 'the clock only')
+        self.assertIn('local_time', snapshot)
         self.assertNotIn('propose_current_state', self.worker_inputs[-1]['tools'])
         self.assertEqual(self.network.plans, [])
 

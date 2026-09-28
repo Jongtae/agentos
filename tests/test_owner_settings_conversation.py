@@ -796,6 +796,34 @@ class TypedConfirmation(ReviewRemediation):
         self.assertIn('settings_drafts', app)
         self.assertNotIn('/settings 확인', app)
 
+    def test_review_p1_a_typed_no_is_the_drafts_decline_not_a_continuity_cancel(self):
+        work, draft = self.web_draft()
+        self.judge(JUDGMENT_NO, JUDGMENT_YES)
+        with mock.patch.object(self.service, 'continuity_relation') as continuity, \
+                mock.patch.object(self.service, 'cancel_focused_work') as cancel_work:
+            job = self.owner_turn('아니')
+        continuity.assert_not_called()
+        cancel_work.assert_not_called()
+        self.assertEqual(self.store.config('settings_change_drafts')[draft['id']]['state'], 'canceled')
+        self.assertIn('취소했습니다', job['response'])
+
+    def test_review_p1_a_pending_calendar_draft_keeps_its_own_approval(self):
+        work, draft = self.web_draft()
+        confirmed, _declined = self.judge(JUDGMENT_YES)
+        with mock.patch.object(self.service.calendar_conversation, 'claims', return_value=True) as claims:
+            self.owner_turn('응')
+        claims.assert_called()
+        confirmed.assert_not_called()
+        self.assertEqual(self.applies, [])
+        self.assertEqual(self.store.config('settings_change_drafts')[draft['id']]['state'], 'awaiting-confirmation')
+
+    def test_review_p2_the_web_receipt_outlives_the_buttons(self):
+        work, draft = self.web_draft()
+        result = self.service.work_settings_draft(work, {'action': 'confirm'})
+        self.assertEqual(self.service.task_progress(work)['selected']['settings_drafts'], [])
+        self.assertIn(result['response'], self.store.job(work)['response'])
+        self.assertIn('바꿨습니다', self.store.job(work)['response'])
+
     def test_the_web_cancel_button_and_a_second_press_apply_nothing(self):
         work, draft = self.web_draft()
         self.assertEqual(self.service.work_settings_draft(work, {'action': 'cancel'})['state'], 'canceled')

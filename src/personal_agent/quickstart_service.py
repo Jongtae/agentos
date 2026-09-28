@@ -633,6 +633,12 @@ class AgentService:
         result=self.settings_orchestrator.settle_pending(self.settings_owner(job),job['channel'],rows,action=='confirm',
                                                          notify=lambda text,job=job:self.settings_followup(job,text))
         LOG.info('settings drafts %s by owner web button work=%s count=%s',action,job['id'],len(rows))
+        # Review P2: the receipt outlives the buttons - it is appended to the proposing Work's
+        # own reply (as the Telegram tap edits its confirmation message), so a refresh that
+        # removes the settled drafts still shows what happened.
+        if result.get('response'):
+            with self.store.db() as db:
+                db.execute("UPDATE jobs SET response=COALESCE(response,'')||? WHERE id=?",('\n\n'+result['response'],job['id']))
         return result
 
     def queue_settings_confirmation(self, job):
@@ -6699,7 +6705,16 @@ class AgentService:
                 # it skips the owner-utterance judgments (relation, calendar draft,
                 # parked withdrawal) that would read the replayed words as a new turn.
                 continued=continuation_request(job.get('request_key'))
-                continuity=None if resumed or continued else self.continuity_relation(owner_prompt,connector_owner,current_work_id=job['id'])
+                # #855: a settings draft pending in this conversation is answered by the owner's
+                # next typed message (a plain yes applies, a plain no cancels, judged by the
+                # DecisionEngine); anything else leaves it pending and this turn proceeds as usual.
+                # Review P1: judged before the generic continuity cancel (a typed no is this
+                # draft's decline, not a cancel of the finished proposal Work) and never while
+                # the pending calendar draft claims the message (its approval stays its own).
+                settings_answer=(None if resumed or continued or job.get('owner_typed')!=1
+                                 or self.calendar_conversation.claims(connector_owner,owner_prompt)
+                                 else self.settings_draft_answer(job,owner_prompt))
+                continuity=None if resumed or continued or settings_answer else self.continuity_relation(owner_prompt,connector_owner,current_work_id=job['id'])
                 if continuity:
                     relation,previous=continuity['relation'],continuity['previous']
                     self.present_turn(job)
@@ -6761,11 +6776,6 @@ class AgentService:
                 # said it literally or an AgentOS rule derived it; a
                 # DecisionEngine answer can only pick among AgentOS-declared
                 # candidates (#417) and reaches no other branch here.
-                # #855: a settings draft pending in this conversation is answered by the owner's
-                # next typed message (a plain yes applies, a plain no cancels, judged by the
-                # DecisionEngine); anything else leaves it pending and this turn proceeds as usual.
-                settings_answer=(None if continued or resumed_decision or job.get('owner_typed')!=1
-                                 else self.settings_draft_answer(job,prompt))
                 decision=(IntentDecision(INTENT_SETTINGS,AUTHORITY_OWNER,argument=prompt) if settings_answer else
                           resumed_decision or self.classify_intent(prompt,calendar_pending=False if continued else None,
                                                                    owner_id=connector_owner))

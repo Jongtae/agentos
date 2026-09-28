@@ -39,9 +39,14 @@ OPENAI_KEY = 'sk-fixture-openai-0710'
 #: A bundled listing without the ranked gpt-6-luna (codex-cli 0.153.4 shape).
 BUNDLED = ('gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5')
 SEARCH_TOOLS = ('bounded_public_research', 'web_search')
-#: #795: what ``cli_metadata`` reports for a CLI stream with no tool call.  A
-#: trusted-local attempt is re-delegated only when its CLI reported this much.
-NO_TOOL_CALLS = {'tool_calls': []}
+#: #795: what ``cli_metadata`` reports for a complete CLI stream with no tool
+#: call.  A trusted-local attempt is re-delegated only when its CLI reported this much.
+NO_TOOL_CALLS = {'tool_calls': [], 'stream_tail': ['thread.started', 'turn.started', 'turn.completed']}
+
+
+def reported(calls, end='turn.completed'):
+    """``cli_metadata``'s shape for a stream that ended with ``end`` and reported ``calls``."""
+    return {'tool_calls': list(calls), 'stream_tail': ['turn.started', end]}
 
 
 def plan(worker, goal, *, model='', context=SECTIONS, criteria=('the answer states it',), tools=None, reason='fits',
@@ -1853,12 +1858,11 @@ class UnmediatedEngine(Harness):
                      {'type': 'tool_use', 'name': 'Read', 'status': 'requested'}):
             with self.subTest(call=call):
                 self.asked_plans.clear()
-                job, _row = self.failing_attempt({'tool_calls': [call]})
+                job, _row = self.failing_attempt(reported([call]))
                 self.assert_stopped_for_effect(job)
 
     def test_a_trusted_local_answer_after_a_host_action_is_not_judged_or_redelegated(self):
-        self.engine.meta = {'tool_calls': [{'type': 'command_execution', 'name': 'command_execution',
-                                            'status': 'completed'}]}
+        self.engine.meta = reported([{'type': 'command_execution', 'name': 'command_execution', 'status': 'completed'}])
         self.script([plan('codex', 'Look it up.'), plan('openai', 'Answer directly.')], goals=[False])
         job, row = self.run_work('알려줘')
         self.assert_stopped_for_effect(job, outcome='not_judged')
@@ -1873,7 +1877,7 @@ class UnmediatedEngine(Harness):
                  # Claude Code's permission layer refused it, so it did not run.
                  {'type': 'tool_use', 'name': 'Bash', 'status': 'requested'},
                  {'type': 'tool_use', 'name': 'Bash', 'status': 'denied'}]
-        job, row = self.failing_attempt({'tool_calls': calls})
+        job, row = self.failing_attempt(reported(calls, end='result'))
         first = self.events(job, 'evaluated')[0][1]
         self.assertEqual((first['outcome'], first['next'], first['stop']), ('worker_failed', 'redelegate', None))
         self.assertEqual(row['response'], 'api answer')
@@ -1913,32 +1917,46 @@ class CliHostActions(unittest.TestCase):
         from personal_agent.quickstart_service import CLI_TOOL_CALLS_KEPT
         host = AgentService.cli_host_actions
         full = [{'type': 'mcp_tool_call', 'name': 'web_search', 'status': 'completed'}] * CLI_TOOL_CALLS_KEPT
-        for meta in (None, {}, {'tool_calls': None}, {'tool_calls': 'x'}, {'tool_calls': [None]}, {'tool_calls': full}):
+        for meta in (None, {}, {'tool_calls': None}, {'tool_calls': 'x'}, reported([None]), reported(full),
+                     # No end-of-turn record: a report from before #793, or a stream that stopped mid-turn.
+                     {'tool_calls': []}, reported([], end='item.completed'), {'tool_calls': [], 'stream_tail': 'x'}):
             with self.subTest(meta=meta):
                 self.assertIsNone(host(meta))
 
+    def test_an_empty_malformed_or_cut_off_stream_is_unobservable(self):
+        """#803 review P1: ``cli_metadata`` reports ``tool_calls: []`` for any stdout; that alone is no evidence."""
+        from personal_agent.bounded_execution import cli_metadata
+        started = json.dumps({'type': 'item.started', 'item': {'type': 'agent_message'}})
+        for engine, raw in (('codex', ''), ('codex', 'not json\n{broken'), ('claude-code', ''),
+                            ('codex', json.dumps({'type': 'turn.started'}) + '\n' + started),
+                            ('claude-code', json.dumps({'type': 'system', 'subtype': 'init'}))):
+            with self.subTest(engine=engine, raw=raw):
+                meta = cli_metadata(engine, raw)
+                self.assertEqual(meta['tool_calls'], [])
+                self.assertIsNone(AgentService.cli_host_actions(meta))
+
     def test_bridge_calls_own_search_and_denied_calls_are_not_host_actions(self):
         host = AgentService.cli_host_actions
-        self.assertEqual(host({'tool_calls': []}), ())
-        self.assertEqual(host({'tool_calls': [{'type': 'mcp_tool_call', 'name': 'save_note', 'status': 'completed'},
+        self.assertEqual(host(reported([])), ())
+        self.assertEqual(host(reported([{'type': 'mcp_tool_call', 'name': 'save_note', 'status': 'completed'},
                                               {'type': 'tool_use', 'name': 'mcp__agentos__save_note', 'status': 'requested'},
                                               {'type': 'web_search', 'name': 'web_search', 'status': 'completed'},
-                                              {'type': 'tool_use', 'name': 'WebSearch', 'status': 'requested'}]}), ())
-        self.assertEqual(host({'tool_calls': [{'type': 'tool_use', 'name': 'Bash', 'status': 'requested'},
-                                              {'type': 'tool_use', 'name': 'Bash', 'status': 'denied'}]}), ())
+                                              {'type': 'tool_use', 'name': 'WebSearch', 'status': 'requested'}])), ())
+        self.assertEqual(host(reported([{'type': 'tool_use', 'name': 'Bash', 'status': 'requested'},
+                                              {'type': 'tool_use', 'name': 'Bash', 'status': 'denied'}])), ())
 
     def test_everything_else_is_named(self):
         host = AgentService.cli_host_actions
-        self.assertEqual(host({'tool_calls': [{'type': 'command_execution', 'name': 'command_execution', 'status': 'in_progress'},
+        self.assertEqual(host(reported([{'type': 'command_execution', 'name': 'command_execution', 'status': 'in_progress'},
                                               {'type': 'file_change', 'name': 'file_change', 'status': 'completed'},
-                                              {'type': 'tool_use', 'name': 'Write', 'status': 'requested'}]}),
+                                              {'type': 'tool_use', 'name': 'Write', 'status': 'requested'}])),
                          ('command_execution', 'file_change', 'Write'))
         # A denial covers one call only; an MCP server other than agentos is not the bridge.
-        self.assertEqual(host({'tool_calls': [{'type': 'tool_use', 'name': 'Bash', 'status': 'requested'},
+        self.assertEqual(host(reported([{'type': 'tool_use', 'name': 'Bash', 'status': 'requested'},
                                               {'type': 'tool_use', 'name': 'Bash', 'status': 'requested'},
                                               {'type': 'tool_use', 'name': 'Bash', 'status': 'denied'},
                                               {'type': 'tool_use', 'name': 'mcp__other__x', 'status': 'requested'},
-                                              {'type': 'mcp_tool_call', 'name': 'other_server_tool', 'status': 'completed'}]}),
+                                              {'type': 'mcp_tool_call', 'name': 'other_server_tool', 'status': 'completed'}])),
                          ('Bash', 'mcp__other__x', 'other_server_tool'))
 
     def test_the_kept_count_and_shapes_match_cli_metadata(self):
@@ -1948,10 +1966,14 @@ class CliHostActions(unittest.TestCase):
         calls = cli_metadata('codex', '\n'.join([line] * (CLI_TOOL_CALLS_KEPT + 10)))['tool_calls']
         self.assertEqual(len(calls), CLI_TOOL_CALLS_KEPT)
         self.assertIsNone(AgentService.cli_host_actions({'tool_calls': calls}))
-        self.assertEqual(AgentService.cli_host_actions(cli_metadata('codex', line)), ('command_execution',))
+        ended = json.dumps({'type': 'turn.completed'})
+        self.assertEqual(AgentService.cli_host_actions(cli_metadata('codex', line + '\n' + ended)), ('command_execution',))
+        self.assertEqual(AgentService.cli_host_actions(cli_metadata('codex', json.dumps({'type': 'turn.failed'}))), ())
         claude = json.dumps({'type': 'assistant', 'message': {'content': [
             {'type': 'tool_use', 'name': 'mcp__agentos__web_search'}, {'type': 'tool_use', 'name': 'Bash'}]}})
         denied = json.dumps({'type': 'result', 'permission_denials': [{'tool_name': 'Bash'}]})
         self.assertEqual(AgentService.cli_host_actions(cli_metadata('claude-code', claude + '\n' + denied)), ())
-        self.assertEqual(AgentService.cli_host_actions(cli_metadata('claude-code', claude)), ('Bash',))
+        result = json.dumps({'type': 'result', 'subtype': 'success'})
+        self.assertEqual(AgentService.cli_host_actions(cli_metadata('claude-code', claude + '\n' + result)), ('Bash',))
+        self.assertIsNone(AgentService.cli_host_actions(cli_metadata('claude-code', claude)), 'no result record')
 

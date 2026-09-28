@@ -255,6 +255,12 @@ EFFECT_RETRY_REFUSAL='이전 요청이 상태를 바꾸는 작업을 시도해 �
 #: calls a CLI reported; a list that long may have dropped some, so it cannot
 #: show that the CLI ran no host action (``cli_host_actions``).
 CLI_TOOL_CALLS_KEPT=30
+#: #795 review: the record each CLI writes last when its turn ended (Codex
+#: ``exec --json`` ``turn.completed``/``turn.failed``, Claude Code
+#: ``stream-json`` ``result``), as ``cli_metadata``'s ``stream_tail`` names it.
+#: Without one the stream was empty, cut off or unparsable, so its tool-call
+#: list is not a complete report.
+CLI_TURN_END_RECORDS=frozenset({'turn.completed','turn.failed','result'})
 #: #787: the next step of a Work whose last worker attempt failed, chosen from
 #: its own recorded state: a typed setup/approval need, the ``safe_retry`` gate.
 FAILED_NEXT_SETUP='필요한 연결이나 승인을 마친 뒤 다시 요청해 주세요.'
@@ -1384,14 +1390,18 @@ class AgentService:
         its permission layer reported denied did not run.  Everything else (a
         shell command, a file change, any other built-in tool) is returned by
         name.  None when there is no parsed list (the CLI was killed, timed out
-        or never reported one) or the list reached ``CLI_TOOL_CALLS_KEPT``:
-        absent evidence is not evidence of no action.
+        or never reported one), when the stream did not end with the CLI's own
+        end-of-turn record (``CLI_TURN_END_RECORDS``: empty, malformed or cut
+        off output), or when the list reached ``CLI_TOOL_CALLS_KEPT``: absent
+        evidence is not evidence of no action.
         """
         from collections import Counter
         from .bounded_execution import CLAUDE_NATIVE_SEARCH_TOOL
         bridge=set(profile_actions(BOUNDED_PROFILE))
         calls=meta.get('tool_calls') if isinstance(meta,dict) else None
         if not isinstance(calls,list) or len(calls)>=CLI_TOOL_CALLS_KEPT:return None
+        tail=meta.get('stream_tail')
+        if not isinstance(tail,list) or not tail or tail[-1] not in CLI_TURN_END_RECORDS:return None
         host,denied=[],Counter()
         for call in calls:
             if not isinstance(call,dict):return None

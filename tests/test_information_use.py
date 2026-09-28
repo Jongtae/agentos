@@ -101,6 +101,41 @@ class RecordsOnly(unittest.TestCase):
             self.assertIn('웹 조회(AgentOS · 실패): "병원 [redacted]"', information_use.render_korean(audit))
             self.assertIsNone(information_use.work_information_use(store, 'no-such-work'))
 
+    def events(self, store, job, rows):
+        with store.db() as db:
+            for tool, status, detail in rows:
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           (job, tool, status, json.dumps(detail), 1))
+
+    def test_source_urls_and_the_provider_pass_the_redaction(self):
+        """#826 review P1: a secret literal in a result URL never reaches the audit."""
+        with tempfile.TemporaryDirectory() as folder:
+            store = QuickStore(Path(folder) / 'state')
+            job = store.enqueue('검색', 'records-urls')
+            self.events(store, job, [('web_search', 'succeeded', {'host_action': 'web_search', 'evidence': {
+                'sources': [f'https://example.org/?token={STORED_SECRET}'], 'result_count': 1, 'provider': 'brave',
+                'composed_by': 'agentos-public-task', 'sent': {'query': '병원'}}})])
+            audit = information_use.work_information_use(store, job, redact=lambda text: text.replace(STORED_SECRET, '[redacted]'))
+            self.assertNotIn(STORED_SECRET, json.dumps(audit, ensure_ascii=False))
+            self.assertEqual(audit['sent_to']['lookups'][0]['sources'], ['https://example.org/?token=[redacted]'])
+
+    def test_a_preflight_query_is_recovered_from_its_running_event_and_sent_wins_on_success(self):
+        """#826 review P2: the /search preflight records its query in the running event only."""
+        with tempfile.TemporaryDirectory() as folder:
+            store = QuickStore(Path(folder) / 'state')
+            job = store.enqueue('/search 서울 날씨', 'records-preflight')
+            self.events(store, job, [
+                ('web_search', 'running', {'scope': 'subscription-preflight', 'query': '서울 날씨'}),
+                ('web_search', 'failed', {'scope': 'subscription-preflight', 'error': 'offline'}),
+                ('web_search', 'running', {'call_id': 'c2', 'host_action': 'web_search',
+                                           'arguments': {'query': '병원 token=abcdefgh12345678'}}),
+                ('web_search', 'succeeded', {'call_id': 'c2', 'host_action': 'web_search',
+                                             'evidence': {'sent': {'query': '병원'}, 'result_count': 0}})])
+            lookups = information_use.work_information_use(store, job)['sent_to']['lookups']
+            self.assertEqual([(row['status'], row['queries']) for row in lookups],
+                             [('failed', ['서울 날씨']), ('succeeded', ['병원'])],
+                             'what AgentOS sent is the record, not the worker\'s dropped credential shape')
+
 
 class _ServiceBase(unittest.TestCase):
     def setUp(self):
@@ -198,7 +233,16 @@ class ApiRouteAudit(_ServiceBase):
         record = self.store.turn_provenance(second)
         self.assertIn('information_use', record['exposed_tools'])
         [event] = [row for row in self.store.task_events(second) if row['tool'] == 'information_use' and row['status'] == 'succeeded']
-        self.assertEqual(event['trace']['evidence'], {'work_id': first, 'recorded': True})
+        self.assertEqual(event['trace']['evidence']['work_id'], first)
+        self.assertEqual(event['trace']['evidence']['lookup_count'], 1)
+        self.assertIn('profile', event['trace']['evidence']['categories'])
+        self.assertNotIn(MEMORY_VALUE, json.dumps(event['trace'], ensure_ascii=False), 'categories and a count, never items')
+        # #826 review P1: this Work's own audit says it read the earlier Work's record.
+        used = {row['category']: row['items'] for row in service.work_information_use(second)['used']}
+        self.assertEqual(len(used['records']), 1)
+        self.assertTrue(used['records'][0].startswith(f'작업 {first[:12]}'))
+        self.assertIn('프로필', used['records'][0])
+        self.assertIn('웹 조회 1건', used['records'][0])
         reply = service.information_use_tool(self.store.job(second))({})
         self.assertEqual(reply['work_id'], first)
         self.assertTrue(reply['response'].startswith('이 답변에 쓴 정보'))

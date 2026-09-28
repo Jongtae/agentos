@@ -116,6 +116,9 @@ Object.assign(I18N["en"],{"설정된 모델 없음":"No model configured","추�
 Object.assign(I18N["ja"],{"설정된 모델 없음":"モデル未設定","추론 강도: CLI 기본값":"推論強度: CLI の既定値","추론 강도: 별도 설정 없음":"推論強度: 個別設定なし","기본 AI 구독 사용 · 판단 모델은 별도":"メイン AI のサブスクリプションを使用 · 判断モデルは別設定","기본 AI API 계정 사용 · 판단 모델은 별도":"メイン AI の API アカウントを使用 · 判断モデルは別設定","기본 AI 따라가기 설정 · 현재는 대체 AI":"メイン AI に追従する設定 · 現在は代替 AI","기본 AI 따라가기 설정 · 적용 확인 중":"メイン AI に追従する設定 · 適用を確認中"});
 Object.assign(I18N["zh-CN"],{"설정된 모델 없음":"未配置模型","추론 강도: CLI 기본값":"推理强度：CLI 默认值","추론 강도: 별도 설정 없음":"推理强度：未单独设置","기본 AI 구독 사용 · 판단 모델은 별도":"使用主 AI 订阅 · 判断模型单独设置","기본 AI API 계정 사용 · 판단 모델은 별도":"使用主 AI API 账户 · 判断模型单独设置","기본 AI 따라가기 설정 · 현재는 대체 AI":"设置为跟随主 AI · 当前使用备用 AI","기본 AI 따라가기 설정 · 적용 확인 중":"设置为跟随主 AI · 正在验证应用"});
 // #826 information-use audit strings.
+Object.assign(I18N["en"],{"이전 답변의 사용 기록":"An earlier answer's information-use record"});
+Object.assign(I18N["zh-CN"],{"이전 답변의 사용 기록":"之前回答的信息使用记录"});
+Object.assign(I18N["ja"],{"이전 답변의 사용 기록":"以前の回答の情報利用記録"});
 Object.assign(I18N["en"],{"공개 자료 조사":"Public research","공개 페이지 읽기":"Read a public page","기억 조회":"Read memory","사용한 정보 확인":"Check information used","연결 폴더 확인":"List connected folders","일정 조회":"Read calendar","파일 읽기":"Read a file","파일 찾기":"Find files"});
 Object.assign(I18N["zh-CN"],{"공개 자료 조사":"公开资料调查","공개 페이지 읽기":"读取公开页面","기억 조회":"查看记忆","사용한 정보 확인":"查看使用的信息","연결 폴더 확인":"查看已连接的文件夹","일정 조회":"查看日程","파일 읽기":"读取文件","파일 찾기":"查找文件"});
 Object.assign(I18N["ja"],{"공개 자료 조사":"公開資料の調査","공개 페이지 읽기":"公開ページを読む","기억 조회":"記憶を確認","사용한 정보 확인":"使った情報を確認","연결 폴더 확인":"接続フォルダを確認","일정 조회":"予定を確認","파일 읽기":"ファイルを読む","파일 찾기":"ファイルを探す"});
@@ -330,7 +333,7 @@ function provenanceView(task){const record=task.provenance,box=devNode('section'
  return box;}
 // #826 이 답변에 쓴 정보: which owner information this Work used and where it went,
 // built by the backend from AgentOS's own records (references and short labels, never values).
-const INFO_CATEGORY={profile:()=>t('프로필'),memory:()=>t('기억'),calendar:()=>t('캘린더'),files:()=>t('파일'),current_context:()=>t('현재 상황'),notes:()=>t('메모'),browser:()=>t('로그인한 브라우저 페이지'),settings:()=>t('설정'),spliced:()=>t('요청에 붙인 자료'),prepared:()=>t('준비해 둔 답변')};
+const INFO_CATEGORY={profile:()=>t('프로필'),memory:()=>t('기억'),calendar:()=>t('캘린더'),files:()=>t('파일'),current_context:()=>t('현재 상황'),notes:()=>t('메모'),browser:()=>t('로그인한 브라우저 페이지'),settings:()=>t('설정'),spliced:()=>t('요청에 붙인 자료'),prepared:()=>t('준비해 둔 답변'),records:()=>t('이전 답변의 사용 기록')};
 function informationUseView(task,box){const audit=task.information_use;if(!audit||typeof audit!=='object'){box.append(devNode('p',t('이 작업의 정보 사용 기록이 없습니다.'),'empty'));return;}
  const facts=devNode('dl');box.append(facts);const fact=(term,value)=>facts.append(devNode('dt',term),devNode('dd',value));
  const used=Array.isArray(audit.used)?audit.used:[];for(const row of used)fact((INFO_CATEGORY[row.category]||(()=>String(row.category||'')))(),(row.items||[]).join('\n'));

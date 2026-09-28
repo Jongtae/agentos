@@ -2492,7 +2492,13 @@ def _evidence_detail(name,result):
  if name=='ask_location':return {'requested':bool(result.get('requested')),'channel':result.get('channel')}
  # #814: which settings were read / which draft waits; never a value beyond the fixed choices.
  if name=='settings_read':return {'category':result.get('category'),'settings':sorted(result.get('settings') or {})}
- if name=='information_use':return {'work_id':result.get('work_id'),'recorded':bool(result.get('recorded'))}
+ if name=='information_use':
+  # #826 review: which categories of the earlier Work's audit this Work read (names and a count, never items).
+  audit=result.get('audit') if isinstance(result.get('audit'),dict) else {}
+  lookups=(audit.get('sent_to') or {}).get('lookups') if isinstance(audit.get('sent_to'),dict) else None
+  return {'work_id':result.get('work_id'),'recorded':bool(result.get('recorded')),
+          'categories':[str(row.get('category'))[:40] for row in audit.get('used') or () if isinstance(row,dict)][:12],
+          'lookup_count':len(lookups) if isinstance(lookups,list) else 0}
  if name=='settings_change':
   return {key:result.get(key) for key in ('draft_id','category','setting','before','after','requires_owner_confirmation','applied')}
  if name=='propose_current_state':

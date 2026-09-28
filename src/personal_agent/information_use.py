@@ -42,6 +42,8 @@ READ_CATEGORIES = {
     'list_notes': 'notes', 'save_note': 'notes',
     'propose_current_state': 'current_context',
     'settings_read': 'settings',
+    # #826 review: an earlier Work's audit read into this Work is itself owner information used here.
+    'information_use': 'records',
     'browser_open': 'browser', 'browser_read': 'browser', 'browser_find': 'browser', 'browser_click': 'browser',
     'browser_type': 'browser',
 }
@@ -52,6 +54,7 @@ CATEGORY_NAMES = {
     'profile': '프로필', 'memory': '기억', 'calendar': '캘린더', 'files': '파일',
     'current_context': '현재 상황', 'notes': '메모', 'browser': '로그인한 브라우저 페이지',
     'settings': '설정', 'spliced': '요청에 붙인 자료', 'prepared': '준비해 둔 답변',
+    'records': '이전 답변의 사용 기록',
 }
 #: Turn-provenance events that are not tools the worker called.
 _NOT_TOOLS = frozenset({'model', 'subscription_engine', 'orchestrator'})
@@ -154,6 +157,11 @@ def _event_items(action, evidence):
         return [f"상태 제안: {_text(evidence.get('predicate'), 60)}"]
     if action == 'settings_read':
         return [f"설정 {_text(evidence.get('category'), 40)}"]
+    if action == 'information_use':
+        names = ', '.join(CATEGORY_NAMES.get(name, name) for name in evidence.get('categories') or ())
+        lookups = int(evidence.get('lookup_count') or 0)
+        detail = ', '.join(part for part in (names, f'웹 조회 {lookups}건' if lookups else '') if part)
+        return [f"작업 {_text(evidence.get('work_id'), 12)}" + (f' ({detail})' if detail else '')]
     if action.startswith('browser_'):
         return [_text(evidence.get('title') or evidence.get('url'))]
     return []
@@ -165,7 +173,10 @@ def _lookup(action, trace, evidence):
     queries = [_text(query, QUERY_CHARS) for query in evidence.get('search_queries') or () if query]
     sent = evidence.get('sent') if isinstance(evidence.get('sent'), dict) else {}
     arguments = trace.get('arguments') if isinstance(trace.get('arguments'), dict) else {}
-    for source in (sent, arguments):
+    # What AgentOS sent (``sent``, stored secrets already dropped) is the record when there is one;
+    # otherwise the call's starting arguments (the subscription /search preflight records its query
+    # at the top level of its running event).
+    for source in ((sent,) if sent else (arguments, trace)):
         for key in ('query', 'city', 'url'):
             value = source.get(key)
             if isinstance(value, str) and value.strip() and _text(value, QUERY_CHARS) not in queries:
@@ -230,10 +241,13 @@ def work_information_use(store, job_id, redact=None):
             add(READ_CATEGORIES[action], _event_items(action, evidence))
         if action in LOOKUP_ACTIONS and status in ('succeeded', 'failed'):
             # A failed lookup was still attempted: its query may have left before the failure.
-            source = trace if status == 'succeeded' else {**started.get((tool, trace.get('call_id')), {}), **trace}
+            # Either way the starting event's arguments complete what the terminal event recorded.
+            source = {**started.pop((tool, trace.get('call_id')), {}), **trace}
             lookup = _lookup(action, source, evidence)
             lookup['status'] = status
             lookup['queries'] = [label(query, QUERY_CHARS) for query in lookup['queries']]
+            lookup['by'] = label(lookup['by'], 60)
+            lookup['sources'] = [label(url, 200) for url in lookup['sources']]
             lookups.append(lookup)
         if status in ('succeeded', 'failed', 'withheld', 'unavailable', 'denied'):
             results.append({'tool': label(tool, 60), 'status': status,

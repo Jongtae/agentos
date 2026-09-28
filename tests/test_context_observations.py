@@ -168,13 +168,18 @@ class CT01OwnerAndForeignTests(ContextInputCase):
         rows = self.rows()
         self.assertEqual(1, len(rows))
         self.assertEqual('current_position_report', rows[0]['source_kind'])
-        self.assertEqual(job, rows[0]['source_job_id'])
+        # #774: the answer continues the asking Work once; the point is bound to that continuation.
+        [continuation] = [row['id'] for row in self.jobs() if row['id'] != job]
+        self.assertEqual((job, 'reference'), (self.store.job(continuation)['related_job_id'],
+                                               self.store.job(continuation)['relation_kind']))
+        self.assertEqual(continuation, rows[0]['source_job_id'])
         self.assertEqual(self.now + FRESHNESS_SECONDS, rows[0]['valid_until'])
         # Consumed once: a second unsolicited pin is only a place reference.
         self.pin()
         self.assertEqual([], [r for r in self.rows()[1:] if r['source_kind'] != 'place_reference'])
+        self.assertEqual(2, len(self.jobs()))
         # Context reuse is off: only this task may use the requested point.
-        usable = self.service.context_observations.usable(job_id=job)
+        usable = self.service.context_observations.usable(job_id=continuation)
         self.assertEqual(['current_position_report'], [entry['kind'] for entry in usable])
         self.assertEqual([], self.service.context_observations.usable(job_id='other'))
 

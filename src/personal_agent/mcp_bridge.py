@@ -21,7 +21,7 @@ from .current_context import redact_known_secrets
 from .providers import ProviderError
 from .bounded_execution import (AgentOSMcpTools, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, ExecutionError,  # noqa: F401
                                 profile_actions, redact_reason, turn_actions)
-from .cli_browser_relay import RELAYED_PREPARATIONS, RelayClient, unused_browser_factory
+from .cli_browser_relay import RELAYED_LOCATION_REQUEST, RELAYED_PREPARATIONS, RelayClient, unused_browser_factory
 from .local_tools import LocalTools
 from .search_providers import ProviderRegistry
 from .quickstart_store import QuickStore
@@ -176,8 +176,9 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                                                - (set() if relay is not None else set(OWNER_STATE_ACTIONS))),
                                 # #701: a placeholder that lists the browser tools; their calls go to the service.
                                 browser=unused_browser_factory if relay is not None and relay_browser else None,
-                                # #774: a placeholder that lists schedule_preparation; its calls go to the service.
+                                # #774: placeholders that list schedule_preparation and ask_location; their calls go to the service.
                                 preparations=RELAYED_PREPARATIONS if relay is not None else None,
+                                location_request=RELAYED_LOCATION_REQUEST if relay is not None else None,
                                 inherited_provenance=_provenance(provenance), lookup_hint=CLI_LOOKUP_HINT,
                                 lookup_sources=_lookup_sources(store, job_id),
                                 # #607 AX-10: the same durable attempt count and

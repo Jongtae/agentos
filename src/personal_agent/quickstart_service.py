@@ -69,7 +69,7 @@ from .conversation_handoff import (LOCAL_AUTHORITY_KIND, LOCAL_AUTHORITY_LABELS,
                                    local_authority_handoff, local_refusal_text, LOCAL_RESUME_TTL_SECONDS)
 from . import local_folder_picker
 # PRESENCE-TG-01 / #581: native Telegram presence (reaction, typing, draft, anchor).
-from .context_observations import ContextObservations
+from .context_observations import ContextObservations, continuation_key, continuation_request
 from .current_context import CurrentContext, KNOWN_SECRET_NAMES, redact_known_secrets
 # SEC-ATTN-01 (#659): owner-accepted preparations (reminders, prepared answers).
 from . import preparations as prep
@@ -560,7 +560,10 @@ class AgentService:
                                            'every_seconds':window and window[0],'window_end':window and window[1],
                                            'max_runs':window and window[2],'delivery_mode':delivery_mode})
             own_request=(isinstance(prompt,str) and prompt==job.get('message')
-                         and prep.preparation_of(job.get('request_key')) is None)
+                         and prep.preparation_of(job.get('request_key')) is None
+                         # #774: a location continuation re-runs an earlier message; the owner's own
+                         # latest message was the location, so it never accepts a preparation.
+                         and continuation_request(job.get('request_key')) is None)
             accepted=own_request and self.decision_judge.explicit_preparation_request(prompt,summary).outcome==JUDGMENT_YES
             try:
                 row=self.preparations.create(kind=kind,goal=goal,due_at=due_at,timezone=timezone,recurrence=recurrence,
@@ -5302,6 +5305,54 @@ class AgentService:
             raise
         return request_id
 
+    def location_requester(self, job):
+        """The ``ask_location`` handler bound to one Work (#774): one Telegram prompt.
+
+        The owner's reply continues this Work once (``continue_located_work``).
+        None (the tool is not offered) for a Work that did not come from the
+        paired Telegram chat: it could never be answered.  A pairing lost since
+        is a typed refusal the model reads.
+        """
+        if not str(job.get('channel') or '').startswith('telegram:') or not isinstance(job.get('chat_id'),int):
+            return None
+        def ask(reason):
+            try:
+                # Pilot boundary 1: a stored secret never reaches the prompt text.
+                return self.request_current_location(job['id'],self._redact_known_secrets(reason))
+            except ToolError:
+                raise
+            except ValueError as exc:
+                raise ToolError(str(exc),'location_unavailable') from None
+            except ProviderError:
+                raise ToolError('Telegram으로 위치 요청을 보내지 못했습니다.','location_unavailable') from None
+        return ask
+
+    def continue_located_work(self, db, answer, message, generation, sender):
+        """Continue the Work whose location request the owner just answered, once (#774).
+
+        Inside the ingress transaction: one new Work with the same request,
+        channel, chat and workspace, keyed by the consumed request (a replayed
+        update cannot make a second), related to the asking Work, with the
+        reported position rebound to it so its current context shows it.  The
+        asking Work is not re-run.
+        """
+        work=db.execute('SELECT * FROM jobs WHERE id=?',(answer['job_id'],)).fetchone()
+        if not work:
+            return None
+        try:
+            task_id=self.store.enqueue(work['message'],continuation_key(answer['request_id']),work['channel'],
+                                       work['chat_id'],work['workspace_id'],db=db)
+        except ValueError as exc:
+            # The position stays recorded for the asking Work; the cursor still advances.
+            LOG.warning('location continuation not queued work=%s reason=%s',work['id'],exc)
+            return None
+        self.store.link_work_relation(task_id,work['id'],'reference',db=db)
+        self.context_observations.rebind_task_observation(db,answer['observation_id'],task_id)
+        # The owner's location message is this Work's source and reply anchor.
+        self.telegram_turns.record_source(task_id,sender,message.get('message_id'),db=db)
+        self.context_observations.note_text_source(db,task_id,message,generation)
+        return task_id
+
     def ingest_update(self, update, generation):
         with self.lock:
             cfg=self.store.config('telegram',{})
@@ -5349,8 +5400,13 @@ class AgentService:
                 if authorized and not paired:
                     # #626: a location or an edit is recorded (or refused) in
                     # this same transaction as the cursor; it never becomes
-                    # a Work, a model call or a reply.
-                    self.context_observations.ingest_telegram(db,update,generation,sender)
+                    # a Work, a model call or a reply - except (#774) a
+                    # location answering a pending request, which continues
+                    # the asking Work once.
+                    answered=[]
+                    self.context_observations.ingest_telegram(db,update,generation,sender,answered)
+                    for answer in answered:
+                        self.continue_located_work(db,answer,message,generation,sender)
                 cfg['cursor']=update_id+1
                 db.execute('INSERT INTO config VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',('telegram',json.dumps(cfg)))
             if paired:
@@ -5810,10 +5866,12 @@ class AgentService:
                                                          if cli_browser else {}),
                                                       # #774: the owner-state actions the trusted-local bridge relays run
                                                       # here under the direct route's gates: #597 memory approval, the
-                                                      # calendar connector and its previews, #659 preparation acceptance.
+                                                      # calendar connector and its previews, #659 preparation acceptance,
+                                                      # the paired Telegram chat for ask_location.
                                                       **({'memory_request':owner_memory_request,'calendar':self.calendar_for(job),
                                                           'calendar_owner':self.connector_owner_id(job),
                                                           'preparations':self.preparation_scheduler(job,prompt),
+                                                          'location_request':self.location_requester(job),
                                                           'judgments':self.decision_judge,'secret_redactor':self._redact_known_secrets}
                                                          if cli_browser else {}),
                                                       **self.work_lookup_options(job,prompt,CLI_LOOKUP_HINT))
@@ -6072,6 +6130,8 @@ class AgentService:
                                                       current_context=self.current_state,
                                                       # #659: owner-accepted preparations (proposal or owner-request acceptance).
                                                       preparations=self.preparation_scheduler(job,prompt),
+                                                      # #774: ask the owner for a current position in the paired chat.
+                                                      location_request=self.location_requester(job),
                                                       # #657: completion is judged from observations.
                                                       judgments=self.decision_judge,
                                                       # Pilot boundary 1: stored secrets never reach the judgment.

@@ -7,7 +7,8 @@ The owner-state components the secretary relies on were unreachable from the own
 They are now relayed to the service over the existing #701 relay (`cli_browser_relay`), like the browser tools, and run in the service's `Capabilities` under the direct route's unchanged gates:
 - a memory write is a MemoryCandidate unless the owner explicitly asked (#597);
 - a calendar write is a preview until approved;
-- a preparation runs only once accepted.
+- a preparation runs only once accepted;
+- `ask_location` asks the owner in the paired Telegram chat to share a current position when a request depends on where the owner is now (the #626 one-time `request_location` prompt). The location that answers the pending request continues the asking Work exactly once: one new Work with the same request and channel, keyed by the consumed request and related to the asking Work as a `reference`, with the reported position bound to it as task-scoped current context. The asking Work is not re-run, an unrequested location still starts no Work, and a continuation never accepts a preparation by itself.
 
 The strict-isolated and isolated profiles are unchanged. A bridge without the relay does not offer these tools. The #678 separation still holds: a turn with the CLI's own web search offers no private-store read (Memory, calendar reads), and the orchestrator chooses a no-search subset when a turn needs them (#735).
 

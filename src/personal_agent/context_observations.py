@@ -46,6 +46,8 @@ MAX_ACCURACY_M = 1500
 INDEFINITE_LIVE_PERIOD = 0x7FFFFFFF
 #: An outstanding location prompt lives as long as a handoff resume.
 LOCATION_REQUEST_TTL_SECONDS = RESUME_TTL_SECONDS
+#: #774: the request key of the one Work that continues an answered location request.
+CONTINUATION_KEY_PREFIX = 'loc:'
 MAX_MESSAGE_ID = 2 ** 53
 LABEL_CHARS = 200
 EDITED_TEXT_CHARS = 4000
@@ -72,6 +74,17 @@ CLAIMS_DDL = '''
 '''
 
 DEFAULT_SETTINGS = {'version': POLICY_VERSION, 'enabled': False, 'epoch': 0, 'cutoff': 0.0, 'timezone': ''}
+
+
+def continuation_key(request_id):
+    """The Work request key continuing location request ``request_id`` (#774): one per request."""
+    return CONTINUATION_KEY_PREFIX + str(request_id)
+
+
+def continuation_request(work_request_key):
+    """The location request a Work continues, or None (#774)."""
+    key = str(work_request_key or '')
+    return key[len(CONTINUATION_KEY_PREFIX):] or None if key.startswith(CONTINUATION_KEY_PREFIX) else None
 
 
 def _number(value):
@@ -350,7 +363,7 @@ class ContextObservations:
         if not row:
             return None
         db.execute("UPDATE context_location_requests SET state='consumed' WHERE id=?", (row['id'],))
-        return row['job_id']
+        return row
 
     # --- ingress (I2), always inside the caller's BEGIN IMMEDIATE ----------
 
@@ -378,12 +391,15 @@ class ContextObservations:
     def _valid_message_id(value):
         return isinstance(value, int) and not isinstance(value, bool) and 0 < value < MAX_MESSAGE_ID
 
-    def ingest_telegram(self, db, update, generation, owner_id):
+    def ingest_telegram(self, db, update, generation, owner_id, answered=None):
         """Record one already-authorized owner update; return a short outcome.
 
         The caller has checked generation, private chat and the paired owner
         and holds ``BEGIN IMMEDIATE``; its cursor advance commits with this
         write or rolls back with it.  Outcomes are content-free diagnostics.
+        ``answered`` (a list, #774) receives ``{request_id, job_id,
+        observation_id}`` when this update newly answers a pending location
+        request, so the caller can continue that Work in the same transaction.
         """
         now = self.clock()
         self.prune(db, now)
@@ -432,6 +448,7 @@ class ContextObservations:
             label = venue.get('title')
             payload['label'] = label[:LABEL_CHARS] if isinstance(label, str) else ''
         job_id = existing['source_job_id'] if existing else None
+        request = None
         if existing:
             kind = existing['source_kind']
         elif venue or any(field in message for field in FORWARD_FIELDS):
@@ -439,7 +456,8 @@ class ContextObservations:
         elif live_period:
             kind = 'live_position_report'
         else:
-            job_id = self._consume_request(db, chat_id, generation, settings['epoch'], sent_at, now)
+            request = self._consume_request(db, chat_id, generation, settings['epoch'], sent_at, now)
+            job_id = request['job_id'] if request else None
             kind = 'current_position_report' if job_id else 'place_reference'
         if job_id and not existing:
             # Requested for one task: usable for it even with reuse off.
@@ -484,10 +502,18 @@ class ContextObservations:
                        (edit_at or sent_at, update['update_id'], observed_at, now, valid_until, expires_at,
                         json.dumps(payload), state, existing['id']))
             return 'updated:' + kind
+        observation_id = str(uuid.uuid4())
         db.execute('INSERT INTO context_observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                   (str(uuid.uuid4()), owner, generation, settings['epoch'], key, 1, observed_at, update['update_id'],
+                   (observation_id, owner, generation, settings['epoch'], key, 1, observed_at, update['update_id'],
                     kind, job_id, observed_at, now, valid_until, expires_at, json.dumps(payload), state))
+        if request is not None and answered is not None:
+            answered.append({'request_id': request['id'], 'job_id': request['job_id'], 'observation_id': observation_id})
         return 'recorded:' + kind
+
+    @staticmethod
+    def rebind_task_observation(db, observation_id, job_id):
+        """Move a task-scoped position to the Work that continues its request (#774)."""
+        db.execute('UPDATE context_observations SET source_job_id=? WHERE id=?', (job_id, observation_id))
 
     def _text_edit(self, db, settings, key, message, owner_id, generation, observed_at, uncertain, update_id, now):
         """An edited earlier text: new revision, never a replayed request."""

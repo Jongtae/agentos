@@ -249,7 +249,7 @@ class ExposedToolWireBoundary(unittest.TestCase):
         """Positive control: exposure and host invocation agree for local tools."""
         names = [tool["name"] for tool in self._listed()]
         # #774: the service relay serves the owner-state tools on the trusted-local route.
-        self.assertEqual(names, ["bounded_public_research", "calendar_draft_cancel", "calendar_draft_create",
+        self.assertEqual(names, ["ask_location", "bounded_public_research", "calendar_draft_cancel", "calendar_draft_create",
                                  "calendar_draft_update", "calendar_query", "list_memory", "list_notes", "save_memory",
                                  "save_note", "schedule_preparation", "weather", "web_search"])
         replies = self._wire(
@@ -271,8 +271,8 @@ class ExposedToolWireBoundary(unittest.TestCase):
         self.assertIn("--native-search", self.server["args"])
         # #774: relayed writes stay offered; the private reads (list_memory, calendar_query) do not.
         self.assertEqual([tool["name"] for tool in replies[2]["result"]["tools"]],
-                         ["calendar_draft_cancel", "calendar_draft_create", "calendar_draft_update", "save_note",
-                          "schedule_preparation", "weather"])
+                         ["ask_location", "calendar_draft_cancel", "calendar_draft_create", "calendar_draft_update",
+                          "save_note", "schedule_preparation", "weather"])
         self.assertTrue(_refused(replies[3]))
 
     def test_an_unlisted_native_tool_is_refused_by_the_real_bridge(self):

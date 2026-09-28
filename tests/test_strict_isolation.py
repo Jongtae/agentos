@@ -157,7 +157,8 @@ class StrictLaunchArguments(unittest.TestCase):
         # #774: trusted-local also pre-approves the owner-state tools its service relays.
         owner_state = (',mcp__agentos__calendar_query,mcp__agentos__calendar_draft_create,'
                        'mcp__agentos__calendar_draft_update,mcp__agentos__calendar_draft_cancel,'
-                       'mcp__agentos__list_memory,mcp__agentos__save_memory,mcp__agentos__schedule_preparation')
+                       'mcp__agentos__list_memory,mcp__agentos__save_memory,mcp__agentos__schedule_preparation,'
+                       'mcp__agentos__ask_location')
         self.assertEqual(trusted[-2:], [allow[0], allow[1] + browser + owner_state])
         self.assertEqual(strict[-2:], allow, 'the variadic --allowedTools stays last')
         self.assertEqual(strict[:len(trusted) - 2], trusted[:-2])

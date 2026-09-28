@@ -28,12 +28,13 @@ class AttentionWaitTests(NativePresenceTestCase):
 
     # --- fixtures --------------------------------------------------------------
 
-    def prepared(self, goal='내일 아침 회의 자료 요약', delivered=False, age=600):
+    def prepared(self, goal='내일 아침 회의 자료 요약', delivered=False, age=600, when_needed=False):
         """A fresh prepared answer whose run reached (or not) the owner as a message."""
         now = time.time()
         row = self.service.preparations.create(kind=prep.KIND_PREPARE, goal=goal, due_at=now - age - 60, timezone='Asia/Seoul',
                                                recurrence=None, channel=prep.CHANNEL_TELEGRAM, created_from='seed-' + goal,
-                                               state=prep.STATE_SCHEDULED, accepted_by=prep.ACCEPTED_OWNER_BUTTON)
+                                               state=prep.STATE_SCHEDULED, accepted_by=prep.ACCEPTED_OWNER_BUTTON,
+                                               delivery_mode=prep.DELIVERY_WHEN_NEEDED if when_needed else None)
         run_id = 'run-' + row['id']
         with self.store.db() as db:
             db.execute("INSERT INTO jobs(id,request_key,message,channel,chat_id,status,response,error,delivery,created) "
@@ -94,6 +95,19 @@ class AttentionWaitTests(NativePresenceTestCase):
         self.turn('질문')
         self.assertEqual(self.attention_lines(), [])
         self.assertEqual(self.drafts(), [DOTS_FRAMES[0], DOTS_FRAMES[1]])
+
+    def test_a_when_needed_watch_is_never_surfaced(self):
+        # #719: its judgment already decided what the owner hears (notified, or deliberately quiet).
+        self.prepared(goal='주가 감시', when_needed=True)
+        self.turn('질문')
+        self.assertEqual(self.attention_lines(), [])
+
+    def test_an_unread_answer_behind_three_delivered_newer_ones_is_still_found(self):
+        unread = self.prepared(goal='읽지 않은 답', age=3000)
+        for index in range(3):
+            self.prepared(goal=f'전달된 답 {index}', delivered=True, age=100 + index)
+        self.turn('질문')
+        self.assertIn(unread['goal_text'], self.attention_lines()[0])
 
     # --- (b) reminders ---------------------------------------------------------------
 

@@ -4336,11 +4336,17 @@ class AgentService:
     def _attention_items(self, job, now):
         own=prep.preparation_of(job.get('request_key'))
         items=[]
-        for row in self.preparations.fresh(now,exclude_job=job['id']):
-            run=self.store.job(row['job_id']) or {}
-            if row['id']==own or run.get('delivery')=='sent':continue
-            items.append({'ref':'prep:'+row['id'],'kind':ATTENTION_PREPARED,'text':row['goal_text'],'at':row['prepared_at']})
         with self.store.db() as db:
+            # Unread: a fresh ``prepare`` answer whose run did not reach the owner as a
+            # message.  A when_needed watch (#719) is never one: its judgment already
+            # decided whether the owner hears it (a notify was sent; quiet stays quiet).
+            # The predicate runs before the limit (review: three delivered newest rows
+            # must not hide a fourth unread one).
+            prepared=[dict(row) for row in db.execute(
+                "SELECT p.id,p.goal_text,p.prepared_at FROM preparations p JOIN jobs j ON j.id=p.prepared_result_ref "
+                "WHERE p.kind=? AND p.prepared_at>=? AND j.id IS NOT ? AND p.id IS NOT ? AND j.delivery IS NOT 'sent' "
+                "AND (p.delivery_mode IS NULL OR p.delivery_mode!=?) ORDER BY p.prepared_at DESC LIMIT ?",
+                (prep.KIND_PREPARE,now-prep.FRESH_SECONDS,job['id'],own,prep.DELIVERY_WHEN_NEEDED,prep.SECTION_MAX_ITEMS)).fetchall()]
             reminders=[dict(row) for row in db.execute(
                 "SELECT id,goal_text,due_at,timezone FROM preparations WHERE kind=? AND state=? AND due_at>? AND due_at<=? ORDER BY due_at",
                 (prep.KIND_REMINDER,prep.STATE_SCHEDULED,now,now+ATTENTION_REMINDER_HORIZON)).fetchall()]
@@ -4351,6 +4357,8 @@ class AgentService:
             asks=[dict(row) for row in db.execute(
                 "SELECT job_id,kind,fingerprint,created FROM telegram_notifications WHERE kind IN (?,?) AND state='sent' AND job_id IS NOT ? "
                 "ORDER BY created",(*MEMORY_PROMPT_KINDS,job['id'])).fetchall()]
+        for row in prepared:
+            items.append({'ref':'prep:'+row['id'],'kind':ATTENTION_PREPARED,'text':row['goal_text'],'at':row['prepared_at']})
         for row in reminders:
             if row['id']==own:continue
             items.append({'ref':'prep:'+row['id'],'kind':ATTENTION_REMINDER,'at':row['due_at'],

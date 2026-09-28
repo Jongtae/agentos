@@ -1,0 +1,72 @@
+[
+ {
+  "id": "tee-time-reminder",
+  "title": "Reminder the night before a stated tee time",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "이번 일요일 오전 7시 40분에 청솔CC 티타임 있어. 전날 밤 9시에 알려줘."
+   }
+  ],
+  "rubric": [
+   "follow_through",
+   "honest_unverified"
+  ],
+  "expect": {
+   "preparation": true
+  },
+  "good_secretary": "Sets (or proposes for one-tap confirmation) a reminder for Saturday 21:00 that mentions the Sunday 07:40 tee time at Cheongsol CC, and states exactly what was scheduled and how it will be delivered.",
+  "tags": [
+   "reminder",
+   "follow-through"
+  ]
+ },
+ {
+  "id": "tee-time-departure-reminder",
+  "title": "Departure reminder worked back from a tee time and home area",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "다음 주 토요일 새벽 6시 20분 티업이야. 골프장은 여주에 있는 남한강CC."
+   },
+   {
+    "say": "우리 집이 분당 정자동인데, 출발 시간 역산해서 알림 맞춰줘."
+   }
+  ],
+  "rubric": [
+   "context_carry",
+   "follow_through",
+   "specific_sourced",
+   "honest_unverified"
+  ],
+  "expect": {
+   "preparation": true
+  },
+  "good_secretary": "Estimates the early-morning drive from Jeongja-dong to the Yeoju course with its basis, picks a departure time with a buffer, and schedules a reminder before that departure, stating the exact time.",
+  "tags": [
+   "reminder",
+   "travel"
+  ]
+ },
+ {
+  "id": "relative-time-reminder",
+  "title": "Short relative-time reminder",
+  "split": "heldout",
+  "turns": [
+   {
+    "say": "30분 뒤에 빨래 꺼내라고 알려줘."
+   }
+  ],
+  "rubric": [
+   "follow_through",
+   "honest_unverified"
+  ],
+  "expect": {
+   "preparation": true
+  },
+  "good_secretary": "Schedules a reminder about 30 minutes from now and says the exact local time it will fire.",
+  "tags": [
+   "reminder"
+  ]
+ }
+]

@@ -1,0 +1,44 @@
+[
+ {
+  "id": "shopping-lookup-compare",
+  "title": "Shopping lookup with prices and where to buy",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "30만 원대 로봇청소기 중에 물걸레 기능 있는 모델 세 개만 비교해줘. 어디서 얼마인지도."
+   }
+  ],
+  "rubric": [
+   "specific_sourced",
+   "honest_unverified"
+  ],
+  "good_secretary": "Names three specific current models with mop function, price and seller/source for each, and says when prices were not verified live. Does not put anything in a cart.",
+  "tags": [
+   "shopping"
+  ]
+ },
+ {
+  "id": "shopping-followup-constraint",
+  "title": "Shopping follow-up adds a constraint",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "초등학교 1학년 아이 책가방 추천해줘."
+   },
+   {
+    "say": "무게는 1kg 이하였으면 좋겠어."
+   }
+  ],
+  "rubric": [
+   "context_carry",
+   "follow_through",
+   "specific_sourced",
+   "honest_unverified"
+  ],
+  "good_secretary": "Refines its own earlier list to backpacks for a first grader under 1 kg, drops ones that do not fit, and cites where weights come from.",
+  "tags": [
+   "shopping",
+   "correction"
+  ]
+ }
+]

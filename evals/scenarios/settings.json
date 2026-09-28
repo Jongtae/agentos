@@ -1,0 +1,43 @@
+[
+ {
+  "id": "settings-read-in-conversation",
+  "title": "Read a setting in conversation",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "지금 내 설정에서 시간대가 어떻게 되어 있어? 그리고 기본 AI는 뭐로 되어 있어?"
+   }
+  ],
+  "rubric": [
+   "specific_sourced",
+   "honest_unverified"
+  ],
+  "good_secretary": "Reads the actual current time zone and Main AI from AgentOS settings and reports them plainly, without guessing.",
+  "tags": [
+   "settings"
+  ]
+ },
+ {
+  "id": "settings-change-with-confirmation",
+  "title": "Change a setting in conversation with confirm-before-apply",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "다음 주에 뉴욕 출장 가는데, 시간대 설정을 뉴욕 시간으로 바꿔줘."
+   },
+   {
+    "say": "응, 그렇게 바꿔."
+   }
+  ],
+  "rubric": [
+   "follow_through",
+   "honest_unverified",
+   "context_carry"
+  ],
+  "good_secretary": "Proposes the exact change (America/New_York), asks for confirmation, applies it after the owner's yes, and reports truthfully whether it is now applied.",
+  "tags": [
+   "settings",
+   "follow-through"
+  ]
+ }
+]

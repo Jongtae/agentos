@@ -1,0 +1,47 @@
+[
+ {
+  "id": "new-request-after-travel-topic",
+  "title": "Unrelated new request after a travel topic",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "부산 해운대 근처에 가족이 묵을 숙소 추천해줘."
+   },
+   {
+    "say": "그건 됐고, 요즘 노이즈캔슬링 잘 되는 무선 이어폰 뭐 있어?"
+   }
+  ],
+  "rubric": [
+   "no_wrong_narrowing",
+   "specific_sourced",
+   "honest_unverified"
+  ],
+  "good_secretary": "Treats turn 2 as a new, general shopping question: recommends earphones on their own merits, not earphones 'for the Busan trip' or anything tied to Haeundae.",
+  "tags": [
+   "topic-shift",
+   "shopping"
+  ]
+ },
+ {
+  "id": "new-request-after-lunch-topic",
+  "title": "Unrelated new request after a lunch topic",
+  "split": "dev",
+  "turns": [
+   {
+    "say": "오늘 점심 광화문 근처에서 먹을 만한 데 추천해줘."
+   },
+   {
+    "say": "다음 달 어머니 생신 선물 아이디어 좀 줘. 예산은 20만 원 정도."
+   }
+  ],
+  "rubric": [
+   "no_wrong_narrowing",
+   "specific_sourced",
+   "owner_model"
+  ],
+  "good_secretary": "Gives gift ideas within about 200,000 won with concrete items; does not narrow the gift to restaurants or Gwanghwamun.",
+  "tags": [
+   "topic-shift"
+  ]
+ }
+]

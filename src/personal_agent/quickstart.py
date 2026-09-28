@@ -883,6 +883,9 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/context-inbox/share-policy':return self.reply(200,service.context_inbox().set_policy(body))
                 if path=='/api/context-inbox/share':return self.reply(200,service.context_inbox().share(body))
                 if path=='/api/settings/request':return self.reply(200,service.conversation_settings_request(body))
+                if path.startswith('/api/tasks/') and path.endswith('/settings-draft'):
+                    # #855: the web chat's 적용 / 바꾸지 않음 on one Work's pending settings drafts.
+                    return self.reply(200,service.work_settings_draft(path[len('/api/tasks/'):-len('/settings-draft')],body))
                 if path=='/api/personal-knowledge':return self.reply(200,service.personal_knowledge_request(body, channel='local-companion'))
                 if path=='/api/personal-space/memory-candidates/request':
                     return self.reply(200,service.memory_candidate_request(body))

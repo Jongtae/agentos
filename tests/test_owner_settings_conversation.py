@@ -12,9 +12,14 @@ import json
 import tempfile
 import threading
 import unittest
+from http.cookiejar import CookieJar
+from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
+from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from personal_agent.agent_runtime import SETTINGS_ACTIONS, Capabilities, recorded_arguments
+from personal_agent.conversation_handoff import JUDGMENT_NO, JUDGMENT_UNAVAILABLE, JUDGMENT_YES, Judgment
 from personal_agent.bounded_execution import (BOUNDED_PROFILE, ISOLATED_PROFILE, STRICT_PROFILE, profile_actions,
                                               route_unavailable)
 from personal_agent.providers import ModelAdapter
@@ -266,7 +271,8 @@ class ConversationConfirmation(_Case):
         self.assertEqual(self.applies, [])
         self.assertFalse(self.context()['enabled'])
         [draft] = self.settings.pending_for_work(work)
-        self.assertIn(f"/settings 확인 {draft['id']}", json.dumps(self.store.task_events(work), ensure_ascii=False))
+        # #855: no command is ever shown; the compatibility form still confirms when the owner types it.
+        self.assertNotIn('/settings', json.dumps(self.store.task_events(work), ensure_ascii=False))
         # The web chat route (``/api/chat``) enqueues the owner's typed message with ``owner_typed``.
         self.assertTrue(self.store.enqueue(f"/settings 확인 {draft['id']}", 'web-2', owner_typed=True))
         self.assertTrue(self.service.run_one())
@@ -679,3 +685,121 @@ class ReviewRemediation(ConversationConfirmation):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TypedConfirmation(ReviewRemediation):
+    """OWNER-SETTINGS-02 (#855): the owner's next typed message answers the pending draft; no command is shown.
+
+    The DecisionEngine's two binary judgments are replaced by fixed verdicts
+    (``judge``); everything else - the store, ``run_one``, the orchestrator's
+    confirm path with digest/TTL/audit, the web route - runs unchanged.
+    """
+
+    def judge(self, confirmed, declined=JUDGMENT_NO):
+        patches = [mock.patch.object(self.service.decision_judge, 'settings_draft_confirmed',
+                                     return_value=Judgment(confirmed)),
+                   mock.patch.object(self.service.decision_judge, 'settings_draft_declined',
+                                     return_value=Judgment(declined))]
+        return [self.enterContext(patch) for patch in patches]
+
+    def owner_turn(self, text, owner_typed=True, reply='알겠습니다.'):
+        self.script = [{'content': reply}] * 4
+        work = self.store.enqueue(text, 'web-next-' + str(len(self.store.jobs())), owner_typed=owner_typed)
+        self.assertTrue(self.service.run_one())
+        return self.store.job(work)
+
+    def test_a_typed_yes_applies_through_the_confirm_path(self):
+        work, draft = self.web_draft()
+        confirmed, declined = self.judge(JUDGMENT_YES)
+        job = self.owner_turn('응, 그렇게 바꿔')
+        self.assertEqual(self.applies, [{'enabled': True}])
+        self.assertTrue(self.context()['enabled'])
+        self.assertIn('바꿨습니다', job['response'])
+        self.assertEqual(self.store.config('settings_change_drafts')[draft['id']]['state'], 'applied')
+        [(pending, message)] = [call.args for call in confirmed.call_args_list]
+        self.assertIn('현재 맥락 사용', pending)
+        self.assertEqual(message, '응, 그렇게 바꿔')
+        declined.assert_not_called()
+        self.assertEqual(self.store.config('settings_audit')[-1]['terminal'], 'applied')
+
+    def test_a_message_agentos_ran_never_confirms_even_when_judged_a_yes(self):
+        work, draft = self.web_draft()
+        confirmed, _declined = self.judge(JUDGMENT_YES)
+        self.owner_turn('응, 그렇게 바꿔', owner_typed=False)
+        confirmed.assert_not_called()
+        self.assertEqual(self.applies, [])
+        self.assertEqual(self.store.config('settings_change_drafts')[draft['id']]['state'], 'awaiting-confirmation')
+
+    def test_a_typed_no_cancels(self):
+        work, draft = self.web_draft()
+        self.judge(JUDGMENT_NO, JUDGMENT_YES)
+        job = self.owner_turn('아니')
+        self.assertEqual(self.applies, [])
+        self.assertEqual(self.store.config('settings_change_drafts')[draft['id']]['state'], 'canceled')
+        self.assertIn('취소했습니다', job['response'])
+
+    def test_an_unrelated_or_unjudged_message_leaves_the_draft_pending_and_is_a_normal_turn(self):
+        work, draft = self.web_draft()
+        for verdicts in ((JUDGMENT_NO, JUDGMENT_NO), (JUDGMENT_UNAVAILABLE, JUDGMENT_UNAVAILABLE)):
+            with self.subTest(verdicts=verdicts):
+                self.judge(*verdicts)
+                job = self.owner_turn('오늘 저녁 뭐 먹을까', reply='김치찌개 어떠세요.')
+                self.assertEqual(job['status'], 'succeeded')
+                self.assertIn('김치찌개', job['response'])
+        self.assertEqual(self.applies, [])
+        self.assertEqual(self.store.config('settings_change_drafts')[draft['id']]['state'], 'awaiting-confirmation')
+        self.assertEqual(self.settings.pending_for_work(work), [dict(self.settings.pending_for_work(work)[0])])
+        # An expired draft is no longer answered by a yes.
+        self.clock[0] += self.settings.TTL_SECONDS + 1
+        confirmed, _ = self.judge(JUDGMENT_YES)
+        self.owner_turn('응')
+        confirmed.assert_not_called()
+        self.assertEqual(self.applies, [])
+
+    def test_no_owner_facing_string_names_a_settings_command(self):
+        from personal_agent.agent_runtime import SETTINGS_CHANGE_DESCRIPTION
+        work, draft = self.web_draft()
+        tools = self.service.settings_tools(self.store.job(work))
+        result = tools('settings_change', {'category': 'current_context', 'setting': 'timezone', 'value': 'America/New_York'})
+        texts = [result['next_step'], SETTINGS_CHANGE_DESCRIPTION, json.dumps(self.store.task_events(work), ensure_ascii=False),
+                 self.settings.confirmation_text(self.settings.pending_for_work(work)), str(self.store.job(work)['response'])]
+        for text in texts:
+            self.assertNotIn('/settings', text)
+        self.assertIn('적용', result['next_step'])
+
+    def test_the_web_turn_offers_the_same_buttons_through_the_work_scoped_route(self):
+        from personal_agent.quickstart import make_handler
+        work, draft = self.web_draft()
+        self.store.claim(self.store.bootstrap.read_text(), 'long-password-test')
+        server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(self.service))
+        thread = threading.Thread(target=server.serve_forever); thread.start()
+        client = build_opener(HTTPCookieProcessor(CookieJar())); base = 'http://127.0.0.1:' + str(server.server_port)
+        def request(path, body=None):
+            data = None if body is None else json.dumps(body).encode()
+            with client.open(Request(base + path, data=data, headers={'Content-Type': 'application/json'} if data else {}),
+                             timeout=3) as response:
+                return json.load(response)
+        try:
+            request('/api/login', {'password': 'long-password-test'})
+            [shown] = request('/api/tasks/' + work)['selected']['settings_drafts']
+            self.assertEqual(shown['id'], draft['id'])
+            self.assertNotIn('digest', shown)
+            self.assertIn('현재 맥락 사용', shown['effect'])
+            applied = request('/api/tasks/' + work + '/settings-draft', {'action': 'confirm'})
+            self.assertEqual(applied['state'], 'applied')
+            self.assertEqual(request('/api/tasks/' + work)['selected']['settings_drafts'], [])
+        finally:
+            server.shutdown(); thread.join(); server.server_close()
+        self.assertEqual(self.applies, [{'enabled': True}])
+        app = (Path(__file__).resolve().parents[1] / 'src/personal_agent/web/app.js').read_text()
+        self.assertIn("/settings-draft'", app)
+        self.assertIn('settings_drafts', app)
+        self.assertNotIn('/settings 확인', app)
+
+    def test_the_web_cancel_button_and_a_second_press_apply_nothing(self):
+        work, draft = self.web_draft()
+        self.assertEqual(self.service.work_settings_draft(work, {'action': 'cancel'})['state'], 'canceled')
+        with self.assertRaises(ValueError):
+            self.service.work_settings_draft(work, {'action': 'confirm'})
+        self.assertEqual(self.applies, [])
+        self.assertEqual(self.store.config('settings_change_drafts')[draft['id']]['state'], 'canceled')

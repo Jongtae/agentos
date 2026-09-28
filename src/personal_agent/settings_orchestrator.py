@@ -22,9 +22,10 @@ OWNER-SETTINGS-01 #814: with the owning service supplied, the same object also
 reads and changes a few owner settings that already exist in the service -
 current context (on/off, time zone), the Judgment AI (mode, model) and the
 Main AI (route, model) - through the service's own setters only.  A change is
-a digest-bound draft; nothing applies until the owner confirms it (Telegram
-button, ``/settings 확인 <id>`` in the same conversation, or the HTTP
-``confirm``).  Values are fixed-choice or a validated time zone; a credential,
+a digest-bound draft; nothing applies until the owner confirms it (the
+적용 button on Telegram or the web, a plain yes typed in the same conversation
+judged by the DecisionEngine - OWNER-SETTINGS-02 #855 - or the HTTP
+``confirm``).  No command is ever shown to the owner (#855).  Values are fixed-choice or a validated time zone; a credential,
 key, token or endpoint is never accepted (those stay in Settings).
 """
 import hashlib
@@ -543,12 +544,39 @@ class SettingsOrchestrator:
         finally:
             category_lock.release()
 
-    def pending_for_work(self, work_id):
-        """This Work's drafts still awaiting the owner, oldest first (#814)."""
+    def pending_drafts(self):
+        """Every draft still awaiting the owner (not expired), oldest first."""
         now = self.now()
-        rows = [row for row in self._drafts().values() if isinstance(row, dict) and row.get("work_id") == work_id
+        rows = [row for row in self._drafts().values() if isinstance(row, dict)
                 and row.get("state") == "awaiting-confirmation" and float(row.get("expires_at") or 0) >= now]
         return sorted(rows, key=lambda row: (row.get("created_at") or 0, row["id"]))
+
+    def pending_for_conversation(self, owner, channel):
+        """This conversation's drafts still awaiting the owner, oldest first (#855)."""
+        return [row for row in self.pending_drafts() if row.get("owner") == owner and row.get("channel") == channel]
+
+    def settle_pending(self, owner, channel, rows, apply, notify=None):
+        """Confirm (``apply``) or cancel every offered draft of one conversation; one owner-facing result (#855).
+
+        The same path as the 적용 / 바꾸지 않음 buttons: each draft goes through
+        ``confirm`` (digest, TTL, stale check, audit) or ``cancel``.
+        """
+        lines, states = [], []
+        for row in rows:
+            try:
+                result = (self.confirm(owner, channel, row["id"], row.get("digest", ""), notify) if apply
+                          else self.cancel(owner, channel, row["id"]))
+                states.append(result.get("state"))
+                lines.append(result.get("response") or "처리했습니다.")
+            except SettingsError as exc:
+                states.append("failed")
+                lines.append(f"{row['effect']}: {exc}")
+        return {"state": states[0] if len(states) == 1 else ("mixed" if len(set(states)) > 1 else states[0]),
+                "drafts": [row["id"] for row in rows], "response": "\n".join(lines)}
+
+    def pending_for_work(self, work_id):
+        """This Work's drafts still awaiting the owner, oldest first (#814)."""
+        return [row for row in self.pending_drafts() if row.get("work_id") == work_id]
 
     @staticmethod
     def drafts_digest(rows):
@@ -558,7 +586,7 @@ class SettingsOrchestrator:
 
     @staticmethod
     def confirmation_text(rows):
-        lines = ["대화에서 요청한 설정 변경입니다. 적용을 누르기 전에는 아무것도 바뀌지 않습니다."]
+        lines = ["대화에서 요청한 설정 변경입니다. 적용을 누르거나 대화에서 그렇게 하라고 답하기 전에는 아무것도 바뀌지 않습니다."]
         for row in rows:
             lines.append(f"- {row['effect']}" + (f" ({row['note']})" if row.get("note") else ""))
             if row.get("reason"):
@@ -570,7 +598,8 @@ class SettingsOrchestrator:
 
         A change is only a draft bound to this conversation; the model gets
         no digest and no way to confirm.  The owner confirms in the same
-        conversation: the Telegram button, or ``/settings 확인 <id>``.
+        conversation: the 적용 button, or a plain yes (#855).  ``telegram`` is
+        kept for callers; the wording no longer differs by channel.
         """
         def call(action, args):
             args = args if isinstance(args, dict) else {}
@@ -581,9 +610,8 @@ class SettingsOrchestrator:
             draft = self.propose(owner, channel, args.get("category"), args.get("setting"), args.get("value"),
                                  args.get("reason"), work_id)
             minutes = self.TTL_SECONDS // 60
-            how = (f"Telegram으로 보내는 확인 메시지의 적용 버튼을 누르면 적용됩니다({minutes}분 안에)." if telegram else
-                   f"이 대화에 /settings 확인 {draft['draft_id']} 를 보내면 적용됩니다({minutes}분 안에). "
-                   f"취소는 /settings 취소 {draft['draft_id']} 입니다.")
+            how = (f"소유자에게 이 대화에서 확인을 요청합니다: 적용 버튼을 누르거나 그렇게 하라고 답하면 적용되고, "
+                   f"아니라고 답하면 취소됩니다({minutes}분 안에).")
             return {**{key: value for key, value in draft.items() if key not in ("digest", "response", "expires_at")},
                     "next_step": f"{draft['summary']} 변경은 소유자 확인을 기다립니다. {how} 확인 전에는 아무것도 바뀌지 않았습니다."}
         return call
@@ -653,7 +681,10 @@ class SettingsOrchestrator:
 
     def handle_text(self, owner, channel, text, owner_typed=True, notify=None):
         """``owner_typed`` (#814 review P1): False for a message AgentOS ran on the owner's
-        behalf (a preparation goal, a continuation, a retry); it can never confirm or cancel."""
+        behalf (a preparation goal, a continuation, a retry); it can never confirm or cancel.
+
+        The ``확인 <id>`` / ``취소 <id>`` forms are kept for compatibility only;
+        they are never shown to the owner (#855)."""
         if not isinstance(text, str): raise SettingsError("설정 요청을 확인하세요.")
         value = text.strip()
         match = re.fullmatch(r"(?:confirm|확인)\s+([A-Za-z0-9_-]+)", value, re.I)

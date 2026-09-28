@@ -486,6 +486,19 @@ FOLLOWUP_QUESTION = (
 WITHDRAWAL_PROPOSITION = ('The owner\'s latest message withdraws or cancels the request that is waiting for '
                           'the listed connection (rather than acknowledging it, changing topic, or asking '
                           'something unrelated).')
+#: #855: a pending settings draft is confirmed or declined by the owner's next typed
+#: message; two propositions, each judged over the draft summary and the message.
+SETTINGS_CONFIRM_PROPOSITION = ('A settings change is waiting for the owner\'s confirmation (the pending change '
+                                'is given). The owner\'s latest message plainly tells the assistant to go ahead and '
+                                'apply that change - a yes, an agreement, "do it", "change it that way" or an '
+                                'equivalent in any language. It is false when the message declines, asks for a '
+                                'different value, asks a question, changes the topic, or when it is unclear. '
+                                'This judgment does not apply anything.')
+SETTINGS_DECLINE_PROPOSITION = ('A settings change is waiting for the owner\'s confirmation (the pending change '
+                                'is given). The owner\'s latest message plainly declines it - a no, "leave it", '
+                                '"don\'t change it", "cancel" or an equivalent in any language. It is false when '
+                                'the message agrees, asks a question, asks for a different value, changes the '
+                                'topic, or when it is unclear. This judgment does not cancel anything.')
 UNSUPPORTED_QUESTION = ('Is the owner asking the assistant to do one of these things it does not offer: '
                         + '; '.join(f'{key} = {label}' for key, label in UNSUPPORTED_CAPABILITIES.items())
                         + '? Choose that capability. If the request is anything else (searching mail by '
@@ -605,7 +618,7 @@ class ConversationJudgments:
     #: Facts that are the owner's own words.
     #: #836: ``already_noted`` is what the owner's own message already gave the Work
     #: (its saved values, #831), so it is treated like the owner's words.
-    OWNER_FACTS = frozenset({'owner_message', 'owner_request', 'terms', 'owner_context', 'already_noted'})
+    OWNER_FACTS = frozenset({'owner_message', 'owner_request', 'terms', 'owner_context', 'already_noted', 'pending_change'})
 
     def __init__(self, engine=None, policy=None, redactor=None):
         self.engine = engine or UnavailableDecisionEngine()
@@ -643,6 +656,24 @@ class ConversationJudgments:
         context = self._context('parked-work-withdrawal',
                                   {'waiting_connection': labels, 'owner_message': utterance})
         decision = self.engine.judge(context, WITHDRAWAL_PROPOSITION)
+        verdict = self.policy.binary(decision)
+        return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
+                        source=decision.confidence.provider or decision.outcome)
+
+    def settings_draft_confirmed(self, pending_change, utterance):
+        """Does ``utterance`` plainly confirm applying ``pending_change`` (#855)?  Unavailable applies nothing."""
+        context = self._context('settings-draft-confirmation',
+                                {'pending_change': pending_change, 'owner_message': utterance})
+        decision = self.engine.judge(context, SETTINGS_CONFIRM_PROPOSITION)
+        verdict = self.policy.binary(decision)
+        return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
+                        source=decision.confidence.provider or decision.outcome)
+
+    def settings_draft_declined(self, pending_change, utterance):
+        """Does ``utterance`` plainly decline ``pending_change`` (#855)?  Unavailable keeps it pending."""
+        context = self._context('settings-draft-decline',
+                                {'pending_change': pending_change, 'owner_message': utterance})
+        decision = self.engine.judge(context, SETTINGS_DECLINE_PROPOSITION)
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
                         source=decision.confidence.provider or decision.outcome)

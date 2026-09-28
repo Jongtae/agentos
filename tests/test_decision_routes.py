@@ -416,6 +416,88 @@ class SubscriptionCliTests(Temp):
                 self.assertEqual(self.audit[-1]['failure'], failure)
                 self.assertEqual(len(self.runner.calls), 1, 'no retry, no other route')
 
+    def failed_call(self, engine_id, fail, facts=None):
+        engine = self.engine(engine_id, runner=CliRunner(fail=fail))
+        with self.assertLogs('personal_agent.decision', 'WARNING') as logs:
+            decision = engine.choose(self.context(**(facts or {})), ('retry',), 'q')
+        self.assertEqual(len(logs.output), 1, 'one log line per failed call')
+        self.assertEqual(len(self.runner.calls), 1, 'diagnostics add no retry and no other route')
+        return decision, self.audit[-1], logs.output[0]
+
+    def test_an_unclassified_cli_failure_records_its_exit_code_and_error_source(self):
+        # #797: the owner's plan call failed as engine-failed with no exit
+        # code, status or reason anywhere.  A stderr-only failure now leaves
+        # the exit code in the audit and the redacted reason in one log line.
+        decision, record, line = self.failed_call('codex', lambda e, a: types.SimpleNamespace(
+            returncode=2, stdout='', stderr='warning: retrying\nstream disconnected before completion\n'))
+        self.assertEqual((decision.outcome, record['failure']), (OUTCOME_UNAVAILABLE, 'engine-failed'))
+        self.assertEqual((record['exit_code'], record['error_source']), (2, 'stderr'))
+        self.assertNotIn('provider_status', record, 'no structured status was observed')
+        self.assertNotIn('reason', record, 'the audit keeps no CLI text')
+        for part in ('engine=codex', 'kind=choose', 'purpose=conversation-followup', 'exit_code=2',
+                     'class=engine-failed', 'status=None', 'source=stderr',
+                     'reason=stream disconnected before completion'):
+            self.assertIn(part, line)
+
+    def test_a_structured_provider_error_records_its_status_without_text(self):
+        failed = json.dumps({'type': 'turn.failed', 'error': {'message': json.dumps(
+            {'status': 503, 'error': {'message': 'upstream overloaded'}})}})
+        decision, record, line = self.failed_call('codex', lambda e, a: types.SimpleNamespace(
+            returncode=1, stdout=failed, stderr='some unrelated stderr'))
+        self.assertEqual(record['failure'], 'engine-failed', 'a 5xx is still engine-failed; classification unchanged')
+        self.assertEqual((record['exit_code'], record['provider_status'], record['error_source']),
+                         (1, 503, 'provider-error'))
+        self.assertNotIn('upstream overloaded', json.dumps(record))
+        self.assertIn('status=503', line)
+        self.assertIn('reason=upstream overloaded', line)
+
+    def test_classified_failures_also_record_diagnostics(self):
+        rejected = json.dumps({'type': 'error', 'message': json.dumps({'status': 400, 'error': {'message': 'nope'}})})
+        _, record, line = self.failed_call('codex', lambda e, a: types.SimpleNamespace(returncode=1, stdout=rejected,
+                                                                                          stderr=''))
+        self.assertEqual((record['failure'], record['exit_code'], record['provider_status'], record['error_source']),
+                         ('request-rejected', 1, 400, 'provider-error'))
+        self.assertIn('class=request-rejected', line)
+        _, record, _ = self.failed_call('codex', lambda e, a: types.SimpleNamespace(returncode=137, stdout='', stderr=''))
+        self.assertEqual((record['failure'], record['exit_code'], record['error_source']), ('engine-failed', 137, 'none'))
+
+    def test_failure_diagnostics_never_carry_the_prompt_owner_content_or_credentials(self):
+        owner = '내일 오전 10시 치과 예약과 비밀 프로젝트 회의 내용을 알려줘'
+        leaked = ('Error: request failed for prompt: ' + owner + ' token=abc123secretvalue '
+                  'Authorization: Bearer sk-live-abcdefghijklmnop cc-fixture-token-000000')
+        for engine_id in ('codex', 'claude-code'):
+            with self.subTest(engine=engine_id):
+                decision, record, line = self.failed_call(engine_id, lambda e, a: types.SimpleNamespace(
+                    returncode=1, stdout='', stderr='noise\n' + leaked), {'owner_message': owner})
+                self.assertEqual(record['failure'], 'engine-failed')
+                persisted = json.dumps(record, ensure_ascii=False)
+                for secret in (owner, '치과', 'abc123secretvalue', 'sk-live-abcdefghijklmnop', 'cc-fixture-token-000000',
+                               'request failed for prompt'):
+                    self.assertNotIn(secret, persisted)
+                    self.assertNotIn(secret, line)
+                self.assertIn('exit_code=1', line)
+
+    def test_the_stored_claude_token_is_removed_before_the_reason_is_logged(self):
+        _, record, line = self.failed_call('claude-code', lambda e, a: types.SimpleNamespace(
+            returncode=1, stdout='', stderr='fatal: session cc-fixture-token-000000 rejected by upstream'))
+        self.assertNotIn('cc-fixture-token-000000', line)
+        self.assertIn('[redacted] rejected by upstream', line)
+        self.assertEqual(record['error_source'], 'stderr')
+
+    def test_a_decided_call_records_no_failure_diagnostics(self):
+        self.engine().choose(self.context(), ('retry',), 'q')
+        for name in ('exit_code', 'provider_status', 'error_source', 'failure'):
+            self.assertNotIn(name, self.audit[-1])
+
+    def test_the_audit_record_keeps_only_declared_integer_or_label_diagnostics(self):
+        from personal_agent.decision import DecisionConfidence, audit_record
+        record = audit_record(self.context(), 'structured', OUTCOME_UNAVAILABLE, {}, DecisionConfidence(), 1.0,
+                              'engine-failed', {'exit_code': 1, 'provider_status': '503 overloaded',
+                                                'error_source': 'owner text', 'reason': 'owner text', 'stderr': 'x'})
+        self.assertEqual(record['exit_code'], 1)
+        for name in ('provider_status', 'error_source', 'reason', 'stderr'):
+            self.assertNotIn(name, record)
+
     def test_cancelled_oversized_and_missing_cli_make_no_call(self):
         engine = self.engine()
         cancelled = DecisionContext('x', {'m': 'a'}, cancelled=lambda: True)

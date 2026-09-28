@@ -1704,7 +1704,7 @@ class SecretaryStandard(Harness):
         self.assertIn('the reply\'s own claims are not evidence', GOAL_REACHED_PROPOSITION)
         # #829: evidence stays strict for action claims; a current fact may be sourced or flagged instead.
         self.assertIn('claims an action the observations do not show', GOAL_REACHED_PROPOSITION)
-        self.assertIn('names where it came from', GOAL_REACHED_PROPOSITION)
+        self.assertIn('counts only when that source appears in the observations', GOAL_REACHED_PROPOSITION)
         self.assertIn('not whether it is perfect', GOAL_REACHED_PROPOSITION)
         self.assertNotIn('when it is unclear', GOAL_REACHED_PROPOSITION)
 

@@ -35,9 +35,6 @@ TERMINAL_UNKNOWN_EFFECT = ('외부 결과를 확인할 수 없습니다. 실제 
 #: #752: opens the AI's own answer in a failed/partial bubble, after the truth
 #: header and what did not complete.  The owner reads the answer, labelled.
 TERMINAL_ANSWER_LABEL = 'AI 답변 (위 부분은 확인되지 않았어요):'
-#: #752 review: what the web shows in place of a withheld answer.
-TERMINAL_ANSWER_WITHHELD = ('실행되지 않은 동작을 주장할 수 있어 AI 답변을 표시하지 않습니다. '
-                            '상세에서 실행 기록을 확인하세요.')
 #: #752: one tool reason in the owner's bubble: its first sentence, bounded.
 #: The full model-facing text stays in the Work record (상세).
 OWNER_REASON_CHARS = 120
@@ -276,12 +273,13 @@ class BlockedTurn(ValueError):
 def terminal_text(response, error=None, outcome=None, next_action=None, verified=None):
     """The one readable terminal bubble for a paired owner.
 
-    * ``failed`` / ``partial`` with an AI answer (#752) - the truth header
-      and what did not complete come first, then the AI's own answer under
-      ``TERMINAL_ANSWER_LABEL``.  Hiding the answer protected nothing the
-      label does not, and left the owner without the result.
+    * ``failed`` / ``partial`` / ``interrupted`` with an AI answer (#752,
+      #820) - the truth header and what did not complete come first, then
+      the AI's own answer under ``TERMINAL_ANSWER_LABEL``.  The answer is
+      always delivered: hiding it protected nothing the header does not, and
+      left the owner without the result.
     * ``failed`` without an answer - the failure, its cause and the next step.
-    * ``partial`` without an answer / ``interrupted`` - the portion the Work's
+    * ``partial`` / ``interrupted`` without an answer - the portion the Work's
       own typed Evidence supports (``verified``, rendered by AgentOS from
       observed tool results), then the portion that did not complete, and
       the pointer to the record (#598 H1).
@@ -299,8 +297,8 @@ def terminal_text(response, error=None, outcome=None, next_action=None, verified
     cause = (error or '').strip()
     action = next_action or TERMINAL_NEXT_ACTION
     answer = (response or '').strip()
-    if outcome in ('failed', 'partial') and answer:
-        body = [TERMINAL_FAILED_HEADER if outcome == 'failed' else TERMINAL_PARTIAL_HEADER]
+    if outcome in ('failed', 'partial', 'interrupted') and answer:
+        body = [{'failed': TERMINAL_FAILED_HEADER, 'partial': TERMINAL_PARTIAL_HEADER}.get(outcome, TERMINAL_INTERRUPTED_HEADER)]
         if cause:
             body.append(cause)
         body.append(TERMINAL_ANSWER_LABEL + '\n' + answer)

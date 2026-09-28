@@ -554,25 +554,21 @@ WATCH_NOTIFY_PROPOSITION = ('The owner accepted a standing watch with the goal s
                             'needs the owner\'s attention yet, when it only repeats what the last notification already '
                             'said, when the run could not observe what the goal needs, or when it is unclear. This '
                             'judgment sends nothing.')
-#: SEC-LOOP-01 (#657): does what the environment showed satisfy the request?
-GOAL_REACHED_PROPOSITION = ('The observations - results that tools actually returned while working on the owner\'s '
-                            'request - show that the request has been fulfilled: every part the request asks for is '
-                            'visible in them (for example the item listed after it was added, the found item matching '
-                            'what was asked, the requested information present and answering the question), and, '
-                            'when completion criteria are listed, each of them is met. It is false when a tool merely '
-                            'ran without an error, when the observations show something else or only part of the '
-                            'request or criteria, when a failed step was needed for it, when the answer rests on '
-                            'facts that change over time or depend on place and no observation sources them, or when '
-                            'it is unclear. Judge only from the observations and failed steps listed, not from any '
-                            'claim.')
-#: ORCH-04 (#740): is the worker's answer a question the owner must answer first?
-OWNER_INPUT_PROPOSITION = ('The worker\'s answer does not fulfil the owner\'s request because it asks the owner for '
-                           'information or a decision the request needs - a missing detail, a choice between real '
-                           'options, or a confirmation - and neither the owner\'s request nor the recent conversation '
-                           'already provides it. It is false when the answer asks for something the request or the '
-                           'recent conversation already says or clearly implies, when the answer only offers further '
-                           'help after answering, when it reports a failure or inability instead of asking, or when '
-                           'it is unclear.')
+#: SEC-LOOP-01 (#657), ARCH-THIN-01 (#820): the one outcome judgment of a Work -
+#: did the reply serve the owner's message, given the conversation?  Step
+#: bookkeeping is evidence for it, never a verdict of its own.
+GOAL_REACHED_PROPOSITION = ('The reply serves the owner\'s message, read in the light of the recent conversation: it '
+                            'answers what the message asks, does what it asks, or - when the owner tells something '
+                            'rather than asks - responds to it the way a capable personal secretary would. A reply '
+                            'that asks the owner for information or a decision the message needs, which neither the '
+                            'message nor the recent conversation provides, also serves it. Every statement in the reply '
+                            'that something was found, read, saved, added, booked, sent or changed, and every current '
+                            'fact in it that changes over time or depends on place, is supported by the observations - '
+                            'results that tools actually returned, as AgentOS recorded them; the reply\'s own claims are '
+                            'not evidence. It is false when the reply does not address the owner\'s message or '
+                            'addresses a different or earlier topic, serves only part of it, claims an action or a '
+                            'current fact the observations do not show, asks for something the message or the '
+                            'conversation already says, or when it is unclear.')
 UNSUPPORTED_JUDGMENT_UNAVAILABLE = ('요청을 안전하게 구분할 판단 기능을 사용할 수 없어 메일을 검색하거나 다른 처리를 하지 않았습니다. '
                                    '메일을 찾으려는 요청이라면 검색할 내용을 다시 구체적으로 적어 주세요.')
 MIXED_MAIL_ACTION_CLARIFICATION = ('지원하지 않는 메일 발송 요청과 다른 작업이 함께 있어 아무 작업도 실행하지 않았습니다. '
@@ -631,12 +627,14 @@ class ConversationJudgments:
     def _context(self, purpose, facts, *, uncut=None, **options):
         """The one ``DecisionContext`` builder: every fact redacted first.
 
-        ``uncut`` names one owner-authored fact whose length widens the bound
-        instead of being cut (#657 ``goal-reached``).
+        ``uncut`` names one fact (or a tuple of facts) whose length widens the
+        bound instead of being cut (#657 ``goal-reached``: the owner's message;
+        #820: also the caller-bounded reply and conversation).
         """
         facts = {label: self.redact(value, private=label not in self.OWNER_FACTS) for label, value in facts.items()}
         if uncut is not None:
-            options['max_chars'] = MAX_CONTEXT_CHARS + len(facts[uncut])
+            names = (uncut,) if isinstance(uncut, str) else tuple(uncut)
+            options['max_chars'] = MAX_CONTEXT_CHARS + sum(len(facts[name]) for name in names)
         return DecisionContext(purpose, facts, **options)
 
     def parked_work_withdrawn(self, utterance, parked_connectors):
@@ -723,39 +721,23 @@ class ConversationJudgments:
             return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
         return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
 
-    def goal_reached(self, request, observations, failed_steps='', work_id=None, criteria=''):
-        """Do the observed tool results satisfy the owner's ``request`` (#657)?
+    def goal_reached(self, request, observations, failed_steps='', work_id=None, answer='', conversation=''):
+        """Did the reply serve the owner's ``request`` (#657, #820)?  The one outcome judgment.
 
-        One ``judge`` call over the owner's request, the observations a
-        completion claim cited and the run's failed steps - never the
-        worker's own summary.  Only a confident yes lets the Work succeed;
-        no or unavailable leaves it partial.  The caller bounds the
-        observations and failed steps; the owner's request is never cut, so
-        this context's bound is widened by exactly its length.
+        One ``judge`` call over the owner's message (never cut), the recent
+        conversation, the worker's reply (model-stated, not evidence), the
+        tool results AgentOS recorded and the run's failed steps.  Only a
+        confident yes lets the Work succeed; no or unavailable leaves it
+        short of succeeded, and the reply is delivered either way.  The
+        caller bounds and redacts the other facts.
         """
         request = str(request or '')
-        facts = {'owner_request': request, 'observations': observations, 'failed_steps': failed_steps or 'none'}
-        if criteria:
-            # #767: the orchestrator's completion criteria for this attempt.
-            facts['completion_criteria'] = criteria
-        context = self._context('goal-reached', facts, work_id=work_id, uncut='owner_request')
+        facts = {'owner_request': request, 'recent_conversation': conversation or 'none',
+                 'reply': answer or 'none (only the observations are known)',
+                 'observations': observations, 'failed_steps': failed_steps or 'none'}
+        context = self._context('goal-reached', facts, work_id=work_id,
+                                uncut=('owner_request', 'reply', 'recent_conversation'))
         decision = self.engine.judge(context, GOAL_REACHED_PROPOSITION)
-        verdict = self.policy.binary(decision)
-        return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
-                        source=decision.confidence.provider or decision.outcome)
-
-    def owner_input_needed(self, request, conversation, answer, work_id=None):
-        """Does the worker's ``answer`` ask the owner for input the request needs (#740)?
-
-        One ``judge`` call over the owner's request (never cut), the recent
-        conversation and the worker's answer.  Only a confident yes counts.
-        """
-        request = str(request or '')
-        context = self._context('owner-input-needed', {'owner_request': request,
-                                                       'recent_conversation': conversation or 'none',
-                                                       'worker_answer': answer or ''}, work_id=work_id,
-                                uncut='owner_request')
-        decision = self.engine.judge(context, OWNER_INPUT_PROPOSITION)
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
                         source=decision.confidence.provider or decision.outcome)

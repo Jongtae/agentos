@@ -25,7 +25,7 @@ from personal_agent.agent_runtime import (DELEGATE_FAILED, FALLBACK_UNDESCRIBED,
                                           evidence_qualifiers, fallback_response, evidence_summary, turn_context)
 from personal_agent.calendar import CALENDAR_SPEC, CALENDAR_WRITE_SPEC, CalendarConnector
 from personal_agent.connector_contract import ConnectorRegistry, ConnectorState
-from personal_agent.conversation_projection import (CONTEXT_QUALIFIER, TERMINAL_ANSWER_LABEL, TERMINAL_ANSWER_WITHHELD,
+from personal_agent.conversation_projection import (CONTEXT_QUALIFIER, TERMINAL_ANSWER_LABEL,
                                                     TERMINAL_PARTIAL_HEADER,
                                                     context_message, qualify_transcript)
 from personal_agent.google_calendar import CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE
@@ -163,9 +163,12 @@ class TranscriptQualificationTests(TruthIntegrityTestCase):
         self.assertIs(row['qualifier']['verified'], False)
         self.assertEqual(row['qualifier']['label'], '일부 완료')
         self.assertIn('소유자가 이 미리보기를 승인해야 실제 일정에 반영됩니다.', row['qualifier']['cause'])
-        # The bubble keeps its own #476 rule; nothing reached the calendar.
+        # #820: the bubble delivers the AI's answer under the truth header and the
+        # cause (the approval still pending); nothing reached the calendar.
         self.assertTrue(bubble.startswith(TERMINAL_PARTIAL_HEADER))
-        self.assertNotIn('등록했습니다', bubble)
+        self.assertIn('소유자가 이 미리보기를 승인해야 실제 일정에 반영됩니다.', bubble)
+        self.assertIn(TERMINAL_ANSWER_LABEL + '\n' + CLAIM, bubble)
+        self.assertLess(bubble.index('승인해야'), bubble.index(CLAIM))
         self.assertEqual(self.calendar_calls, [])
 
     def test_the_home_conversation_and_project_view_carry_the_same_qualifier(self):
@@ -178,16 +181,13 @@ class TranscriptQualificationTests(TruthIntegrityTestCase):
         self.service.run_one()
         home = self.assistant_row(job_id, self.service.home()['conversation'])
         project = self.assistant_row(job_id, self.service.workspace(workspace['id'])['messages'])
-        # #752: the calendar write was withheld for approval, so the claim of it is
-        # withheld on both views alike; the qualifier still says partial.
+        # #820: the calendar write was withheld for approval; the answer is still delivered
+        # on both views alike, and the qualifier says partial.
         for row in (home, project):
-            self.assertEqual(row['content'], TERMINAL_ANSWER_WITHHELD)
+            self.assertIn(CLAIM, row['content'])
             self.assertEqual(row['qualifier']['outcome'], 'partial')
         # The task card uses the same typed qualifier, so the surfaces agree.
         self.assertEqual(self.card(job_id)['qualifier']['outcome'], 'partial')
-        # A withheld claim never becomes a saved project result.
-        with self.assertRaises(ValueError):
-            self.service.save_workspace_result(workspace['id'], {'job_id': job_id})
         # A partial result saved at the store level keeps its outcome too.
         saved = self.store.save_workspace_result(workspace['id'], job_id)
         self.assertEqual(saved['results'][0]['qualifier']['outcome'], 'partial')

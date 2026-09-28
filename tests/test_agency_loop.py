@@ -493,18 +493,46 @@ class AlternativesAndCompletionTests(unittest.TestCase):
         self.assertIn(GOAL_NOT_SHOWN, result.report['unknown'])
         self.assertEqual(self.concluded()['judgment'], 'no')
 
-    def test_a_plain_reply_after_tools_is_checked_once_and_never_succeeds_without_a_claim(self):
+    def test_a_plain_reply_after_tools_is_checked_once_and_judged_like_a_claim(self):
+        """#820: the one outcome judgment reads the plain reply; whether ``finish`` was called is bookkeeping."""
+        seen = []
+
+        def unsupported(facts):
+            seen.append(facts)
+            return False
         network = ProviderNetwork({'default': MATCHING})
         script = Script({'tool_calls': [call('1', 'web_search', query='When Leaders Make the Difference')]},
                         {'content': '장바구니에 담았습니다.'},
                         {'content': '네, 완료했습니다.'})
-        result, _caps = self.run_script(script, network)
+        result, _caps = self.run_script(script, network, answer=unsupported)
         self.assertIn('Completion check', script.bodies[2]['messages'][-1]['content'])
         self.assertEqual(result.outcome, 'partial')
-        # The answer stays the draft the check followed; nothing claimed it.
+        # The answer stays the draft the check followed, and it is what was judged.
         self.assertTrue(result.content.startswith('장바구니에 담았습니다.'))
-        self.assertIn(GOAL_NOT_CLAIMED, result.report['unknown'])
+        [facts] = seen
+        self.assertTrue(facts['reply'].startswith('장바구니에 담았습니다.'))
+        self.assertIn('[1] web_search', facts['observations'])
+        self.assertIn(GOAL_NOT_SHOWN, result.report['unknown'])
         self.assertIsNone(self.concluded()['claim'])
+        self.assertEqual(self.concluded()['judgment'], 'no')
+
+    def test_a_plain_reply_after_tools_the_judgment_accepts_succeeds(self):
+        network = ProviderNetwork({'default': MATCHING})
+        script = Script({'tool_calls': [call('1', 'web_search', query='When Leaders Make the Difference')]},
+                        {'content': '검색 결과 두 권을 찾았습니다.'},
+                        {'content': '네.'})
+        result, _caps = self.run_script(script, network, answer=True)
+        self.assertEqual(result.outcome, 'succeeded')
+        self.assertTrue(result.content.startswith('검색 결과 두 권을 찾았습니다.'))
+        self.assertEqual(self.concluded()['judgment'], 'yes')
+
+    def test_a_plain_reply_without_a_judgment_says_nothing_was_claimed(self):
+        network = ProviderNetwork({'default': MATCHING})
+        script = Script({'tool_calls': [call('1', 'web_search', query='When Leaders Make the Difference')]},
+                        {'content': '찾았습니다.'}, {'content': '네.'})
+        result, _caps = self.run_script(script, network, answer=None)
+        self.assertEqual(result.outcome, 'partial')
+        self.assertIn(GOAL_NOT_CLAIMED, result.report['unknown'])
 
     def test_a_claim_citing_a_failed_or_unknown_observation_is_rejected(self):
         script = Script({'tool_calls': [call('1', 'weather', city='Seongnam', country='KR')]},
@@ -559,7 +587,7 @@ class AlternativesAndCompletionTests(unittest.TestCase):
         script = Script(*[{'tool_calls': [call(str(i), 'weather', city=city, country='KR')]} for i, city in enumerate(cities)],
                         {'content': '찾지 못했습니다.'})
         budget = WorkBudget()
-        result, _caps = self.run_script(script, budget=budget)
+        result, _caps = self.run_script(script, budget=budget, answer=False)
         nudges = [m for m in script.bodies[-1]['messages'] if m['role'] == 'system' and m['content'].startswith('Path check')]
         self.assertEqual((len(nudges), budget.nudges_used), (2, 2))
         self.assertEqual(result.outcome, 'failed')

@@ -462,9 +462,9 @@ class GuidanceTests(unittest.TestCase):
                       CORE_INSTRUCTIONS)
         self.assertIn('earlier advice or plans that no longer fit, timing that has passed, and a brief apology',
                       CORE_INSTRUCTIONS)
-        self.assertIn('When the owner tells AgentOS something about themselves or their situation rather than asking',
-                      QUESTION)
-        self.assertIn('timing that has passed, and a brief apology where AgentOS fell short', QUESTION)
+        # #820: the worker reads the owner's statement itself; the plan never rewrites it into a goal.
+        self.assertNotIn('propose a memory', QUESTION)
+        self.assertIn('you do not rewrite the owner\'s message', QUESTION)
 
 
 if __name__ == '__main__':

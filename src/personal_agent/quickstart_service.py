@@ -25,7 +25,7 @@ from .main_ai import MainAiRoutes
 from .search_providers import (SEARCH_FAILED_TEXT, ProviderRegistry, SearchProviderSettings, public_http_url)
 from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_UNVERIFIED, BLOCKER_NO_AI_ROUTE,
                                       TELEGRAM_RESULT_PREVIEW_CHARS, TERMINAL_FAILED_HEADER,
-                                      TERMINAL_ANSWER_WITHHELD, TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
+                                      TERMINAL_INTERRUPTED_HEADER, TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
                                       BlockedTurn, ConversationProjection, context_message,
                                       owner_cause, report_statement, terminal_text, tried_statement, turn_qualifier,
                                       verified_portion)
@@ -33,7 +33,7 @@ from .subscription_engines import SubscriptionEngines
 from .bounded_execution import TOOL_INCOMPLETE, TOOL_INCOMPLETE_TEXT, incomplete_bridge_calls
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, StrictIsolatedAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, private_read_actions, profile_actions, profile_status, route_unavailable
 from .orchestrator import model_refused, remember_model_refusal
-from .orchestrator import (EVENT_TOOL as ORCHESTRATION_EVENT, NOT_JUDGED, NOT_REACHED, OWNER_NEEDED, REACHED, UNJUDGED, WORKER_FAILED,
+from .orchestrator import (EVENT_TOOL as ORCHESTRATION_EVENT, NOT_JUDGED, NOT_REACHED, REACHED, UNJUDGED, WORKER_FAILED,
                            Orchestration, worker_catalogue)
 from .isolated_engine_gateway import EngineGatewayError
 from .service_control import build_identity
@@ -868,7 +868,7 @@ class AgentService:
         row=self.preparations.get(prep.preparation_of((job or {}).get('request_key')))
         if not job or not row or row['state']==prep.STATE_CANCELLED:return None
         goal=str(row['goal_text'])
-        body=self.telegram_result_text(None if self.answer_withheld(job) else job['response'],
+        body=self.telegram_result_text(job['response'],
                                        job.get('owner_cause') or job.get('error'),job.get('status'),
                                        verified=job.get('owner_verified'))
         return (f"지켜보던 일에서 알려 드립니다 ({goal[:120]}{'…' if len(goal)>120 else ''}).\n\n"+body+
@@ -2210,7 +2210,7 @@ class AgentService:
                     waits.append('승인 대기')
             artifacts=[{'id':item['id'],'kind':'저장된 결과' if 'path' not in item else '파일 결과','path':item.get('path'),'workspace_id':item.get('workspace_id'),'created':item.get('created'),'state':item.get('state','current')} for item in self.store.task_artifacts(job['id'])]
             retained_rows.append((job['id'],events))
-            task={'id':job['id'],'title':self._progress_title(job.get('message'),job['id']),'status':job.get('status'),'status_kind':kind,'status_label':label,'started_at':job.get('created'),'observed_at':last,'result_available':bool(job.get('response')) and job.get('status') in ('succeeded','partial','failed') and not self.answer_withheld(job),'workspace_id':job.get('workspace_id'),'events_count':len(events),'waits':waits,'configured':{'provider':configured.get('provider'),'model':configured.get('model'),'runtime':selected_subscription or (configured.get('provider') if configured else None)},'observed':{'provider':job.get('provider'),'model':job.get('model'),'runtime':job.get('provider') or None},'route':self._observed_route(job,events,model_events),'artifacts':artifacts}
+            task={'id':job['id'],'title':self._progress_title(job.get('message'),job['id']),'status':job.get('status'),'status_kind':kind,'status_label':label,'started_at':job.get('created'),'observed_at':last,'result_available':bool(job.get('response')) and job.get('status') in ('succeeded','partial','failed'),'workspace_id':job.get('workspace_id'),'events_count':len(events),'waits':waits,'configured':{'provider':configured.get('provider'),'model':configured.get('model'),'runtime':selected_subscription or (configured.get('provider') if configured else None)},'observed':{'provider':job.get('provider'),'model':job.get('model'),'runtime':job.get('provider') or None},'route':self._observed_route(job,events,model_events),'artifacts':artifacts}
             # The same typed qualifier the transcript and model context use
             # (#494), so the card cannot disagree with them.
             task['qualifier']=turn_qualifier(job.get('status'))
@@ -2361,9 +2361,7 @@ class AgentService:
 
     def save_workspace_result(self, workspace_id, body):
         if not isinstance(body,dict):raise ValueError('저장할 결과를 확인하세요.')
-        job=self.store.job(body.get('job_id','')) if isinstance(body.get('job_id'),str) else None
-        # #752 review: a withheld answer never becomes a saved project result.
-        if job and self.answer_withheld(job):raise ValueError('실행되지 않은 동작을 주장할 수 있는 답변은 저장할 수 없습니다.')
+        # #820: an answer is never withheld; a saved result keeps its Work's outcome qualifier.
         return self.owner_workspace(self.store.save_workspace_result(workspace_id,body.get('job_id','')))
 
     def context_inbox(self):
@@ -3161,43 +3159,25 @@ class AgentService:
         tools={tool['id']:tool for package in self.runtime_packages() for tool in package['tools']}
         return event_trail([(row['tool'],row['status'],row['detail']) for row in rows],tools)[0]
 
-    def answer_withheld(self, job):
-        """Whether a failed or partial Work's AI answer is kept out of its Telegram bubble (#752).
-
-        A failed or partial Work's answer is shown under the truth header and
-        what did not complete.  It is withheld only when a state-changing
-        action fell short (``agent_runtime.state_change_short``): the answer
-        may claim that action (#476, #488).  The web card's
-        ``result_available`` follows the same rule.  Other statuses are not
-        decided here (an ``unknown`` effect keeps its own statement, #598 I1).
-        """
-        if job.get('status') not in ('partial','failed') or not (job.get('response') or '').strip():
-            return False
-        from .agent_runtime import state_change_short
-        return state_change_short(self.work_trail(job['id']))
-
     def owner_jobs(self, jobs):
-        """Work rows as the web reads them: a withheld answer is removed (#752 review).
+        """Work rows as the web reads them (#820: the AI's answer is always delivered).
 
         #818 review: a Work with pending memory candidates carries AgentOS's
         own line that nothing was saved yet, pointing to 내 기록.
         """
         pending=self.pending_candidate_works()
-        return [{**job,'response':None,'answer_withheld':True} if self.answer_withheld(job) else
-                {**job,'response':job['response']+'\n\n'+MEMORY_PENDING_WEB_NOTE} if job.get('response') and pending(job['id']) else job
+        return [{**job,'response':job['response']+'\n\n'+MEMORY_PENDING_WEB_NOTE} if job.get('response') and pending(job['id']) else job
                 for job in jobs]
 
     def owner_messages(self, messages):
-        """Transcript rows as the web reads them: a withheld answer is replaced by a notice (#752 review).
+        """Transcript rows as the web reads them (#820: the AI's answer is always delivered).
 
         #818 review: an answer of a Work with pending memory candidates
         carries AgentOS's own line that nothing was saved yet.
         """
-        withheld={job['id'] for job in self.store.jobs() if self.answer_withheld(job)}
         pending=self.pending_candidate_works()
         def view(row):
             if row.get('role')!='assistant':return row
-            if row.get('job_id') in withheld:return {**row,'content':TERMINAL_ANSWER_WITHHELD}
             if row.get('content') and pending(row.get('job_id')):return {**row,'content':row['content']+'\n\n'+MEMORY_PENDING_WEB_NOTE}
             return row
         return [view(row) for row in messages]
@@ -3291,33 +3271,20 @@ class AgentService:
                              sections={**sections,'history':len(earlier)},budget=budget,record=event,state=state,
                              pinned=pinned,work_id=job['id'])
 
-    def cli_shortfall(self, job_id, since, request, evaluation, answer=''):
-        """``(outcome, report)`` of a CLI attempt whose goal was judged not shown or not judgeable (#710 review),
-        or None when the attempt keeps its own outcome.
+    def cli_shortfall(self, job_id, since, request, evaluation):
+        """``(outcome, report)`` of an attempt the one outcome judgment found short or could not judge (#710 review, #820).
 
         Not reached: ``partial`` when the attempt observed a successful tool
         result, else ``failed``; unjudged: ``partial``.  The report states the
-        unknown the way the direct route's completion rule does (#657).
-        Owner needed (#740, #753), as the direct route's ``needs_owner`` finish
-        (``run_agent.conclude``): an attempt that called no tool outside
-        AgentOS-internal state (``INTERNAL_STATE_ACTIONS``) is ordinary
-        conversation and keeps its outcome (None); otherwise ``partial`` when a
-        tool result was observed, else ``failed``, with ``answer`` as the
-        report's question.
+        unknown the way the direct route's completion rule does (#657).  The
+        reply itself is delivered either way (#820).
         """
-        from .agent_runtime import GOAL_NOT_SHOWN, GOAL_UNJUDGED, INTERNAL_STATE_ACTIONS, agency_report
+        from .agent_runtime import GOAL_NOT_SHOWN, GOAL_UNJUDGED, agency_report
         with self.store.db() as db:
             rows=db.execute("SELECT tool,status,detail FROM tool_events WHERE job_id=? AND id>? AND status IN ('running','succeeded','failed')",
                             (job_id,since or 0)).fetchall()
         rows=[row for row in rows if row['tool'] not in ('model','subscription_engine',ORCHESTRATION_EVENT)]
         observed=any(row['status']=='succeeded' for row in rows)
-        if evaluation==OWNER_NEEDED:
-            def action(row):
-                try:data=json.loads(row['detail'] or '{}')
-                except (TypeError,ValueError):data={}
-                return (data.get('host_action') if isinstance(data,dict) else None) or row['tool']
-            if not any(action(row) not in INTERNAL_STATE_ACTIONS for row in rows):return None
-            return ('partial' if observed else 'failed'),agency_report(request,[],[],[],None,answer)
         if evaluation==UNJUDGED:
             return 'partial',agency_report(request,[],[],[GOAL_UNJUDGED],None)
         return ('partial' if observed else 'failed'),agency_report(request,[],[],[GOAL_NOT_SHOWN],None)
@@ -3412,13 +3379,8 @@ class AgentService:
             failed_steps='; '.join(part for part in (failed_steps,self._redact_reason(failed) or '') if part)
             summary+='; the worker itself failed: '+(self._redact_reason(failed) or 'failed')[:200]
         elif result is not None:
+            # #820: the direct route's own outcome judgment (#657) is the one judgment; no second check.
             evaluation=orchestration.evaluate_run(result,owner_needed=owner_needed)
-            # #767 review: a direct-route run its own #657 rule accepted (often ordinary
-            # conversation, no tool) is held to the brief's completion criteria too.  Only a
-            # verdict that the criteria are not met changes it; an unavailable one keeps it.
-            if evaluation==REACHED and attempt.criteria and not effect and orchestration.budget_allows():
-                checked=orchestration.evaluate_answer(answer,'\n'.join(observed),failed_steps)
-                if checked in (NOT_REACHED,OWNER_NEEDED):evaluation=checked
         elif owner_needed:
             evaluation='owner_needed'
         elif effect or not orchestration.budget_allows():
@@ -6592,7 +6554,6 @@ class AgentService:
                     attempt=orchestration.first() if orchestration else None
                     while True:
                         config,key,subscription,attempt_test=self.attempt_route(orchestration,attempt,base_config,base_key,route_snapshot)
-                        section=(lambda name,value:attempt.section(name,value)) if attempt is not None else (lambda name,value:value)
                         brief=attempt.brief(adjusted=attempt.number>1) if attempt is not None else None
                         attempt_start=self.last_event_id(job['id'])
                         # #795: whether this attempt's CLI ran with its own tools unconfined, and what it reported.
@@ -6683,12 +6644,12 @@ class AgentService:
                             # #627: the same current-context snapshot as the direct route.
                             # #678: the CLI's own web search, when this turn may use it.
                             def cli_context(native):
-                                # #710: the sections this attempt's brief selected, and the brief; #804: the profile and
-                                # current context always (``orchestrator.ALWAYS_SECTIONS``).
-                                context=turn_context([*(history[:-1] if section('history',True) else []),{'role':'user','content':current_request}],'cli',
-                                                     current_context=section('current_context',section_values['current_context']),
-                                                     profile=section('profile',section_values['profile']),
-                                                     prepared=section('prepared',section_values['prepared']),native_search=native,brief=brief)
+                                # #804, #820: every attempt carries the conversation, the profile, the current
+                                # context and the prepared answers; the plan's notes (``brief``) only add to them.
+                                context=turn_context([*history[:-1],{'role':'user','content':current_request}],'cli',
+                                                     current_context=section_values['current_context'],
+                                                     profile=section_values['profile'],
+                                                     prepared=section_values['prepared'],native_search=native,brief=brief)
                                 prompt_text,adapter=render_turn_prompt(context),context
                                 # Bounded Claude Code gets the instructions as a separate
                                 # argv element, so only conversation + request count
@@ -6885,12 +6846,12 @@ class AgentService:
                             checked=attempt_test if isinstance(attempt_test,dict) else self.store.config('model_test',{})
                             if checked.get('runtime_model'):
                                 runtime_config['model']=checked['runtime_model']
-                            # #710: the sections this attempt's brief selected, and the brief; #804: the profile and
-                            # current context always (``orchestrator.ALWAYS_SECTIONS``).
-                            api_context=turn_context(history if section('history',True) else history[-1:],'api',
-                                                     current_context=section('current_context',section_values['current_context']),
-                                                     profile=section('profile',section_values['profile']),
-                                                     prepared=section('prepared',section_values['prepared']),brief=brief)
+                            # #804, #820: every attempt carries the conversation, the profile, the current
+                            # context and the prepared answers; the plan's notes (``brief``) only add to them.
+                            api_context=turn_context(history,'api',
+                                                     current_context=section_values['current_context'],
+                                                     profile=section_values['profile'],
+                                                     prepared=section_values['prepared'],brief=brief)
                             # #605: the sources of exactly the earlier messages this
                             # worker is shown replace the file-workspace job-list
                             # flag (`document_context`), which missed an earlier
@@ -7007,21 +6968,12 @@ class AgentService:
                             and orchestration.terminal==REACHED and not (approval_needed[0] or context_approval_needed[0]) \
                             and self.goal_upgrade_allowed(job['id']):
                         outcome='succeeded';refusals.clear();resolved_blocker=True
-                    # #710 review P1 (#767: either route): an attempt the orchestrator judged short and did not
-                    # re-delegate (limit, budget, no new plan) is never stored as succeeded.
-                    owner_question=(orchestration is not None and orchestration.terminal==OWNER_NEEDED
-                                    and not (approval_needed[0] or context_approval_needed[0]))
-                    if outcome=='succeeded' and orchestration is not None \
-                            and (orchestration.terminal in (NOT_REACHED,UNJUDGED) or owner_question):
-                        shortfall=self.cli_shortfall(job['id'],attempt_start,prompt,orchestration.terminal,response)
-                        if shortfall is not None:
-                            outcome,agency_report=shortfall
-                            resolved_blocker=False
-                    elif subscription.get('id') and owner_question and outcome in ('failed','partial') and not agency_report:
-                        # #753: already short (for example a failed tool, internal-state calls
-                        # included); the outcome stays and the question still reaches the owner.
-                        from .agent_runtime import agency_report as question_report
-                        agency_report=question_report(prompt,[],[],[],None,response)
+                    # #710 review P1 (#767: either route): an attempt the one outcome judgment found short and
+                    # that was not re-delegated (limit, budget, no new plan) is never stored as succeeded.
+                    # #820: its reply is still delivered, under the truthful header.
+                    if outcome=='succeeded' and orchestration is not None and orchestration.terminal in (NOT_REACHED,UNJUDGED):
+                        outcome,agency_report=self.cli_shortfall(job['id'],attempt_start,prompt,orchestration.terminal)
+                        resolved_blocker=False
                     # Said once when working orchestration fell back to the default Main AI.
                     if orchestration is not None and orchestration.notice:
                         response=response.rstrip()+'\n\n'+orchestration.notice
@@ -7161,7 +7113,7 @@ class AgentService:
             blocked=self.store.blocked_delivery_reply(job['id'])
             # The owner-language cause when one was recorded (#598 X1); the
             # technical ``error`` remains the Task-detail record.
-            text=blocked or self.telegram_result_text(None if self.answer_withheld(job) else job['response'],
+            text=blocked or self.telegram_result_text(job['response'],
                                                       job.get('owner_cause') or job['error'],job.get('status'),
                                                       verified=job.get('owner_verified'))
             # #659: a prepared answer arrives without an owner turn; say what it is for.

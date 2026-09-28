@@ -480,23 +480,32 @@ class SchemaDecisionEngine(DecisionEngine):
     _ANSWER_FIELD = {'judge': 'answer', 'choose': 'choice', 'score': 'score', 'choose_many': 'choices',
                      'structured': None}
 
-    def _done(self, context, kind, outcome, data, confidence, started, failure=''):
+    def _done(self, context, kind, outcome, data, confidence, started, failure='', diagnostics=None):
         confidence.elapsed_seconds = round(self.now() - started, 3)
         if self.audit:
-            self.audit(audit_record(context, kind, outcome, data, confidence, self.now(), failure))
+            self.audit(audit_record(context, kind, outcome, data, confidence, self.now(), failure, diagnostics))
         return outcome, data if isinstance(data, dict) else {}, confidence
 
 
 _ANSWER_FIELD = SchemaDecisionEngine._ANSWER_FIELD
 
 
-def audit_record(context, kind, outcome, data, confidence, at, failure=''):
+#: #797: content-free failure diagnostics an adapter may add to its record:
+#: the CLI exit code, the provider's structured HTTP-like status and where the
+#: last error came from.  Numbers and fixed labels only, never text.
+AUDIT_DIAGNOSTIC_FIELDS = ('exit_code', 'provider_status', 'error_source')
+ERROR_SOURCES = frozenset({'provider-error', 'stderr', 'none'})
+
+
+def audit_record(context, kind, outcome, data, confidence, at, failure='', diagnostics=None):
     """One small, content-free record of a judgment (shared by every adapter).
 
     The decided value is a bool, a declared candidate name or a number -
     never owner content.  #580: which DecisionEngine route answered, under
     which model policy; the requested and observed model stay separate and
-    an unreported model is recorded as ``not reported``.
+    an unreported model is recorded as ``not reported``.  #797: a failed call
+    may add ``AUDIT_DIAGNOSTIC_FIELDS`` (integers and a fixed label, never
+    provider or CLI text); any other key or value is dropped.
     """
     field = _ANSWER_FIELD.get(kind)
     answer = data.get(field) if field and outcome == OUTCOME_DECIDED and isinstance(data, dict) else None
@@ -509,6 +518,11 @@ def audit_record(context, kind, outcome, data, confidence, at, failure=''):
               'model_policy': confidence.model_policy, 'requested_model': confidence.model or ''}
     if failure:
         record['failure'] = failure
+    for name in AUDIT_DIAGNOSTIC_FIELDS:
+        value = (diagnostics or {}).get(name)
+        if name == 'error_source' and value in ERROR_SOURCES \
+                or name != 'error_source' and isinstance(value, int) and not isinstance(value, bool):
+            record[name] = value
     return record
 
 

@@ -39,6 +39,7 @@ Whether a given *account* accepts a model is never inferred from these
 flags; it is established only by an explicit owner-triggered probe.
 """
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -55,6 +56,8 @@ from .decision import (DECISION_SYSTEM, MAX_CONTEXT_CHARS, NO_CANDIDATE, OUTCOME
                        DecisionConfidence, DecisionEngine, SchemaDecisionEngine, ScoreDecision,
                        SelectionDecision, audit_record)
 from .providers import ProviderError, request_json
+
+LOG = logging.getLogger('personal_agent.decision')
 
 #: Upper bound for one CLI judgment.  A decision is a small question; a CLI
 #: that needs longer is reported as a timeout, never retried elsewhere.
@@ -237,10 +240,10 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
         identity = self._identity()
         self.last_failure = ''
 
-        def done(outcome, data=None, confidence=None, failure=''):
+        def done(outcome, data=None, confidence=None, failure='', diagnostics=None):
             self.last_failure = failure
             return self._done(context, kind, outcome, data or {}, confidence or DecisionConfidence(**identity),
-                              started, failure)
+                              started, failure, diagnostics)
 
         if self.guard:
             blocked = self.guard()
@@ -300,7 +303,12 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
                 failure = 'request-rejected'
             else:
                 failure = 'engine-failed'
-            return done(OUTCOME_UNAVAILABLE, confidence=identity_seen, failure=failure)
+            diagnostics = self._failure_diagnostics(completed.returncode, status, stdout, stderr, env, prompt)
+            LOG.warning('decision call failed engine=%s kind=%s purpose=%s exit_code=%s class=%s status=%s '
+                        'source=%s duration=%.1fs reason=%s', self.engine_id, kind, context.purpose,
+                        completed.returncode, failure, status, diagnostics['error_source'], self.now() - started,
+                        diagnostics.pop('reason') or '-')
+            return done(OUTCOME_UNAVAILABLE, confidence=identity_seen, failure=failure, diagnostics=diagnostics)
         data = self._structured(stdout)
         if data is None:
             return done(OUTCOME_MALFORMED, confidence=identity_seen, failure='invalid-output')
@@ -309,6 +317,28 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
         outcome = self._checked(data, confidence, valid)
         return done(outcome, data if outcome == OUTCOME_DECIDED else {}, confidence,
                     '' if outcome == OUTCOME_DECIDED else 'invalid-output')
+
+    def _failure_diagnostics(self, exit_code, status, stdout, stderr, env, prompt):
+        """#797: why a decision CLI exited non-zero, for the audit and one log line.
+
+        Diagnostics only; classification above is unchanged.  The audit keeps
+        the exit code, the provider's structured status and where the last
+        error came from (``provider-error`` event, ``stderr`` tail or
+        ``none``).  The text ``reason`` is for the log line only and goes
+        through the engine path's own guards: the stored Claude Code token's
+        literal value is removed first, then ``failure_details`` bounds the
+        text with ``redact_reason``, which withholds any echo of the prompt
+        and masks secret-shaped strings.
+        """
+        secret = (env or {}).get('CLAUDE_CODE_OAUTH_TOKEN') or ''
+        scrub = ((lambda text: (text or '').replace(secret, '[redacted]')) if len(secret) >= 8
+                 else (lambda text: text or ''))
+        stdout, stderr = scrub(stdout), scrub(stderr)
+        _, reason = failure_details(self.engine_id, stdout, stderr, prompt)
+        source = ('provider-error' if failure_details(self.engine_id, stdout, '')[1]
+                  else 'stderr' if stderr.strip() else 'none')
+        return {'exit_code': exit_code, 'provider_status': status if isinstance(status, int) else None,
+                'error_source': source, 'reason': reason}
 
     def _structured(self, stdout):
         """The CLI's structured answer as a dict, or None.

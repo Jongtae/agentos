@@ -557,18 +557,23 @@ WATCH_NOTIFY_PROPOSITION = ('The owner accepted a standing watch with the goal s
 #: SEC-LOOP-01 (#657), ARCH-THIN-01 (#820): the one outcome judgment of a Work -
 #: did the reply serve the owner's message, given the conversation?  Step
 #: bookkeeping is evidence for it, never a verdict of its own.
-GOAL_REACHED_PROPOSITION = ('The reply serves the owner\'s message, read in the light of the recent conversation: it '
-                            'answers what the message asks, does what it asks, or - when the owner tells something '
-                            'rather than asks - responds to it the way a capable personal secretary would. A reply '
-                            'that asks the owner for information or a decision the message needs, which neither the '
-                            'message nor the recent conversation provides, also serves it. Every statement in the reply '
-                            'that something was found, read, saved, added, booked, sent or changed, and every current '
-                            'fact in it that changes over time or depends on place, is supported by the observations - '
-                            'results that tools actually returned, as AgentOS recorded them; the reply\'s own claims are '
-                            'not evidence. It is false when the reply does not address the owner\'s message or '
-                            'addresses a different or earlier topic, serves only part of it, claims an action or a '
-                            'current fact the observations do not show, asks for something the message or the '
-                            'conversation already says, or when it is unclear.')
+GOAL_REACHED_PROPOSITION = ('The reply serves the owner\'s message, read in the light of the recent conversation and '
+                            'what AgentOS knows about the owner (owner_context): it answers what the message asks, does '
+                            'what it asks, or - when the owner tells something rather than asks - responds to it the way '
+                            'a capable personal secretary would. A reply that asks the owner for information or a '
+                            'decision the message needs, which neither the message, the recent conversation nor the owner '
+                            'context provides, also serves it. Judge whether it serves the message, not whether it is '
+                            'perfect: a useful reply that could be more detailed still serves it. Every statement in the '
+                            'reply that something was found, read, saved, added, booked, sent or changed is supported by '
+                            'the observations - results that tools actually returned, as AgentOS recorded them; the '
+                            'reply\'s own claims are not evidence. A current fact that changes over time or depends on '
+                            'place is acceptable when the observations or the owner context support it, or when the reply '
+                            'plainly presents it as approximate or unverified; a source the reply names counts only when '
+                            'that source appears in the observations. It is '
+                            'false when the reply does not address the owner\'s message or addresses a different or '
+                            'earlier topic, serves only part of it, claims an action the observations do not show, states '
+                            'a changing fact as checked when nothing supports it, or asks for something the message, the '
+                            'conversation or the owner context already says.')
 UNSUPPORTED_JUDGMENT_UNAVAILABLE = ('요청을 안전하게 구분할 판단 기능을 사용할 수 없어 메일을 검색하거나 다른 처리를 하지 않았습니다. '
                                    '메일을 찾으려는 요청이라면 검색할 내용을 다시 구체적으로 적어 주세요.')
 MIXED_MAIL_ACTION_CLARIFICATION = ('지원하지 않는 메일 발송 요청과 다른 작업이 함께 있어 아무 작업도 실행하지 않았습니다. '
@@ -606,7 +611,7 @@ class ConversationJudgments:
     """
 
     #: Facts that are the owner's own words.
-    OWNER_FACTS = frozenset({'owner_message', 'owner_request', 'terms'})
+    OWNER_FACTS = frozenset({'owner_message', 'owner_request', 'terms', 'owner_context'})
 
     def __init__(self, engine=None, policy=None, redactor=None):
         self.engine = engine or UnavailableDecisionEngine()
@@ -721,7 +726,8 @@ class ConversationJudgments:
             return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
         return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
 
-    def goal_reached(self, request, observations, failed_steps='', work_id=None, answer='', conversation=''):
+    def goal_reached(self, request, observations, failed_steps='', work_id=None, answer='', conversation='',
+                     owner_context=''):
         """Did the reply serve the owner's ``request`` (#657, #820)?  The one outcome judgment.
 
         One ``judge`` call over the owner's message (never cut), the recent
@@ -733,10 +739,11 @@ class ConversationJudgments:
         """
         request = str(request or '')
         facts = {'owner_request': request, 'recent_conversation': conversation or 'none',
+                 'owner_context': owner_context or 'none',
                  'reply': answer or 'none (only the observations are known)',
                  'observations': observations, 'failed_steps': failed_steps or 'none'}
         context = self._context('goal-reached', facts, work_id=work_id,
-                                uncut=('owner_request', 'reply', 'recent_conversation'))
+                                uncut=('owner_request', 'reply', 'recent_conversation', 'owner_context'))
         decision = self.engine.judge(context, GOAL_REACHED_PROPOSITION)
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,

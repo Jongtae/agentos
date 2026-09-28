@@ -22,6 +22,7 @@ from personal_agent.agent_runtime import (EFFECT_FREE_READS, OWNER_STATE_ACTIONS
                                           Capabilities, ToolError, evidence_summary, recorded_arguments)
 from personal_agent.bounded_execution import BOUNDED_PROFILE, CLI_PROFILES, STRICT_PROFILE, profile_actions
 from personal_agent.cli_browser_relay import RELAYED_LOCATION_REQUEST
+from personal_agent.conversation_handoff import FOLLOWUP_CANCEL
 from personal_agent.context_observations import LOCATION_REQUEST_TTL_SECONDS, continuation_key, continuation_request
 from personal_agent.manifests import HOST_ACTIONS, WRITE_ACTIONS
 from personal_agent.quickstart_service import CONTINUATION_EFFECT_NOTE_HEAD, RETRY_EFFECT_TOOLS
@@ -284,6 +285,34 @@ class Continuation(_LocationCase):
         # Nothing left to withdraw: the ordinary "already finished" answer.
         self.assertFalse(self.service.cancel_focused_work(self.store.job(work), None)[0])
 
+    # --- P3-5: a continuation's replayed message is not a new owner turn ------
+
+    def test_a_continuation_skips_the_owner_utterance_judgments_and_runs(self):
+        asking = self.ask()
+        self.now += 30
+        self.location()
+        [row] = self.continued()
+        judged_cancel = {'relation': FOLLOWUP_CANCEL, 'previous': self.store.job(asking)}
+        seen = []
+        self.script = [lambda body: seen.append(body['messages']) or {'content': '출발하셨네요.'}]
+        with mock.patch.object(self.service, 'continuity_relation', return_value=judged_cancel) as relation, \
+                mock.patch.object(self.service.decision_judge, 'parked_work_withdrawn') as withdrawn, \
+                mock.patch.object(self.service.calendar_conversation, 'clear') as clear:
+            self.assertTrue(self.service.run_one())
+        relation.assert_not_called()
+        withdrawn.assert_not_called()
+        clear.assert_not_called()
+        self.assertTrue(seen, 'the worker ran the continued request')
+        self.assertIn(self.REQUEST, json.dumps(seen[0], ensure_ascii=False))
+        self.assertEqual(self.store.job(row['id'])['status'], 'succeeded')
+        # Control: the same words as an ordinary owner turn would be answered as a cancel, not run.
+        control = self.store.enqueue(self.REQUEST, 'tg-control', f'telegram:{GENERATION}', CHAT)
+        with mock.patch.object(self.service, 'continuity_relation', return_value=judged_cancel) as relation:
+            self.assertTrue(self.service.run_one())
+        relation.assert_called_once()
+        self.assertEqual(len(seen), 1)
+        self.assertIn('이전 요청은', self.store.job(control)['response'])
+
     # --- P2-3: no blind replay of the asking Work's effects (C8) -------------
 
     def test_the_continuation_is_told_what_the_asking_work_already_changed(self):
@@ -375,6 +404,44 @@ class PreparationContinuation(_LocationCase):
         self.assertEqual(len(settled_events), 2, 'one continue record and one settlement')
         self.tick()
         self.assertEqual(self.service.preparations.get(row['id'])['updated_at'], settled['updated_at'], 'settled once')
+
+    def asking_run(self):
+        row = self.scheduled(goal=self.GOAL, channel='telegram')
+        self.now += 120
+        self.tick()
+        [asking] = self.runs(row['id'])
+        self.script = [{'content': None, 'tool_calls': [call('1', 'ask_location', reason='출발 위치가 필요해요.')]},
+                       finish('f', '1', summary='현재 위치를 요청했어요.')]
+        self.service.run_one()
+        self.service.deliver_one()
+        self.tick()
+        self.assertEqual(len(self.pending()), 1)
+        return row, asking
+
+    def test_cancelling_the_preparation_withdraws_its_runs_request(self):
+        """P3-1: Settings (and the ``p7q`` stop button, the same ``cancel_preparation``) withdraw it."""
+        row, asking = self.asking_run()
+        self.service.preparation_request({'operation': 'cancel', 'id': row['id']})
+        self.assertEqual(self.service.preparations.get(row['id'])['state'], prep.STATE_CANCELLED)
+        self.assertEqual(self.pending(), [])
+        self.now += 30
+        self.location()
+        self.assertEqual([run['id'] for run in self.runs(row['id'])], [asking['id']])
+
+    def test_a_run_of_an_inactive_preparation_is_never_continued(self):
+        """P3-1: even with its request still pending, a cancelled or removed preparation's goal does not run."""
+        for how in ('cancel', 'delete'):
+            with self.subTest(how=how):
+                row, asking = self.asking_run()
+                self.service.preparations.cancel(row['id'])
+                if how == 'delete':
+                    self.service.preparations.delete(row['id'])
+                self.assertEqual(len(self.pending()), 1)
+                self.now += 30
+                self.location()
+                self.assertEqual(self.continued(), [])
+                with self.store.db() as db:
+                    db.execute('DELETE FROM jobs')
 
     def test_an_unanswered_request_expires_and_the_asking_run_settles(self):
         row = self.scheduled(goal=self.GOAL, channel='telegram')

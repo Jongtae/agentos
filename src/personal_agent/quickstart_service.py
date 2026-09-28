@@ -762,6 +762,17 @@ class AgentService:
                          'last_decision':row.get('last_decision'),'last_decision_reason':row.get('last_decision_reason')})
         return {'preparations':rows}
 
+    def cancel_preparation(self, preparation_id):
+        """``Preparations.cancel`` plus withdrawing its run's pending location request (#774).
+
+        A run that asked the owner for a location would otherwise continue on
+        the answer and run the cancelled preparation's goal again.
+        """
+        row=self.preparations.cancel(preparation_id)
+        if row['state']==prep.STATE_CANCELLED and row.get('last_run_job_id'):
+            self.context_observations.cancel_work_requests(row['last_run_job_id'])
+        return row
+
     def preparation_request(self, body):
         """Owner Settings operations on one preparation: list, accept, cancel, delete (#659)."""
         if not isinstance(body,dict):raise ValueError('준비 요청을 확인하세요.')
@@ -770,7 +781,7 @@ class AgentService:
         preparation_id=body.get('id')
         if not isinstance(preparation_id,str) or not preparation_id:raise ValueError('준비를 선택하세요.')
         if operation=='accept':self.preparations.accept(preparation_id,prep.ACCEPTED_OWNER_SETTINGS)
-        elif operation=='cancel':self.preparations.cancel(preparation_id)
+        elif operation=='cancel':self.cancel_preparation(preparation_id)
         elif operation=='delete':self.preparations.delete(preparation_id)
         else:raise ValueError('지원하지 않는 준비 작업입니다.')
         LOG.info('preparation %s id=%s by owner settings',operation,preparation_id)
@@ -5352,7 +5363,7 @@ class AgentService:
                     if exact:
                         for row in proposals:
                             if parts[2]=='accept':self.preparations.accept(row['id'],prep.ACCEPTED_OWNER_BUTTON)
-                            else:self.preparations.cancel(row['id'])
+                            else:self.cancel_preparation(row['id'])
                         result_kind='preparation_accepted' if parts[2]=='accept' else 'preparation_denied'
                         LOG.info('preparation %s by owner button work=%s count=%s',parts[2],notification['job_id'],len(proposals))
                         self.store.update_notification(notification['id'],result_kind)
@@ -5373,7 +5384,7 @@ class AgentService:
                            and notification['message_id']==message.get('message_id') and preparation_id)
                     if exact:
                         try:
-                            stopped=self.preparations.cancel(preparation_id)
+                            stopped=self.cancel_preparation(preparation_id)
                         except prep.PreparationRefusal:
                             stopped=None
                         if stopped is not None:
@@ -5484,8 +5495,8 @@ class AgentService:
         channel, chat and workspace, keyed by the consumed request (a replayed
         update cannot make a second), related to the asking Work, with the
         reported position rebound to it so its current context shows it.  The
-        asking Work is not re-run.  A Work the owner stopped or cancelled is
-        never continued.  A preparation run's continuation stays that
+        asking Work is not re-run.  A Work the owner stopped or cancelled, or
+        a run of a preparation no longer active, is never continued.  A preparation run's continuation stays that
         preparation's run: same slot key, and the slot settles from it.
         """
         work=db.execute('SELECT * FROM jobs WHERE id=?',(answer['job_id'],)).fetchone()
@@ -5495,6 +5506,13 @@ class AgentService:
             # The position stays recorded for the asking Work; nothing runs again.
             LOG.info('location continuation skipped work=%s reason=stopped',work['id'])
             return None
+        preparation_id=prep.preparation_of(work['request_key'])
+        if preparation_id:
+            row=db.execute('SELECT state FROM preparations WHERE id=?',(preparation_id,)).fetchone()
+            if not row or row['state'] not in prep.ACTIVE_STATES:
+                # A cancelled or removed preparation's goal never runs again.
+                LOG.info('location continuation skipped work=%s reason=preparation_inactive',work['id'])
+                return None
         try:
             task_id=self.store.enqueue(work['message'],continuation_key(answer['request_id'],work['request_key']),
                                        work['channel'],work['chat_id'],work['workspace_id'],db=db)
@@ -5653,7 +5671,12 @@ class AgentService:
                 resumed_decision=None
                 if resumed:
                     prompt,prompt_work_id,resumed_decision=resumed
-                continuity=None if resumed else self.continuity_relation(owner_prompt,connector_owner,current_work_id=job['id'])
+                # #774: a location continuation re-runs the asking Work's message; the
+                # owner's own latest message was the location, so like a resumed Work
+                # it skips the owner-utterance judgments (relation, calendar draft,
+                # parked withdrawal) that would read the replayed words as a new turn.
+                continued=continuation_request(job.get('request_key'))
+                continuity=None if resumed or continued else self.continuity_relation(owner_prompt,connector_owner,current_work_id=job['id'])
                 if continuity:
                     relation,previous=continuity['relation'],continuity['previous']
                     self.present_turn(job,relation=relation)
@@ -5696,7 +5719,6 @@ class AgentService:
                         # Calendar, Memory and connector state machines remain
                         # the authority for any actual change.
                         self.record_continuity(job['id'],previous['id'],relation,executed=False)
-                continued=continuation_request(job.get('request_key'))
                 if continued and retry_note is None:
                     # #774 (C8): the continuation runs the asking Work's message again.
                     # Nothing is replayed blindly: the worker reads, before it, which
@@ -5708,7 +5730,7 @@ class AgentService:
                 # #505: a newer request withdraws any folder-resumed Work still
                 # waiting for document-sharing approval; approving sharing later
                 # never revives it.
-                if not self._answered_before(job['id']):
+                if not continued and not self._answered_before(job['id']):
                     self.drop_document_resume(owner_id=connector_owner,except_work_id=job['id'])
                 owner_memory_request=self.owner_memory_approval(job,prompt)
                 # Routing decision, made by AgentOS before any capability is
@@ -5716,14 +5738,18 @@ class AgentService:
                 # said it literally or an AgentOS rule derived it; a
                 # DecisionEngine answer can only pick among AgentOS-declared
                 # candidates (#417) and reaches no other branch here.
-                decision=resumed_decision or self.classify_intent(prompt,owner_id=connector_owner)
+                decision=resumed_decision or self.classify_intent(prompt,calendar_pending=False if continued else None,
+                                                                  owner_id=connector_owner)
                 # A pending calendar draft claims cue-free follow-ups ("치과",
                 # "오후 4시", "승인").  Anything it does not recognise as its
                 # own - and any other intent - drops the draft, says so, and
                 # is routed exactly as if no draft had been pending.  The
                 # dropped draft can never execute: its approval was never
                 # minted.
-                if decision.intent==INTENT_CALENDAR_CREATE and decision.continuation \
+                # #774: a continuation's replayed words neither answer nor drop a draft.
+                if continued:
+                    pass
+                elif decision.intent==INTENT_CALENDAR_CREATE and decision.continuation \
                         and not self.calendar_conversation.claims(connector_owner,prompt):
                     decision=self.classify_intent(prompt,calendar_pending=False,owner_id=connector_owner)
                     # A new create request judged for this turn replaces the
@@ -5748,7 +5774,7 @@ class AgentService:
                 # the first time it ran.
                 parked=self.resume_index.parked_for(connector_owner) if self.resume_index else ()
                 if parked and not (decision.intent==INTENT_CALENDAR_CREATE and decision.continuation) \
-                        and not resumed and not self._answered_before(job['id']) \
+                        and not resumed and not continued and not self._answered_before(job['id']) \
                         and self.decision_judge.parked_work_withdrawn(prompt,parked).outcome==JUDGMENT_YES:
                     self.supersede_pending_handoffs(job['id'],owner_id=connector_owner)
                 # Prerequisite detection runs before `decision.executes` is

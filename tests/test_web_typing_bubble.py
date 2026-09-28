@@ -119,6 +119,15 @@ class TypingBubbleReadModelTests(unittest.TestCase):
             self.assertEqual(task['step_line'], '웹 검색 중: 경주 휴게소')
             self.assertNotIn(task['step_line'], ('running', 'queued', '진행 중'))
 
+    def test_a_pending_browser_approval_is_an_owner_wait_not_typing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store, service = self._service(folder)
+            job_id = self._job(store, 'running')
+            store.queue_notification(job_id, 42, 1, 'browser_approval_needed', fingerprint='d1')
+            task = next(t for t in service.task_progress()['tasks'] if t['id'] == job_id)
+            self.assertEqual(task['waits'], ['승인 대기'])
+            self.assertEqual(task['step_line'], '')
+
     def test_finished_and_failed_work_carry_no_typing_state_and_nothing_is_stored(self):
         with tempfile.TemporaryDirectory() as folder:
             store, service = self._service(folder)

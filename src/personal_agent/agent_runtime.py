@@ -38,7 +38,9 @@ REDACTED_ARGUMENTS={'browser_type':'text','propose_current_state':'value'}
 #: saved private values removed (``Capabilities.judgment_text``): a
 #: preparation goal is owner text the owner reads back, not a secret.
 #: Without a redactor it falls back to the length placeholder.
-SCRUBBED_ARGUMENTS={'schedule_preparation':'goal'}
+SCRUBBED_ARGUMENTS={'schedule_preparation':'goal',
+                    # #774: the reason the owner reads in the Telegram prompt.
+                    'ask_location':'reason'}
 def recorded_arguments(action,args,redact=None):
  """Tool-call arguments as AgentOS may record or project them (#656).
 

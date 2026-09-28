@@ -32,6 +32,7 @@ import uuid
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .conversation_handoff import RESUME_TTL_SECONDS
+from .preparations import CONTINUATION_SEPARATOR, preparation_of, slot_key
 
 CONFIG_KEY = 'current_context'
 POLICY_VERSION = 1
@@ -76,15 +77,38 @@ CLAIMS_DDL = '''
 DEFAULT_SETTINGS = {'version': POLICY_VERSION, 'enabled': False, 'epoch': 0, 'cutoff': 0.0, 'timezone': ''}
 
 
-def continuation_key(request_id):
-    """The Work request key continuing location request ``request_id`` (#774): one per request."""
+def continuation_key(request_id, asking_key=None):
+    """The Work request key continuing location request ``request_id`` (#774): one per request.
+
+    A preparation run's continuation keeps that run's slot key in front, so
+    it stays the same preparation and slot (history, prefix, scrub, settlement).
+    """
+    if preparation_of(asking_key):
+        return slot_key(asking_key) + CONTINUATION_SEPARATOR + CONTINUATION_KEY_PREFIX + str(request_id)
     return CONTINUATION_KEY_PREFIX + str(request_id)
 
 
 def continuation_request(work_request_key):
     """The location request a Work continues, or None (#774)."""
     key = str(work_request_key or '')
-    return key[len(CONTINUATION_KEY_PREFIX):] or None if key.startswith(CONTINUATION_KEY_PREFIX) else None
+    head, found, request = key.rpartition(CONTINUATION_KEY_PREFIX)
+    if not found or not request:
+        return None
+    if head == '' or (head.endswith(CONTINUATION_SEPARATOR) and preparation_of(head[:-1])):
+        return request
+    return None
+
+
+def answerable_work(job):
+    """Whether ``ask_location`` could ever be answered for this Work (#774).
+
+    Only a Work from the paired Telegram chat: the prompt and its answer
+    travel there.  A web Work is never offered the tool.
+    """
+    job = job or {}
+    chat_id = job.get('chat_id')
+    return (str(job.get('channel') or '').startswith('telegram:') and isinstance(chat_id, int)
+            and not isinstance(chat_id, bool))
 
 
 def _number(value):
@@ -352,6 +376,28 @@ class ContextObservations:
         with self.store.db() as db:
             db.execute("UPDATE context_location_requests SET state='cancelled' WHERE id=? AND state='pending'",
                        (request_id,))
+
+    def cancel_work_requests(self, job_id):
+        """Cancel every pending location request of a stopped or cancelled Work (#774).
+
+        Its answer then continues nothing.  Returns how many were pending.
+        """
+        with self.store.db() as db:
+            return db.execute("UPDATE context_location_requests SET state='cancelled' WHERE job_id=? AND state='pending'",
+                              (job_id,)).rowcount
+
+    def awaiting_answer(self, job_id, now=None):
+        """Whether Work ``job_id`` still waits for the owner's location answer (#774)."""
+        now = self.clock() if now is None else now
+        with self.store.db() as db:
+            return db.execute("SELECT 1 FROM context_location_requests WHERE job_id=? AND state='pending' AND expires>? "
+                              'LIMIT 1', (job_id, now)).fetchone() is not None
+
+    def request_work(self, request_id):
+        """The Work that opened location request ``request_id``, or None (#774)."""
+        with self.store.db() as db:
+            row = db.execute('SELECT job_id FROM context_location_requests WHERE id=?', (request_id,)).fetchone()
+        return row['job_id'] if row else None
 
     @staticmethod
     def _consume_request(db, chat_id, generation, epoch, sent_at, now):

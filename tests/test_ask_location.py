@@ -7,20 +7,28 @@ ingress, ``run_one``), ``run_agent``, ``Capabilities`` and the context stores
 run unchanged.  No live model, Telegram or device location is contacted, and
 none is claimed.
 """
+import contextlib
+import io
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from personal_agent.agent_runtime import (EFFECT_FREE_READS, OWNER_STATE_ACTIONS, READONLY_EXCLUDED, Capabilities,
-                                          ToolError, evidence_summary)
+from personal_agent import mcp_bridge
+from personal_agent import preparations as prep
+from personal_agent.agent_runtime import (EFFECT_FREE_READS, OWNER_STATE_ACTIONS, READONLY_EXCLUDED, WORK_STOP_KEY,
+                                          Capabilities, ToolError, evidence_summary, recorded_arguments)
 from personal_agent.bounded_execution import BOUNDED_PROFILE, CLI_PROFILES, STRICT_PROFILE, profile_actions
 from personal_agent.cli_browser_relay import RELAYED_LOCATION_REQUEST
+from personal_agent.context_observations import LOCATION_REQUEST_TTL_SECONDS, continuation_key, continuation_request
 from personal_agent.manifests import HOST_ACTIONS, WRITE_ACTIONS
+from personal_agent.quickstart_service import CONTINUATION_EFFECT_NOTE_HEAD, RETRY_EFFECT_TOOLS
 from personal_agent.quickstart_store import QuickStore
+from personal_agent.telegram_presence import draft_id_for
 
-from test_preparations import CHAT, GENERATION, _Case, call, finish
+from test_preparations import CHAT, GENERATION, SECRET, _Case, call, finish
 
 POINT = {'latitude': 37.5665, 'longitude': 126.978, 'horizontal_accuracy': 12.5}
 
@@ -82,7 +90,54 @@ class ToolDeclaration(unittest.TestCase):
             bridge.execute('ask_location', {'reason': '위치'})
 
 
-class Continuation(_Case):
+class BridgeOffer(unittest.TestCase):
+    """P2-4: the trusted-local bridge lists ask_location only for a Work from the paired chat."""
+
+    def listed(self, store, job_id):
+        requests = [{'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}},
+                    {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'}]
+        out = io.StringIO()
+        with mock.patch.object(sys, 'stdin', io.StringIO(''.join(json.dumps(r) + '\n' for r in requests))), \
+                contextlib.redirect_stdout(out):
+            mcp_bridge.serve(str(store.root), job_id, profile=BOUNDED_PROFILE, browser_relay=str(store.root / 'relay'))
+        replies = {reply['id']: reply for reply in map(json.loads, out.getvalue().splitlines())}
+        return [tool['name'] for tool in replies[2]['result']['tools']]
+
+    def test_only_a_telegram_work_is_offered_the_relayed_tool(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = QuickStore(Path(tmp.name) / 'data')
+        web = store.enqueue('지금 어디야', 'web-1')
+        telegram = store.enqueue('지금 어디야', 'tg-1', f'telegram:{GENERATION}', CHAT)
+        self.assertNotIn('ask_location', self.listed(store, web))
+        self.assertIn('schedule_preparation', self.listed(store, web), 'the other relayed tools are unchanged')
+        self.assertIn('ask_location', self.listed(store, telegram))
+
+
+class RecordedReason(unittest.TestCase):
+    def test_the_reason_is_scrubbed_where_arguments_are_recorded(self):
+        args = {'reason': f'키 {SECRET} 로 위치 확인'}
+        scrubbed = recorded_arguments('ask_location', args, redact=lambda text: text.replace(SECRET, '[비밀]'))
+        self.assertEqual(scrubbed, {'reason': '키 [비밀] 로 위치 확인'})
+        self.assertNotIn(SECRET, json.dumps(recorded_arguments('ask_location', args), ensure_ascii=False))
+        self.assertIn('ask_location', RETRY_EFFECT_TOOLS, 'a Work that already prompted the owner is not replayed')
+
+    def test_a_preparation_continuation_key_keeps_its_slot(self):
+        slot = prep.request_key('abc123', 1700000000)
+        key = continuation_key('req-1', slot)
+        self.assertEqual(prep.preparation_of(key), 'abc123')
+        self.assertEqual(continuation_request(key), 'req-1')
+        # A continuation of a continuation keeps the slot, not a growing chain.
+        again = continuation_key('req-2', key)
+        self.assertEqual((prep.preparation_of(again), continuation_request(again)), ('abc123', 'req-2'))
+        self.assertEqual(again, slot + '/loc:req-2')
+        self.assertEqual((continuation_key('req-3', 'tg:1:2'), continuation_request('loc:req-3')), ('loc:req-3', 'req-3'))
+        for other in (slot, 'tg:1:2', 'x/loc:req', '', None):
+            with self.subTest(key=other):
+                self.assertIsNone(continuation_request(other))
+
+
+class _LocationCase(_Case):
     REQUEST = '티오프 전에 내가 출발했는지 확인해 줘'
 
     def setUp(self):
@@ -112,6 +167,11 @@ class Continuation(_Case):
                        finish('f', '1', summary='현재 위치를 요청했어요.')]
         return self.receive(self.REQUEST)
 
+    def continued(self):
+        return [row for row in self.jobs() if row['relation_kind'] == 'reference']
+
+
+class Continuation(_LocationCase):
     def test_the_reply_continues_the_asking_work_once_with_the_position(self):
         work = self.ask()
         [prompt] = [body for body in self.sends() if (body.get('reply_markup') or {}).get('keyboard')]
@@ -174,6 +234,163 @@ class Continuation(_Case):
                 {'kind': 'reminder', 'goal': '출발 확인', 'due': self.due_iso(3600)})
         judged.assert_not_called()
         self.assertTrue(result['requires_owner_acceptance'])
+
+
+    # --- P2-1: a stopped or cancelled request is never revived ----------------
+
+    def test_stop_while_running_withdraws_the_request_and_the_answer_runs_nothing(self):
+        stops = []
+
+        def stop(_body):
+            [work] = [row['id'] for row in self.jobs()]
+            stops.append(self.service.ingest_stop({'chat': {'id': CHAT, 'type': 'private'},
+                                                   'draft_id': draft_id_for(work)}, GENERATION))
+            return {'content': '요청했어요.'}
+
+        self.script = [{'content': None, 'tool_calls': [call('1', 'ask_location', reason='현재 위치가 필요해요.')]}, stop]
+        work = self.receive(self.REQUEST)
+        self.assertEqual(stops, ['running'])
+        self.assertEqual(self.pending(), [])
+        self.now += 30
+        self.location()
+        self.assertEqual(self.continued(), [])
+        self.assertEqual([row['id'] for row in self.jobs()], [work])
+
+    def test_a_stopped_or_cancelled_asking_work_is_not_continued_even_with_a_pending_request(self):
+        for mark in ('stop', 'cancelled'):
+            with self.subTest(mark=mark):
+                work = self.ask()
+                self.assertEqual(len(self.pending()), 1)
+                if mark == 'stop':
+                    self.store.append_config_list(WORK_STOP_KEY, work, 200)
+                else:
+                    with self.store.db() as db:
+                        db.execute("UPDATE jobs SET status='cancelled' WHERE id=?", (work,))
+                self.now += 30
+                self.location()
+                self.assertEqual(self.continued(), [])
+                with self.store.db() as db:
+                    db.execute('DELETE FROM jobs')
+
+    def test_cancelling_the_asking_work_in_conversation_withdraws_its_request(self):
+        work = self.ask()
+        cancelled, text = self.service.cancel_focused_work(self.store.job(work), None)
+        self.assertTrue(cancelled)
+        self.assertIn('위치를 보내도 이어서 처리하지 않습니다', text)
+        self.assertEqual(self.pending(), [])
+        self.now += 30
+        self.location()
+        self.assertEqual(self.continued(), [])
+        # Nothing left to withdraw: the ordinary "already finished" answer.
+        self.assertFalse(self.service.cancel_focused_work(self.store.job(work), None)[0])
+
+    # --- P2-3: no blind replay of the asking Work's effects (C8) -------------
+
+    def test_the_continuation_is_told_what_the_asking_work_already_changed(self):
+        self.script = [{'content': None, 'tool_calls': [call('1', 'save_note', content='티오프 07:10'),
+                                                        call('2', 'ask_location', reason='현재 위치가 필요해요.')]},
+                       finish('f', '1', '2', summary='메모하고 위치를 요청했어요.')]
+        self.receive(self.REQUEST)
+        self.now += 30
+        self.location()
+        [row] = self.continued()
+        seen = []
+        self.script = [lambda body: seen.append(body['messages']) or {'content': '출발하셨네요.'}]
+        self.assertTrue(self.service.run_one())
+        latest = [m['content'] for m in seen[0] if m['role'] == 'user'][-1]
+        self.assertTrue(latest.startswith(CONTINUATION_EFFECT_NOTE_HEAD))
+        self.assertIn('- save_note: outcome observed: succeeded', latest)
+        self.assertNotIn('- ask_location', latest, 'the answered request is not an effect to re-check')
+        self.assertTrue(latest.endswith(self.REQUEST))
+        with self.store.db() as db:
+            stored = db.execute("SELECT content FROM messages WHERE role='user' AND job_id=?", (row['id'],)).fetchone()
+        self.assertEqual(stored['content'], self.REQUEST, 'the note is never stored as owner text')
+
+    def test_an_effect_free_asking_work_adds_no_note_and_memory_approval_is_not_reissued(self):
+        self.ask()
+        self.now += 30
+        self.location()
+        [row] = self.continued()
+        with mock.patch.object(self.service.decision_judge, 'explicit_memory_request') as judged:
+            self.assertIsNone(self.service.owner_memory_approval(row, row['message'])())
+        judged.assert_not_called()
+        seen = []
+        self.script = [lambda body: seen.append(body['messages']) or {'content': '출발하셨네요.'}]
+        self.assertTrue(self.service.run_one())
+        latest = [m['content'] for m in seen[0] if m['role'] == 'user'][-1]
+        self.assertNotIn('AgentOS note', latest)
+
+
+class PreparationContinuation(_LocationCase):
+    """P2-2: a prepare run that asks for a location stays that preparation's run."""
+
+    GOAL = '출발 시간 맞는지 확인해 줘'
+    UNRELATED = '어제 병원 검사 결과 이야기 UNRELATED-MARK'
+
+    def test_the_continuation_is_the_same_preparation_and_its_answer_is_kept(self):
+        self.script = [{'content': '그랬군요.'}]
+        self.web_turn(self.UNRELATED)
+        row = self.scheduled(goal=self.GOAL, channel='telegram')
+        self.now += 120
+        self.assertTrue(self.tick())
+        [asking] = self.runs(row['id'])
+        self.script = [{'content': None, 'tool_calls': [call('1', 'ask_location', reason='출발 위치가 필요해요.')]},
+                       finish('f', '1', summary='현재 위치를 요청했어요.')]
+        self.assertTrue(self.service.run_one())
+        self.assertEqual(self.store.job(asking['id'])['status'], 'succeeded')
+        self.service.deliver_one()
+        for _ in range(2):
+            self.tick()
+        current = self.service.preparations.get(row['id'])
+        self.assertEqual((current['state'], current['last_run_job_id'], current['prepared_result_ref']),
+                         ('running', asking['id'], None), 'the slot waits for the answer')
+
+        self.now += 30
+        self.location()
+        [continuation] = [run for run in self.runs(row['id']) if run['id'] != asking['id']]
+        self.assertEqual(prep.preparation_of(continuation['request_key']), row['id'])
+        self.assertEqual(self.service.preparations.get(row['id'])['last_run_job_id'], continuation['id'])
+
+        seen = []
+        self.script = [lambda body: seen.append(json.dumps(body['messages'], ensure_ascii=False))
+                       or {'content': f'출발하셨네요. (키 {SECRET})'}] * 2
+        self.assertTrue(self.service.run_one())
+        self.assertIn(self.GOAL, seen[0])
+        self.assertIn('current_position_report', seen[0])
+        self.assertNotIn('UNRELATED-MARK', seen[0], 'preparation history isolation holds')
+        finished = self.store.job(continuation['id'])
+        self.assertEqual(finished['status'], 'succeeded')
+        self.assertIn('출발하셨네요', finished['response'])
+        self.assertNotIn(SECRET, finished['response'], 'the preparation scrub applies')
+        self.service.deliver_one()
+        self.assertTrue(self.sends()[-1]['text'].startswith(f'미리 준비한 결과입니다 ({self.GOAL})'))
+
+        self.tick()
+        settled = self.service.preparations.get(row['id'])
+        self.assertEqual((settled['prepared_result_ref'], settled['last_outcome'], settled['state']),
+                         (continuation['id'], 'delivered', 'delivered'))
+        self.assertIn('출발하셨네요', settled['prepared_text'])
+        self.assertNotIn('요청했어요', settled['prepared_text'])
+        settled_events = [e for e in self.store.task_events(continuation['id']) if e['tool'] == 'preparation']
+        self.assertEqual(len(settled_events), 2, 'one continue record and one settlement')
+        self.tick()
+        self.assertEqual(self.service.preparations.get(row['id'])['updated_at'], settled['updated_at'], 'settled once')
+
+    def test_an_unanswered_request_expires_and_the_asking_run_settles(self):
+        row = self.scheduled(goal=self.GOAL, channel='telegram')
+        self.now += 120
+        self.tick()
+        [asking] = self.runs(row['id'])
+        self.script = [{'content': None, 'tool_calls': [call('1', 'ask_location', reason='출발 위치가 필요해요.')]},
+                       finish('f', '1', summary='현재 위치를 요청했어요.')]
+        self.service.run_one()
+        self.service.deliver_one()
+        self.tick()
+        self.assertEqual(self.service.preparations.get(row['id'])['state'], 'running')
+        self.now += LOCATION_REQUEST_TTL_SECONDS + 1
+        self.tick()
+        settled = self.service.preparations.get(row['id'])
+        self.assertEqual((settled['prepared_result_ref'], settled['state']), (asking['id'], 'delivered'))
 
 
 if __name__ == '__main__':

@@ -22,6 +22,7 @@ from .providers import ProviderError
 from .bounded_execution import (AgentOSMcpTools, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, ExecutionError,  # noqa: F401
                                 profile_actions, redact_reason, turn_actions)
 from .cli_browser_relay import RELAYED_LOCATION_REQUEST, RELAYED_PREPARATIONS, RelayClient, unused_browser_factory
+from .context_observations import answerable_work
 from .local_tools import LocalTools
 from .search_providers import ProviderRegistry
 from .quickstart_store import QuickStore
@@ -178,7 +179,9 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                                 browser=unused_browser_factory if relay is not None and relay_browser else None,
                                 # #774: placeholders that list schedule_preparation and ask_location; their calls go to the service.
                                 preparations=RELAYED_PREPARATIONS if relay is not None else None,
-                                location_request=RELAYED_LOCATION_REQUEST if relay is not None else None,
+                                # ask_location only for a Work from the paired Telegram chat, as on the direct route.
+                                location_request=(RELAYED_LOCATION_REQUEST if relay is not None
+                                                  and answerable_work(store.job(job_id)) else None),
                                 inherited_provenance=_provenance(provenance), lookup_hint=CLI_LOOKUP_HINT,
                                 lookup_sources=_lookup_sources(store, job_id),
                                 # #607 AX-10: the same durable attempt count and

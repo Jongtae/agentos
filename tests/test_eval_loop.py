@@ -5,6 +5,7 @@ needed (only ``evals/agentos_eval/task.py`` imports it).  Evidence class:
 unit tests of the harness logic, not a live evaluation result.
 """
 import json
+import math
 import os
 import sqlite3
 import subprocess
@@ -332,6 +333,22 @@ class ScoringTest(unittest.TestCase):
         self.assertEqual(meta['failures'], [{'kind': 'rubric', 'name': 'context_carry', 'reason': 'lost the place'}])
         value, _ = scoring.combine(scenario(), {'turns': [turn()]}, {'delivered': True}, [])
         self.assertEqual(value['passed'], 1.0)
+
+    def test_every_score_carries_every_key_so_inspect_metrics_do_not_abort(self):
+        judged, _ = scoring.combine(scenario(), {'turns': [turn()]}, {'delivered': True, 'memory': True}, [],
+                                    {'dimensions': {'context_carry': {'score': 1.0, 'reason': 'ok'}}, 'summary': 's'},
+                                    'judged')
+        unjudged, _ = scoring.combine(scenario(), {'turns': [turn()]}, {'delivered': True}, [])
+        errored, _ = scoring.combine(scenario(), {'error': 'sandbox failed'}, *scoring.deterministic_checks(
+            scenario(), {'error': 'sandbox failed'}))
+        self.assertEqual(set(judged), set(unjudged))
+        self.assertEqual(set(judged), set(errored))
+        self.assertTrue(math.isnan(unjudged['rubric_context_carry']))
+        self.assertTrue(math.isnan(unjudged['rubric_mean']))
+        self.assertTrue(math.isnan(judged['check_preparation']))
+        summary = report._group([{'value': judged, 'checks': {}}, {'value': unjudged, 'checks': {}}])
+        self.assertEqual(summary['rubric']['context_carry'], {'n': 1, 'mean': 1.0, 'zero_rate': 0.0})
+        self.assertNotIn('follow_through', summary['rubric'])
 
 
 class BudgetTest(unittest.TestCase):

@@ -190,7 +190,7 @@ SCHEDULE_PREPARATION_DESCRIPTION=('Schedule something for a later time that the 
  'goal: one short sentence the owner will read (reminder) or the request to run (prepare); never credentials.')
 #: #774 step 2: ask the owner, in the paired Telegram chat, for a current position.
 ASK_LOCATION_DESCRIPTION=('Ask the owner through their paired Telegram chat to share their current location for this request. Use it only when the answer depends on where the owner is now and the current context does not already hold a fresh position. '
- 'reason: one short sentence the owner will read (at most 300 characters); never credentials. The owner\'s reply arrives later: AgentOS then continues this request once with that location in its current context. After calling it, end this turn telling the owner you asked.')
+ 'reason: one short sentence the owner will read (at most 300 characters); never credentials. When the owner later shares a location, AgentOS continues this request once with it in its current context; a typed reply is an ordinary new message, not a continuation. After calling it, end this turn telling the owner you asked.')
 DEFINITIONS=[
  schema('web_search',WEB_SEARCH_DESCRIPTION,{'query':STRING,'provider':STRING,'locale':STRING},['query']),
  schema('public_page_read','Read one anonymous public HTTP(S) page as bounded text. Use only for a user-supplied public URL; no login, cookies, JavaScript, private destinations or mutations.',{'url':STRING},['url']),

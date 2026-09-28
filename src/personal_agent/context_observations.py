@@ -411,17 +411,6 @@ class ContextObservations:
         db.execute("UPDATE context_location_requests SET state='consumed' WHERE id=?", (row['id'],))
         return row
 
-    def consume_text_answer(self, db, message, generation):
-        """The pending location request a typed place answers, consumed, or None (#774).
-
-        The prompt's keyboard offers typing a place instead: the owner's next
-        text in that chat is the answer.  Inside the caller's transaction.
-        """
-        chat_id, sent_at = (message.get('chat') or {}).get('id'), _source_time(message.get('date'))
-        if not isinstance(chat_id, int) or sent_at is None:
-            return None
-        return self._consume_request(db, chat_id, generation, self.settings(db)['epoch'], sent_at, self.clock())
-
     @staticmethod
     def reopen_request(db, request_id):
         """An answered request whose continuation could not be queued waits again (#774)."""

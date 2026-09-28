@@ -265,10 +265,10 @@ RETRY_EFFECT_NOTE_HEAD=('AgentOS note (not from the owner): the owner\'s message
                         'request, which AgentOS did not replay because that earlier Work called tools that may have '
                         'changed state:')
 RETRY_EFFECT_NOTE_TAIL='Check the current state before repeating any of these; ask the owner if unsure.'
-#: #774: the same factual note for a location continuation: the asking Work's message
-#: run again once the owner shared a position, or the place the owner typed instead.
+#: #774: the same factual note for a location continuation, whose request is the
+#: asking Work's message run again once the owner shared a position.
 CONTINUATION_EFFECT_NOTE_HEAD=('AgentOS note (not from the owner): the request below continues an earlier Work that '
-                               'asked the owner for their current location, which the owner has now answered. That '
+                               'asked the owner for their current location, which the owner has now shared. That '
                                'earlier Work called tools that may have changed state:')
 #: #774 review: an answered location request whose continuation could not be queued.
 LOCATION_NOT_CONTINUED_TEXT='대기 중인 작업이 많아 보내 주신 위치로 요청을 이어서 처리하지 못했습니다. 잠시 후 위치를 다시 보내 주세요.'
@@ -720,12 +720,6 @@ class AgentService:
         if origin and origin.get('message'):
             rows.append({'role':'user','content':self.scrub_work_text(origin['id'],origin['message']),
                          'job_id':origin['id'],'channel':origin.get('channel'),'qualifier':None})
-        continued=continuation_request(job.get('request_key'))
-        if continued and row and row['goal_text']!=job['message']:
-            # #774: a continuation's own message can be the owner's typed place; the goal
-            # comes first, attributed to the run that asked (its sources are recorded).
-            rows.append({'role':'user','content':row['goal_text'],'job_id':self.context_observations.request_work(continued),
-                         'channel':job.get('channel'),'qualifier':None})
         rows.append({'role':'user','content':job['message'],'job_id':job['id'],'channel':job.get('channel'),'qualifier':None})
         return rows
 
@@ -744,12 +738,11 @@ class AgentService:
         if not shown or prep.digest(shown)!=notification['fingerprint']:return [],0
         return shown,remaining
 
-    def preparation_reply_prefix(self, job):
+    @staticmethod
+    def preparation_reply_prefix(job):
         """A prepared answer says what it was prepared for; a reminder needs nothing."""
-        preparation_id=prep.preparation_of(job.get('request_key'))
-        if preparation_id is None or job.get('model')=='preparation':return ''
-        # #774: the goal, not a continuation's own message (a typed place).
-        goal=str((self.preparations.get(preparation_id) or {}).get('goal_text') or job.get('message') or '')
+        if prep.preparation_of(job.get('request_key')) is None or job.get('model')=='preparation':return ''
+        goal=str(job.get('message') or '')
         return f"미리 준비한 결과입니다 ({goal[:120]}{'…' if len(goal)>120 else ''}).\n\n"
 
     def preparations_status(self):
@@ -5446,8 +5439,8 @@ class AgentService:
 
         A one-time reply keyboard with ``request_location``; the matching
         answer is a sender-reported current position bound to this Work, not
-        verified GPS.  The owner may type a place instead; that text answers
-        the request too (``ingest_update``).
+        verified GPS.  Only a shared location answers it: a typed reply is an
+        ordinary new Work, so the keyboard offers no typed alternative.
         """
         job=self.store.job(job_id)
         cfg=self.store.config('telegram',{})
@@ -5458,8 +5451,7 @@ class AgentService:
             raise ValueError('위치를 요청하는 목적을 짧게 적어 주세요.')
         request_id=self.context_observations.open_location_request(job_id,cfg['user_id'],cfg.get('generation'))
         markup={'keyboard':[[{'text':'현재 위치 보내기','request_location':True}]],
-                'one_time_keyboard':True,'resize_keyboard':True,
-                'input_field_placeholder':'또는 장소 이름을 입력하세요'}
+                'one_time_keyboard':True,'resize_keyboard':True}
         try:
             self.telegram.send_message(cfg['user_id'],prompt.strip(),markup)
         except ProviderError:
@@ -5499,29 +5491,6 @@ class AgentService:
         except ValueError:rows=[]
         return isinstance(rows,list) and job_id in rows
 
-    def _continuable(self, db, work):
-        """Whether an answered location request may continue Work ``work`` (#774).
-
-        A Work the owner stopped or cancelled, or a run of a preparation no
-        longer active, is never continued.
-        """
-        if work['status']=='cancelled' or self._stopped_in(db,work['id']):
-            LOG.info('location continuation skipped work=%s reason=stopped',work['id'])
-            return False
-        preparation_id=prep.preparation_of(work['request_key'])
-        if preparation_id:
-            row=db.execute('SELECT state FROM preparations WHERE id=?',(preparation_id,)).fetchone()
-            if not row or row['state'] not in prep.ACTIVE_STATES:
-                # A cancelled or removed preparation's goal never runs again.
-                LOG.info('location continuation skipped work=%s reason=preparation_inactive',work['id'])
-                return False
-        return True
-
-    def _link_continuation(self, db, task_id, work):
-        """``task_id`` continues ``work``: related to it, and a preparation run's slot settles from it (#774)."""
-        self.store.link_work_relation(task_id,work['id'],'reference',db=db)
-        prep.Preparations.continue_run(db,work['id'],task_id,self.preparations.clock())
-
     def continue_located_work(self, db, answer, message, generation, sender):
         """Continue the Work whose location request the owner just answered, once (#774).
 
@@ -5529,16 +5498,26 @@ class AgentService:
         channel, chat and workspace, keyed by the consumed request (a replayed
         update cannot make a second), related to the asking Work, with the
         reported position rebound to it so its current context shows it.  The
-        asking Work is not re-run, and is never continued when ``_continuable``
-        says no.  A preparation run's continuation stays that preparation's
-        run: same slot key, and the slot settles from it.  False when the
-        continuation could not be queued: the request is pending again and the
-        position stays with the asking Work, so resending the location continues it.
+        asking Work is not re-run.  A Work the owner stopped or cancelled, or
+        a run of a preparation no longer active, is never continued.  A preparation run's continuation stays that
+        preparation's run: same slot key, and the slot settles from it.  False
+        when the continuation could not be queued: the request is pending again
+        and the position stays with the asking Work, so resending continues it.
         """
         work=db.execute('SELECT * FROM jobs WHERE id=?',(answer['job_id'],)).fetchone()
-        if not work or not self._continuable(db,work):
-            # The position stays recorded for the asking Work; nothing runs again.
+        if not work:
             return None
+        if work['status']=='cancelled' or self._stopped_in(db,work['id']):
+            # The position stays recorded for the asking Work; nothing runs again.
+            LOG.info('location continuation skipped work=%s reason=stopped',work['id'])
+            return None
+        preparation_id=prep.preparation_of(work['request_key'])
+        if preparation_id:
+            row=db.execute('SELECT state FROM preparations WHERE id=?',(preparation_id,)).fetchone()
+            if not row or row['state'] not in prep.ACTIVE_STATES:
+                # A cancelled or removed preparation's goal never runs again.
+                LOG.info('location continuation skipped work=%s reason=preparation_inactive',work['id'])
+                return None
         try:
             task_id=self.store.enqueue(work['message'],continuation_key(answer['request_id'],work['request_key']),
                                        work['channel'],work['chat_id'],work['workspace_id'],db=db)
@@ -5547,7 +5526,8 @@ class AgentService:
             LOG.warning('location continuation not queued work=%s reason=%s',work['id'],exc)
             self.context_observations.reopen_request(db,answer['request_id'])
             return False
-        self._link_continuation(db,task_id,work)
+        self.store.link_work_relation(task_id,work['id'],'reference',db=db)
+        prep.Preparations.continue_run(db,work['id'],task_id,self.preparations.clock())
         self.context_observations.rebind_task_observation(db,answer['observation_id'],task_id)
         # The owner's location message is this Work's source and reply anchor.
         self.telegram_turns.record_source(task_id,sender,message.get('message_id'),db=db)
@@ -5589,17 +5569,7 @@ class AgentService:
                         task_id=self.store.enqueue(text,f'tg:{generation}:{update_id}',f'telegram:{generation}',sender,db=db)
                         self.store.attach_context(task_id,event_ids,self.context_assistant_id(),db)
                     else:
-                        # #774: a typed place answers a pending location request (the prompt's
-                        # keyboard offers it): this text continues the asking Work once.
-                        request=(self.context_observations.consume_text_answer(db,message,generation)
-                                 if not guided_context_requested and self.is_natural_language(text) else None)
-                        work=request and db.execute('SELECT * FROM jobs WHERE id=?',(request['job_id'],)).fetchone()
-                        if work and self._continuable(db,work):
-                            task_id=self.store.enqueue(text,continuation_key(request['id'],work['request_key']),
-                                                       work['channel'],work['chat_id'],work['workspace_id'],db=db)
-                            self._link_continuation(db,task_id,work)
-                        else:
-                            task_id=self.store.enqueue(text,f'tg:{generation}:{update_id}',f'telegram:{generation}',sender,db=db)
+                        task_id=self.store.enqueue(text,f'tg:{generation}:{update_id}',f'telegram:{generation}',sender,db=db)
                         if guided_context_requested:
                             db.execute("UPDATE jobs SET status='awaiting_context' WHERE id=?",(task_id,))
                             guided_context=True

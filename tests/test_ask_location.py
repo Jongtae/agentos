@@ -221,37 +221,22 @@ class Continuation(_LocationCase):
 
     # --- review: a typed place (the keyboard offers it) continues the request once --
 
-    def test_a_typed_place_continues_the_asking_work_once(self):
+    def test_a_typed_reply_is_an_ordinary_work_and_the_request_still_waits(self):
         work = self.ask()
+        [prompt] = [body for body in self.sends() if (body.get('reply_markup') or {}).get('keyboard')]
+        self.assertNotIn('input_field_placeholder', prompt['reply_markup'], 'no typed alternative is offered')
         [request] = self.pending()
         self.now += 30
-        message_id = self.typed('강남역')
-        [row] = self.continued()
-        self.assertEqual((row['message'], row['related_job_id'], row['request_key'], row['status']),
-                         ('강남역', work, continuation_key(request['id'], self.store.job(work)['request_key']), 'queued'))
-        self.assertEqual(self.service.telegram_turns.source(row['id']), message_id)
-        self.assertEqual(self.pending(), [])
-        # The next text is an ordinary turn again, and a later location continues nothing.
-        self.typed('고마워')
-        self.location()
-        self.assertEqual(len(self.continued()), 1)
-        self.assertEqual(len(self.jobs()), 3)
-
-        seen = []
-        self.script = [lambda body: seen.append(json.dumps(body['messages'], ensure_ascii=False)) or {'content': '강남역 기준으로 볼게요.'}]
-        self.assertTrue(self.service.run_one())
-        self.assertIn(self.REQUEST, seen[0], 'the asking turn is in the history the continuation reads')
-        self.assertIn('강남역', seen[0])
-        self.assertEqual(self.store.job(row['id'])['status'], 'succeeded')
-
-    def test_a_typed_place_for_a_stopped_asking_work_is_an_ordinary_turn(self):
-        work = self.ask()
-        self.store.append_config_list(WORK_STOP_KEY, work, 200)
-        self.now += 30
         self.typed('강남역')
-        self.assertEqual(self.continued(), [])
         [row] = [job for job in self.jobs() if job['id'] != work]
         self.assertTrue(row['request_key'].startswith('tg:'))
+        self.assertIsNone(continuation_request(row['request_key']))
+        self.assertEqual((row['relation_kind'], row['related_job_id']), (None, None))
+        self.assertEqual([item['id'] for item in self.pending()], [request['id']], 'the request is not consumed')
+        # A shared location still continues the asking Work.
+        self.location()
+        [continued] = self.continued()
+        self.assertEqual((continued['related_job_id'], continued['message']), (work, self.REQUEST))
 
     # --- review: an answer whose continuation cannot be queued is kept -------
 
@@ -488,23 +473,6 @@ class PreparationContinuation(_LocationCase):
         self.tick()
         self.assertEqual(len(self.pending()), 1)
         return row, asking
-
-    def test_a_typed_place_continues_the_preparation_run(self):
-        row, asking = self.asking_run()
-        self.now += 30
-        self.typed('강남역')
-        [continuation] = [run for run in self.runs(row['id']) if run['id'] != asking['id']]
-        self.assertEqual((continuation['message'], continuation['related_job_id']), ('강남역', asking['id']))
-        self.assertEqual(self.service.preparations.get(row['id'])['last_run_job_id'], continuation['id'])
-        seen = []
-        self.script = [lambda body: seen.append(json.dumps(body['messages'], ensure_ascii=False))
-                       or {'content': '강남역에서 출발하면 늦지 않아요.'}]
-        self.assertTrue(self.service.run_one())
-        self.assertLess(seen[0].index(self.GOAL), seen[0].index('강남역'), 'the goal, then the typed place')
-        self.service.deliver_one()
-        self.assertTrue(self.sends()[-1]['text'].startswith(f'미리 준비한 결과입니다 ({self.GOAL})'))
-        self.tick()
-        self.assertEqual(self.service.preparations.get(row['id'])['prepared_result_ref'], continuation['id'])
 
     def test_cancelling_the_preparation_withdraws_its_runs_request(self):
         """P3-1: Settings (and the ``p7q`` stop button, the same ``cancel_preparation``) withdraw it."""

@@ -37,7 +37,7 @@ class ProjectionTestCase(unittest.TestCase):
     """One paired owner, one scripted model, every outbound Telegram call recorded."""
 
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir=str(Path(__file__).resolve().parent))
+        self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.store = QuickStore(Path(self.temp.name) / 'data')
         self.outbound = []      # ('send'|'edit', text) in the order the owner would see them
@@ -551,15 +551,18 @@ class TerminalTextTests(unittest.TestCase):
     """Rows H/I at the renderer level; transcript-level partial cases live in
     tests/test_truthful_terminal_result.py (#476) and are unchanged."""
 
-    def test_partial_labels_the_model_text_after_the_truth_header_and_cause(self):
-        # #752: the AI answer is shown, but only after the header and the cause, under the label.
-        from personal_agent.conversation_projection import TERMINAL_ANSWER_LABEL, TERMINAL_NEXT_ACTION
+    def test_partial_puts_the_answer_first_and_one_note_last(self):
+        # #847: the AI answer is the message; the recorded note (or one outcome
+        # sentence) closes it.  The cause with tool words is not read here.
+        from personal_agent.conversation_projection import TERMINAL_NEXT_ACTION
         text = terminal_text('모델이 쓴 문장', '캘린더 조회 거부', 'partial')
-        self.assertEqual(text, TERMINAL_PARTIAL_HEADER + '\n\n캘린더 조회 거부\n\n'
-                         + TERMINAL_ANSWER_LABEL + '\n모델이 쓴 문장')
-        self.assertLess(text.index('캘린더 조회 거부'), text.index(TERMINAL_ANSWER_LABEL))
-        self.assertLess(text.index(TERMINAL_ANSWER_LABEL), text.index('모델이 쓴 문장'))
+        self.assertEqual(text, '모델이 쓴 문장\n\n일부 단계는 확인하지 못했어요.')
+        text = terminal_text('모델이 쓴 문장', '캘린더 조회 거부', 'partial', note='한 단계는 확인하지 못했어요.')
+        self.assertEqual(text, '모델이 쓴 문장\n\n한 단계는 확인하지 못했어요.')
         self.assertNotIn(TERMINAL_NEXT_ACTION, text)
+        self.assertNotIn(TERMINAL_PARTIAL_HEADER, text)
+        self.assertEqual(terminal_text('답', None, 'failed'), '답\n\n요청하신 작업은 끝내지 못했어요.')
+        self.assertEqual(terminal_text('답', '원인', 'interrupted', note='무시됨'), '답\n\n중간에 멈춰서 끝까지 확인하지 못했어요.')
 
     def test_a_specific_next_action_replaces_only_the_web_pointer(self):
         text = terminal_text(None, '연결이 끊어졌습니다', 'failed', next_action='다시 연결한 뒤 같은 요청을 보내 주세요.')
@@ -580,14 +583,13 @@ class TruthfulRepliesTests(unittest.TestCase):
                 self.assertLess(text.index('a.txt'), text.index('파일 읽기: 거부'))
                 self.assertTrue(text.endswith(TERMINAL_NEXT_ACTION))
 
-    def test_partial_with_an_answer_shows_it_labelled_instead_of_the_verified_portion(self):
-        # #752: with an AI answer, header -> cause -> label -> answer; no verified portion, no web pointer.
-        from personal_agent.conversation_projection import (TERMINAL_ANSWER_LABEL, TERMINAL_NEXT_ACTION,
-                                                            TERMINAL_VERIFIED_LABEL)
+    def test_partial_with_an_answer_shows_it_first_instead_of_the_verified_portion(self):
+        # #752/#847: with an AI answer, answer -> note; no header, no cause, no verified portion, no web pointer.
+        from personal_agent.conversation_projection import TERMINAL_NEXT_ACTION, TERMINAL_VERIFIED_LABEL
         text = terminal_text('모델이 쓴 문장', '완료하지 못한 부분 — 파일 읽기: 거부', 'partial', verified='찾은 파일:\n- a.txt')
-        self.assertTrue(text.startswith(TERMINAL_PARTIAL_HEADER))
-        self.assertLess(text.index('파일 읽기: 거부'), text.index(TERMINAL_ANSWER_LABEL))
-        self.assertLess(text.index(TERMINAL_ANSWER_LABEL), text.index('모델이 쓴 문장'))
+        self.assertTrue(text.startswith('모델이 쓴 문장\n\n'))
+        self.assertNotIn(TERMINAL_PARTIAL_HEADER, text)
+        self.assertNotIn('파일 읽기', text)
         self.assertNotIn(TERMINAL_VERIFIED_LABEL, text)
         self.assertNotIn('a.txt', text)
         self.assertNotIn(TERMINAL_NEXT_ACTION, text)
@@ -616,6 +618,29 @@ class TruthfulRepliesTests(unittest.TestCase):
         text = owner_cause([('find_files', '한도에서 멈춤'), ('pkg.custom_tool', None), ('find_files', '한도에서 멈춤')])
         self.assertEqual(text, '완료하지 못한 부분 — 파일 찾기: 한도에서 멈춤 · 도구 실행')
         self.assertIsNone(owner_cause([]))
+
+    def test_answer_note_counts_steps_and_speaks_only_withheld_next_steps(self):
+        """#847: no tool name, host action or tool error follows an answer."""
+        from personal_agent.conversation_projection import answer_note
+        steps = [('browser_click', '일치하는 요소가 없습니다. 요소 목록에 있는 번호나 이름을 사용하세요.'),
+                 ('browser_click', '일치하는 요소가 없습니다. 요소 목록에 있는 번호나 이름을 사용하세요.'),
+                 ('calendar_draft_create', '소유자가 이 미리보기를 승인해야 실제 일정에 반영됩니다.')]
+        kept = {'소유자가 이 미리보기를 승인해야 실제 일정에 반영됩니다.'}
+        self.assertEqual(answer_note(steps, 'partial', kept=kept),
+                         '한 단계는 확인하지 못했어요. 소유자가 이 미리보기를 승인해야 실제 일정에 반영됩니다.')
+        self.assertEqual(answer_note(steps, 'failed', kept=kept),
+                         '요청하신 작업은 끝내지 못했어요. 소유자가 이 미리보기를 승인해야 실제 일정에 반영됩니다.')
+        self.assertEqual(answer_note(steps[:1], 'partial'), '한 단계는 확인하지 못했어요.')
+        self.assertEqual(answer_note([('a', 'x'), ('b', 'y'), ('c', 'z'), ('d', 'w')], 'partial'), '몇 단계는 확인하지 못했어요.')
+        self.assertIsNone(answer_note([], 'partial'))
+        self.assertEqual(answer_note([], 'failed'), '요청하신 작업은 끝내지 못했어요.')
+        # The worker's own question and next step follow as sentences, never as labelled lines.
+        note = answer_note(steps[:1], 'partial', report={'unknown': ['재고'], 'question': '어느 날짜로 할까요?',
+                                                         'next': '예보 페이지를 열어 확인하기'})
+        self.assertEqual(note, '한 단계는 확인하지 못했어요. 어느 날짜로 할까요? 예보 페이지를 열어 확인하기')
+        self.assertNotIn('재고', note)
+        for word in ('브라우저', '일치하는 요소', 'browser_click', '확인하지 못한 부분:', '다음 단계 제안:'):
+            self.assertNotIn(word, answer_note(steps, 'partial', kept=kept, report={'next': '예보 페이지를 열어 확인하기'}))
 
     def test_object_particle_follows_the_final_sound(self):
         from personal_agent.conversation_projection import object_particle

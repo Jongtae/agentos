@@ -26,7 +26,7 @@ from personal_agent.agent_runtime import CALENDAR_DRAFT_TOOLS, withheld_effect
 from personal_agent.calendar import (CALENDAR_SPEC, CALENDAR_WRITE_SPEC,
                                      CalendarConnector)
 from personal_agent.connector_contract import ConnectorRegistry, ConnectorState
-from personal_agent.conversation_projection import TERMINAL_ANSWER_LABEL, TERMINAL_FAILED_HEADER
+from personal_agent.conversation_projection import TERMINAL_FAILED_NOTE
 from personal_agent.decision import OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, fixture_confidence
 from personal_agent.google_calendar import CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE
 from personal_agent.providers import ModelAdapter
@@ -47,7 +47,7 @@ class RefusedWriteTestCase(unittest.TestCase):
     """One Telegram owner, one scripted model, one recorded outbound seam."""
 
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir=str(Path(__file__).resolve().parent))
+        self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.store = QuickStore(Path(self.temp.name) / 'data')
         self.sent = []
@@ -250,9 +250,8 @@ class RefusedMemoryWriteTests(RefusedWriteTestCase):
         self.text = '기억했습니다.'
         job, bubble = self.ask('오늘 점심 뭐 먹을까?')
         self.assertEqual(job['status'], 'failed')
-        # #820: the answer is delivered, after the truth header, under the unverified label.
-        self.assertTrue(bubble.startswith(TERMINAL_FAILED_HEADER))
-        self.assertLess(bubble.index(TERMINAL_ANSWER_LABEL), bubble.index('기억했습니다'))
+        # #820/#847: the answer is delivered first, then the note that the request was not finished.
+        self.assertEqual(bubble, '기억했습니다.\n\n' + TERMINAL_FAILED_NOTE)
         self.assertEqual(self.store.memory_candidates(), [])
 
 
@@ -313,9 +312,9 @@ class DeferredCalendarWriteTests(RefusedWriteTestCase):
         # The tool's own next step, verbatim -- not a generic stand-in the
         # renderer could substitute without anyone noticing.
         self.assertIn('소유자가 이 미리보기를 승인해야 실제 일정에 반영됩니다.', bubble)
-        # #820: the answer is delivered after it, under the unverified label.
-        self.assertLess(bubble.index('승인해야'), bubble.index(TERMINAL_ANSWER_LABEL))
-        self.assertLess(bubble.index(TERMINAL_ANSWER_LABEL), bubble.index('등록했습니다'))
+        # #820/#847: the answer is delivered first; the step's own next step closes the bubble.
+        self.assertEqual(bubble, self.text + '\n\n소유자가 이 미리보기를 승인해야 실제 일정에 반영됩니다.')
+        self.assertNotIn('일정 초안', bubble, 'no tool name after the answer')
 
     def test_every_draft_tool_is_covered_not_only_create(self):
         """Review found `update` and `cancel` unpinned after the rule was
@@ -339,8 +338,8 @@ class DeferredCalendarWriteTests(RefusedWriteTestCase):
                 case.text = '팀 회의 시간을 변경했습니다.'
                 job, bubble = case.ask('내일 팀 회의 좀 바꿔줘')
                 self.assertEqual(job['status'], 'partial')
-                self.assertLess(bubble.index('승인해야'), bubble.index(TERMINAL_ANSWER_LABEL))
-                self.assertLess(bubble.index(TERMINAL_ANSWER_LABEL), bubble.index('변경했습니다'))
+                self.assertTrue(bubble.startswith(case.text), bubble)
+                self.assertTrue(bubble.endswith('\n\n소유자가 이 미리보기를 승인해야 실제 일정에 반영됩니다.'), bubble)
                 self.assertEqual([call[0] for call in case.calendar_calls], [])
 
     def test_nothing_reached_the_calendar_provider(self):

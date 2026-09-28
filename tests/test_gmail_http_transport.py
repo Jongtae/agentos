@@ -52,7 +52,7 @@ class GmailHttpTransportTests(unittest.TestCase):
         from cryptography.fernet import Fernet
         from personal_agent.quickstart import configured_service
         from personal_agent.quickstart_store import QuickStore
-        with tempfile.TemporaryDirectory(dir=str(Path(__file__).resolve().parent)) as temp:
+        with tempfile.TemporaryDirectory() as temp:
             service = configured_service(QuickStore(Path(temp) / 'data'), {
                 'AGENTOS_GMAIL_LOCAL_ONLY': '1',
                 'AGENTOS_GMAIL_CLIENT_ID': 'client',

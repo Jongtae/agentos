@@ -32,18 +32,23 @@ TERMINAL_NEXT_ACTION = 'AgentOS 웹에서 실행 기록과 다음 단계를 확�
 #: Used only when an ``unknown`` Work carries no statement of its own.
 TERMINAL_UNKNOWN_EFFECT = ('외부 결과를 확인할 수 없습니다. 실제 결과를 직접 확인해 주세요. '
                            '자동으로 다시 시도하지 않았습니다.')
-#: #752: opens the AI's own answer in a failed/partial bubble, after the truth
-#: header and what did not complete.  The owner reads the answer, labelled.
-TERMINAL_ANSWER_LABEL = 'AI 답변 (위 부분은 확인되지 않았어요):'
-#: #752: one tool reason in the owner's bubble: its first sentence, bounded.
+#: #847: the note that closes a failed/partial/interrupted bubble that carries
+#: the AI's answer.  The answer comes first; one short sentence qualifies it.
+#: A count of steps replaces any tool name or tool error (those stay in 상세).
+TERMINAL_FAILED_NOTE = '요청하신 작업은 끝내지 못했어요.'
+TERMINAL_INTERRUPTED_NOTE = '중간에 멈춰서 끝까지 확인하지 못했어요.'
+TERMINAL_PARTIAL_NOTE = '{count} 단계는 확인하지 못했어요.'
+#: One reason string in the owner's bubble: its first sentence, bounded.
 #: The full model-facing text stays in the Work record (상세).
 OWNER_REASON_CHARS = 120
+#: Upper bound of the closing note after an answer.
+ANSWER_NOTE_CHARS = 400
+#: Opens the portion that did not complete in a bubble without an answer.
+TERMINAL_UNFINISHED_LABEL = '완료하지 못한 부분'
 #: Opens the portion of a partial Work that its own typed Evidence supports
 #: (#598 H1).  What follows is AgentOS's rendering of observed tool results,
 #: never the model's prose.
 TERMINAL_VERIFIED_LABEL = '확인된 부분:'
-#: Opens the portion that did not complete, so it reads apart from the above.
-TERMINAL_UNFINISHED_LABEL = '완료하지 못한 부분'
 #: Upper bound for the verified portion inside one bubble; the full record
 #: stays in the AgentOS web Task detail.
 TERMINAL_VERIFIED_CHARS = 1600
@@ -117,8 +122,9 @@ def owner_cause(steps):
 
     ``steps`` are ``(tool_id, reason)`` pairs observed for the Work, with the
     reason already redacted by the caller.  The technical cause (with ids)
-    stays on the Work record for Task detail; this is what the conversation
-    reads.  One generic rendering: no tool gets its own wording here.
+    stays on the Work record for Task detail; this is what a bubble without
+    an answer reads (#598).  One generic rendering: no tool gets its own
+    wording.  A bubble that carries the answer reads ``answer_note`` instead.
     """
     entries = []
     for tool, reason in steps:
@@ -130,6 +136,46 @@ def owner_cause(steps):
     if not entries:
         return None
     return (TERMINAL_UNFINISHED_LABEL + ' — ' + ' · '.join(entries[:3]))[:400]
+
+
+def step_count_word(count):
+    """``한``/``두``/``세`` for one to three steps, ``몇`` beyond (no digits in the bubble)."""
+    return {1: '한', 2: '두', 3: '세'}.get(count, '몇')
+
+
+def answer_note(steps, outcome, kept=(), report=None):
+    """The one closing note after a failed/partial answer, or ``None`` (#847).
+
+    ``steps`` are the same ``(tool_id, reason)`` pairs ``owner_cause`` reads.
+    A reason in ``kept`` is a step's own owner-facing next step (a withheld
+    effect: an approval, a login, a confirmation) and is spoken as written;
+    every other step is only counted, so no tool name, host action or tool
+    error follows the answer.  A ``failed`` Work states that the request was
+    not finished instead of a count.  From the worker's typed report only
+    the question it asks the owner and its proposed next step follow, as
+    sentences, never as labelled lines; what stayed unknown is already the
+    answer's own business and stays in 상세.
+    """
+    spoken, counted = [], []
+    for tool, reason in steps:
+        text = first_sentence(reason, OWNER_REASON_CHARS)
+        if reason and reason in kept:
+            if text and text not in spoken:
+                spoken.append(text)
+        elif (tool, text) not in counted:
+            counted.append((tool, text))
+    parts = []
+    if outcome == 'failed':
+        parts.append(TERMINAL_FAILED_NOTE)
+    elif counted:
+        parts.append(TERMINAL_PARTIAL_NOTE.format(count=step_count_word(len(counted))))
+    parts.extend(spoken[:3])
+    if isinstance(report, dict):
+        for key in ('question', 'next'):
+            text = ' '.join(str(report.get(key) or '').split())
+            if text and text not in parts:
+                parts.append(text)
+    return clip_keeping_links(' '.join(parts), ANSWER_NOTE_CHARS) if parts else None
 
 
 #: SEC-LOOP-01 (#657): the report lines after the failed steps.
@@ -271,14 +317,15 @@ class BlockedTurn(ValueError):
         self.kind = kind
 
 
-def terminal_text(response, error=None, outcome=None, next_action=None, verified=None):
+def terminal_text(response, error=None, outcome=None, next_action=None, verified=None, note=None):
     """The one readable terminal bubble for a paired owner.
 
     * ``failed`` / ``partial`` / ``interrupted`` with an AI answer (#752,
-      #820) - the truth header and what did not complete come first, then
-      the AI's own answer under ``TERMINAL_ANSWER_LABEL``.  The answer is
-      always delivered: hiding it protected nothing the header does not, and
-      left the owner without the result.
+      #820, #847) - the AI's own answer first, then ``note`` (the Work's
+      recorded ``answer_note``) or one outcome sentence as the closing line.
+      The answer is always delivered: hiding it protected nothing, and left
+      the owner without the result.  No header, tool name or tool error
+      appears; the steps stay in 상세.  ``error`` is not read here.
     * ``failed`` without an answer - the failure, its cause and the next step.
     * ``partial`` / ``interrupted`` without an answer - the portion the Work's
       own typed Evidence supports (``verified``, rendered by AgentOS from
@@ -299,11 +346,14 @@ def terminal_text(response, error=None, outcome=None, next_action=None, verified
     action = next_action or TERMINAL_NEXT_ACTION
     answer = (response or '').strip()
     if outcome in ('failed', 'partial', 'interrupted') and answer:
-        body = [{'failed': TERMINAL_FAILED_HEADER, 'partial': TERMINAL_PARTIAL_HEADER}.get(outcome, TERMINAL_INTERRUPTED_HEADER)]
-        if cause:
-            body.append(cause)
-        body.append(TERMINAL_ANSWER_LABEL + '\n' + answer)
-        text = '\n\n'.join(body)
+        # #847: the answer is the message.  The recorded note (owner words,
+        # no tool names) or one outcome sentence follows it; never a header.
+        if outcome == 'interrupted':
+            closing = TERMINAL_INTERRUPTED_NOTE
+        else:
+            closing = (note or '').strip() or (TERMINAL_FAILED_NOTE if outcome == 'failed'
+                                               else TERMINAL_PARTIAL_NOTE.format(count='일부'))
+        text = answer + '\n\n' + closing
     elif outcome == 'failed':
         body = [TERMINAL_FAILED_HEADER]
         if cause:

@@ -25,8 +25,7 @@ from personal_agent.agent_runtime import (DELEGATE_FAILED, FALLBACK_UNDESCRIBED,
                                           evidence_qualifiers, fallback_response, evidence_summary, turn_context)
 from personal_agent.calendar import CALENDAR_SPEC, CALENDAR_WRITE_SPEC, CalendarConnector
 from personal_agent.connector_contract import ConnectorRegistry, ConnectorState
-from personal_agent.conversation_projection import (CONTEXT_QUALIFIER, TERMINAL_ANSWER_LABEL,
-                                                    TERMINAL_PARTIAL_HEADER,
+from personal_agent.conversation_projection import (CONTEXT_QUALIFIER, TERMINAL_PARTIAL_HEADER,
                                                     context_message, qualify_transcript)
 from personal_agent.google_calendar import CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE
 from personal_agent.providers import ModelAdapter
@@ -47,7 +46,7 @@ class TruthIntegrityTestCase(unittest.TestCase):
     """One Telegram owner, a scripted model, a recorded outbound seam."""
 
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir=str(Path(__file__).resolve().parent))
+        self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.store = QuickStore(Path(self.temp.name) / 'data')
         self.sent = []
@@ -163,12 +162,10 @@ class TranscriptQualificationTests(TruthIntegrityTestCase):
         self.assertIs(row['qualifier']['verified'], False)
         self.assertEqual(row['qualifier']['label'], '일부 완료')
         self.assertIn('소유자가 이 미리보기를 승인해야 실제 일정에 반영됩니다.', row['qualifier']['cause'])
-        # #820: the bubble delivers the AI's answer under the truth header and the
-        # cause (the approval still pending); nothing reached the calendar.
-        self.assertTrue(bubble.startswith(TERMINAL_PARTIAL_HEADER))
-        self.assertIn('소유자가 이 미리보기를 승인해야 실제 일정에 반영됩니다.', bubble)
-        self.assertIn(TERMINAL_ANSWER_LABEL + '\n' + CLAIM, bubble)
-        self.assertLess(bubble.index('승인해야'), bubble.index(CLAIM))
+        # #820/#847: the bubble delivers the AI's answer first, then the step's
+        # own next step (the approval still pending); nothing reached the calendar.
+        self.assertEqual(bubble, CLAIM + '\n\n소유자가 이 미리보기를 승인해야 실제 일정에 반영됩니다.')
+        self.assertNotIn(TERMINAL_PARTIAL_HEADER, bubble)
         self.assertEqual(self.calendar_calls, [])
 
     def test_the_home_conversation_and_project_view_carry_the_same_qualifier(self):
@@ -345,9 +342,10 @@ class IncompleteEvidenceOutcomeTests(TruthIntegrityTestCase):
 
     def assert_partial_and_qualified(self, job, bubble, claim):
         self.assertEqual(job['status'], 'partial', job.get('error'))
-        # #752: only reads fell short, so the reply follows the truth header, labelled.
-        self.assertTrue(bubble.startswith(TERMINAL_PARTIAL_HEADER), bubble[:60])
-        self.assertLess(bubble.index(TERMINAL_ANSWER_LABEL), bubble.index(claim))
+        # #752/#847: only reads fell short, so the reply comes first, then one note.
+        self.assertTrue(bubble.startswith(claim), bubble[:60])
+        self.assertTrue(bubble.endswith('\n\n' + job['owner_note']), bubble)
+        self.assertNotIn(TERMINAL_PARTIAL_HEADER, bubble)
         row = self.assistant_row(job['id'])
         self.assertIn(claim, row['content'], 'the reply is preserved')
         self.assertEqual(row['qualifier']['outcome'], 'partial')
@@ -415,8 +413,8 @@ class FallbackTextTests(TruthIntegrityTestCase):
         # #657: nothing claimed completion, so the Work is partial; AgentOS's
         # own truth header is the only "완료" in the bubble.
         self.assertEqual(job['status'], 'partial')
-        self.assertTrue(bubble.startswith(TERMINAL_PARTIAL_HEADER))
-        for text in (job['response'], bubble[len(TERMINAL_PARTIAL_HEADER):]):
+        self.assertTrue(bubble.startswith(job['response']), bubble)
+        for text in (job['response'], bubble):
             self.assertNotIn('완료했습니다', text)
 
     def test_an_unconfigured_search_is_not_reported_as_finding_nothing(self):
@@ -455,9 +453,11 @@ class DelegationOutcomeTests(TruthIntegrityTestCase):
         self.assertEqual(job['status'], 'failed')
         self.assertIn(DELEGATE_FAILED, job['error'])
         self.assertNotIn(TERMINAL_PARTIAL_HEADER, bubble)
-        # #752: only a read failed, so the answer follows the failure, labelled.
-        self.assertLess(bubble.index(job['owner_cause']), bubble.index(TERMINAL_ANSWER_LABEL))
-        self.assertLess(bubble.index(TERMINAL_ANSWER_LABEL), bubble.index('정리했습니다'))
+        # #752/#847: only a read failed, so the answer comes first, then the failed note.
+        self.assertTrue(bubble.startswith(job['response']), bubble)
+        self.assertIn('정리했습니다', bubble)
+        self.assertTrue(bubble.endswith('\n\n' + job['owner_note']), bubble)
+        self.assertNotIn(job['owner_cause'], bubble)
         # Diagnostic material stays inspectable without upgrading the outcome.
         card = self.card(job['id'])
         self.assertEqual(card['qualifier']['outcome'], 'failed')

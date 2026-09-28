@@ -27,7 +27,7 @@ POINT = {'latitude': 37.5665, 'longitude': 126.978, 'horizontal_accuracy': 12.5}
 
 class ContextInputCase(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir=str(Path(__file__).resolve().parent))
+        self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / 'data'
         self.store = QuickStore(self.root)

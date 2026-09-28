@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 .runtime/
 *.egg-info/
+tests/tmp*/

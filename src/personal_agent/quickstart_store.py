@@ -79,6 +79,8 @@ class QuickStore:
             # Neither is ever sent to a model: they are not transcript rows.
             if 'owner_cause' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN owner_cause TEXT')
             if 'owner_verified' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN owner_verified TEXT')
+            # #847: the one closing note after a delivered answer (no tool names).
+            if 'owner_note' not in columns: db.execute('ALTER TABLE jobs ADD COLUMN owner_note TEXT')
             # #626: the owner's own source time/identity, separate from
             # ``created`` (local persistence time).  Nullable and never
             # backfilled: an unknown source time stays unknown.

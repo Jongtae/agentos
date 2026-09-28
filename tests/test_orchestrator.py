@@ -909,16 +909,17 @@ class OwnerQuestion(Harness):
         self.assertEqual(len(self.asked_plans), 2, 'the attempt was re-delegated')
 
     def test_a_short_attempt_still_delivers_its_reply(self):
-        """#820: a reply judged not to serve the message is delivered under the truthful header."""
-        from personal_agent.conversation_projection import TERMINAL_ANSWER_LABEL
+        """#820/#847: a reply judged not to serve the message is delivered first, then one note."""
+        from personal_agent.conversation_projection import TERMINAL_FAILED_NOTE
         self.engine.answers = ['어느 날짜로 할까요?']
         self.script([plan('codex', 'Answer.')], goals=[False])
         job, row = self.run_work('찾아줘')
         self.assertEqual(self.events(job, 'evaluated')[-1][1]['outcome'], 'not_reached')
         self.assertEqual(row['status'], 'failed')
         self.assertEqual(row['response'], '어느 날짜로 할까요?')
-        bubble = self.service.telegram_result_text(row['response'], row['owner_cause'], row['status'])
-        self.assertIn(TERMINAL_ANSWER_LABEL + '\n어느 날짜로 할까요?', bubble)
+        bubble = self.service.telegram_result_text(row['response'], row['owner_cause'], row['status'], note=row['owner_note'])
+        self.assertTrue(bubble.startswith('어느 날짜로 할까요?\n\n' + TERMINAL_FAILED_NOTE), bubble)
+        self.assertNotIn('구독 CLI', bubble)
 
     def test_the_conversation_is_redacted_before_it_is_cut(self):
         """Review P2: a cut landing inside a stored secret never leaves a fragment of it."""
@@ -2024,14 +2025,14 @@ class ThinOrchestration(Harness):
         self.assertIn(self.ACK, row['response'])
 
     def test_a_reply_judged_short_is_still_delivered_and_the_notes_never_become_the_goal(self):
-        from personal_agent.conversation_projection import TERMINAL_ANSWER_LABEL
+        from personal_agent.conversation_projection import TERMINAL_FAILED_NOTE
         self.engine.answers = [self.ACK]
         self.script([plan('codex', 'Only record the state.')], goals=[False])
         job, row = self.run_work(self.STATEMENT)
         self.assertEqual(row['status'], 'failed')
         self.assertEqual(row['response'], self.ACK)
-        bubble = self.service.telegram_result_text(row['response'], row['owner_cause'], row['status'])
-        self.assertIn(TERMINAL_ANSWER_LABEL + '\n' + self.ACK, bubble)
+        bubble = self.service.telegram_result_text(row['response'], row['owner_cause'], row['status'], note=row['owner_note'])
+        self.assertTrue(bubble.startswith(self.ACK + '\n\n' + TERMINAL_FAILED_NOTE), bubble)
         prompt = self.engine.turns[-1]['prompt']
         self.assertLess(prompt.index('Only record the state.'), prompt.index('# Current request\n' + self.STATEMENT))
         self.assertIn('never replace or narrow the owner\'s request', prompt)

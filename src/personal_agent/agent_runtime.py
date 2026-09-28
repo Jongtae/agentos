@@ -3159,7 +3159,7 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
      if withheld.advanced:successful+=1
      # 'error' is the field the owner-visible cause is built from; without it
      # the turn would report a failure it could not explain.
-     record(name,'failed',json.dumps({**trace,'error':withheld.reason},ensure_ascii=False))
+     record(name,'failed',json.dumps({**trace,'state':'withheld','error':withheld.reason},ensure_ascii=False))
     elif proposed:
      proposals+=1;trail.append((action,'proposed'))
      observed=verified_text(name,result)

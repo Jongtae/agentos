@@ -692,15 +692,20 @@ class AgencyReportEntryPointTests(unittest.TestCase):
         row, failed = self.run_turn('내일 성남 날씨랑 비 올 확률 알려줘', script, Network(), route)
         self.assertEqual(row['status'], 'partial')
         self.assertEqual([event['trace']['code'] for event in failed], ['tool_failed'])
-        bubble = terminal_text(row['response'], row['owner_cause'], 'partial', verified=row['owner_verified'])
-        # One bubble, in order (#752): the truth header, what failed, what
-        # stayed unknown, the proposed next step, then the AI's own answer
-        # under the label, with its sources.
-        from personal_agent.conversation_projection import TERMINAL_ANSWER_LABEL, TERMINAL_VERIFIED_LABEL
-        # The tool reason is cut to its first sentence in the owner's bubble (#752).
-        parts = ['일부 단계만 완료했습니다.', '날씨 조회: 도시를 찾지 못했습니다.\n', '확인하지 못한 부분: 내일 강수 확률',
-                 '다음 단계 제안: 날씨 예보 페이지를 열어 강수 확률을 확인하기', TERMINAL_ANSWER_LABEL,
-                 '내일 성남은 22°C로 보입니다.', 'https://weather.example/seongnam']
+        bubble = terminal_text(row['response'], row['owner_cause'], 'partial', verified=row['owner_verified'],
+                               note=row['owner_note'])
+        # The record keeps the typed report in order (#657): what failed (first
+        # sentence, #752), what stayed unknown, the proposed next step.
+        self.assertEqual(row['owner_cause'].split('\n'), ['완료하지 못한 부분 — 날씨 조회: 도시를 찾지 못했습니다.',
+                                                          '확인하지 못한 부분: 내일 강수 확률',
+                                                          '다음 단계 제안: 날씨 예보 페이지를 열어 강수 확률을 확인하기'])
+        # One bubble, in order (#847): the AI's own answer with its sources,
+        # then one note - the step counted, the next step as a sentence.
+        from personal_agent.conversation_projection import TERMINAL_VERIFIED_LABEL
+        parts = ['내일 성남은 22°C로 보입니다.', 'https://weather.example/seongnam',
+                 '한 단계는 확인하지 못했어요. 날씨 예보 페이지를 열어 강수 확률을 확인하기']
+        for machinery in ('일부 단계만', '날씨 조회', '확인하지 못한 부분:', '다음 단계 제안:'):
+            self.assertNotIn(machinery, bubble)
         positions = [bubble.find(part) for part in parts]
         self.assertNotIn(-1, positions, bubble)
         self.assertEqual(positions, sorted(positions), bubble)

@@ -11,12 +11,12 @@ carried the real cause; Telegram carried the model's sentence, because
 and never saw the outcome at all (#476).
 
 #752 (owner contract change): a failed or partial Work's AI answer reaches
-the owner, but never *as* the result.  The truth header and what did not
-complete come first; the model's text follows only under
-`TERMINAL_ANSWER_LABEL`.  The answer is withheld on every surface (Telegram
-and the web card agree) only when a state-changing action failed, was
-withheld or left incomplete in that Work: the answer may claim that action
-(#476, #488).  A failed read does not withhold it.
+the owner, but never *as* the result.  #847 (owner observation 2026-09-28):
+the answer is the message; one closing note follows it - the Work's
+``owner_note``: a count of the steps not confirmed, a withheld step's own
+next step (approve, log in), the worker's question - never a header, a
+tool name or a tool error.  Step detail stays in 상세 (``error``,
+``owner_cause``).  A failed state-changing step still never reads as done.
 
 The last bubble is what people read, so these are end-to-end through
 `run_one` + `deliver_one` with an injected Telegram transport, asserting on
@@ -28,9 +28,9 @@ import time
 import unittest
 from pathlib import Path
 
-from personal_agent.conversation_projection import (TERMINAL_ANSWER_LABEL, TERMINAL_FAILED_HEADER,
-                                                    TERMINAL_NEXT_ACTION, TERMINAL_PARTIAL_HEADER,
-                                                    TERMINAL_VERIFIED_LABEL)
+from personal_agent.conversation_projection import (TERMINAL_FAILED_HEADER, TERMINAL_FAILED_NOTE,
+                                                    TERMINAL_INTERRUPTED_NOTE, TERMINAL_NEXT_ACTION,
+                                                    TERMINAL_PARTIAL_HEADER, TERMINAL_VERIFIED_LABEL)
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import TELEGRAM_CARD_GRACE_SECONDS, AgentService
 from personal_agent.quickstart_store import QuickStore
@@ -44,7 +44,7 @@ class TerminalResultTestCase(unittest.TestCase):
     """One Telegram owner, one scripted model, one recorded outbound seam."""
 
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir=str(Path(__file__).resolve().parent))
+        self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.store = QuickStore(Path(self.temp.name) / 'data')
         self.sent = []
@@ -124,13 +124,20 @@ class TerminalResultTestCase(unittest.TestCase):
         bubble = self.sent[before] if len(self.sent) > before else None
         return job, bubble
 
-    def assertLabelled(self, bubble, header, cause, claim):
-        """#752: header, then the cause, then the label, then the model text - in that order, once."""
-        self.assertTrue(bubble.startswith(header), bubble[:60])
-        self.assertLess(bubble.index(cause), bubble.index(TERMINAL_ANSWER_LABEL), bubble)
-        self.assertLess(bubble.index(TERMINAL_ANSWER_LABEL), bubble.index(claim), bubble)
-        self.assertEqual(bubble.count(claim), 1, 'the claim is never stated above the label')
-        self.assertNotIn(TERMINAL_NEXT_ACTION, bubble)
+    def assertAnswerFirst(self, bubble, job, claim):
+        """#847: the answer, then one closing note (the Work's owner_note) - no header, no tool names."""
+        self.assertTrue(bubble.startswith(job['response']), bubble[:60])
+        self.assertIn(claim, bubble)
+        self.assertEqual(bubble.count(claim), 1)
+        self.assertTrue(job['owner_note'], 'a failed/partial Work records its closing note')
+        self.assertTrue(bubble.endswith('\n\n' + job['owner_note']), bubble)
+        for machinery in (TERMINAL_FAILED_HEADER, TERMINAL_PARTIAL_HEADER, TERMINAL_NEXT_ACTION, '완료하지 못한 부분',
+                          '확인되지 않았어요', 'AI 답변'):
+            self.assertNotIn(machinery, bubble)
+        for tool, _arguments in self.plan:
+            self.assertNotIn(tool, bubble, 'no tool id in the bubble')
+        # The note is one sentence or a few, never a labelled block.
+        self.assertNotIn('\n', job['owner_note'])
 
     def card(self, job):
         return next(task for task in self.service.task_progress(job['id'])['tasks'] if task['id'] == job['id'])
@@ -144,7 +151,7 @@ class TerminalResultTestCase(unittest.TestCase):
 
 
 class FailedTurnTests(TerminalResultTestCase):
-    """A failed READ does not withhold the answer (#752); it is labelled below what failed."""
+    """A failed READ does not withhold the answer (#752); the answer comes first, then one note (#847)."""
 
     def test_a_failed_calendar_query_labels_the_claimed_schedule_after_the_failure(self):
         """#476 case 1. Calendar is not configured, so the tool refuses."""
@@ -155,7 +162,7 @@ class FailedTurnTests(TerminalResultTestCase):
         job, bubble = self.ask('내일 일정 뭐 있어?')
         self.assertEqual(job['status'], 'failed', job.get('error'))
         self.assertIsNotNone(bubble)
-        self.assertLabelled(bubble, TERMINAL_FAILED_HEADER, job['owner_cause'], '팀 회의 하나입니다')
+        self.assertAnswerFirst(bubble, job, '팀 회의 하나입니다')
 
     def test_a_failed_file_read_labels_the_claimed_summary_after_the_failure(self):
         """#476 case 4."""
@@ -165,7 +172,8 @@ class FailedTurnTests(TerminalResultTestCase):
         self.text = '출장 계획 요약: 9월 3일 출발, 9월 7일 귀국입니다.'
         job, bubble = self.ask('내 출장 계획 파일 요약해줘')
         self.assertEqual(job['status'], 'failed', job.get('error'))
-        self.assertLabelled(bubble, TERMINAL_FAILED_HEADER, job['owner_cause'], '9월 3일 출발')
+        self.assertAnswerFirst(bubble, job, '9월 3일 출발')
+        self.assertEqual(job['owner_note'], TERMINAL_FAILED_NOTE, 'a tool error is counted, never spoken')
 
     def test_a_refused_research_request_labels_the_comparison_after_the_refusal(self):
         """#476 case 3 — a refused public read, then an apparent answer.
@@ -181,7 +189,8 @@ class FailedTurnTests(TerminalResultTestCase):
         self.text = '관찰됨: Model A 30시간 재생. 확인되지 않음: 가격·재고.'
         job, bubble = self.ask('노이즈캔슬링 헤드폰 비교해줘')
         self.assertEqual(job['status'], 'partial', job.get('error'))
-        self.assertLabelled(bubble, TERMINAL_PARTIAL_HEADER, job['owner_cause'], '관찰됨')
+        self.assertAnswerFirst(bubble, job, '관찰됨')
+        self.assertEqual(job['owner_note'], '한 단계는 확인하지 못했어요.')
 
 
 class PartialTurnTests(TerminalResultTestCase):
@@ -206,18 +215,20 @@ class PartialTurnTests(TerminalResultTestCase):
         job, bubble = self.partial_turn('팀 회의 취소 초안을 만들었습니다. 승인해 주세요.')
         self.assertEqual(job['status'], 'partial', job.get('error'))
         self.assertNotIn('처리가 끝났습니다', bubble)
-        self.assertTrue(bubble.startswith('일부 단계만 완료했습니다.'), bubble[:60])
+        # #847: the answer first, then the one note; the old header is gone.
+        self.assertNotIn('일부 단계만 완료했습니다', bubble)
+        self.assertTrue(bubble.endswith('\n\n한 단계는 확인하지 못했어요.'), bubble)
 
     def test_a_partial_turn_delivers_a_claim_of_an_action_that_did_not_run_after_the_truth(self):
         """#476 case 2 / #820: the draft action did nothing; the answer is still delivered.
 
-        What did not complete comes first; the answer follows under the
-        unverified label, so the claim never reads as a result.
+        The answer comes first; the closing note says a step was not
+        confirmed (#847), so the claim never reads as a result.
         """
         claim = '팀 회의 취소 초안을 만들었습니다. 승인해 주세요.'
         job, bubble = self.partial_turn(claim)
         self.assertEqual(job['status'], 'partial')
-        self.assertLabelled(bubble, TERMINAL_PARTIAL_HEADER, job['owner_cause'], '초안을 만들었습니다')
+        self.assertAnswerFirst(bubble, job, '초안을 만들었습니다')
         self.assertEqual(job['response'], claim, 'the text must be preserved, not deleted')
 
     def test_a_partial_turn_names_what_did_not_complete(self):
@@ -226,15 +237,15 @@ class PartialTurnTests(TerminalResultTestCase):
         # #598 X1: the same observed cause, in owner words; the technical
         # cause with the tool id stays on the Work record for Task detail.
         self.assertTrue(job['owner_cause'])
-        self.assertIn(job['owner_cause'], bubble,
-                      'the bubble must carry the observed cause, not only a header')
+        self.assertIn('일정 초안: Google Calendar가 로컬에 구성되어 있지 않습니다.', job['owner_cause'])
         self.assertIn('calendar_draft_cancel', job['error'])
+        # #847: with the answer delivered, the bubble carries neither the
+        # tool id nor the tool's error; the step is counted and stays in 상세.
         self.assertNotIn('calendar_draft_cancel', bubble)
-        # #752: the tool reason is cut to its first sentence in the bubble.
-        self.assertIn('Google Calendar가 로컬에 구성되어 있지 않습니다.', bubble)
-        self.assertNotIn('먼저 캘린더를 연결해 주세요', bubble)
-        # #820: with the answer delivered, it follows what did not complete.
-        self.assertLess(bubble.index(job['owner_cause']), bubble.index(TERMINAL_ANSWER_LABEL))
+        self.assertNotIn('Google Calendar가 로컬에 구성되어 있지 않습니다', bubble)
+        self.assertNotIn(job['owner_cause'], bubble)
+        self.assertEqual(job['owner_note'], '한 단계는 확인하지 못했어요.')
+        self.assertTrue(bubble.endswith('\n\n' + job['owner_note']), bubble)
 
 
 class DeliveredAnswerTests(TerminalResultTestCase):
@@ -251,8 +262,9 @@ class DeliveredAnswerTests(TerminalResultTestCase):
         job, bubble = self.ask('이건 기억하지 마. 그냥 방금 이야기만 정리해 줘', card=True)
         self.assertEqual(job['status'], 'failed', job.get('error'))
         self.assertEqual(job['response'], self.text)
-        # Telegram: header and cause first, then the answer under the unverified label.
-        self.assertLabelled(bubble, TERMINAL_FAILED_HEADER, job['owner_cause'], '기억해 두었습니다')
+        # Telegram: the answer first, then the note that the request was not finished (#847).
+        self.assertAnswerFirst(bubble, job, '기억해 두었습니다')
+        self.assertEqual(job['owner_note'], TERMINAL_FAILED_NOTE)
         # The web serves the same answer, in the jobs and in the transcript.
         [served] = [row for row in self.service.owner_jobs(self.store.jobs()) if row['id'] == job['id']]
         self.assertEqual(served['response'], self.text)
@@ -283,7 +295,7 @@ class DeliveredAnswerTests(TerminalResultTestCase):
         job, bubble = self.ask('내일 일정 뭐 있어?')
         self.assertEqual(job['status'], 'failed')
         self.assertTrue(self.card(job)['result_available'])
-        self.assertIn(TERMINAL_ANSWER_LABEL, bubble)
+        self.assertAnswerFirst(bubble, job, self.text)
         [served] = [row for row in self.service.owner_jobs(self.store.jobs()) if row['id'] == job['id']]
         self.assertEqual(served['response'], self.text, 'the web keeps a read-only failure answer')
 
@@ -321,11 +333,11 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
         card = self.card(job)
         self.assertEqual(card['status_label'], '확인 필요')
         self.assertTrue(card['result_available'])
-        self.assertLabelled(bubble, TERMINAL_FAILED_HEADER, job['owner_cause'], self.text)
-        # ...and the cause the web card carries is the one Telegram carries,
-        # Telegram in owner words (#598 X1) and the card with the exact id.
+        self.assertAnswerFirst(bubble, job, self.text)
+        # ...and the card carries the technical cause with the exact id; the
+        # bubble carries the step's own owner-facing next step (#598 X1, #847).
         self.assertEqual(card['error'], job['error'])
-        self.assertIn(job['owner_cause'], bubble)
+        self.assertNotIn(job['owner_cause'], bubble)
         self.assertIn(job['error'].split(': ', 1)[1].split('. ')[0], bubble)
         self.assertNotIn('calendar_query', bubble)
 
@@ -342,7 +354,7 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
         self.assertEqual(card['status_label'], '확인 필요')
         self.assertTrue(card['result_available'], 'the web offers it exactly as Telegram does')
         self.assertEqual(card['error'], job['error'])
-        self.assertLabelled(bubble, TERMINAL_PARTIAL_HEADER, job['owner_cause'], self.text)
+        self.assertAnswerFirst(bubble, job, self.text)
 
     def test_the_card_above_a_partial_bubble_does_not_announce_a_result(self):
         """Independent review of #486 found the bubble alone was not enough.
@@ -363,8 +375,8 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
         # Exact, not a substring: '일부 단계만 완료했습니다. 아래 결과를 확인하세요.'
         # would satisfy a loose assertion while re-making the claim.
         self.assertEqual(self.cards[-1], '일부 단계만 완료했습니다. 아래 안내를 확인하세요.')
-        # #820: the answer is delivered below the truth, under the unverified label.
-        self.assertLess(bubble.index(TERMINAL_ANSWER_LABEL), bubble.index(self.text))
+        # #847: the bubble is the answer, then the note.
+        self.assertTrue(bubble.startswith(self.text), bubble)
 
     def test_the_card_above_a_succeeded_bubble_still_announces_the_result(self):
         """The opposing pin for the card."""
@@ -386,10 +398,10 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
         only, so the bubble must not point the owner at a web result that is
         not there, and must not claim steps completed that may never have run.
         """
-        # #820: an answer it has is delivered, under the interrupted header and the unverified label.
+        # #820/#847: an answer it has is delivered first, then the one interrupted note.
         text = AgentService.telegram_result_text('모두 처리했습니다.', '중단됨', 'interrupted')
-        self.assertEqual(text, '이 요청은 중단되었습니다. 자동으로 다시 실행하지 않았습니다.'
-                         '\n\n중단됨\n\nAI 답변 (위 부분은 확인되지 않았어요):\n모두 처리했습니다.')
+        self.assertEqual(text, '모두 처리했습니다.\n\n' + TERMINAL_INTERRUPTED_NOTE)
+        self.assertEqual(TERMINAL_INTERRUPTED_NOTE, '중간에 멈춰서 끝까지 확인하지 못했어요.')
         text = AgentService.telegram_result_text(None, '중단됨', 'interrupted')
         self.assertNotIn('일부 단계만', text)
         # A literal, not the constants: asserting against TERMINAL_* would
@@ -423,8 +435,8 @@ class SurfaceConsistencyTests(TerminalResultTestCase):
                                                     'end': '2026-09-25T00:00:00+09:00',
                                                     'timezone': 'Asia/Seoul'})]
         self.text = '내일 일정은 팀 회의 하나입니다.'
-        _job, bubble = self.ask('내일 일정 뭐 있어?')
-        self.assertIn(TERMINAL_ANSWER_LABEL, bubble)
+        job, bubble = self.ask('내일 일정 뭐 있어?')
+        self.assertAnswerFirst(bubble, job, self.text)
         self.assertNotIn('다음 단계를 확인하세요', bubble)
 
 
@@ -433,42 +445,44 @@ class UnsupportedTextNeverTerminalTests(TerminalResultTestCase):
 
     The end-to-end cases above each pin one scenario. This pins the rule they
     share, so a future scenario nobody wrote a test for is covered too: the
-    model text of a failed/partial turn appears only after the truth header,
-    the cause and `TERMINAL_ANSWER_LABEL` (#752).
+    model text of a failed/partial turn is followed by exactly one closing
+    note, and the technical cause (tool ids) never enters the bubble (#847).
     """
 
     CLAIM = '일정을 만들었고 메일도 보냈습니다.'
 
-    def assertOnlyAfterTheLabel(self, text, header, cause):
-        self.assertTrue(text.startswith(header), text)
-        label = text.index(TERMINAL_ANSWER_LABEL)
-        self.assertNotIn(self.CLAIM, text[:label])
-        self.assertTrue(text.endswith(TERMINAL_ANSWER_LABEL + '\n' + self.CLAIM), text)
-        if cause:
-            self.assertLess(text.index(cause), label)
-        self.assertNotIn(TERMINAL_NEXT_ACTION, text)
+    def assertAnswerThenNote(self, text, note):
+        self.assertTrue(text.startswith(self.CLAIM + '\n\n'), text)
+        self.assertEqual(text[len(self.CLAIM) + 2:], note)
+        for machinery in (TERMINAL_FAILED_HEADER, TERMINAL_PARTIAL_HEADER, TERMINAL_NEXT_ACTION, '완료하지 못한 도구 실행',
+                          'calendar_query', 'read_file', 'AI 답변'):
+            self.assertNotIn(machinery, text)
 
-    def test_a_failed_outcome_renders_the_model_text_only_after_the_label(self):
+    def test_a_failed_outcome_renders_the_model_text_then_one_note(self):
         for cause in ('완료하지 못한 도구 실행 — calendar_query: 거부', '', None):
             with self.subTest(cause=cause):
                 text = AgentService.telegram_result_text(self.CLAIM, cause, 'failed')
-                self.assertIn('완료하지 못했습니다', text)
-                self.assertOnlyAfterTheLabel(text, TERMINAL_FAILED_HEADER, cause)
+                self.assertAnswerThenNote(text, TERMINAL_FAILED_NOTE)
+        text = AgentService.telegram_result_text(self.CLAIM, '완료하지 못한 도구 실행 — calendar_query: 거부', 'failed',
+                                                 note='요청하신 작업은 끝내지 못했어요. 승인이 필요합니다.')
+        self.assertAnswerThenNote(text, '요청하신 작업은 끝내지 못했어요. 승인이 필요합니다.')
 
-    def test_a_partial_outcome_renders_the_model_text_only_after_the_label(self):
+    def test_a_partial_outcome_renders_the_model_text_then_one_note(self):
         for cause in ('완료하지 못한 도구 실행 — read_file: 거부', '', None):
             with self.subTest(cause=cause):
                 text = AgentService.telegram_result_text(self.CLAIM, cause, 'partial', verified='찾은 파일:\n- a.txt')
-                self.assertIn('일부 단계만 완료했습니다', text)
-                self.assertOnlyAfterTheLabel(text, TERMINAL_PARTIAL_HEADER, cause)
+                self.assertAnswerThenNote(text, '일부 단계는 확인하지 못했어요.')
                 self.assertNotIn(TERMINAL_VERIFIED_LABEL, text)
+        text = AgentService.telegram_result_text(self.CLAIM, None, 'partial', note='한 단계는 확인하지 못했어요.')
+        self.assertAnswerThenNote(text, '한 단계는 확인하지 못했어요.')
 
     def test_a_withheld_answer_never_renders_the_model_text(self):
         """A withheld answer reaches the renderer as ``None``; nothing of it appears."""
         for outcome in ('failed', 'partial'):
             with self.subTest(outcome=outcome):
-                text = AgentService.telegram_result_text(None, '원인', outcome)
-                self.assertNotIn(TERMINAL_ANSWER_LABEL, text)
+                text = AgentService.telegram_result_text(None, '원인', outcome, note='한 단계는 확인하지 못했어요.')
+                self.assertNotIn('확인하지 못했어요', text)
+                self.assertIn('원인', text)
                 self.assertTrue(text.endswith(TERMINAL_NEXT_ACTION), text)
 
     def test_an_unknown_status_keeps_the_previous_behaviour(self):

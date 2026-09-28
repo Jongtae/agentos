@@ -675,6 +675,13 @@ def native_searches(engine_id, records):
     for any other tool error; ``denied`` for a permission denial.  Only what
     the CLI reported is kept: a search that reported no URL has none, and a
     reported URL with whitespace or control characters is dropped.
+
+    Observed (#854, codex-cli 0.153.4, ``exec --json`` with
+    ``web_search="live"``): the ``web_search`` item carries only ``query``
+    and ``action``; no ``results``, no annotations, no citations.  The only
+    URL of the turn is markdown prose inside the final ``agent_message``,
+    which is the model's own claim, not a reported search result, so it is
+    not recorded as a source (``tests/fixtures/codex_exec_web_search.jsonl``).
     """
     if engine_id == 'codex':
         return _codex_searches(records)[:MAX_NATIVE_SEARCHES]

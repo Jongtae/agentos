@@ -57,7 +57,7 @@ from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_NO, JUDGMENT_YES,
                                    ConnectorHandoff,
                                    ConversationFocus,
                                    ConversationHandoffError, IntentClassifier,
-                                   INTENT_AMBIGUOUS, INTENT_CALENDAR_CREATE, AUTHORITY_RULE, INTENT_LABELS,
+                                   INTENT_AMBIGUOUS, INTENT_CALENDAR_CREATE, AUTHORITY_OWNER, AUTHORITY_RULE, INTENT_LABELS,
                                    IntentDecision,
                                    INTENT_GREETING, INTENT_KNOWLEDGE,
                                    INTENT_MAIL_SEARCH, INTENT_NOTE_CREATE, INTENT_NOTE_LIST, INTENT_DRIVE_READ,
@@ -551,7 +551,7 @@ class AgentService:
         """``settings_read`` / ``settings_change`` bound to one Work (#814).
 
         A change is a draft bound to this conversation; the owner confirms it
-        here (Telegram button, ``/settings 확인 <id>``), never the model.
+        here (the 적용 button or a plain yes, #855), never the model.
         """
         return self.settings_orchestrator.work_tools(self.settings_owner(job),job['channel'],job['id'],
                                                      telegram=answerable_work(job))
@@ -606,6 +606,40 @@ class AgentService:
                 and job.get('chat_id')==cfg.get('user_id')):
             try:self.telegram.send_message(job['chat_id'],text)
             except ProviderError:LOG.warning('settings follow-up not delivered work=%s',job.get('id'))
+
+    def settings_draft_answer(self, job, prompt):
+        """``'confirm'``, ``'cancel'`` or None: how the owner's typed message answers this conversation's pending drafts (#855).
+
+        Two DecisionEngine binary judgments over the drafts' summary and the
+        message (confirm first, then decline); unavailable or neither leaves
+        the drafts pending and the message is handled as a normal turn.  The
+        caller has already required ``owner_typed`` (#814 review P1).
+        """
+        rows=self.settings_orchestrator.pending_for_conversation(self.settings_owner(job),job['channel'])
+        if not rows or not isinstance(prompt,str):return None
+        pending='\n'.join(row['effect']+(f" ({row['note']})" if row.get('note') else '') for row in rows)
+        if self.decision_judge.settings_draft_confirmed(pending,prompt).outcome==JUDGMENT_YES:return 'confirm'
+        if self.decision_judge.settings_draft_declined(pending,prompt).outcome==JUDGMENT_YES:return 'cancel'
+        return None
+
+    def work_settings_draft(self, work_id, body):
+        """The web's 적용 / 바꾸지 않음 buttons on one Work's pending drafts (#855): the Telegram button's path."""
+        job=self.store.job(work_id) if isinstance(work_id,str) else None
+        if not job:raise ValueError('작업을 찾지 못했습니다.')
+        action=(body or {}).get('action') if isinstance(body,dict) else None
+        if action not in ('confirm','cancel'):raise ValueError('적용 또는 취소만 할 수 있습니다.')
+        rows=self.settings_orchestrator.pending_for_work(job['id'])
+        if not rows:raise ValueError('확인을 기다리는 설정 변경이 없습니다.')
+        result=self.settings_orchestrator.settle_pending(self.settings_owner(job),job['channel'],rows,action=='confirm',
+                                                         notify=lambda text,job=job:self.settings_followup(job,text))
+        LOG.info('settings drafts %s by owner web button work=%s count=%s',action,job['id'],len(rows))
+        # Review P2: the receipt outlives the buttons - it is appended to the proposing Work's
+        # own reply (as the Telegram tap edits its confirmation message), so a refresh that
+        # removes the settled drafts still shows what happened.
+        if result.get('response'):
+            with self.store.db() as db:
+                db.execute("UPDATE jobs SET response=COALESCE(response,'')||? WHERE id=?",('\n\n'+result['response'],job['id']))
+        return result
 
     def queue_settings_confirmation(self, job):
         """Offer this Work's settings drafts to the paired owner once, with buttons (#814)."""
@@ -2404,6 +2438,9 @@ class AgentService:
         observed=[]
         model_events=self._model_attempts(job['id'] for job in jobs)
         retained_rows=[]
+        awaiting_drafts={}
+        for row in self.settings_orchestrator.pending_drafts():
+            awaiting_drafts.setdefault(row.get('work_id'),[]).append(row)
         for job in jobs:
             kind,label=self._progress_status(job)
             events=self.store.task_events(job['id'])
@@ -2423,6 +2460,9 @@ class AgentService:
             # The same typed qualifier the transcript and model context use
             # (#494), so the card cannot disagree with them.
             task['qualifier']=turn_qualifier(job.get('status'))
+            # #855: the settings drafts this Work still offers the owner (id and wording only; no digest).
+            task['settings_drafts']=[{'id':row['id'],'effect':row['effect'],'note':row.get('note'),'reason':row.get('reason'),
+                                      'expires_at':row.get('expires_at')} for row in awaiting_drafts.get(job['id'],())]
             # #845: the web's transient typing bubble shows the same observed step
             # line as the Telegram draft (#718) while the Work runs. Read model
             # only, computed per poll from recorded events; never stored.
@@ -6665,7 +6705,16 @@ class AgentService:
                 # it skips the owner-utterance judgments (relation, calendar draft,
                 # parked withdrawal) that would read the replayed words as a new turn.
                 continued=continuation_request(job.get('request_key'))
-                continuity=None if resumed or continued else self.continuity_relation(owner_prompt,connector_owner,current_work_id=job['id'])
+                # #855: a settings draft pending in this conversation is answered by the owner's
+                # next typed message (a plain yes applies, a plain no cancels, judged by the
+                # DecisionEngine); anything else leaves it pending and this turn proceeds as usual.
+                # Review P1: judged before the generic continuity cancel (a typed no is this
+                # draft's decline, not a cancel of the finished proposal Work) and never while
+                # the pending calendar draft claims the message (its approval stays its own).
+                settings_answer=(None if resumed or continued or job.get('owner_typed')!=1
+                                 or self.calendar_conversation.claims(connector_owner,owner_prompt)
+                                 else self.settings_draft_answer(job,owner_prompt))
+                continuity=None if resumed or continued or settings_answer else self.continuity_relation(owner_prompt,connector_owner,current_work_id=job['id'])
                 if continuity:
                     relation,previous=continuity['relation'],continuity['previous']
                     self.present_turn(job)
@@ -6727,8 +6776,9 @@ class AgentService:
                 # said it literally or an AgentOS rule derived it; a
                 # DecisionEngine answer can only pick among AgentOS-declared
                 # candidates (#417) and reaches no other branch here.
-                decision=resumed_decision or self.classify_intent(prompt,calendar_pending=False if continued else None,
-                                                                  owner_id=connector_owner)
+                decision=(IntentDecision(INTENT_SETTINGS,AUTHORITY_OWNER,argument=prompt) if settings_answer else
+                          resumed_decision or self.classify_intent(prompt,calendar_pending=False if continued else None,
+                                                                   owner_id=connector_owner))
                 # A pending calendar draft claims cue-free follow-ups ("치과",
                 # "오후 4시", "승인").  Anything it does not recognise as its
                 # own - and any other intent - drops the draft, says so, and
@@ -6812,10 +6862,17 @@ class AgentService:
                 elif decision.intent==INTENT_SETTINGS:
                     work_sources.add('owner-settings')
                     # #814 review P1: only a message the owner typed confirms or cancels a draft.
-                    result=self.conversation_settings_request({'operation':'text','text':decision.argument},
-                                                              owner_id=owner, channel=job['channel'],
-                                                              owner_typed=job.get('owner_typed')==1,
-                                                              notify=lambda text,job=job:self.settings_followup(job,text))
+                    if settings_answer:
+                        # #855: the owner's typed yes/no to the pending draft, the same path as the buttons.
+                        result=self.settings_orchestrator.settle_pending(
+                            owner,job['channel'],self.settings_orchestrator.pending_for_conversation(owner,job['channel']),
+                            settings_answer=='confirm',notify=lambda text,job=job:self.settings_followup(job,text))
+                        LOG.info('settings drafts %s by owner reply work=%s',settings_answer,job['id'])
+                    else:
+                        result=self.conversation_settings_request({'operation':'text','text':decision.argument},
+                                                                  owner_id=owner, channel=job['channel'],
+                                                                  owner_typed=job.get('owner_typed')==1,
+                                                                  notify=lambda text,job=job:self.settings_followup(job,text))
                     response=self.settings_response(result)
                 elif decision.intent==INTENT_CALENDAR_CREATE:
                     work_sources.add('owner-calendar')

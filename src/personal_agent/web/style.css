@@ -524,6 +524,7 @@ details.technical details>summary{color:var(--muted)}
 .chooser-name{font-weight:600}
 .chooser-current{font-size:var(--fs-1);font-weight:400;margin-left:8px;color:var(--muted)}
 .chooser-status{font-size:var(--fs-2);color:var(--muted);overflow-wrap:anywhere}
+.chooser-failure{grid-column:1/-1;margin:0;padding-left:26px;overflow-wrap:anywhere}
 .chooser-account{grid-column:1/-1;display:grid;gap:12px;min-width:0;padding:12px;background:var(--surface-2);border:1px solid var(--line);border-radius:6px}
 .chooser-account-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .chooser-account p{margin:0}

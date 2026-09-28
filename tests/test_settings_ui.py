@@ -233,6 +233,41 @@ assert(descendants($('active-ai')).find(node=>node.dataset.disclosure==='technic
  // An in-session rejection keeps the edited model and shows an actionable failure.
  model().value='retry-model';model().oninput();gate=deferred();const currentRequest=ctx.applyAiChoice($('ai-chooser-apply'));gate.reject(new Error('current request refusal'));await currentRequest;gate=null;
  assert(dialog.open);assert.equal(model().value,'retry-model');assert.equal($('ai-chooser-feedback').textContent,'current request refusal');assert.equal($('ai-chooser-apply').disabled,false);
+ // External credential completion refreshes a clean account panel, while protecting local secret drafts.
+ dialog.close();settings=settingsFor('codex');ctx.renderExecutionConnection(settings);ctx.openAiChooser(changeButton);calls.length=0;
+ ctx.chooserPanel('openrouter');const cleanPanel=accounts()[0];assert(cleanPanel.querySelector('input[type="password"]'));
+ settings.main_ai.routes.find(route=>route.id==='openrouter').key={saved:true,saved_at:1700000002,pending:false};
+ ctx.renderExecutionConnection(settings);ctx.renderAiChooser();
+ assert.notEqual(accounts()[0],cleanPanel,'changed credential presence refreshes a clean panel');
+ assert.equal(accounts()[0].querySelector('input[type="password"]'),null,'a saved OpenRouter key no longer appears as missing');
+ assert(accountButton('바꾸기')&&accountButton('지우기'),'completed account setup exposes management actions');
+ accountButton('바꾸기').onclick();const replacement=accounts()[0].querySelector('input[type="password"]');replacement.value='synthetic-replacement-draft';replacement.focus();replacement.setSelectionRange(2,6);
+ accountButton('바꾸기').onclick();assert.equal(accounts()[0].querySelector('input[type="password"]'),replacement,'repeat replace focuses the existing editor');assert.equal(replacement.value,'synthetic-replacement-draft');assert.equal(document.activeElement,replacement);assert.equal(replacement.selectionStart,2);assert.equal(replacement.selectionEnd,6);
+ ctx.chooserPanel('');confirmDiscard();
+ ctx.chooserPanel('openai');const dirtyPanel=accounts()[0],dirtyKey=dirtyPanel.querySelector('input[type="password"]');dirtyKey.value='synthetic-draft-to-retain';dirtyKey.focus();dirtyKey.setSelectionRange(1,4);
+ settings.main_ai.routes.find(route=>route.id==='openai').key={saved:true,saved_at:1700000003,pending:false};
+ ctx.renderExecutionConnection(settings);ctx.renderAiChooser();
+ assert.equal(accounts()[0],dirtyPanel,'changed saved-key metadata never destroys unfinished credential entry');assert.equal(dirtyKey.value,'synthetic-draft-to-retain');assert.equal(document.activeElement,dirtyKey);assert.equal(dirtyKey.selectionStart,1);assert.equal(dirtyKey.selectionEnd,4);
+ const failedCandidate=settings.main_ai.routes.find(route=>route.id==='claude-code');failedCandidate.check={state:'failed',failure:'auth',checked_at:1700000010};
+ ctx.renderExecutionConnection(settings);ctx.renderAiChooser();
+ const failedRow=descendants($('ai-chooser-list')).find(node=>node.className==='chooser-row'&&node.textContent.includes('Claude Code'));
+ assert(failedRow.textContent.includes('로그인 또는 인증 실패'),'candidate failure explains the recorded reason, not only a generic failed marker');
+ assert.equal(calls.length,0,'external state rendering never initiates an account save, check or activation');
+ // A non-saving login check must not make an unrelated unsaved token disposable.
+ dialog.close();settings=settingsFor('codex',{'claude-code':sub('claude-code',{credential:false,login:{state:'signed-out'}})});ctx.renderExecutionConnection(settings);ctx.openAiChooser(changeButton);ctx.chooserPanel('claude-code');calls.length=0;
+ const pendingTokenForm=descendants(accounts()[0]).find(node=>node.className==='engine-token'),pendingToken=pendingTokenForm.querySelector('input[type="password"]');pendingToken.value='synthetic-token-while-checking';
+ gate=deferred();const pendingLogin=accountButton('로그인 확인').onclick({currentTarget:accountButton('로그인 확인')});ctx.chooserDismiss();
+ assert(dialog.open,'pending login check cannot silently discard an unsaved token');assert.equal($('ai-chooser-discard').hidden,false);assert.equal(calls.length,1);keepDiscard();assert.equal(pendingToken.value,'synthetic-token-while-checking');
+ gate.resolve({state:'signed-out'});await pendingLogin;gate=null;
+ assert(dialog.open);assert.equal(accounts()[0].querySelector('input[type="password"]'),pendingToken);assert.equal(pendingToken.value,'synthetic-token-while-checking');
+ // Completing another explicit account action invalidates an earlier apply-discard callback.
+ calls.length=0;await ctx.applyAiChoice($('ai-chooser-apply'));assert.equal($('ai-chooser-discard').hidden,false);assert.equal(calls.length,0);
+ gate=deferred();const pendingSave=pendingTokenForm.onsubmit({preventDefault(){}});assert.equal($('ai-chooser-discard').hidden,true,'starting a save clears stale discard UI');
+ settings.main_ai.routes.find(route=>route.id==='claude-code').credential=true;
+ gate.resolve({engines:[{id:'claude-code',login:{state:'token-saved'}}]});await pendingSave;gate=null;
+ assert.equal(accounts()[0].querySelector('input[type="password"]'),null);assert.equal(vm.runInContext('aiDiscardAction',ctx),null);assert.equal($('ai-chooser-discard').hidden,true);
+ confirmDiscard();assert(dialog.open,'stale discard confirmation is harmless after completed save');
+ same(calls,[{path:'/api/subscription-engines/credential',body:{engine:'claude-code',token:'synthetic-token-while-checking'}}],'stale apply callback cannot activate after token save');
 })().catch(error=>{console.error(error);process.exit(1);});
 ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});
 const telegramButton=buttonIn('telegram-current');ctx.renderTelegram({telegram:{enabled:true,paired:true,username:'fixture'},telegram_status:{message:'ok'}});

@@ -22,7 +22,10 @@ The checked-out production assets were served by the existing local browser fixt
 ## Capture asset hashes
 
 - `index.html`: `c3c62b50cd4c7335afbf6a991f80ffa3f860a8cd5f2d539ae7cc99b74f62bceb`
-- `app.js`: `a66790a651021a9c5985c21bd63140b8b4cea4844fe68d9b8bc35bde99bcc68c`
-- `style.css`: `ed82b72d36981ca321e7d5cc5c6d02989a1decce6d35c82210d22952b5439aae`
+- `app.js`: `0dceb1504cebcfa6d50785314bb8a5f4ac911feb47dbbb14ec106eb9feb4b1aa`
+- `style.css`: `ab1cec998df190e09beed0113ad6a6e4635f33993be3e17eab2a0ed3d14c1b13`
 
 Unit tests preserve credential transport shapes, async session isolation, missing-key eligibility, cached model suggestions, sidecar model clearing and API failure retention. Required CI applies to the PR head. Final integrated evidence is delivered in #784.
+
+## Consolidated review remediation
+Clean account panels rebuild when observed credential state changes; actual dirty secret drafts retain node/value/caret. OAuth completion settles the in-dialog notice. Candidate failures retain their translated reason. Repeated replacement, pending-login dismissal and saved-credential/discard callback races have explicit regression coverage. The browser walkthrough and captures were repeated on these assets.

@@ -503,7 +503,8 @@ function chooserDiscard(next,dirty=chooserDraftDirty()){
  if(!dirty){next();return;}
  aiDiscardAction=next;const box=$('ai-chooser-discard');box.hidden=false;box.querySelector('button')?.focus();
 }
-function chooserDismiss(){if(aiPending){$('ai-chooser').close();return;}chooserDiscard(()=>$('ai-chooser').close());}
+function chooserClearDiscard(){aiDiscardAction=null;$('ai-chooser-discard').hidden=true;}
+function chooserDismiss(){chooserDiscard(()=>$('ai-chooser').close(),aiPending?chooserSecretDirty():chooserDraftDirty());}
 function chooserPanel(id){if(aiPending)return;chooserDiscard(()=>{aiAccountPanel=id;aiAccountNode=null;aiKeyEditing='';aiKeyRemoving='';renderAiChooser();(aiAccountNode?.querySelector('input')||aiAccountNode?.querySelector('button')||$('ai-chooser-list').querySelector('input[name="main-ai"]:checked'))?.focus();},chooserSecretDirty());}
 function openAiChooser(opener){
  const dialog=$('ai-chooser'),main=aiSettings?.main_ai||{};aiChooserSession++;aiChoice=(main.order||[]).includes(main.current)?main.current:'';aiInitialChoice=aiChoice;aiInitialModels={};for(const route of main.routes||[])aiInitialModels[route.id]=route.model||'';
@@ -515,8 +516,8 @@ function openAiChooser(opener){
 }
 function chooserFeedback(text,error=false){const node=$('ai-chooser-feedback');node.textContent=text||'';node.classList.toggle('error',Boolean(error));if(error&&$('ai-chooser').open)node.focus();}
 async function chooserAction(button,fn){
- if(aiPending)return;const session=aiChooserSession;let completion=null;aiPending=true;renderAiChooser();chooserFeedback(t('요청이 진행 중입니다. 창을 닫아도 계속되며, 결과는 AI 설정에 표시됩니다.'));
- try{const result=await fn();completion=[result?.message||t('저장했습니다.'),false];aiNotice=completion;$('active-ai').dataset.state='';await refresh();if(session===aiChooserSession&&$('ai-chooser').open){if(result?.resetPanel){aiAccountNode=null;aiKeyEditing='';aiKeyRemoving='';}chooserFeedback(completion[0]);}}
+ if(aiPending)return;const session=aiChooserSession;let completion=null;chooserClearDiscard();aiPending=true;renderAiChooser();chooserFeedback(t('요청이 진행 중입니다. 창을 닫아도 계속되며, 결과는 AI 설정에 표시됩니다.'));
+ try{const result=await fn();completion=[result?.message||t('저장했습니다.'),false];aiNotice=completion;$('active-ai').dataset.state='';await refresh();if(session===aiChooserSession&&$('ai-chooser').open){chooserClearDiscard();if(result?.resetPanel){aiAccountNode=null;aiKeyEditing='';aiKeyRemoving='';}chooserFeedback(completion[0]);}}
  catch(error){completion=[error.message,true];aiNotice=completion;aiFeedback(error.message,true);if(session===aiChooserSession&&$('ai-chooser').open)chooserFeedback(error.message,true);}
  finally{aiPending=false;if($('ai-chooser').open){renderAiChooser();if(session!==aiChooserSession&&completion)chooserFeedback(...completion);}}
 }
@@ -538,7 +539,7 @@ function chooserAccount(route){
  }else{
   if(route.key?.saved){panel.append(element('p',t('키 저장됨 · {date}',{date:aiDate(route.key.saved_at)||t('날짜 없음')}),'field-hint'));
    if(aiKeyRemoving===route.id){panel.append(element('p',t('다시 누르면 {name} 키를 지웁니다.',{name:route.name}),'field-hint'),settingsAction(t('지우기 확인'),event=>chooserAction(event.currentTarget,async()=>{await api('/api/main-ai/key',{provider:route.id,key:''});return {resetPanel:true,message:t('{name} 키를 지웠습니다. 다른 AI로 자동 전환하지 않습니다.',{name:route.name})};}),'destructive'),settingsAction(t('취소'),()=>{aiKeyRemoving='';aiAccountNode=null;renderAiChooser();}));}
-   else panel.append(settingsAction(t('바꾸기'),()=>{aiKeyEditing=route.id;aiAccountNode=null;renderAiChooser();aiAccountNode.querySelector('input')?.focus();}),settingsAction(t('지우기'),()=>chooserDiscard(()=>{aiKeyRemoving=route.id;aiKeyEditing='';aiAccountNode=null;renderAiChooser();},chooserSecretDirty()),'destructive'));
+   else panel.append(settingsAction(t('바꾸기'),()=>{if(aiKeyEditing===route.id){aiAccountNode.querySelector('input')?.focus();return;}aiKeyEditing=route.id;aiAccountNode=null;renderAiChooser();aiAccountNode.querySelector('input')?.focus();}),settingsAction(t('지우기'),()=>chooserDiscard(()=>{aiKeyRemoving=route.id;aiKeyEditing='';aiAccountNode=null;renderAiChooser();},chooserSecretDirty()),'destructive'));
   }
   if(!route.key?.saved||aiKeyEditing===route.id)panel.append(chooserKeyForm(route));
   if(route.id==='openrouter')panel.append(settingsAction(typeof openRouterFlowPending==='function'&&openRouterFlowPending()?t('연결 이어가기'):t('계정 연결'),()=>startOpenRouter()));
@@ -549,11 +550,12 @@ function chooserRow(route,main){
  const row=element('div',undefined,'chooser-row'),label=element('label',undefined,'chooser-option'),radio=element('input'),copy=element('span',undefined,'chooser-copy');radio.type='radio';radio.name='main-ai';radio.value=route.id;radio.checked=aiChoice===route.id;
  const selectable=route.kind==='subscription'?route.installed:route.key?.saved;
  let status=route.kind==='subscription'?t(!route.installed?'설치 안 됨':({'signed-in':'로그인 확인됨','signed-out':'로그인 필요',unchecked:'로그인 확인 전',unknown:'로그인 상태 확인 필요','token-saved':'토큰 저장됨 · 로그인 확인 전',sidecar:'실행 환경에서 인증 관리'}[route.login?.state]||'로그인 확인 전')):route.key?.saved?t('키 저장됨 · {date}',{date:aiDate(route.key.saved_at)||t('날짜 없음')}):t('키 없음');
- if(route.check?.state==='failed'&&!(route.login?.state==='signed-in'&&Number(route.login?.checked_at)>Number(route.check?.checked_at)))status+=' · '+t('마지막 확인 실패');radio.disabled=!selectable||aiPending;
- radio.onchange=()=>{aiChoice=route.id;chooserFeedback('');renderAiChooser();$('ai-chooser-list').querySelector('input[name="main-ai"]:checked')?.focus();};
+ const failed=route.check?.state==='failed'&&!(route.login?.state==='signed-in'&&Number(route.login?.checked_at)>Number(route.check?.checked_at));if(failed)status+=' · '+t('마지막 확인 실패');radio.disabled=!selectable||aiPending;
+ radio.onchange=()=>{chooserClearDiscard();aiChoice=route.id;chooserFeedback('');renderAiChooser();$('ai-chooser-list').querySelector('input[name="main-ai"]:checked')?.focus();};
  const name=element('span',route.name,'chooser-name');if(route.id===main.current)name.append(element('span',t('현재'),'chooser-current'));copy.append(name,element('span',status,'chooser-status'));label.append(radio,copy);
  const action=settingsAction(t(route.kind==='subscription'?'로그인 설정':route.key?.saved||route.id==='openrouter'?'계정 설정':'키 입력'),()=>chooserPanel(aiAccountPanel===route.id?'':route.id));action.setAttribute('aria-expanded',String(aiAccountPanel===route.id));row.append(label,action);
- if(aiAccountPanel===route.id){if(!aiAccountNode)aiAccountNode=chooserAccount(route);row.append(aiAccountNode);}return row;
+ if(failed&&route.check.failure)row.append(element('p',t('마지막 확인 실패: {reason}',{reason:t(DECISION_FAILURE_TEXT[route.check.failure]||route.check.failure)}),'field-hint chooser-failure'));
+ if(aiAccountPanel===route.id){const fingerprint=JSON.stringify([route.key,route.credential,route.login,route.installed]);if(!aiAccountNode||(aiAccountNode.dataset.state!==fingerprint&&!chooserSecretDirty())){aiAccountNode=chooserAccount(route);aiAccountNode.dataset.state=fingerprint;}row.append(aiAccountNode);}return row;
 }
 function chooserModel(chosen){
  const field=element('label',undefined,'chooser-model');field.dataset.route=chosen.id;
@@ -583,10 +585,10 @@ function renderAiChooser(){
  if(active?.isConnected){active.focus({preventScroll:true});if(caret)active.setSelectionRange(...caret);}
 }
 async function applyAiChoice(button,discarded=false){
- if(aiPending)return;if(chooserSecretDirty()&&!discarded){chooserDiscard(()=>{aiAccountNode.querySelector('input[type="password"]').value='';void applyAiChoice(button,true);},true);return;}const chosen=mainAiRoutes(aiSettings)[aiChoice];if(!chosen)return;
+ if(aiPending)return;if(chooserSecretDirty()&&!discarded){chooserDiscard(()=>{const input=aiAccountNode?.querySelector('input[type="password"]');if(input)input.value='';void applyAiChoice(button,true);},true);return;}const chosen=mainAiRoutes(aiSettings)[aiChoice];if(!chosen)return;
  const session=aiChooserSession,body={route:chosen.id},model=aiModelDraft[chosen.id];let completion=null;
  if(chosen.kind==='api'&&typeof model==='string'&&model.trim())body.model=model.trim();if(chosen.kind==='subscription'&&typeof model==='string'&&chosen.model_selectable!==false)body.model=model.trim();if(chosen.kind==='subscription'&&chosen.model_selectable===false&&chosen.model)body.model='';
- aiPending=true;renderAiChooser();chooserFeedback(t('{name}에 확인 요청을 보내는 중… 통과한 경우에만 바뀝니다.',{name:chosen.name})+' '+t('창을 닫아도 요청은 계속됩니다.'));
+ chooserClearDiscard();aiPending=true;renderAiChooser();chooserFeedback(t('{name}에 확인 요청을 보내는 중… 통과한 경우에만 바뀝니다.',{name:chosen.name})+' '+t('창을 닫아도 요청은 계속됩니다.'));
  try{const result=await api('/api/main-ai/activate',body),judgment=result.judgment||{};
   completion=[judgment.state==='attention'?t('기본 AI를 {name}(으)로 바꿨습니다. 판단 AI는 확인이 필요합니다: {reason}',{name:chosen.name,reason:t(judgment.message||'-')}):judgment.state==='queued'?t('기본 AI를 {name}(으)로 바꿨습니다. 판단 AI는 백그라운드에서 확인합니다.',{name:chosen.name}):t('기본 AI를 {name}(으)로 바꿨습니다.',{name:chosen.name}),judgment.state==='attention'];aiNotice=completion;
   if(session===aiChooserSession&&$('ai-chooser').open)$('ai-chooser').close();$('active-ai').dataset.state='';await refresh();
@@ -1217,7 +1219,7 @@ $('logout').onclick=async()=>{try{await api('/api/logout',{});invalidateModelLoa
 async function startOpenRouter(){const pending=restoreOpenRouterFlow();if(pending){window.open(pending.url,'agentos-openrouter');return;}const popup=window.open('about:blank','agentos-openrouter');try{const bytes=crypto.getRandomValues(new Uint8Array(48)),verifier=btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier)),challenge=btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');const state=crypto.randomUUID(),callback=location.origin+'/?state='+encodeURIComponent(state),url='https://openrouter.ai/auth?'+new URLSearchParams({callback_url:callback,code_challenge:challenge,code_challenge_method:'S256'});localStorage.setItem('openrouter-flow',JSON.stringify({verifier,state,url,expires:Date.now()+600000}));if(popup)popup.location.href=url;chooserFeedback(t('OpenRouter 창에서 연결을 마치면 키가 저장됩니다.'));}catch(error){chooserFeedback(error.message,true);}}
 function restoreOpenRouterFlow(){let raw=null;try{raw=localStorage.getItem('openrouter-flow');}catch(_error){}const flow=parseOpenRouterFlow(raw);if(!flow){try{localStorage.removeItem('openrouter-flow');}catch(_error){}}return flow;}
 function openRouterFlowPending(){return Boolean(restoreOpenRouterFlow());}
-function openRouterSaved(){aiNotice=[t('OpenRouter 계정 키를 저장했습니다. 기본 AI는 확인하고 사용을 눌러야 바뀝니다.'),false];$('active-ai').dataset.state='';return refresh().then(()=>{if($('ai-chooser').open)renderAiChooser();});}
+function openRouterSaved(){const message=t('OpenRouter 계정 키를 저장했습니다. 기본 AI는 확인하고 사용을 눌러야 바뀝니다.');aiNotice=[message,false];$('active-ai').dataset.state='';return refresh().then(()=>{if($('ai-chooser').open){renderAiChooser();chooserFeedback(message);}});}
 async function finishOpenRouter(){const params=new URLSearchParams(location.search);if(!params.has('code'))return;const flow=restoreOpenRouterFlow();history.replaceState(null,'',location.pathname+'#settings/ai');navigate('settings','ai');try{if(!flow||flow.state!==params.get('state'))throw new Error(t('연결 시간이 지났습니다. 다시 시작하세요.'));await api('/api/openrouter/connect',{code:params.get('code'),verifier:flow.verifier});localStorage.removeItem('openrouter-flow');if(window.opener&&!window.opener.closed){window.opener.postMessage({type:'agentos-openrouter-connected'},location.origin);window.close();return;}await openRouterSaved();}catch(error){aiNotice=[error.message,true];$('active-ai').dataset.state='';await refresh();}}
 window.addEventListener('message',event=>{if(!isOpenRouterCompletion(event,location.origin))return;try{localStorage.removeItem('openrouter-flow');}catch(_error){}void openRouterSaved();});
 $('ai-chooser-cancel').onclick=chooserDismiss;

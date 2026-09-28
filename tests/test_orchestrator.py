@@ -1264,6 +1264,14 @@ class ReadIsNotAnEffect(Harness):
         self.assertIn('일정 조회: 연결이 필요합니다.', report)
         self.assertIn('일정 조회 실패', report)
 
+    def test_a_malformed_declaration_is_an_effect(self):
+        from personal_agent.agent_runtime import page_load_only
+        for value in ({'x': 1}, ['read'], 'Read', ' read', None, 1):
+            with self.subTest(value=value):
+                self.assertFalse(page_load_only('browser_open', {'declared_effect': value}))
+        self.assertFalse(page_load_only('browser_click', {'declared_effect': 'read'}))
+        self.assertTrue(page_load_only('browser_open', {'declared_effect': 'navigate'}))
+
     def test_a_worker_failure_before_any_attempt_keeps_the_plain_failure(self):
         # A Work with no recorded worker attempt has nothing observed to report.
         job = self.store.enqueue('알려줘', 'no-attempt')

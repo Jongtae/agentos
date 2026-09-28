@@ -6322,6 +6322,10 @@ class AgentService:
                 # plus the run-time labels of a worker that had started.
                 self.record_work_sources(job['id'],work_sources|set(getattr(work_capabilities[0],'private_provenance',()) or ()))
                 with self.store.db() as db:
+                    # #787 review: an unknown effect recorded while the report was built still wins.
+                    if outcome=='failed' and self._work_has_unknown_effect(job['id']):
+                        outcome,report='unknown',None
+                        transcript=calendar_notice+'이 요청은 완료하지 못했습니다: '+response
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id,delivery_projection) VALUES (?,?,?,?,?,?,?)',('assistant',transcript,job['channel'],time.time(),job.get('workspace_id'),job['id'],'blocked-turn' if isinstance(exc,BlockedTurn) else None))
                     db.execute("UPDATE jobs SET status=?,error=?,delivery=?,owner_cause=COALESCE(?,owner_cause) WHERE id=?",
                                (outcome,response,'pending' if job['chat_id'] else 'none',report,job['id']))

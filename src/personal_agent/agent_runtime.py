@@ -1353,7 +1353,9 @@ def page_load_only(action,detail):
  ``detail`` is the call's recorded event detail.  Only ``browser_open``
  qualifies: it navigates by URL and submits nothing and presses nothing.
  """
- return action=='browser_open' and isinstance(detail,dict) and detail.get('declared_effect') in PAGE_LOAD_EFFECTS
+ if action!='browser_open' or not isinstance(detail,dict):return False
+ value=detail.get('declared_effect')
+ return isinstance(value,str) and value in PAGE_LOAD_EFFECTS
 
 #: Public network reads that may be retried once after a transient failure.
 NETWORK_READS=frozenset({'web_search','public_page_read','weather'})

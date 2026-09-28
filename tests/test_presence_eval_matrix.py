@@ -1109,6 +1109,16 @@ class F_CalendarApproval(CalendarEval):
         self.assertEqual(self.drafts(), {})
         self.assertEqual(self.provider.calls, [])
 
+    def test_blocked_calendar_access_is_a_review_note_without_a_connect_link(self):
+        # #834 review: connecting again cannot clear blocked access, so no link is offered.
+        self.registry.transition(OWNER, CALENDAR_WRITE_SPEC.connector_id, ConnectorState.BLOCKED)
+        request = '다음 주 화요일 10시 반 병원 예약 일정 추가해줘'
+        self.turn(request)
+        sent = self.model_bodies[0]['messages'][-1]['content']
+        self.assertIn('Google Calendar access is blocked in this install', sent)
+        self.assertNotIn('connect it at', sent)
+        self.assertEqual(self.provider.calls, [])
+
 
 class _Conflict409:
     """A Google Calendar transport whose create answers HTTP 409 (#447)."""

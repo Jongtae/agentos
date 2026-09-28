@@ -43,7 +43,7 @@ from .personal_knowledge import PersonalKnowledgeOrchestrator
 from .memory_service import MemoryService
 from .file_workspace import FileWorkspace
 from . import folder_grants
-from .connector_contract import ConnectorContractError, _owner_key
+from .connector_contract import ConnectorContractError, ConnectorResultKind, _owner_key
 from .gmail import GMAIL_CONNECTOR_ID, GmailError
 from .connector_revocation import (GoogleConnectionRevoker, RevocationError, drive_connection,
                                    google_revoke_transport, registry_connection)
@@ -63,6 +63,7 @@ from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_NO, JUDGMENT_YES,
                                    INTENT_SETTINGS,
                                    INTENT_UNSUPPORTED, INTENT_WORKSPACE_SEARCH, SUPERSEDED_WORK_ERROR)
 # PRESENCE-CAP-01 / #505: contextual local authority handoff.
+from .conversation_handoff import LINKABLE_KINDS
 from .conversation_handoff import (LOCAL_AUTHORITY_KIND, LOCAL_AUTHORITY_LABELS, LOCAL_AUTHORITY_PREVIEWS,
                                    LOCAL_AUTHORITY_SCOPES, LOCAL_FOLDER_READ, LOCAL_REFERENCE_READ,
                                    LOCAL_RESULT_WRITE, LOCAL_RESUMED_NOTICE, local_authority_guidance,
@@ -3228,9 +3229,15 @@ class AgentService:
         if self.connector_handoff:
             if not self.connector_handoff.known(connector_id):
                 return f'{name} is not available in this install.'
-            if self.connector_handoff.prerequisite(self.connector_owner_id(job),connector_id) is not None:
+            result=self.connector_handoff.prerequisite(self.connector_owner_id(job),connector_id)
+            if result is not None:
+                if result.kind not in LINKABLE_KINDS:
+                    # Blocked access is not cleared by connecting again (#834 review).
+                    return f'{name} access is blocked in this install; the owner must review its access in Settings.'
                 url=self.connector_connect_url(connector_id)
-                return f'{name} is not connected in this install' + (f' (the owner can connect it at {url}).' if url else '.')
+                state=('needs re-authentication' if result.kind is ConnectorResultKind.REAUTH_REQUIRED
+                       else 'is not connected')
+                return f'{name} {state} in this install' + (f' (the owner can connect it at {url}).' if url else '.')
         if not connected:
             return f'{name} is not connected in this install.'
         return None

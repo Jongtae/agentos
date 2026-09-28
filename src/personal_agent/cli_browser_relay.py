@@ -37,7 +37,7 @@ import socketserver
 import tempfile
 import threading
 
-from .agent_runtime import BROWSER_ACTIONS, REPEAT_PATH_TEXT, ToolError, path_key, result_page_digest
+from .agent_runtime import BROWSER_ACTIONS, HOST_RELAYED_ACTIONS, REPEAT_PATH_TEXT, ToolError, path_key, result_page_digest
 
 SOCKET_NAME = 's'
 KEY_NAME = 'key'
@@ -154,8 +154,8 @@ class BrowserRelay:
             return {'error': {'kind': 'tool', 'message': RELAY_UNAVAILABLE_TEXT, 'code': 'relay_refused'}}
         name, arguments = request.get('name'), request.get('arguments')
         tools = getattr(self.tools.capabilities, 'tools', {}) or {}
-        # Only the five browser tools of this Work: every other tool stays in the bridge.
-        if not isinstance(name, str) or (tools.get(name) or {}).get('host_action') not in BROWSER_ACTIONS:
+        # Only this Work's browser and owner-state tools (#774): every other tool stays in the bridge.
+        if not isinstance(name, str) or (tools.get(name) or {}).get('host_action') not in HOST_RELAYED_ACTIONS:
             return {'error': {'kind': 'invalid_arguments', 'message': ''}}
         with self._lock:
             if self._closed:
@@ -164,7 +164,8 @@ class BrowserRelay:
             # page step (action, target and input digests) on the same page is
             # refused, not re-run (``agent_runtime.path_key``, reused).
             action = tools[name]['host_action']
-            path = path_key(action, arguments, self._page) if isinstance(arguments, dict) else None
+            path = (path_key(action, arguments, self._page)
+                    if action in BROWSER_ACTIONS and isinstance(arguments, dict) else None)
             if path is not None and path in self._paths:
                 return {'error': _error_payload(ToolError(REPEAT_PATH_TEXT, 'repeat_path'))}
             if path is not None:
@@ -173,7 +174,14 @@ class BrowserRelay:
                 value = self.tools.call(name, arguments)
             except Exception as exc:   # every failure becomes a typed reply
                 return {'error': _error_payload(exc)}
-            self._page = result_page_digest(value) or self._page
+            if action in BROWSER_ACTIONS:
+                self._page = result_page_digest(value) or self._page
+            else:
+                # #774 review: the service reads typed owner-state results (a missing
+                # connector's ``needs_setup``) after the turn, as the direct route's memo.
+                memo = getattr(self.tools.capabilities, 'memo', None)
+                if isinstance(memo, dict):
+                    memo[(name, json.dumps(arguments, sort_keys=True, ensure_ascii=False))] = value
             return {'ok': value}
 
     def close(self):
@@ -226,4 +234,10 @@ def unused_browser_factory():
 
     Never a driver: were it ever called, the call is refused, not run in the bridge.
     """
+    raise ToolError(RELAY_UNAVAILABLE_TEXT, 'browser_relay_unavailable')
+
+
+def RELAYED_PREPARATIONS(*_args, **_kwargs):
+    """The bridge's ``Capabilities.preparations`` placeholder (#774): ``schedule_preparation`` is
+    listed, and its calls go to the service, where acceptance is decided.  Never run in the bridge."""
     raise ToolError(RELAY_UNAVAILABLE_TEXT, 'browser_relay_unavailable')

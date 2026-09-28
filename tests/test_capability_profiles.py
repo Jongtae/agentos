@@ -79,7 +79,8 @@ class OneActionSource(_Store):
         self.enable_context()
         for profile, facade in FACADES.items():
             # #701: with a browser profile registered, trusted-local lists its browser tools too.
-            listed = facade(self.caps(browser=lambda: None)).definitions()
+            # #774: with the service's preparation scheduler wired, schedule_preparation is listed too.
+            listed = facade(self.caps(browser=lambda: None, preparations=lambda *a: None)).definitions()
             with self.subTest(profile=profile):
                 self.assertEqual([tool['name'] for tool in listed], sorted(profile_actions(profile)))
                 for tool in listed:
@@ -99,8 +100,11 @@ class OneActionSource(_Store):
 
     def test_read_only_hint_comes_from_the_manifest_mode(self):
         hints = {tool['name']: tool['annotations']['readOnlyHint'] for tool in AgentOSMcpTools(self.caps()).definitions()}
+        # #774: the relayed owner-state tools carry their manifest modes too.
         self.assertEqual(hints, {'bounded_public_research': True, 'list_notes': True, 'save_note': False,
-                                 'weather': True, 'web_search': True})
+                                 'weather': True, 'web_search': True, 'calendar_query': True, 'list_memory': True,
+                                 'calendar_draft_create': False, 'calendar_draft_update': False,
+                                 'calendar_draft_cancel': False, 'save_memory': False})
 
     def test_no_route_keeps_its_own_schema_list(self):
         """The removed three-tool fork and the two list_notes copies stay gone."""
@@ -235,10 +239,12 @@ class EffectiveAvailability(_Store):
         self.assertNotIn('propose_current_state', native)
         # #701: no registered browser profile hides the browser tools (as on the direct route).
         self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps()).definitions()],
-                         sorted(set(profile_actions(BOUNDED_PROFILE)) - CONTEXT_GATED_ACTIONS - BROWSER_ACTIONS))
+                         sorted(set(profile_actions(BOUNDED_PROFILE)) - CONTEXT_GATED_ACTIONS - BROWSER_ACTIONS
+                                - {'schedule_preparation'}))
         self.enable_context()
         self.assertIn('propose_current_state', [d['function']['name'] for d in self.caps().definitions()])
-        self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps(browser=lambda: None)).definitions()],
+        self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps(browser=lambda: None,
+                                                                       preparations=lambda *a: None)).definitions()],
                          sorted(profile_actions(BOUNDED_PROFILE)))
         self.assertEqual([t['name'] for t in ReadOnlyAgentOSMcpTools(self.caps()).definitions()], ['list_notes'])
 
@@ -323,7 +329,9 @@ class SettingsProjection(_Store):
                                    'limitation': CLI_PROFILES[BOUNDED_PROFILE]['limitation'],
                                    'tools': ['bounded_public_research', 'list_notes', 'propose_current_state',
                                              'save_note', 'weather', 'web_search', 'browser_open', 'browser_read',
-                                             'browser_find', 'browser_click', 'browser_type'],
+                                             'browser_find', 'browser_click', 'browser_type',
+                                             # #774: relayed to the service on this route.
+                                             'calendar_query', 'calendar_draft_create', 'calendar_draft_update', 'calendar_draft_cancel', 'list_memory', 'save_memory', 'schedule_preparation'],
                                    'unavailable': route_unavailable(BOUNDED_PROFILE),
                                    # #616: the owner can choose; nothing is qualified by default.
                                    'selectable': ['trusted-local', 'strict-isolated'], 'qualified': {}})

@@ -1,5 +1,16 @@
 # Personal AgentOS Secretary Agency Contract
 
+## Amendment — #774 (2026-09-28)
+
+The owner-state components the secretary relies on were unreachable from the owner's subscription CLI route. These are Memory and MemoryCandidate (#597), preparations and reminders (#659), and the calendar connector (#606). The trusted-local profile declared them unavailable because the CLI's MCP bridge is a separate process without the service's memory approval, connector or preparation acceptance.
+
+They are now relayed to the service over the existing #701 relay (`cli_browser_relay`), like the browser tools, and run in the service's `Capabilities` under the direct route's unchanged gates:
+- a memory write is a MemoryCandidate unless the owner explicitly asked (#597);
+- a calendar write is a preview until approved;
+- a preparation runs only once accepted.
+
+The strict-isolated and isolated profiles are unchanged. A bridge without the relay does not offer these tools. The #678 separation still holds: a turn with the CLI's own web search offers no private-store read (Memory, calendar reads), and the orchestrator chooses a no-search subset when a turn needs them (#735).
+
 ## Amendment — #677 (2026-09-27)
 
 Owner decisions after re-analysis:

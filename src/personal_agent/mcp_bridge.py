@@ -13,7 +13,7 @@ import time
 
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERSION
 
-from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, TRANSIENT_FAILURE_TEXT,
+from .agent_runtime import (CLI_LOOKUP_HINT, ENGINE_UNMEDIATED, OWNER_STATE_ACTIONS, TRANSIENT_FAILURE_TEXT,
                             Capabilities, ToolError, WorkBudget, WorkLedger, classify_failure, evidence_summary,
                             lookup_sources, progress_step, recorded_private_sources, split_status, work_source_records,
                             work_stop_requested)
@@ -21,7 +21,7 @@ from .current_context import redact_known_secrets
 from .providers import ProviderError
 from .bounded_execution import (AgentOSMcpTools, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, ExecutionError,  # noqa: F401
                                 profile_actions, redact_reason, turn_actions)
-from .cli_browser_relay import RelayClient, unused_browser_factory
+from .cli_browser_relay import RELAYED_PREPARATIONS, RelayClient, unused_browser_factory
 from .local_tools import LocalTools
 from .search_providers import ProviderRegistry
 from .quickstart_store import QuickStore
@@ -151,7 +151,7 @@ def unexpected_error_result(exc, action):
 
 
 def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROFILE, browser_relay=None,
-          search_off_reason='', only=None):
+          search_off_reason='', only=None, relay_browser=True):
     """Serve one Work's AgentOS tools over stdio for the route profile the host named (#701).
 
     ``profile`` is ``trusted-local`` or ``strict-isolated``; anything else
@@ -171,9 +171,13 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
     # schemas come from Capabilities.definitions(), never a bridge-local list.
     capabilities = Capabilities(store, None, {}, '', job_id, record, network=LocalTools(providers=ProviderRegistry.from_store(store)), document_access=False,
                                 # #678 P1: a turn that may search natively gets no private read.
-                                allowed_tools=set(turn_actions(profile, native_search and profile == BOUNDED_PROFILE, only)),
+                                # #774: owner-state tools run only in the service; without its relay they are not offered.
+                                allowed_tools=(set(turn_actions(profile, native_search and profile == BOUNDED_PROFILE, only))
+                                               - (set() if relay is not None else set(OWNER_STATE_ACTIONS))),
                                 # #701: a placeholder that lists the browser tools; their calls go to the service.
-                                browser=unused_browser_factory if relay is not None else None,
+                                browser=unused_browser_factory if relay is not None and relay_browser else None,
+                                # #774: a placeholder that lists schedule_preparation; its calls go to the service.
+                                preparations=RELAYED_PREPARATIONS if relay is not None else None,
                                 inherited_provenance=_provenance(provenance), lookup_hint=CLI_LOOKUP_HINT,
                                 lookup_sources=_lookup_sources(store, job_id),
                                 # #607 AX-10: the same durable attempt count and
@@ -274,9 +278,11 @@ if __name__ == '__main__':
     parser.add_argument('--profile',default=BOUNDED_PROFILE)
     parser.add_argument('--search-off-reason',default='')
     parser.add_argument('--browser-relay',default=None)
+    parser.add_argument('--relay-no-browser',action='store_true')
     # #710: the orchestrator's per-request tool subset (comma-separated; absent: the profile's set).
     parser.add_argument('--only',default=None)
     args=parser.parse_args()
     only=None if args.only is None else frozenset(name for name in args.only.split(',') if name)
     serve(args.data, args.job, args.provenance, native_search=args.native_search, profile=args.profile,
-          browser_relay=args.browser_relay, search_off_reason=args.search_off_reason, only=only)
+          browser_relay=args.browser_relay, search_off_reason=args.search_off_reason, only=only,
+          relay_browser=not args.relay_no_browser)

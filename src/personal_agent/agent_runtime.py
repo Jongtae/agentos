@@ -2286,6 +2286,13 @@ def render_turn_prompt(context,*,include_instructions=True):
  return '\n\n'.join(parts)
 
 CALENDAR_DRAFT_TOOLS=('calendar_draft_create','calendar_draft_update','calendar_draft_cancel')
+#: #774: owner-state actions held by the AgentOS service (Memory approval, the
+#: calendar connector, preparation acceptance).  A trusted-local CLI turn
+#: reaches them through the service relay (``cli_browser_relay``), exactly as
+#: it reaches the browser tools; they then run in the service's Capabilities.
+OWNER_STATE_ACTIONS=frozenset({'save_memory','list_memory','calendar_query',*CALENDAR_DRAFT_TOOLS,'schedule_preparation'})
+#: Every action a trusted-local CLI turn runs in the service rather than in its bridge.
+HOST_RELAYED_ACTIONS=BROWSER_ACTIONS|OWNER_STATE_ACTIONS
 #: #606 T5: a calendar read with no calendar read nothing; never a satisfied read.
 CALENDAR_UNCONFIGURED='Google Calendar가 연결 또는 구성되어 있지 않아 일정을 읽지 못했습니다. 먼저 캘린더를 연결해 주세요.'
 

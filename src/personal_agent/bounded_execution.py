@@ -85,6 +85,9 @@ _BROWSER_ACTIONS = ('browser_open', 'browser_read', 'browser_find', 'browser_cli
 #: #659: accepting a preparation needs the host's DecisionEngine and its
 #: Telegram acceptance surface, which a CLI bridge process does not hold.
 _PREPARATIONS = 'owner-preparations-not-bound-to-cli-route'
+#: #774: relayed to the service on the trusted-local route only.
+_OWNER_STATE_RELAYED = ('calendar_query', 'calendar_draft_create', 'calendar_draft_update', 'calendar_draft_cancel',
+                        'list_memory', 'save_memory', 'schedule_preparation')
 
 #: The verified limitation of the trusted-local profile (owner decision on
 #: #604).  The CLI's own built-in tools can read local host files that AgentOS
@@ -152,18 +155,17 @@ CLI_PROFILES = {
         # #701: the five browser tools, executed by the AgentOS service's own
         # BrowserSession (mediation, payment guard, approvals, budget) and
         # relayed by the bridge; offered only while the profile is available.
+        # #774: the owner-state actions (Memory, calendar, preparations) are
+        # relayed the same way and run under the service's unchanged gates:
+        # #597 memory approval, calendar previews, #659 preparation acceptance.
         'actions': ('bounded_public_research', 'list_notes', 'propose_current_state', 'save_note', 'weather', 'web_search',
-                    *_BROWSER_ACTIONS),
+                    *_BROWSER_ACTIONS, *_OWNER_STATE_RELAYED),
         # Approvals bound to the direct-API model fingerprint are not carried to
         # another provider: doing so would silently change the data destination.
         'unavailable': {
             'public_page_read': _API_BOUND_PAGES,
             'find_files': _API_BOUND_DOCUMENTS, 'read_file': _API_BOUND_DOCUMENTS, 'list_roots': _API_BOUND_DOCUMENTS,
-            'calendar_query': _CALENDAR, 'calendar_draft_create': _CALENDAR,
-            'calendar_draft_update': _CALENDAR, 'calendar_draft_cancel': _CALENDAR,
-            'save_memory': _MEMORY, 'list_memory': _MEMORY,
             'list_agents': _SPECIALISTS, 'delegate_agent': _SPECIALISTS,
-            'schedule_preparation': _PREPARATIONS,
         },
         # No AgentOS-mediated live run of this catalog has been observed.
         # Reference versions are the argv shapes recorded from each CLI's own
@@ -325,7 +327,10 @@ def bridge_tool_bound(actions):
     search = max(SEARCH_TIMEOUT_SECONDS, NATIVE_MAX_REQUESTS * NATIVE_TIMEOUT_SECONDS)
     own = {'web_search': search, 'bounded_public_research': search + MAX_RESEARCH_PAGES * MAX_PAGE_SECONDS,
            # local_tools.LocalTools.weather: geocoding (10 s) then the forecast (15 s).
-           'weather': 10 + 15, 'public_page_read': MAX_PAGE_SECONDS}
+           'weather': 10 + 15, 'public_page_read': MAX_PAGE_SECONDS,
+           # #774 review: a relayed write asks the Judgment AI (explicit memory / preparation
+           # request) before it commits; one decision call is bounded by DEFAULT_TOOL_SECONDS.
+           'save_memory': 2 * DEFAULT_TOOL_SECONDS, 'schedule_preparation': 2 * DEFAULT_TOOL_SECONDS}
     bounds = [CALL_SECONDS if action in BROWSER_ACTIONS else own.get(action, DEFAULT_TOOL_SECONDS)
               for action in actions or ()]
     return max(bounds, default=DEFAULT_TOOL_SECONDS)
@@ -1133,12 +1138,13 @@ class AgentOSMcpTools:
             raise ExecutionError('허용하지 않은 AgentOS MCP 도구 또는 인수입니다.') from None
         if any(not arguments[field].strip() for field in parameters['required']):
             raise ExecutionError('MCP 도구의 필수 문자열 인수가 비어 있습니다.')
-        # #701: in the bridge process a browser tool runs in the AgentOS
-        # service (its one BrowserSession, profile lock, approvals, budget and
-        # mediation); the bridge only forwards the validated call.
-        from .agent_runtime import BROWSER_ACTIONS
+        # #701/#774: in the bridge process a browser or owner-state tool runs in
+        # the AgentOS service (its BrowserSession, Memory approval, calendar
+        # connector, preparation acceptance, budget and mediation); the bridge
+        # only forwards the validated call.
+        from .agent_runtime import HOST_RELAYED_ACTIONS
         host_action = ((getattr(self.capabilities, 'tools', {}) or {}).get(name) or {}).get('host_action')
-        if host_action in BROWSER_ACTIONS and self.relay is not None:
+        if host_action in HOST_RELAYED_ACTIONS and self.relay is not None:
             return self.relay.call(name, arguments)
         # Capabilities is AgentOS-owned and applies its normal validation,
         # document boundary, egress, evidence and idempotency rules.
@@ -1673,7 +1679,9 @@ class BoundedExecutionAdapter:
                          *(['--native-search'] if native_search else []),
                          *([f'--search-off-reason={search_off}'] if search_off else []),
                          *([f'--only={",".join(sorted(only))}'] if only is not None else []),
-                         *([f'--browser-relay={relay}'] if relay else [])],
+                         *([f'--browser-relay={relay}'] if relay else []),
+                         # #774: the relay serves owner-state tools even when no browser is served.
+                         *(['--relay-no-browser'] if relay and not getattr(tools, 'relay_browser', True) else [])],
             }}}, ensure_ascii=False), encoding='utf-8')
             env = self.environment(engine_id, binary, run_dir)
             disabled = ()
@@ -1715,7 +1723,7 @@ class BoundedExecutionAdapter:
             # #678: the facade says whether this turn may use the CLI's own web search.
             # #729: the bridge tools this turn offers bound Codex's per-call timeout.
             offered = [action for action in turn_actions(profile, native_search, only)
-                       if relay is not None or action not in _BROWSER_ACTIONS]
+                       if (relay is not None and getattr(tools, 'relay_browser', True)) or action not in _BROWSER_ACTIONS]
             argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile, disabled_features=disabled,
                                 model=model or None, native_search=native_search, only=only,
                                 tool_timeout=bridge_tool_timeout(offered, timeout))

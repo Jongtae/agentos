@@ -83,14 +83,16 @@ class StrictProfileDeclaration(unittest.TestCase):
         self.assertEqual(CLI_PROFILES[STRICT_PROFILE]['runtimes']['claude-code']['tested_versions'], ('2.1.280',))
 
     def test_strict_offers_what_the_bridge_serves(self):
-        """#701: the bridge is told its profile; strict is trusted-local minus the browser tools."""
-        from personal_agent.agent_runtime import BROWSER_ACTIONS
+        """#701/#774: the bridge is told its profile; strict is trusted-local minus every service-relayed tool."""
+        from personal_agent.agent_runtime import BROWSER_ACTIONS, HOST_RELAYED_ACTIONS
         self.assertEqual(profile_actions(STRICT_PROFILE),
-                         tuple(action for action in profile_actions(BOUNDED_PROFILE) if action not in BROWSER_ACTIONS))
-        self.assertFalse(BROWSER_ACTIONS & set(profile_actions(STRICT_PROFILE)))
-        self.assertTrue(BROWSER_ACTIONS <= set(route_unavailable(STRICT_PROFILE)), 'declared, never silently missing')
-        self.assertEqual({k: v for k, v in route_unavailable(STRICT_PROFILE).items() if k not in BROWSER_ACTIONS},
+                         tuple(action for action in profile_actions(BOUNDED_PROFILE) if action not in HOST_RELAYED_ACTIONS))
+        self.assertFalse(HOST_RELAYED_ACTIONS & set(profile_actions(STRICT_PROFILE)))
+        self.assertTrue(HOST_RELAYED_ACTIONS <= set(route_unavailable(STRICT_PROFILE)), 'declared, never silently missing')
+        self.assertEqual({k: v for k, v in route_unavailable(STRICT_PROFILE).items() if k not in HOST_RELAYED_ACTIONS},
                          route_unavailable(BOUNDED_PROFILE))
+        self.assertFalse(HOST_RELAYED_ACTIONS & set(route_unavailable(BOUNDED_PROFILE)))
+        self.assertTrue(BROWSER_ACTIONS <= HOST_RELAYED_ACTIONS)
         self.assertEqual(StrictIsolatedAgentOSMcpTools.PROFILE, STRICT_PROFILE)
 
     def test_cli_versions_are_parsed_exactly(self):
@@ -152,7 +154,11 @@ class StrictLaunchArguments(unittest.TestCase):
         # every built-in tool.  #701: trusted-local adds the browser tools.
         browser = ',mcp__agentos__browser_open,mcp__agentos__browser_read,mcp__agentos__browser_find,' \
                   'mcp__agentos__browser_click,mcp__agentos__browser_type'
-        self.assertEqual(trusted[-2:], [allow[0], allow[1] + browser])
+        # #774: trusted-local also pre-approves the owner-state tools its service relays.
+        owner_state = (',mcp__agentos__calendar_query,mcp__agentos__calendar_draft_create,'
+                       'mcp__agentos__calendar_draft_update,mcp__agentos__calendar_draft_cancel,'
+                       'mcp__agentos__list_memory,mcp__agentos__save_memory,mcp__agentos__schedule_preparation')
+        self.assertEqual(trusted[-2:], [allow[0], allow[1] + browser + owner_state])
         self.assertEqual(strict[-2:], allow, 'the variadic --allowedTools stays last')
         self.assertEqual(strict[:len(trusted) - 2], trusted[:-2])
         self.assertNotIn('browser', ' '.join(strict), 'strict never pre-approves a browser tool')

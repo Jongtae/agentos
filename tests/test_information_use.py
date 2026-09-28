@@ -432,3 +432,28 @@ class GovernanceRecords(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+from test_orchestrator import Harness, plan  # noqa: E402
+
+
+class JudgmentSeesOwnerValues(Harness):
+    """#826 follow-up: the owner's Judgment AI sees the Work's saved values; stored secrets stay masked."""
+
+    def test_a_saved_value_reaches_the_outcome_judgment_and_a_secret_does_not(self):
+        self.store.secret('telegram_token', STORED_SECRET)
+
+        def save(tools):
+            tools.call('save_memory', {'memory_key': 'profile.work', 'content': '판교 사무실'})
+        self.engine.before = save
+        self.engine.answers = [f'판교 사무실 근처 분짜 집을 추천해요. {STORED_SECRET}']
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        job, row = self.run_work('회사 근처 점심 추천해줘')
+        self.assertEqual(row['status'], 'succeeded')
+        with self.store.db() as db:
+            pending = [r['content'] for r in db.execute("SELECT content FROM memory_candidates WHERE state='pending'")]
+        self.assertEqual(pending, ['판교 사무실'], 'the value is a value this Work saved (the #605 exclusion set)')
+        [judged] = self.asked_goals
+        self.assertIn('판교 사무실', judged.facts['reply'], 'no longer masked from the owner\'s Judgment AI')
+        self.assertNotIn(STORED_SECRET, json.dumps(judged.facts, ensure_ascii=False), 'secrets never reach a judgment')
+        self.assertNotIn(STORED_SECRET, json.dumps(self.asked_plans[0][0].facts, ensure_ascii=False))

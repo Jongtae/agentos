@@ -490,7 +490,7 @@ details.technical details>summary{color:var(--muted)}
 .ai-fact .settings-row-title{font-weight:500}
 .ai-fact .settings-row-main{display:contents}
 .ai-fact .settings-row-title{grid-column:1;grid-row:1}
-.ai-fact>.settings-state{grid-column:2;grid-row:1;justify-self:end;text-align:right;display:block;background:none;color:var(--muted);padding:0;font-size:var(--fs-3);font-weight:400;line-height:1.5;border-radius:0}
+.ai-fact>.settings-state{min-width:0;white-space:normal;overflow-wrap:anywhere;grid-column:2;grid-row:1;justify-self:end;text-align:right;display:block;background:none;color:var(--muted);padding:0;font-size:var(--fs-3);font-weight:400;line-height:1.5;border-radius:0}
 .ai-fact>.settings-state::before{display:none}
 .ai-fact>.settings-state.attention{color:var(--attn);font-weight:600}
 .ai-fact .settings-row-actions{grid-column:3;grid-row:1}
@@ -542,7 +542,7 @@ details.technical details>summary{color:var(--muted)}
  .ai-fact{grid-template-columns:minmax(70px,.7fr) minmax(0,1.3fr);gap:8px}
  .ai-fact .settings-row-actions{grid-column:2;grid-row:2}
  .ai-fact .settings-row-description{grid-column:1/-1;grid-row:3}
- .ai-fact>.settings-state{grid-column:2;grid-row:1}
+ .ai-fact>.settings-state{min-width:0;white-space:normal;overflow-wrap:anywhere;grid-column:2;grid-row:1}
  .ai-fact .settings-row-title{grid-column:1;grid-row:1}
  .ai-fact .settings-row-action{min-height:44px}
  .rail-foot .language-picker select{min-height:44px}

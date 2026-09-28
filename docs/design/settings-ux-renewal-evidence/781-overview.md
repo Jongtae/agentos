@@ -12,6 +12,6 @@ Issue #781, owner program #780. This is the real checked-out web HTML/CSS/JS ser
 
 - `index.html` SHA-256 `7a7e284d2369ecd213df4f0dda5630ab643bf14ed20eaa622659ea71e75b3457`
 - `app.js` SHA-256 `5736b946989f4c5d959782a8b35fe76c3b3aa35b894d69d81cbdda46136e109c`
-- `style.css` SHA-256 `c2864ead27edb427552311770d8f3098097ffc842db271d9947e08616e56ca4a`
+- `style.css` SHA-256 `a96323f99f8fbb9a97cb6c57631c7a44201ccd72e4621b31db4a1cf3fd106f2b`
 
 Rollback: revert the implementation PR through normal checked branch workflow; no data migration or configuration mutation.

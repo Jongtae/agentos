@@ -1834,6 +1834,7 @@ class OwnerModelAlwaysOn(Harness):
         MemoryService(self.store, private_read_sink=MemoryService.NO_EGRESS_GUARD).remember_profile(
             MEMORY_OWNER, 'settings', 'profile.place.work', '판교 사무실')
 
+    @mock.patch.dict('os.environ', {'TZ': 'Asia/Seoul'})  # #804: a host zone, not the CI's unset UTC
     def test_both_routes_get_the_owner_model_when_the_brief_selects_no_section(self):
         from personal_agent.agent_runtime import CURRENT_CONTEXT_HEADING, PROFILE_HEADING
         self.script([plan('codex', 'Recommend lunch.', context=()), plan('openai', 'Recommend lunch.', context=())],
@@ -1849,6 +1850,7 @@ class OwnerModelAlwaysOn(Harness):
             self.assertIn('"local_time":', text, 'the clock, with current context off')
         self.assertEqual(self.engine.turns[-1]['context']['conversation'], [], 'history is still the brief\'s choice')
 
+    @mock.patch.dict('os.environ', {'TZ': 'Asia/Seoul'})  # #804: a host zone, not the CI's unset UTC
     def test_the_plan_call_reads_the_owner_model_and_selects_only_the_extra_sections(self):
         self.script([plan('codex', 'Answer.', context=())], goals=[True])
         self.run_work('오늘 점심 추천해줘')

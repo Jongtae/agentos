@@ -17,6 +17,7 @@ import json
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from personal_agent.agent_runtime import (CURRENT_CONTEXT_HEADING, Capabilities, ToolError, lookup_sources, run_agent)
@@ -348,6 +349,7 @@ class _ConsumptionCase:
         self.assertNotIn(SECRET, self.service.current_state.render(job) or '')
         self.assertNotIn(SECRET, json.dumps(self.service.current_state.status(), ensure_ascii=False))
 
+    @mock.patch.dict('os.environ', {'TZ': 'Asia/Seoul'})  # #804: a host zone, not the CI's unset UTC
     def test_context_off_is_the_old_text_flow(self):
         """CT-18: no location, no proposal tool, no lookup from context; #804: the clock only."""
         self.message_id += 1

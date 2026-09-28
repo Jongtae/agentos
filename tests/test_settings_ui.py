@@ -80,10 +80,17 @@ for(const [login,label,kind] of [['signed-out','로그인 필요','attention'],[
  const view=ctx.mainAiView(settingsFor('codex',{codex:sub('codex',{login:{state:login}})}));
  assert.equal(view.state,label);assert.equal(view.kind,kind);assert.equal(view.checkable,login!=='sidecar');
 }
-// A later login observation supersedes an older subscription login failure only.
-for(const [loginTime,checkTime,kind] of [[200,100,'neutral'],[100,200,'attention'],[100,100,'attention'],[200,undefined,'attention']]){
- const stale=ctx.mainAiView(settingsFor('codex',{codex:sub('codex',{login:{state:'signed-in',checked_at:loginTime},check:{state:'failed',checked_at:checkTime,failure:'auth'}})}));
+// Only finite numeric evidence times can supersede a failed subscription check.
+for(const [loginTime,checkTime,kind] of [
+ [200.25,100.5,'neutral'],[100,200,'attention'],[100,100,'attention'],
+ [200,null,'attention'],[200,undefined,'attention'],[200,'100','attention'],[200,'','attention'],[200,false,'attention'],[200,NaN,'attention'],[200,Infinity,'attention'],[200,-Infinity,'attention'],
+ [null,-1,'attention'],[undefined,100,'attention'],['200',100,'attention'],['',-1,'attention'],[true,0,'attention'],[NaN,100,'attention'],[Infinity,100,'attention'],[-Infinity,-200,'attention'],
+ [200,'malformed','attention'],['malformed',100,'attention']]){
+ const recoveryRoute=sub('codex',{login:{state:'signed-in',checked_at:loginTime},check:{state:'failed',checked_at:checkTime,failure:'auth'}});
+ const stale=ctx.mainAiView(settingsFor('codex',{codex:recoveryRoute}));
  assert.equal(stale.kind,kind);assert.equal(stale.description.includes('마지막 확인 실패'),kind==='attention');
+ const candidate=ctx.chooserRow(recoveryRoute,{current:'codex'});
+ assert.equal(candidate.textContent.includes('마지막 확인 실패'),kind==='attention','chooser and overview use the same evidence-time rule');
 }
 const savedApi=()=>settingsFor('openai',{openai:api('openai',{key:{saved:true,pending:false}})});
 let projected=savedApi();projected.main_ai.routes[2].key.pending=true;

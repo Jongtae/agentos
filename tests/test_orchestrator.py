@@ -1688,6 +1688,9 @@ class SecretaryStandard(Harness):
         self.assertNotIn('completion_criteria', context.facts)
         self.assertNotIn('Name options', json.dumps(context.facts, ensure_ascii=False))
         self.assertEqual(context.facts['owner_request'], '추천해줘')
+        # #829: the judgment sees the owner model the worker was given.
+        self.assertIn('owner_profile:', context.facts['owner_context'])
+        self.assertIn('current_context:', context.facts['owner_context'])
 
     def test_the_worker_guidance_and_the_judgment_state_the_standard(self):
         from personal_agent.agent_runtime import API_TOOL_GUIDANCE, CLI_TOOL_GUIDANCE, CORE_INSTRUCTIONS
@@ -1699,7 +1702,11 @@ class SecretaryStandard(Harness):
         self.assertIn('capable personal secretary', GOAL_REACHED_PROPOSITION)
         self.assertIn('read in the light of the recent conversation', GOAL_REACHED_PROPOSITION)
         self.assertIn('the reply\'s own claims are not evidence', GOAL_REACHED_PROPOSITION)
-        self.assertIn('current fact the observations do not show', GOAL_REACHED_PROPOSITION)
+        # #829: evidence stays strict for action claims; a current fact may be sourced or flagged instead.
+        self.assertIn('claims an action the observations do not show', GOAL_REACHED_PROPOSITION)
+        self.assertIn('names where it came from', GOAL_REACHED_PROPOSITION)
+        self.assertIn('not whether it is perfect', GOAL_REACHED_PROPOSITION)
+        self.assertNotIn('when it is unclear', GOAL_REACHED_PROPOSITION)
 
     def test_a_tool_less_direct_reply_gets_the_one_judgment_and_is_re_delegated_when_short(self):
         """#820 review P1: a direct run that asked no judgment (no external tool) is judged once, like a CLI attempt."""

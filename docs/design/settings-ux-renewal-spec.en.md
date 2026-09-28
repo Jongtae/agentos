@@ -108,6 +108,12 @@ Judgment AI help: `요청에 맞는 AI와 도구를 고르고 결과를 확인�
 
 `상태 확인` is an explicit check, not a monitoring subscription. Put the last check time in details unless freshness or a failure makes it relevant to the decision. An unknown runtime model stays `CLI 기본값` or `모델 확인 안 됨`; never substitute a plausible model name.
 
+### Owner follow-up: scan the configuration in one place — #809
+
+The owner found the separate provider, model and status rows too difficult to scan after #806. Adapt the existing leading row of each peer group to show provider, configured/effective model and known reasoning effort together, with the edit action alongside it. Put account relationship directly beneath the summary. Successful following shares the Main AI subscription/account while using a separate Judgment model; it does not copy the Main model. Preserve explicit fallback/checking/attention explanations and destinations.
+
+Main AI currently stores a model override but no separate reasoning-effort setting. Show CLI default or no separate setting, never an invented `medium`. Judgment effort comes only from the active record when it matches the effective model/transport. Missing model identity remains unknown/default. This follow-up adds no runtime setting, provider request, API or state change.
+
 ## 6. State projection contract
 
 Configuration, authentication/verification and execution are separate dimensions. These are view projections of existing API fields, not new stored lifecycle states. A selected item may need attention. Use text with colour; neutral selection must not masquerade as a green health check.

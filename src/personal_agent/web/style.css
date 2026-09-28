@@ -496,6 +496,9 @@ details.technical details>summary{color:var(--muted)}
 .ai-fact .settings-row-actions{grid-column:3;grid-row:1}
 .ai-fact .settings-row-description{grid-column:1/-1;grid-row:2}
 .ai-fact .settings-row-action{min-height:36px;background:var(--surface-3);border-color:transparent;white-space:normal}
+.ai-summary>.settings-state{color:var(--ink);font-size:var(--fs-4);font-weight:600}
+.ai-summary .settings-row-description{color:var(--ink-2)}
+@media(min-width:621px){.ai-summary{grid-template-columns:100px minmax(0,1fr) auto}.ai-summary>.settings-state{justify-self:start;text-align:left}.ai-summary .settings-row-description{grid-column:2;grid-row:2}.ai-summary .settings-row-actions{grid-row:1/span 2;align-self:start}}
 .ai-group-note{padding:10px 0 14px;font-size:var(--fs-2);color:var(--muted)}
 .ai-access-options{margin:0;min-width:0}
 .ai-access-options>summary{min-height:36px;padding:0 10px;background:var(--surface-3);border-radius:var(--r-1)}

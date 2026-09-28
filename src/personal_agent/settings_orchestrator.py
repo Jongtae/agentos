@@ -86,13 +86,17 @@ def next_action(row):
 
 
 #: #814: owner-visible names of the categories and settings the conversation may read/change.
-CATEGORY_LABELS = {"connections": "외부 연결", "current_context": "현재 맥락", "judgment_ai": "판단 AI", "main_ai": "기본 AI"}
-SETTINGS = {"current_context": ("enabled", "timezone"), "judgment_ai": ("mode", "model"), "main_ai": ("route", "model")}
-SETTING_LABELS = {"enabled": "사용", "timezone": "시간대", "mode": "방식", "model": "모델", "route": "경로"}
+CATEGORY_LABELS = {"connections": "외부 연결", "current_context": "현재 맥락", "judgment_ai": "판단 AI", "main_ai": "기본 AI",
+                   "owner_model": "알아 두기"}
+SETTINGS = {"current_context": ("enabled", "timezone"), "judgment_ai": ("mode", "model"), "main_ai": ("route", "model"),
+            # #805 owner-model upkeep: its pause switch and rolling 24-hour call cap.
+            "owner_model": ("enabled", "daily_calls")}
+SETTING_LABELS = {"enabled": "사용", "timezone": "시간대", "mode": "방식", "model": "모델", "route": "경로",
+                  "daily_calls": "하루 판단 횟수"}
 VALUE_LABELS = {"on": "켜짐", "off": "꺼짐", "follow_main": "기본 AI 따라가기", "explicit": "따로 지정"}
 JUDGMENT_MODE_LABELS = {"off": "사용 안 함"}
 UNKNOWN_SETTING_MESSAGE = ("대화로 바꿀 수 있는 설정이 아닙니다. 현재 맥락(enabled, timezone), 판단 AI(mode, model), "
-                           "기본 AI(route, model)만 바꿀 수 있습니다. API 키, 토큰, 로그인, 엔드포인트는 설정 화면에서 직접 입력하세요.")
+                           "기본 AI(route, model), 알아 두기(enabled, daily_calls)만 바꿀 수 있습니다. API 키, 토큰, 로그인, 엔드포인트는 설정 화면에서 직접 입력하세요.")
 CREDENTIAL_VALUE_MESSAGE = ("자격 증명처럼 보이는 값은 대화로 설정하지 않습니다. API 키, 토큰, 로그인은 설정 화면에서 직접 입력하세요. "
                             "아무것도 바꾸지 않았습니다.")
 UNAVAILABLE_MESSAGE = "이 설정의 현재 상태를 확인하지 못해 바꾸지 않았습니다. 설정 화면에서 확인하세요."
@@ -216,6 +220,15 @@ class SettingsOrchestrator:
                 "timezone": self._row("timezone", zone, zone or "설정 안 함(이 컴퓨터의 시간대)", None,
                                       format="IANA 시간대 이름(예: Asia/Seoul)")}
 
+    def _owner_model(self):
+        from .owner_model import MAX_DAILY_CALLS
+        settings = self.service.owner_model.settings()
+        enabled = "on" if settings.get("enabled") else "off"
+        cap = str(settings.get("daily_calls"))
+        return {"enabled": self._row("enabled", enabled, VALUE_LABELS[enabled], self._options(("on", "off"))),
+                "daily_calls": self._row("daily_calls", cap, f"{cap}회", None,
+                                         format=f"0~{MAX_DAILY_CALLS} 사이의 정수(24시간 동안 판단 AI 호출 수)")}
+
     def _model_lists(self):
         rows = self.store.config("decision_model_lists", {})
         return rows if isinstance(rows, dict) else {}
@@ -276,8 +289,10 @@ class SettingsOrchestrator:
             raise SettingsError(RETIRED_CONTROL_MESSAGE)
         if category not in SETTINGS or setting not in SETTINGS[category] or self.service is None:
             raise SettingsError(UNKNOWN_SETTING_MESSAGE)
-        if isinstance(value, bool) and (category, setting) == ("current_context", "enabled"):
+        if isinstance(value, bool) and setting == "enabled":
             value = "on" if value else "off"
+        if isinstance(value, int) and not isinstance(value, bool) and setting == "daily_calls":
+            value = str(value)
         if not isinstance(value, str) or len(value) > MAX_VALUE_CHARS:
             raise SettingsError("바꿀 값을 짧은 글자로 주세요. 아무것도 바꾸지 않았습니다.")
         value = value.strip()
@@ -293,6 +308,11 @@ class SettingsOrchestrator:
                 return valid_timezone(canonical_timezone(value)), row
             except ValueError as exc:
                 raise SettingsError(f"{exc} 아무것도 바꾸지 않았습니다.") from None
+        if setting == "daily_calls":
+            from .owner_model import MAX_DAILY_CALLS
+            if not value.isascii() or not value.isdigit() or not 0 <= int(value) <= MAX_DAILY_CALLS:
+                raise SettingsError(f"하루 판단 횟수는 0~{MAX_DAILY_CALLS} 사이의 정수로 주세요. 아무것도 바꾸지 않았습니다.")
+            return str(int(value)), row
         allowed = [option["value"] for option in row[setting]["options"] or ()]
         if value not in allowed:
             listed = ", ".join(allowed) or "지금은 없음"
@@ -302,6 +322,8 @@ class SettingsOrchestrator:
 
     def _describe(self, category, setting, value, row):
         options = {option["value"]: option["label"] for option in row[setting].get("options") or ()}
+        if setting == "daily_calls":
+            return f"{value}회"
         return options.get(value) or VALUE_LABELS.get(value) or value or "설정 안 함"
 
     @staticmethod
@@ -349,6 +371,9 @@ class SettingsOrchestrator:
         category, setting, after = row["category"], row["setting"], row["after"]
         if category == "current_context":
             self.service.set_current_context({"enabled": after == "on"} if setting == "enabled" else {"timezone": after})
+        elif category == "owner_model":
+            self.service.owner_model_request({"operation": "set", **({"enabled": after == "on"} if setting == "enabled"
+                                                                      else {"daily_calls": int(after)})})
         elif (category, setting) == ("judgment_ai", "mode"):
             self.service.activate_decision_route({"transport": after})
             # #814 review P2-1: following the Main AI queues a background qualification

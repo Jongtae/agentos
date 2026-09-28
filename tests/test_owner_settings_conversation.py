@@ -87,7 +87,7 @@ class OrchestratorCategories(_Case):
         for secret in (TELEGRAM_SECRET, OPENAI_KEY, OPENROUTER_KEY, 'decision-owner-key-value-0003'):
             self.assertNotIn(secret, text)
         self.assertNotIn('https://', text, 'no endpoint is reported')
-        self.assertEqual(set(read['settings']), {'current_context', 'judgment_ai', 'main_ai'})
+        self.assertEqual(set(read['settings']), {'current_context', 'judgment_ai', 'main_ai', 'owner_model'})
         self.assertEqual([o['value'] for o in read['settings']['main_ai']['route']['options']], ['openai', 'openrouter'])
         self.assertEqual(read['settings']['current_context']['enabled']['value'], 'off')
         self.assertIn('기본 AI · 경로: OpenRouter', read['response'])
@@ -134,6 +134,21 @@ class OrchestratorCategories(_Case):
         fresh = self.draft('current_context', 'timezone', 'Asia/Seoul')
         self.settings.confirm('owner', 'http', fresh['draft_id'], fresh['digest'])
         self.assertEqual(self.context()['timezone'], 'Asia/Seoul')
+
+    def test_owner_model_upkeep_pause_and_cap(self):
+        """#805's controls, through ``owner_model_request`` (set) only."""
+        self.assertEqual(self.settings.read('owner', 'owner_model')['settings']['owner_model']['enabled']['value'], 'on')
+        pause = self.draft('owner_model', 'enabled', 'off')
+        self.assertTrue(self.service.owner_model.settings()['enabled'], 'a draft changes nothing')
+        self.settings.confirm('owner', 'http', pause['draft_id'], pause['digest'])
+        self.assertFalse(self.service.owner_model.settings()['enabled'])
+        for value in ('-1', '201', '1.5', '열', '２０'):
+            with self.subTest(value=value), self.assertRaisesRegex(SettingsError, '0~200'):
+                self.draft('owner_model', 'daily_calls', value)
+        cap = self.draft('owner_model', 'daily_calls', 5)
+        self.assertEqual((cap['after'], cap['summary']), ('5', '알아 두기 하루 판단 횟수: 20회 → 5회'))
+        self.settings.confirm('owner', 'http', cap['draft_id'], cap['digest'])
+        self.assertEqual(self.service.owner_model.settings()['daily_calls'], 5)
 
     def test_judgment_ai_mode_and_model(self):
         draft = self.draft('judgment_ai', 'mode', 'off')

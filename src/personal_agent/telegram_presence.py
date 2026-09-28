@@ -73,15 +73,82 @@ NO_STEP_LINE = ''
 _TRAILING_ELLIPSIS = re.compile(r'(?:\s*(?:…|\.{2,}))+\s*$')
 
 
-def draft_frame(line, frame):
+def draft_frame(line, frame, note=None):
     """The draft text: the observed step line (if any) followed by dots frame ``frame``.
 
     A trailing ellipsis on the line is dropped, since the dots replace it.
-    Never empty.
+    ``note`` (ATTN-WAIT-01 / #839: the one "참, …" attention line) follows on
+    its own line.  Never empty.
     """
     dots = DOTS_FRAMES[frame % len(DOTS_FRAMES)]
     line = _TRAILING_ELLIPSIS.sub('', str(line or '')).strip()
-    return f'{line} {dots}' if line else dots
+    text = f'{line} {dots}' if line else dots
+    note = ' '.join(str(note or '').split())
+    return f'{text}\n{note}' if note else text
+
+
+# --- attention while waiting (ATTN-WAIT-01 / #839) ------------------------------
+#
+# Owner direction 2026-09-28: the waiting draft is a natural breakpoint, so
+# it may remind the owner of ONE thing AgentOS already prepared for them.
+# Selection is deterministic from existing state (no model call): a fresh
+# prepared answer the owner has not received, then an accepted reminder due
+# soon, then an ask still waiting for the owner (a proposed preparation, a
+# memory ask).  The draft is ephemeral, so the item's durable surface is
+# unchanged; nothing is decided, accepted or delivered here.
+
+#: Selection order: lower is shown first.
+ATTENTION_PREPARED = 'prepared'
+ATTENTION_REMINDER = 'reminder'
+ATTENTION_ASK = 'ask'
+ATTENTION_RANK = {ATTENTION_PREPARED: 0, ATTENTION_REMINDER: 1, ATTENTION_ASK: 2}
+#: A reminder is "soon" within this horizon.
+ATTENTION_REMINDER_HORIZON = 12 * 3600
+#: The same item is not surfaced again within this cooldown.
+ATTENTION_COOLDOWN = 6 * 3600
+#: The natural lead-in of the one line.
+ATTENTION_PREFIX = '참, '
+ATTENTION_LINE_CHARS = 160
+#: The recorded tool/host action of one surfacing (the information-use audit reads it).
+ATTENTION_ACTION = 'attention_surface'
+ATTENTION_TOOL = 'presence'
+#: How each kind of item is phrased; ``text`` is the item's own (redacted) words.
+ATTENTION_PHRASES = {ATTENTION_PREPARED: '준비해 둔 답이 있어요: {text}',
+                     ATTENTION_REMINDER: '{text} 알림 있어요.',
+                     ATTENTION_ASK: '아직 답을 기다리는 게 있어요: {text}'}
+
+
+def attention_line(kind, text):
+    """The one "참, …" line for an item of ``kind`` whose own words are ``text``, or None."""
+    text = ' '.join(str(text or '').split())
+    if not text or kind not in ATTENTION_PHRASES:
+        return None
+    line = ATTENTION_PREFIX + ATTENTION_PHRASES[kind].format(text=text)
+    if len(line) > ATTENTION_LINE_CHARS:
+        line = line[:ATTENTION_LINE_CHARS - 1].rstrip() + '…'
+    return line
+
+
+def pick_attention(items, now, surfaced=None, cooldown=ATTENTION_COOLDOWN):
+    """The one item to surface, or None: the best-ranked item not surfaced within ``cooldown``.
+
+    ``items`` are ``{'ref', 'kind', 'text', 'at'}`` dicts (``at``: the
+    item's own time, used as the tiebreak, earliest first).  ``surfaced``
+    maps an item ref to the time it was last surfaced.  Pure and
+    deterministic; the caller already excluded the current Work's own items.
+    """
+    surfaced = surfaced if isinstance(surfaced, dict) else {}
+    ranked = sorted((item for item in items or () if isinstance(item, dict) and item.get('ref')
+                     and item.get('kind') in ATTENTION_RANK),
+                    key=lambda item: (ATTENTION_RANK[item['kind']], item.get('at') or 0, str(item['ref'])))
+    for item in ranked:
+        last = surfaced.get(item['ref'])
+        if isinstance(last, (int, float)) and now - last < cooldown:
+            continue
+        line = attention_line(item['kind'], item.get('text'))
+        if line:
+            return {**item, 'line': line}
+    return None
 
 # --- live step lines (SEC-PROGRESS-01 / #718) ----------------------------------
 #
@@ -364,6 +431,10 @@ class WaitState:
     draft_text: str = None
     dots_frame: int = 0
     scrubbed: tuple = None
+    #: #839: the one attention item chosen for this Work's draft (None: not
+    #: chosen yet; {}: nothing to surface), and whether it was shown and recorded.
+    attention: dict = None
+    attention_shown: bool = False
 
 
 # --- durable reply controls -----------------------------------------------------

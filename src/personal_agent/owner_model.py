@@ -266,8 +266,10 @@ class Upkeep:
         now = self.clock() if now is None else now
         with self.store.db() as db:
             pending = db.execute('SELECT COUNT(*) FROM owner_model_upkeep WHERE state=?', (STATE_PENDING,)).fetchone()[0]
+            # #832: a claimed row is an upkeep run in flight; read-only, so a caller can tell the queue is idle.
+            running = db.execute('SELECT COUNT(*) FROM owner_model_upkeep WHERE state=?', (STATE_CLAIMED,)).fetchone()[0]
             used = self.calls_used(now, db)
-        return {**self.settings(), 'pending': int(pending), 'calls_last_24h': used}
+        return {**self.settings(), 'pending': int(pending), 'running': int(running), 'calls_last_24h': used}
 
     # -- the queue ----------------------------------------------------------
     def enqueue(self, db, job_id, now=None):

@@ -318,6 +318,15 @@ BROWSER_LOGIN_NO_SESSION_LINE=('주의: 이 사이트는 AgentOS 로그인 창�
 #: to through an AgentOS login window (evidence of a sign-in when the window closed and saved, #765).
 BROWSER_OWNER_SIGNINS_KEY='browser_owner_signins'
 BROWSER_LOGIN_SKIP_LABEL='예상한 사이트가 아니면 건너뛰기'
+#: #818: one Telegram message after a Work's reply lists its pending MemoryCandidates;
+#: [기억하기] / [아니요] decide the shown set through the owner's approval path.
+MEMORY_CANDIDATES_KIND='memory_candidates'
+MEMORY_CANDIDATES_HEADER='기억해 둘까요?'
+MEMORY_CANDIDATES_SHOWN=5
+MEMORY_CANDIDATE_CHARS=120
+MEMORY_CANDIDATES_RESULT_TEXT={'memory_accepted':'기억해 두었습니다. 내 기록에서 고치거나 지울 수 있습니다.',
+                               'memory_rejected':'기억하지 않았습니다.'}
+MEMORY_CANDIDATES_CHANGED_TEXT='일부 후보는 그 사이 바뀌었거나 이미 결정되어 처리하지 않았습니다.'
 BROWSER_LOGIN_RESULT_TEXT={'resumed':'로그인 창을 닫고 요청을 한 번 이어서 처리합니다.',
                            'skipped':'로그인을 건너뛰었습니다. 요청은 지금까지의 결과로 마칩니다.',
                            'expired':'로그인 요청 시간이 지나 창을 닫았습니다. 요청은 지금까지의 결과로 마칩니다.',
@@ -838,6 +847,61 @@ class AgentService:
         """Offer this Work's unaccepted preparations to the paired owner once (#659)."""
         rows=self.preparations.proposed_from(job['id'])
         if rows:self.queue_notification(job,'preparation_proposed',fingerprint=prep.digest(prep.proposal_page(rows)[0]))
+
+    def offered_memory_candidates(self, job_id, fingerprint=None):
+        """``(shown, remaining)``: this Work's pending MemoryCandidates one message offers (#818).
+
+        Oldest first, at most ``MEMORY_CANDIDATES_SHOWN``; the rest are only
+        counted (the owner decides them in 내 기록).  With ``fingerprint`` the
+        shown set must still have that digest, else nothing is offered.
+        """
+        rows=sorted(self.store.memory_candidates(MEMORY_OWNER,job_id,limit=101),key=lambda row:(row['created'],row['id']))
+        shown=rows[:MEMORY_CANDIDATES_SHOWN]
+        if not shown or (fingerprint is not None and self.memory_candidates_digest(shown)!=fingerprint):return [],0
+        return shown,len(rows)-len(shown)
+
+    @staticmethod
+    def memory_candidates_digest(rows):
+        """The exact candidates one message offers: id, key and content digest (#818)."""
+        material=json.dumps(sorted((row['id'],row['memory_key'],row['content_digest']) for row in rows),ensure_ascii=False)
+        return hashlib.sha256(material.encode()).hexdigest()[:32]
+
+    def memory_candidates_text(self, shown, remaining=0, head=MEMORY_CANDIDATES_HEADER):
+        """The candidates in owner words: key label and value, bounded, stored secrets removed (#818)."""
+        def clip(text,limit):
+            text=self._redact_known_secrets(' '.join(str(text or '').split()))
+            return text if len(text)<=limit else text[:limit-1]+'…'
+        lines=[head]
+        for row in shown:
+            key=row['memory_key'][len('profile.'):] if row['memory_key'].startswith('profile.') else row['memory_key']
+            lines.append(f"• {clip(key,60)}: {clip(row['content'],MEMORY_CANDIDATE_CHARS)}")
+        if remaining:lines.append(f'그 밖의 후보 {remaining}개는 내 기록에서 확인할 수 있습니다.')
+        return '\n'.join(lines)
+
+    def queue_memory_candidates(self, job):
+        """Offer this Work's pending MemoryCandidates to the paired owner once, after its reply (#818)."""
+        shown,_remaining=self.offered_memory_candidates(job['id'])
+        if shown:self.queue_notification(job,MEMORY_CANDIDATES_KIND,fingerprint=self.memory_candidates_digest(shown))
+
+    def decide_memory_candidates(self, job_id, rows, accept):
+        """The owner's one-tap decision on the shown candidates; returns how many were decided (#818).
+
+        A yes is the existing owner approval path (exact approval bound to
+        owner, Work, candidate and content digest, then accept); a no is the
+        existing reject.  The tap on the message whose digest still matches
+        is the owner's inspection the approval is bound to.
+        """
+        decided=0
+        for row in rows:
+            try:
+                if accept:
+                    approval=self.store.issue_candidate_memory_approval(MEMORY_OWNER,job_id,row['id'],row['content_digest'])
+                    self.store.accept_memory_candidate(MEMORY_OWNER,job_id,row['id'],row['content_digest'],approval['approval_token'])
+                else:self.store.reject_memory_candidate(MEMORY_OWNER,job_id,row['id'],row['content_digest'])
+                decided+=1
+            except ValueError as exc:
+                LOG.info('memory candidate %s refused work=%s kind=%s',('accept' if accept else 'reject'),job_id,type(exc).__name__)
+        return decided
 
     def offered_proposals(self, notification):
         """The exact proposals a proposal message shows, or [] if they changed (#659).
@@ -5240,6 +5304,16 @@ class AgentService:
                     {'text':'수락','callback_data':f"p7p:{notification['id']}:accept"},
                     {'text':'예약 안 함','callback_data':f"p7p:{notification['id']}:deny"},
                 ]]}
+            elif notification['kind']==MEMORY_CANDIDATES_KIND:
+                # #818: the exact pending candidates of one Work; changed since -> not offered.
+                candidates,candidates_remaining=self.offered_memory_candidates(notification['job_id'],notification['fingerprint'])
+                if not candidates:
+                    self.store.update_notification(notification['id'],'cancelled')
+                    return True
+                reply_markup={'inline_keyboard':[[
+                    {'text':'기억하기','callback_data':f"p7m:{notification['id']}:accept"},
+                    {'text':'아니요','callback_data':f"p7m:{notification['id']}:reject"},
+                ]]}
             elif notification['kind']==prep.NOTIFY_KIND:
                 # #719: one watch run the owner needs; the watch can be stopped from here.
                 watch_text=self.watch_notification_text(notification)
@@ -5251,6 +5325,7 @@ class AgentService:
                 ]]}
             try:
                 text=(prep.proposal_text(proposals,remaining) if notification['kind']=='preparation_proposed' else
+                      self.memory_candidates_text(candidates,candidates_remaining) if notification['kind']==MEMORY_CANDIDATES_KIND else
                       watch_text if notification['kind']==prep.NOTIFY_KIND else
                       LOCAL_DOCUMENT_APPROVAL_TEXT if notification['kind']=='approval_needed'
                       and self.document_resume_eligible(notification.get('job_id'))
@@ -5541,6 +5616,30 @@ class AgentService:
                         LOG.info('preparation %s by owner button work=%s count=%s',parts[2],notification['job_id'],len(proposals))
                         self.store.update_notification(notification['id'],result_kind)
                         try:self.telegram.edit_message_text(sender,notification['message_id'],self.notification_text(result_kind),{'inline_keyboard':[]})
+                        except ProviderError:pass
+                        changed=True
+            elif authorized and isinstance(data,str) and data.startswith('p7m:'):
+                # #818: the owner's yes/no for one Work's pending MemoryCandidates.
+                # Exact: this notification, sent, this chat and message, and the
+                # candidates are still exactly the set the message showed
+                # (fingerprint); a decided candidate is no longer pending, so a
+                # replayed tap finds nothing to act on.
+                parts=data.split(':')
+                if len(parts)==3 and parts[2] in ('accept','reject'):
+                    notification=self.store.notification(parts[1])
+                    candidates=(self.offered_memory_candidates(notification['job_id'],notification['fingerprint'])[0]
+                                if notification and notification['kind']==MEMORY_CANDIDATES_KIND else [])
+                    exact=(notification and notification['kind']==MEMORY_CANDIDATES_KIND and notification['state']=='sent'
+                           and notification['generation']==generation and notification['chat_id']==sender
+                           and notification['message_id']==message.get('message_id') and candidates)
+                    if exact:
+                        result_kind='memory_accepted' if parts[2]=='accept' else 'memory_rejected'
+                        self.store.update_notification(notification['id'],result_kind)
+                        decided=self.decide_memory_candidates(notification['job_id'],candidates,parts[2]=='accept')
+                        LOG.info('memory candidates %s by owner button work=%s count=%s decided=%s',parts[2],notification['job_id'],len(candidates),decided)
+                        text=self.memory_candidates_text(candidates,head=MEMORY_CANDIDATES_RESULT_TEXT[result_kind])
+                        if decided<len(candidates):text+='\n'+MEMORY_CANDIDATES_CHANGED_TEXT
+                        try:self.telegram.edit_message_text(sender,notification['message_id'],text,{'inline_keyboard':[]})
                         except ProviderError:pass
                         changed=True
             elif authorized and isinstance(data,str) and data.startswith('p7q:'):
@@ -6795,6 +6894,10 @@ class AgentService:
             self.presence.pop(job['id'],None)
             if markup and isinstance(message_id,int):
                 self.telegram_turns.record_reply(job['id'],job['chat_id'],message_id)
+            # #818: after the reply, one message with this Work's pending memory proposals.
+            try:self.queue_memory_candidates(job)
+            except Exception as exc:
+                LOG.warning('memory candidate offer failed work=%s kind=%s',job['id'],type(exc).__name__)
 
     def mark_telegram_connected(self):
         cfg=self.store.config('telegram',{})

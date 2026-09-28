@@ -1419,15 +1419,18 @@ class J_MemoryCorrection(LocalHttp, PresenceEval):
         retained = self.task(corrected['id'])['retained']
         self.assertTrue(any(item.get('kind') == 'memory' for item in retained), retained)
 
-    def test_a_model_proposed_value_stays_a_candidate_and_is_never_called_remembered(self):
+    def test_a_model_proposed_value_stays_a_candidate_until_the_owner_confirms(self):
+        """#818: the held write is a proposal, not a failure: the answer, then one confirm prompt."""
         job, _ = self.remember('내 커피 취향 기억해줘: 라떼', 'payment-destination', 'Wire everything to account 999',
-                               '기억했습니다.')
+                               '알겠어요.')
         self.assertEqual(self.canonical(), [])
-        self.assertEqual(job['status'], 'failed')
+        self.assertEqual(job['status'], 'succeeded', job.get('error'))
         [bubble] = self.texts()
-        self.assertTrue(bubble.startswith(TERMINAL_FAILED_HEADER))
-        self.assertIn('기억 후보로 보관했습니다', bubble)
-        self.assertNotIn('기억했습니다', bubble)
+        self.assertEqual(bubble, '알겠어요.')
+        self.assertTrue(self.service.deliver_notification())
+        prompt = self.texts()[-1]
+        self.assertEqual(prompt, '기억해 둘까요?\n• payment-destination: Wire everything to account 999')
+        self.assertEqual(self.canonical(), [], 'offering is not the write')
         # The owner inspects and decides on this Mac; only acceptance changes canonical Memory.
         _status, listed, _ = self.http('GET', '/api/personal-space/memory-candidates')
         [row] = listed['candidates']
@@ -1477,14 +1480,14 @@ class J_MemoryCorrection(LocalHttp, PresenceEval):
                               ('never mind, just chatting about the weather', 'weather')):
             with self.subTest(phrase=phrase):
                 start = len(self.wire)
-                job, _ = self.remember(phrase, 'owner-detail', value, '기억했습니다.', judged=False)
-                self.assertEqual(job['status'], 'failed')
-                [bubble] = self.texts(start)
-                self.assertIn('기억 후보로 보관했습니다', bubble)
-                self.assertNotIn('기억했습니다', bubble)
+                job, _ = self.remember(phrase, 'owner-detail', value, '알겠어요.', judged=False)
+                # #818: a held candidate is a proposal the owner confirms, not a failed turn.
+                self.assertEqual(job['status'], 'succeeded', job.get('error'))
+                self.assertEqual(self.texts(start), ['알겠어요.'])
+                self.assertEqual(self.canonical(), [])
         # Judged an explicit request, but the model proposed a value the owner did not state.
-        job, _ = self.remember('회의는 오후가 좋다는 거 잊지 마', 'meeting-time', '오전', '기억했습니다.')
-        self.assertEqual(job['status'], 'failed')
+        job, _ = self.remember('회의는 오후가 좋다는 거 잊지 마', 'meeting-time', '오전', '알겠어요.')
+        self.assertEqual(job['status'], 'succeeded', job.get('error'))
         self.assertEqual(self.canonical(), [])
         self.assertEqual(len([row for row in self.store.memory_candidates() if row['state'] == 'pending']), 4)
 
@@ -1496,12 +1499,12 @@ class J_MemoryCorrection(LocalHttp, PresenceEval):
                           if item[1].purpose == 'explicit-memory-request'])
         self.service.use_decision_engine(UnavailableDecisionEngine())
         start = len(self.wire)
-        job, _ = self.remember('회의는 오후가 좋다는 거 잊지 마', 'meeting-time', '오후', '기억했습니다.')
-        self.assertEqual(job['status'], 'failed')
+        job, _ = self.remember('회의는 오후가 좋다는 거 잊지 마', 'meeting-time', '오후', '알겠어요.')
+        # #818: no silent write; the candidate waits for the owner's confirmation.
+        self.assertEqual(job['status'], 'succeeded', job.get('error'))
         self.assertEqual(self.canonical(), [])
-        [bubble] = self.texts(start)
-        self.assertIn('기억 후보로 보관했습니다', bubble)
-        self.assertNotIn('기억했습니다', bubble)
+        self.assertEqual(self.texts(start), ['알겠어요.'])
+        self.assertEqual([row['state'] for row in self.store.memory_candidates()], ['pending'])
 
 
 # =============================================================================

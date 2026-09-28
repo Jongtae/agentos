@@ -1,5 +1,12 @@
 # Personal AgentOS Secretary Agency Contract
 
+## Amendment — #818 (2026-09-28)
+
+OWNER-MODEL-04 follows owner feedback on Works `18c91ca7` and `7767e7da`, where a stated fact became a pending MemoryCandidate and the owner saw only a failure:
+- **A proposed memory is not a failed action.** A `save_memory` that #597 holds as a pending MemoryCandidate is a recorded proposal (trail state `proposed`). It neither withholds the answer (#752 `answer_withheld`) nor makes the Work partial or failed, and it is not evidence of the goal. The #488/#752 rule is unchanged for every other tool, for calendar drafts and for a memory write that errored.
+- **The owner confirms in one tap.** After a Telegram Work's reply, one message lists that Work's pending candidates (key and value, bounded, stored secrets removed) with [기억하기] [아니요]. The buttons follow the #659 pattern: this notification, sent, the paired private chat, its generation and message, and the shown set's digest; a decided candidate is no longer offered, so a replayed tap does nothing. A yes goes through the existing owner approval path (`issue_candidate_memory_approval` → `accept_memory_candidate`); a no is the existing reject. The web keeps 내 기록.
+- **Guidance only (C16).** `save_memory` content is the value in the owner's own words, and the key names the attribute. When the owner tells AgentOS something rather than asking, the plan question and the core instructions ask for a secretary's response: acknowledge it, update what AgentOS knows, and act on what it changes. No task logic.
+
 ## Amendment — #805 phase 1 (2026-09-28)
 
 OWNER-MODEL-03 keeps the owner in mind after each Work, asynchronously and minimised (`src/personal_agent/owner_model.py`). It adds no data source, no monitoring and no task-specific code:

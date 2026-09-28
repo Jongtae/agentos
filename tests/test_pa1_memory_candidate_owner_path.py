@@ -185,10 +185,9 @@ class _OwnerSurface(unittest.TestCase):
         self.model_text = MODEL_ANSWER
         job_id = self.ask(NO_SAVE_PROMPT)
         self.model_plan = []
-        # #488: the write was withheld, so the turn does not report success.
-        # This used to assert 'succeeded' -- the defect, written down as the
-        # expected result.
-        self.assertEqual(self.store.job(job_id)['status'], 'failed')
+        # #818: the held write is a recorded proposal the owner confirms, not a
+        # failed action (#488 still holds for a write that errored).
+        self.assertEqual(self.store.job(job_id)['status'], 'succeeded')
         # C5: the model's write did not become canonical Memory.
         self.assertEqual(self.store.memories(), [])
         self.assertEqual(self.web('/api/personal-space')['memory_candidate_count'], 1)

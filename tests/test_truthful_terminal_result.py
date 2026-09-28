@@ -245,10 +245,13 @@ class PartialTurnTests(TerminalResultTestCase):
 
 
 class WithheldAnswerTests(TerminalResultTestCase):
-    """#752 / #488: a failed state-changing action keeps the answer withheld on both surfaces."""
+    """#752 / #488: a failed state-changing action keeps the answer withheld on both surfaces.
 
-    def test_a_refused_memory_write_withholds_the_answer_on_telegram_and_the_web_card(self):
-        self.plan = [('save_memory', {'memory_key': 'inferred-preference', 'content': '모델이 추론한 값'})]
+    #818: a memory write held as a pending candidate is a proposal, not such a failure.
+    """
+
+    def test_a_memory_write_that_errored_withholds_the_answer_on_telegram_and_the_web_card(self):
+        self.plan = [('save_memory', {'memory_key': 'inferred-preference', 'content': 'x' * 4001})]
         self.text = '취향을 기억해 두었습니다.'
         job, bubble = self.ask('이건 기억하지 마. 그냥 방금 이야기만 정리해 줘', card=True)
         self.assertEqual(job['status'], 'failed', job.get('error'))
@@ -275,6 +278,18 @@ class WithheldAnswerTests(TerminalResultTestCase):
         self.assertEqual(card['status_label'], '확인 필요')
         self.assertFalse(card['result_available'])
         self.assertEqual(self.store.memories(), [])
+
+    def test_a_memory_proposal_does_not_withhold_the_answer(self):
+        """#818: a pending MemoryCandidate is a proposal the owner confirms next, not a failed action."""
+        self.plan = [('save_memory', {'memory_key': 'inferred-preference', 'content': '모델이 추론한 값'})]
+        self.text = '정리해 드릴게요.'
+        job, bubble = self.ask('이건 기억하지 마. 그냥 방금 이야기만 정리해 줘', card=True)
+        self.assertEqual(job['status'], 'succeeded', job.get('error'))
+        self.assertFalse(self.service.answer_withheld(job))
+        self.assertEqual(bubble, self.text)
+        self.assertTrue(self.card(job)['result_available'])
+        self.assertEqual(self.store.memories(), [])
+        self.assertEqual([row['state'] for row in self.store.memory_candidates()], ['pending'])
 
     def test_the_same_failed_status_with_only_a_failed_read_is_not_withheld(self):
         """The opposing pin: the status alone never decides withholding."""

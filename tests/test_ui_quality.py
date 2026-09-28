@@ -381,31 +381,59 @@ class EngineAuthUi(unittest.TestCase):
         self.assertNotIn("token:engine", form)
 
     def test_token_save_reports_next_to_the_field(self):
-        """#578: success and failure appear beside the token field, and survive the re-render."""
-        out = node_run(r"""
-const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');const app=fs.readFileSync(process.argv[1],'utf8');
-class El{constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.attrs={};this.className='';this._t='';this.value='';this.classList={toggle:(c,on)=>{this.cls=this.cls||new Set();on?this.cls.add(c):this.cls.delete(c);},contains:c=>Boolean(this.cls&&this.cls.has(c))};}
- set textContent(v){this._t=String(v);this.children=[];} get textContent(){return this._t+this.children.map(c=>c.textContent).join(' ');}
- append(...n){this.children.push(...n);} setAttribute(k,v){this.attrs[k]=v;} focus(){}}
-const all=n=>n.children.flatMap(c=>[c,...all(c)]);const active=new El('div');
-const document={createElement:t=>new El(t)};const part=(a,b)=>app.slice(app.indexOf(a),app.indexOf(b));
-const source=part('const LANGUAGES=','function normalizeEndpoint(')+part('function element(','function setError(')+part('const ENGINE_LOGIN_TEXT=','function renderSubscriptionEngines(');
-let fail=null,refreshed=0;const ctx={document,$:()=>active,console,busy:async(b,fn)=>fn(),refresh:async()=>{refreshed++;},
- api:async(path,body)=>{if(fail)throw new Error(fail);return {engines:[{id:'claude-code',login:{state:'token-saved'}}]};}};
+        """#782: linked chooser feedback survives refresh; failed secret drafts remain editable."""
+        from test_settings_ui import DOM_CHECKS
+
+        # Reuse the same DOM and actual chooser source extraction as the settings
+        # regressions, including node identity, focus and account-panel handling.
+        harness = DOM_CHECKS.split("const calls=[];", 1)[0]
+        out = node_run(harness + r"""
+const calls=[];let refreshed=0,gate=null;
+const engine={id:'claude-code',name:'Claude Code',kind:'subscription',installed:true,credential:false,
+ login:{state:'signed-out'},model:'',destination:'Anthropic (Claude Code 구독 계정)'};
+const settings={main_ai:{current:'claude-code',order:['claude-code'],routes:[engine]},
+ subscription_engines:{selected:'claude-code'},decision_route:{mode:'off',active:{transport:'none'}}};
+const ctx={document,$,console,telegramDraftOpen:false,
+ api:async(path,body)=>{calls.push({path,body});return gate.promise;},
+ refresh:async()=>{refreshed++;ctx.renderExecutionConnection(settings);},
+ setFeedback:(id,text)=>{$(id).textContent=text||'';},setError:(id,error)=>{$(id).textContent=error.message;}};
 vm.createContext(ctx);vm.runInContext(source,ctx);vm.runInContext("setLanguage('ko')",ctx);
-const statusOf=form=>all(form).find(n=>n.attrs.role==='status');
-let form=ctx.claudeTokenForm({credential:false});const input=all(form).find(n=>n.tag==='input');
-input.value='';form.onsubmit({preventDefault(){}});
-assert.match(statusOf(form).textContent,/붙여 넣은 뒤/,'an empty save explains itself');
-fail='경로를 찾을 수 없습니다.';input.value='tok-123456789012345678901';
-(async()=>{await form.onsubmit({preventDefault(){}});
- assert.match(statusOf(form).textContent,/저장하지 못했습니다: 경로를 찾을 수 없습니다/,'a failed save is shown beside the field');
- assert.equal(refreshed,0);
- fail=null;await form.onsubmit({preventDefault(){}});assert.equal(refreshed,1);
- form=ctx.claudeTokenForm({credential:true});
- assert.match(statusOf(form).textContent,/토큰을 저장했습니다\. 토큰 저장됨/,'the saved notice survives the re-render with the login state');
- assert.equal(statusOf(ctx.claudeTokenForm({credential:true})).textContent,'','the notice is shown once');
- console.log(JSON.stringify({ok:true}));})().catch(e=>{console.error(e);process.exit(1);});
+const dialog=new Element('dialog');dialog.id='ai-chooser';dialog._root=true;
+dialog.append($('ai-chooser-list'),$('ai-chooser-consequence'),$('ai-chooser-feedback'),$('ai-chooser-apply'),$('ai-chooser-cancel'),$('ai-chooser-discard'));
+$('ai-chooser-discard').append($('ai-discard-keep'),$('ai-discard-confirm'));
+dialog.showModal=()=>{dialog.open=true;};dialog.close=()=>{dialog.open=false;dialog.onclose?.();};
+ctx.renderExecutionConnection(settings);ctx.openAiChooser($('active-ai').querySelector('button'));ctx.chooserPanel('claude-code');
+const form=$('ai-chooser-list').querySelector('.engine-token'),input=form.querySelector('input[type="password"]');
+const feedback=$('ai-chooser-feedback'),save=form.querySelector('button');
+assert.equal(input.attrs['aria-describedby'],'ai-chooser-feedback','the password field is linked to the visible chooser status');
+const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
+(async()=>{
+ await form.onsubmit({preventDefault(){}});
+ assert.match(feedback.textContent,/붙여 넣은 뒤/);assert.equal(calls.length,0);assert.equal(document.activeElement,input);
+ const synthetic='tok-fixture-never-rendered';input.value=synthetic;gate=deferred();
+ const failed=form.onsubmit({preventDefault(){}});
+ assert.equal(save.disabled,true);assert.equal(input.disabled,true,'pending submission disables duplicate editing');
+ gate.reject(new Error('경로를 찾을 수 없습니다.'));await failed;
+ assert.match(feedback.textContent,/경로를 찾을 수 없습니다/);assert(feedback.classList.contains('error'));
+ assert.equal(input.value,synthetic,'failed credential remains available for correction');
+ assert.equal($('ai-chooser-list').querySelector('input[type="password"]'),input,'failure preserves the draft node');
+ assert.equal(input.disabled,false);assert.equal(refreshed,0);
+ assert.equal(document.activeElement,feedback,'the linked error receives focus');
+ assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{path:'/api/subscription-engines/credential',body:{engine:'claude-code',token:synthetic}}]);
+ gate=deferred();const saved=form.onsubmit({preventDefault(){}});
+ engine.credential=true;engine.login={state:'token-saved'};
+ gate.resolve({engines:[{id:'claude-code',login:{state:'token-saved'}}]});await saved;
+ assert.equal(refreshed,1);assert.equal(input.value,'','accepted secret is cleared');
+ assert.equal(vm.runInContext('aiNotice',ctx),null,'the real overview renderer consumes the global notice');
+ assert.match(feedback.textContent,/Claude Code 토큰을 저장했습니다/);
+ assert.match(feedback.textContent,/기본 AI는 아직 바뀌지 않았습니다/);
+ assert.match(feedback.textContent,/토큰 저장됨, 다음 요청에서 확인/);
+ assert(!feedback.classList.contains('error'));assert(!feedback.textContent.includes(synthetic));
+ assert.equal($('ai-chooser-list').querySelector('input[type="password"]'),null,'saved presence replaces entry without exposing its value');
+ assert.equal(calls.length,2);assert(calls.every(call=>call.path==='/api/subscription-engines/credential'),'token saves never activate an AI');
+ const notice=feedback.textContent;ctx.renderAiChooser();assert.equal(feedback.textContent,notice,'a normal render retains completion feedback');
+ console.log(JSON.stringify({ok:true}));
+})().catch(error=>{console.error(error);process.exit(1);});
 """)
         self.assertEqual(json.loads(out.strip().splitlines()[-1]), {"ok": True})
 

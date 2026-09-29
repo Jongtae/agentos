@@ -1733,6 +1733,19 @@ class AgentService:
             LOG.warning('photo provenance could not be recorded job=%s',job_id)
             return attempt_id
 
+    def photo_work_has_pending_resume(self, work_id):
+        """Keep the Telegram photo available while an owner-approved continuation can requeue this Work."""
+        login=self._browser_login(work_id) or {}
+        if login.get('state') in ('requested','opening','offered','closing','resuming'):
+            return True
+        browser=self._browser_request(work_id) or {}
+        if browser.get('state') in ('requested','issued'):
+            return True
+        attachment=self.store.context_attachment(work_id)
+        if attachment and not attachment.get('approved'):
+            return True
+        return work_id in self._document_resume_rows()
+
     # Private sources whose content existing guards keep out of durable
     # records (Drive excerpts, the expiring context inbox, notes, documents,
     # Memory reads, calendar). A turn that carried any of them keeps only a
@@ -5300,6 +5313,7 @@ class AgentService:
         if not job or not row:return {'approved':False,'resumed':False,'work_id':work_id}
         if not approve:
             self._put_browser_request(work_id,None)
+            if not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
             return {'approved':False,'resumed':False,'work_id':work_id}
         approval=self.store.issue_browser_step_approval(self.connector_owner_id(job),work_id,row['action'],
                                                         row['page_digest'],row['target_digest'],row['step_digest'])
@@ -5309,6 +5323,9 @@ class AgentService:
         with self.store.db() as db:
             db.execute('BEGIN IMMEDIATE')
             resumed=db.execute("UPDATE jobs SET status='queued',error=NULL,delivery='none' WHERE id=? AND status IN ('failed','partial')",(work_id,)).rowcount==1
+        if not resumed:
+            self._put_browser_request(work_id,None)
+            if not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
         return {'approved':True,'resumed':resumed,'work_id':work_id}
 
     # -- in-flow login (SEC-FLOW-01 #709) ------------------------------------
@@ -5670,7 +5687,7 @@ class AgentService:
             self._put_browser_login(work_id,{**row,'state':final,'cause':shown,'closed_at':time.time()})
             # #749/#765: the site(s) the owner signed in to through the window, each by its own evidence.
             self._record_owner_signins(signed)
-        if final!='resumed':self.store.remove_telegram_photo(work_id)
+        if final!='resumed' and not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
         self._finish_login_notification(work_id,shown)
         return final
 
@@ -5720,14 +5737,14 @@ class AgentService:
                     current=self._browser_login(work_id)
                     if current and current.get('state')=='opening' and current.get('nonce')==row.get('nonce'):
                         self._put_browser_login(work_id,{**current,'state':'unavailable','closed_at':now})
-                self.store.remove_telegram_photo(work_id)
+                if not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
             elif state=='requested' and now-float(row.get('requested_at') or 0)>=BROWSER_LOGIN_SECONDS:
                 # The run that asked never finished (a restart): nothing to show.
                 self._put_browser_login(work_id,{**row,'state':'expired','cause':'expired','closed_at':now})
-                self.store.remove_telegram_photo(work_id)
+                if not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
             elif state not in ('requested','opening','offered','closing','resuming') and now-float(row.get('closed_at') or 0)>=BROWSER_LOGIN_KEEP_SECONDS:
                 self._put_browser_login(work_id,None)
-                self.store.remove_telegram_photo(work_id)
+                if not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
         return settled
 
     def calendar_for(self, job):
@@ -6644,6 +6661,7 @@ class AgentService:
                             result_kind='approved'
                         else:
                             result_kind='denied'
+                            self.store.remove_telegram_photo(notification['job_id'])
                         self.store.update_notification(notification['id'],result_kind)
                         try:self.telegram.edit_message_text(sender,notification['message_id'],
                             ('이 작업의 컨텍스트 공유를 승인했습니다. 작업을 계속합니다.' if parts[2]=='approve' else '이 작업의 컨텍스트 공유를 허용하지 않았습니다.'),
@@ -7890,6 +7908,10 @@ class AgentService:
                 # durable tool events; this records what was declared so far
                 # plus the run-time labels of a worker that had started.
                 self.record_work_sources(job['id'],work_sources|set(getattr(work_capabilities[0],'private_provenance',()) or ()))
+                # Register the exact local-document continuation before the
+                # terminal-status trigger decides whether to discard its photo.
+                if approval_needed[0]:
+                    with self.lock:self.mark_document_resume(job)
                 with self.store.db() as db:
                     # #787 review: an unknown effect recorded while the report was built still wins.
                     if outcome=='failed' and self._work_has_unknown_effect(job['id']):
@@ -7904,10 +7926,8 @@ class AgentService:
             # run released the profile, and ask the owner to log in.  #752: only
             # when the Work did not succeed; a reached goal did not need it.
             if outcome!='succeeded':self.offer_browser_login(job)
-            if outcome in ('failed','partial'):
-                login=self._browser_login(job['id']) or {}
-                if login.get('state') not in ('requested','opening','offered','closing','resuming'):
-                    self.store.remove_telegram_photo(job['id'])
+            if outcome in ('failed','partial') and not self.photo_work_has_pending_resume(job['id']):
+                self.store.remove_telegram_photo(job['id'])
             if resolved_blocker:
                 self.projection.clear(self.connector_owner_id(job))
             if approval_needed[0]:

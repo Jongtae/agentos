@@ -1435,7 +1435,11 @@ class AgentService:
         that label is deliberately not added to the Work's egress provenance.
         """
         memory=MemoryService(self.store,private_read_sink=MemoryService.NO_EGRESS_GUARD)
-        return self._redact_known_secrets(memory.profile_snapshot(MEMORY_OWNER)['text'])
+        snapshot=memory.profile_snapshot(MEMORY_OWNER)
+        text=snapshot['text']
+        if snapshot.get('omitted_count'):
+            text += ('\n' if text else '') + f"{snapshot['omitted_count']} saved profile facts omitted by the context limit; use search_memory if relevant."
+        return self._redact_known_secrets(text)
 
     #: The Work identity a Settings profile write is recorded under (#658).
     #: It is an owner operation from the local surface, not a conversation Work.

@@ -33,6 +33,7 @@ class QuickStore:
         self.secret_path = self.private/'connections.json'
         self.secret_lock_path = self.private/'connections.lock'
         self.secret_lock = _SECRET_STATE_LOCK
+        self.memory_search_available = False
         with self.db() as db:
             db.executescript('''
             CREATE TABLE IF NOT EXISTS auth(id INTEGER PRIMARY KEY CHECK(id=1), salt TEXT, password TEXT);
@@ -58,6 +59,34 @@ class QuickStore:
             CREATE TABLE IF NOT EXISTS workspace_results(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, job_id TEXT NOT NULL, content TEXT NOT NULL, evidence TEXT NOT NULL DEFAULT '', created REAL NOT NULL, UNIQUE(workspace_id, job_id));
             CREATE INDEX IF NOT EXISTS workspace_results_workspace ON workspace_results(workspace_id, created DESC);
             ''')
+            # OWNER-MEMORY-01: FTS is a rebuildable index over the existing
+            # owner-owned Memory table. Keep the durable row as the only source
+            # of truth and fall back to bounded LIKE search when this SQLite
+            # build omits FTS5.
+            try:
+                fts_existed = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memories_search'").fetchone()
+                db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS memories_search USING fts5(memory_key, content, content='memories', content_rowid='rowid', tokenize='unicode61')")
+                db.executescript('''
+                    CREATE TRIGGER IF NOT EXISTS memories_search_ai AFTER INSERT ON memories BEGIN
+                      INSERT INTO memories_search(rowid,memory_key,content) VALUES(new.rowid,new.memory_key,new.content);
+                    END;
+                    CREATE TRIGGER IF NOT EXISTS memories_search_ad AFTER DELETE ON memories BEGIN
+                      INSERT INTO memories_search(memories_search,rowid,memory_key,content) VALUES('delete',old.rowid,old.memory_key,old.content);
+                    END;
+                    CREATE TRIGGER IF NOT EXISTS memories_search_au AFTER UPDATE OF memory_key,content ON memories BEGIN
+                      INSERT INTO memories_search(memories_search,rowid,memory_key,content) VALUES('delete',old.rowid,old.memory_key,old.content);
+                      INSERT INTO memories_search(rowid,memory_key,content) VALUES(new.rowid,new.memory_key,new.content);
+                    END;
+                ''')
+                db.execute('CREATE TABLE IF NOT EXISTS memory_search_meta(version INTEGER NOT NULL)')
+                indexed = db.execute('SELECT version FROM memory_search_meta LIMIT 1').fetchone()
+                if not fts_existed or indexed is None or indexed['version'] != 1:
+                    db.execute("INSERT INTO memories_search(memories_search) VALUES('rebuild')")
+                    db.execute('DELETE FROM memory_search_meta')
+                    db.execute('INSERT INTO memory_search_meta(version) VALUES(1)')
+                self.memory_search_available = True
+            except sqlite3.OperationalError:
+                self.memory_search_available = False
             # SEC-ATTN-01 (#659): owner-accepted preparations, one indexed tick query.
             db.executescript(PREPARATIONS_TABLE_SQL)
             # #719: the watch window and silent-unless-needed columns, among others.
@@ -474,6 +503,52 @@ class QuickStore:
             where+=" AND memory_key LIKE ? ESCAPE '\\'";parameters.append(escaped+'%')
         with self.db() as db:
             return [self._memory_row(r) for r in db.execute('SELECT * FROM memories WHERE '+where+' ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',(*parameters,limit,offset))]
+
+    def search_memories(self, owner_id, terms, *, limit=10):
+        """Search current owner Memory with a rebuildable FTS index or safe LIKE fallback.
+
+        ``terms`` are already normalized literal tokens, never raw FTS syntax.
+        The returned rows are always joined back to the authoritative Memory
+        table and owner/state filtered there.
+        """
+        if isinstance(limit,bool) or not isinstance(limit,int) or not 1<=limit<=20:
+            raise ValueError('기억 검색 범위를 확인하세요.')
+        if not isinstance(terms,(list,tuple)) or not terms or any(not isinstance(t,str) or not t for t in terms):
+            return []
+        owner_key=self._memory_binding(owner_id)
+        terms=list(dict.fromkeys(terms))[:12]
+        def source_row(row):
+            value=self._memory_row(row)
+            work_key=row['work_key']
+            value['work_ref']='workref:'+work_key if work_key else None
+            return value
+        with self.db() as db:
+            if self.memory_search_available:
+                # Each token is quoted and escaped before it enters MATCH. The
+                # worker may expand synonyms in its query, but cannot inject
+                # FTS operators or alter the owner/state filter.
+                match=' OR '.join('"'+term.replace('"','""')+'"*' for term in terms)
+                try:
+                    rows=db.execute('''SELECT m.* FROM memories_search
+                        JOIN memories AS m ON m.rowid=memories_search.rowid
+                        WHERE memories_search MATCH ? AND m.owner_key=? AND m.state='current'
+                        ORDER BY bm25(memories_search),m.created DESC,m.id DESC LIMIT ?''',
+                        (match,owner_key,limit))
+                    return [source_row(row) for row in rows]
+                except sqlite3.OperationalError:
+                    # An existing but incompatible index must not make Memory
+                    # inaccessible; the bounded fallback below stays owner-scoped.
+                    pass
+            clauses=[];parameters=[]
+            for term in terms:
+                clauses.append('(memory_key LIKE ? ESCAPE \'\\\' OR content LIKE ? ESCAPE \'\\\')')
+                needle='%'+term.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
+                parameters.extend((needle,needle))
+            where='('+' OR '.join(clauses)+')'
+            rows=db.execute('SELECT * FROM memories WHERE owner_key=? AND state=? AND '+where+
+                            ' ORDER BY created DESC,id DESC LIMIT ?',
+                            (owner_key,'current',*parameters,limit))
+            return [source_row(row) for row in rows]
 
     def memory_status_counts(self, owner_id):
         """Return authoritative aggregate counts, independent of list pagination."""

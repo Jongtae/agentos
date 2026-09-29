@@ -106,6 +106,7 @@ class OneActionSource(_Store):
         # #774: the relayed owner-state tools carry their manifest modes too.
         self.assertEqual(hints, {'bounded_public_research': True, 'list_notes': True, 'save_note': False,
                                  'weather': True, 'web_search': True, 'calendar_query': True, 'list_memory': True,
+                                 'search_memory': True,
                                  'calendar_draft_create': False, 'calendar_draft_update': False,
                                  'calendar_draft_cancel': False, 'save_memory': False,
                                  # #826: the connected-folder documents and approved pages.
@@ -338,7 +339,7 @@ class SettingsProjection(_Store):
                                              'save_note', 'weather', 'web_search', 'browser_open', 'browser_read',
                                              'browser_find', 'browser_click', 'browser_type',
                                              # #774: relayed to the service on this route.
-                                             'calendar_query', 'calendar_draft_create', 'calendar_draft_update', 'calendar_draft_cancel', 'list_memory', 'save_memory', 'schedule_preparation',
+                                             'calendar_query', 'calendar_draft_create', 'calendar_draft_update', 'calendar_draft_cancel', 'list_memory', 'search_memory', 'save_memory', 'schedule_preparation',
                                              'ask_location',
                                              # #814: owner settings, relayed the same way.
                                              'settings_read', 'settings_change',

@@ -98,20 +98,13 @@
   ],
   "rubric": [
    "follow_through",
-   "owner_model",
+   "context_carry",
    "honest_unverified"
   ],
-  "expect": {
-   "memory_any": [
-    [
-     "김치찌개"
-    ]
-   ]
-  },
-  "good_secretary": "Acknowledges it missed the timing, records (or proposes recording) that lunch was kimchi stew so later suggestions avoid repeating it, and does not keep pushing lunch options.",
+  "good_secretary": "Acknowledges it missed the timing, keeps the meal in the recent conversation context, and does not keep pushing lunch options or save a today-only event as a lasting profile fact.",
   "tags": [
    "food",
-   "memory",
+   "context",
    "follow-through"
   ]
  },
@@ -129,20 +122,12 @@
   ],
   "rubric": [
    "follow_through",
-   "context_carry",
-   "owner_model"
+   "context_carry"
   ],
-  "expect": {
-   "memory_any": [
-    [
-     "초밥"
-    ]
-   ]
-  },
-  "good_secretary": "Acknowledges dinner already happened, keeps that it was sushi, and suggests tomorrow's lunch that is clearly not raw fish/Japanese.",
+  "good_secretary": "Acknowledges dinner already happened, uses the recent conversation to avoid repeating sushi at tomorrow's lunch, and does not save a today-only event as a lasting profile fact.",
   "tags": [
    "food",
-   "memory"
+   "context"
   ]
  }
 ]

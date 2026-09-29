@@ -80,6 +80,15 @@ class SectionReferences(unittest.TestCase):
         self.assertEqual(information_use.section_references('not a profile', 'legend only', '{broken'),
                          {'profile_keys': [], 'current_context': [], 'prepared': [], 'spliced': []})
 
+    def test_memory_search_is_audited_with_query_and_keys_but_not_values(self):
+        item = information_use._event_items('search_memory', {
+            'query_terms': ['초밥', '스시'], 'memory_keys': ['profile.food_preference'], 'memory_count': 1,
+            'memory_refs': [{'memory_key': 'profile.food_preference', 'saved_at': '2026-09-29T01:00:00+00:00',
+                             'work_ref': 'workref:abc123'}],
+        })
+        self.assertEqual(item, ['기억 검색: 초밥 스시 → profile.food_preference (saved 2026-09-29T01:00:00+00:00, workref:abc123)'])
+        self.assertEqual(information_use.READ_CATEGORIES['search_memory'], 'memory')
+
 
 class RecordsOnly(unittest.TestCase):
     """The audit reads only AgentOS's records: an attempted lookup that failed is still listed."""

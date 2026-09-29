@@ -61,7 +61,7 @@ TERMINAL_VERIFIED_MORE = '… (나머지는 AgentOS 웹 기록에서 확인하�
 TOOL_LABELS = {
     'subscription_engine': '구독 CLI 실행', 'model': 'AI 응답', 'web_search': '웹 검색',
     'list_notes': '메모 조회', 'save_note': '메모 저장', 'save_memory': '기억 저장',
-    'list_memory': '기억 조회', 'local_authority': '폴더 권한', 'calendar_create': '일정 만들기',
+    'list_memory': '기억 조회', 'search_memory': '기억 검색', 'local_authority': '폴더 권한', 'calendar_create': '일정 만들기',
     'calendar_query': '일정 조회', 'calendar_draft_create': '일정 초안', 'calendar_draft_update': '일정 초안',
     'calendar_draft_cancel': '일정 초안', 'weather': '날씨 조회', 'ask_location': '위치 확인',
     'delegate_agent': '다른 에이전트에 맡김', 'list_agents': '에이전트 목록 조회',

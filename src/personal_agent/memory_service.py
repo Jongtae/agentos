@@ -271,6 +271,25 @@ class MemoryService:
             "next_offset": offset + limit if len(rows) > limit else None,
         }, len(page))
 
+    def search_memories(self, owner_id, query, *, limit=10):
+        """Find a small, owner-scoped set of current Memory rows by literal terms."""
+        self._identity(owner_id, "owner")
+        if not isinstance(query, str) or len(query) > 500:
+            raise MemoryServiceError("기억 검색어를 확인하세요.")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
+            raise MemoryServiceError("기억 검색 범위를 확인하세요.")
+        # SQLite FTS syntax is built from extracted literal words, never from
+        # worker-provided operators. Short Korean terms are kept because
+        # unicode61 indexes them as words; semantic alternatives are selected
+        # by the worker and passed as additional words in the query.
+        terms = list(dict.fromkeys(re.findall(r"[^\W_]+", query.casefold(), flags=re.UNICODE)))[:12]
+        rows = self.store.search_memories(owner_id, terms, limit=limit) if terms else []
+        return self._private_read("memory_service.search_memories", {
+            "state": "current", "memories": rows, "query_terms": terms,
+            "search_mode": "fts5" if getattr(self.store, "memory_search_available", False) else "bounded-like",
+            "truncated": len(rows) == limit,
+        }, len(rows))
+
     def inspect_memory(self, owner_id, memory_id):
         self._identity(owner_id, "owner")
         row = self.store.memory(memory_id, owner_id)

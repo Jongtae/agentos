@@ -422,6 +422,12 @@ class AgentService:
         self.owner_model=om.Upkeep(store)
         self.owner_model_flight=threading.Lock()
         self.owner_model_spawn=lambda target:threading.Thread(target=target,name='agentos-owner-model',daemon=True).start()
+        # Optional progress emoji judgments never hold the Telegram acknowledgement
+        # loop. One in flight globally keeps slow providers from accumulating
+        # unbounded best-effort presentation work.
+        self.progress_reaction_flight=threading.Lock()
+        self.progress_reaction_spawn=lambda target:threading.Thread(
+            target=target,name='agentos-telegram-progress-reaction',daemon=True).start()
         self.presence_timing=PresenceTiming()
         self.presence={}
         # #718: the CLI's own streamed step per running Work (presentation only, never persisted).
@@ -4341,33 +4347,50 @@ class AgentService:
         return identity,text
 
     def _react_progress_choice(self, job, state, pending):
-        """Judge outside the service lock, then apply only to the still-current step."""
+        """Dispatch one optional judgment off the acknowledgement loop.
+
+        The Telegram acknowledgement loop also refreshes typing/drafts and
+        queued Work cards. A slow provider must not stall that loop, so this
+        best-effort judgment runs on the existing background-thread seam and
+        is single-flight across all Works.
+        """
         identity,text=pending
-        try:
-            # Use the same Work-scoped redaction as the live progress line, then
-            # let ConversationJudgments apply its normal secret redaction too.
-            step=' '.join(str(self.scrub_work_text(job['id'],text)).split())
-            if not step:return
-            previous_work_id=self.current_work_id
-            self.current_work_id=job['id']
+        if not self.progress_reaction_flight.acquire(blocking=False):return
+
+        def judge_and_apply():
             try:
-                emoji=self.decision_judge.progress_reaction(step,PROGRESS_CANDIDATES)
+                try:
+                    # Use the same Work-scoped redaction as the live progress
+                    # line, then the judgment's normal secret redaction too.
+                    step=' '.join(str(self.scrub_work_text(job['id'],text)).split())
+                    if not step:return
+                    previous_work_id=self.current_work_id
+                    self.current_work_id=job['id']
+                    try:
+                        emoji=self.decision_judge.progress_reaction(step,PROGRESS_CANDIDATES)
+                    finally:
+                        self.current_work_id=previous_work_id
+                    if not emoji or emoji not in PROGRESS_CANDIDATES:return
+                    with self.lock:
+                        current=self.store.job(job['id'])
+                        if not current or current['status']!='running' or self.presence.get(job['id']) is not state:return
+                        _text,approval,current_identity=draft_step_details(
+                            self.store.task_events(job['id']),self.live_steps.get(job['id']))
+                        if approval or current_identity!=identity:return
+                        source=self.telegram_turns.source(job['id'])
+                        if not isinstance(source,int) or emoji==state.reaction:return
+                        if self._presence_call('set_message_reaction',job['chat_id'],source,emoji):
+                            state.reaction=emoji
+                except Exception as exc:  # optional presentation only
+                    LOG.info('telegram progress reaction judgment skipped: %s',type(exc).__name__)
             finally:
-                self.current_work_id=previous_work_id
-        except Exception as exc:  # optional presentation only
-            LOG.info('telegram progress reaction judgment skipped: %s',type(exc).__name__)
-            return
-        if not emoji or emoji not in PROGRESS_CANDIDATES:return
-        with self.lock:
-            current=self.store.job(job['id'])
-            if not current or current['status']!='running' or self.presence.get(job['id']) is not state:return
-            _text,approval,current_identity=draft_step_details(
-                self.store.task_events(job['id']),self.live_steps.get(job['id']))
-            if approval or current_identity!=identity:return
-            source=self.telegram_turns.source(job['id'])
-            if not isinstance(source,int) or emoji==state.reaction:return
-            if self._presence_call('set_message_reaction',job['chat_id'],source,emoji):
-                state.reaction=emoji
+                self.progress_reaction_flight.release()
+
+        try:
+            self.progress_reaction_spawn(judge_and_apply)
+        except Exception as exc:
+            self.progress_reaction_flight.release()
+            LOG.info('telegram progress reaction dispatch skipped: %s',type(exc).__name__)
 
     def _present_outcome(self, job, *, delivered, blocked, awaiting_owner=False):
         """Replace 👀 by the outcome reaction, after the answer was sent (#835).

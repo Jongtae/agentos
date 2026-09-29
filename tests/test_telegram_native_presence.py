@@ -243,6 +243,8 @@ class JudgmentReactionTests(NativePresenceTestCase):
         self.connect_model()
         self.store.secret('decision_model_key', 'owner-private-sentinel')
         self.install_reaction_judgment({'turn-reaction': '🤗', 'progress-reaction': '🤓', 'closing-reaction': '🎉'})
+        pending_judgments = []
+        self.service.progress_reaction_spawn = pending_judgments.append
 
         def show_progress(job):
             with self.store.db() as db:
@@ -252,6 +254,11 @@ class JudgmentReactionTests(NativePresenceTestCase):
                                                                       'status': 'owner-private-sentinel 검색 중'}}),
                             job['created'] + 5))
             self.service.acknowledge_long_work(now=job['created'] + 6)
+            self.assertTrue(any(method == 'sendRichMessageDraft' for method in self.methods()),
+                            'the acknowledgement loop refreshes the wait surface before the judgment completes')
+            self.assertNotIn('🤓', self.emojis(), 'the optional judgment is still pending')
+            self.assertEqual(len(pending_judgments), 1)
+            pending_judgments.pop()()
             # A wait refresh with no new event must not ask or react again.
             self.service.acknowledge_long_work(now=job['created'] + 7)
 
@@ -305,6 +312,7 @@ class JudgmentReactionTests(NativePresenceTestCase):
 
         self.service.decision_judge = ConversationJudgments(FixtureDecisionEngine(choose=choose),
                                                             redactor=self.service.redact_judgment_text)
+        self.service.progress_reaction_spawn = lambda target: target()
 
         def show_progress(job):
             work_id['value'] = job['id']

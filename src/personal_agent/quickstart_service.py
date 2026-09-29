@@ -6899,10 +6899,17 @@ class AgentService:
                             captions=[part for part in (current['caption'] or '').split('\n\n') if part]
                             if text!='[사진 첨부]' and text not in captions:captions.append(text)
                             caption='\n\n'.join(captions)[:MAX_OWNER_MESSAGE_CHARS]
+                            parsed_album_context=self.parse_context_request(caption)
+                            if parsed_album_context:
+                                event_ids,caption=parsed_album_context
+                                self.store.attach_context(task_id,event_ids,self.context_assistant_id(),db)
+                            elif guided_context_requested:
+                                db.execute("UPDATE jobs SET status='awaiting_context' WHERE id=? AND status='queued'",(task_id,))
+                                guided_context=True
                             db.execute('UPDATE telegram_photo_albums SET last_received=?,caption=? WHERE job_id=?',
                                        (time.time(),caption,task_id))
-                            db.execute('UPDATE jobs SET message=? WHERE id=? AND status=?',
-                                       (caption or '[사진 첨부]',task_id,'queued'))
+                            db.execute("UPDATE jobs SET message=? WHERE id=? AND status IN ('queued','awaiting_context')",
+                                       (caption or '[사진 첨부]',task_id))
                             self.store.attach_telegram_photo(task_id,photo_file_id,db=db)
                             self.store.mark_telegram_photo_attached(task_id,db=db)
                             if album_created:

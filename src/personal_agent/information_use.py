@@ -255,7 +255,7 @@ def work_information_use(store, job_id, redact=None):
     add('spliced', [f"{row.get('kind')}: {row.get('label') or row.get('ref')}" for row in sections.get('spliced') or ()
                     if isinstance(row, dict)])
     photo = record.get('photo_input') if isinstance(record.get('photo_input'), dict) else None
-    if photo and photo.get('count'):
+    if photo and photo.get('status') == 'included-in-request' and photo.get('count'):
         try:photo_count=min(10,max(1,int(photo.get('count') or 0)))
         except (TypeError,ValueError):photo_count=1
         add('spliced', [f'Telegram 사진 {photo_count}개'])

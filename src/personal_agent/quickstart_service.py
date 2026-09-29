@@ -6750,7 +6750,12 @@ class AgentService:
             if has_photo:
                 candidates=[item for item in photo if isinstance(item,dict) and isinstance(item.get('file_id'),str)
                             and item.get('file_id')]
-                chosen=max(candidates,key=lambda item:item.get('file_size',0) if isinstance(item.get('file_size'),int) else 0) if candidates else {}
+                def photo_rank(item):
+                    width=item.get('width');height=item.get('height');size=item.get('file_size')
+                    pixels=(width*height if isinstance(width,int) and not isinstance(width,bool)
+                            and isinstance(height,int) and not isinstance(height,bool) else 0)
+                    return pixels,size if isinstance(size,int) and not isinstance(size,bool) else 0
+                chosen=max(candidates,key=photo_rank) if candidates else {}
                 photo_file_id=chosen.get('file_id') or 'invalid-telegram-file-id'
                 if not isinstance(text,str) or not text.strip():text='[사진 첨부]'
             private=chat.get('type')=='private' and isinstance(sender,int) and chat.get('id')==sender

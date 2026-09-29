@@ -1116,6 +1116,12 @@ class RenderTests(unittest.TestCase):
         # Unchanged: a lone escaped pipe, and a backslash elsewhere in a cell.
         self.assertEqual(render_telegram_html('| a \\| b | c |\n|--|--|\n| 1 | 2 |'), '<b>a | b · c</b>\n1 · 2')
         self.assertEqual(render_telegram_html('| C:\\\\tmp | y |\n|--|--|\n| 1 | 2 |'), '<b>C:\\\\tmp · y</b>\n1 · 2')
+        # #872 review P2: a long run of backslashes not followed by a pipe is scanned once, not quadratically.
+        run = '\\' * 200_000
+        started = time.monotonic()
+        rendered = render_telegram_html(f'| {run}x | y |\n|--|--|\n| 1 | 2 |')
+        self.assertLess(time.monotonic() - started, 1.0)
+        self.assertEqual(rendered, f'<b>{run}x · y</b>\n1 · 2')
 
 
 def visible(rendered):

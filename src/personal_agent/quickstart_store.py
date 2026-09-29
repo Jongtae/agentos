@@ -55,23 +55,30 @@ class QuickStore:
             CREATE INDEX IF NOT EXISTS context_events_expiry ON context_events(expires_at);
             CREATE TABLE IF NOT EXISTS context_sharing_policies(assistant_id TEXT PRIMARY KEY, approved INTEGER NOT NULL, approved_at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS context_job_attachments(job_id TEXT PRIMARY KEY, event_ids TEXT NOT NULL, assistant_id TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS context_location_requests(
+              id TEXT PRIMARY KEY, job_id TEXT NOT NULL, chat_id INTEGER NOT NULL, generation TEXT NOT NULL,
+              context_epoch INTEGER NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, state TEXT NOT NULL);
             DROP TRIGGER IF EXISTS telegram_photo_terminal_cleanup;
             CREATE TRIGGER telegram_photo_terminal_cleanup AFTER UPDATE OF status ON jobs
               WHEN NEW.status IN ('succeeded','failed','partial','cancelled','interrupted','unknown','blocked')
-               AND NOT (NEW.status IN ('failed','partial') AND (
-                 EXISTS (
-                   SELECT 1 FROM config, json_each(CASE WHEN json_valid(config.value) THEN config.value ELSE '{}' END)
-                   WHERE config.key IN ('browser_login_requests','browser_step_requests','local_authority_document_resume_jobs')
-                     AND json_each.key=NEW.id
-                     AND (
-                       (config.key='browser_login_requests' AND json_extract(json_each.value,'$.state') IN ('requested','opening','offered','closing','resuming'))
-                       OR (config.key='browser_step_requests' AND json_extract(json_each.value,'$.state') IN ('requested','issued'))
-                       OR (config.key='local_authority_document_resume_jobs'
-                           AND CAST(json_extract(json_each.value,'$.expires_at') AS REAL) > CAST(strftime('%s','now') AS REAL))
-                     )
-                 )
-                 OR EXISTS (SELECT 1 FROM context_job_attachments WHERE job_id=NEW.id AND approved=0)
-               ))
+               AND NOT (
+                 (NEW.status IN ('failed','partial') AND (
+                   EXISTS (
+                     SELECT 1 FROM config, json_each(CASE WHEN json_valid(config.value) THEN config.value ELSE '{}' END)
+                     WHERE config.key IN ('browser_login_requests','browser_step_requests','local_authority_document_resume_jobs')
+                       AND json_each.key=NEW.id
+                       AND (
+                         (config.key='browser_login_requests' AND json_extract(json_each.value,'$.state') IN ('requested','opening','offered','closing','resuming'))
+                         OR (config.key='browser_step_requests' AND json_extract(json_each.value,'$.state') IN ('requested','issued'))
+                         OR (config.key='local_authority_document_resume_jobs'
+                             AND CAST(json_extract(json_each.value,'$.expires_at') AS REAL) > CAST(strftime('%s','now') AS REAL))
+                       )
+                   )
+                   OR EXISTS (SELECT 1 FROM context_job_attachments WHERE job_id=NEW.id AND approved=0)
+                 ))
+                 OR EXISTS (SELECT 1 FROM context_location_requests WHERE job_id=NEW.id AND state='pending'
+                              AND expires>CAST(strftime('%s','now') AS REAL))
+               )
               BEGIN DELETE FROM telegram_photo_attachments WHERE job_id=NEW.id; END;
             CREATE TABLE IF NOT EXISTS telegram_context_choices(token TEXT PRIMARY KEY, job_id TEXT NOT NULL, event_id TEXT NOT NULL, chat_id INTEGER NOT NULL, generation TEXT NOT NULL, message_id INTEGER, state TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS workspaces(id TEXT PRIMARY KEY, title TEXT NOT NULL, purpose TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', created REAL NOT NULL, updated REAL NOT NULL);
@@ -996,6 +1003,22 @@ class QuickStore:
     def remove_telegram_photo(self, job_id):
         with self.db() as db:
             db.execute('DELETE FROM telegram_photo_attachments WHERE job_id=?', (job_id,))
+
+    def transfer_telegram_photo(self, source_job_id, target_job_id, db=None):
+        """Move an owner-supplied Telegram photo handle to its one continuation Work."""
+        if not isinstance(source_job_id,str) or not isinstance(target_job_id,str) or source_job_id==target_job_id:
+            return False
+        if db is None:
+            with self.db() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                return self.transfer_telegram_photo(source_job_id,target_job_id,conn)
+        row=db.execute('SELECT file_id,created FROM telegram_photo_attachments WHERE job_id=?',(source_job_id,)).fetchone()
+        if not row:return False
+        db.execute('INSERT INTO telegram_photo_attachments(job_id,file_id,created) VALUES (?,?,?) '
+                   'ON CONFLICT(job_id) DO UPDATE SET file_id=excluded.file_id,created=excluded.created',
+                   (target_job_id,row['file_id'],row['created']))
+        db.execute('DELETE FROM telegram_photo_attachments WHERE job_id=?',(source_job_id,))
+        return True
 
     def create_workspace(self, title, purpose=''):
         if not isinstance(title,str) or not 1<=len(title.strip())<=120:raise ValueError('작업공간 이름은 1~120자로 입력하세요.')

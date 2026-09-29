@@ -372,6 +372,14 @@ class ContextObservations:
                         'pending'))
         return request_id
 
+    def pending_location_work_ids(self, chat_id, generation, now=None):
+        """The Works whose location prompts this owner will supersede by opening another."""
+        now = self.clock() if now is None else now
+        with self.store.db() as db:
+            rows=db.execute("SELECT DISTINCT job_id FROM context_location_requests WHERE state='pending' "
+                            'AND chat_id=? AND generation=? AND expires>?',(chat_id,generation,now)).fetchall()
+        return [row['job_id'] for row in rows]
+
     def cancel_location_request(self, request_id):
         with self.store.db() as db:
             db.execute("UPDATE context_location_requests SET state='cancelled' WHERE id=? AND state='pending'",

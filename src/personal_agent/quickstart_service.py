@@ -1409,7 +1409,8 @@ class AgentService:
         """
         row=self.preparations.cancel(preparation_id)
         if row['state']==prep.STATE_CANCELLED and row.get('last_run_job_id'):
-            self.context_observations.cancel_work_requests(row['last_run_job_id'])
+            if self.context_observations.cancel_work_requests(row['last_run_job_id']):
+                self.store.remove_telegram_photo(row['last_run_job_id'])
         return row
 
     def preparation_request(self, body):
@@ -1744,7 +1745,15 @@ class AgentService:
         attachment=self.store.context_attachment(work_id)
         if attachment and not attachment.get('approved'):
             return True
+        if self.context_observations.awaiting_answer(work_id):
+            return True
         return work_id in self._document_resume_rows()
+
+    def photo_attempt_received_model_response(self, work_id, since_event_id):
+        """Whether a direct model turn responded after this photo-backed attempt began."""
+        with self.store.db() as db:
+            return db.execute("SELECT 1 FROM tool_events WHERE job_id=? AND tool='model' AND status='responded' AND id>? LIMIT 1",
+                              (work_id,since_event_id or 0)).fetchone() is not None
 
     # Private sources whose content existing guards keep out of durable
     # records (Drive excerpts, the expiring context inbox, notes, documents,
@@ -2208,12 +2217,13 @@ class AgentService:
                 changed=db.execute("UPDATE jobs SET status='cancelled',error=?,delivery='cancelled' WHERE id=? AND status='queued'",
                                    ('소유자가 후속 대화에서 취소했습니다.',work_id)).rowcount
             if changed:
-                self.context_observations.cancel_work_requests(work_id)
+                if self.context_observations.cancel_work_requests(work_id):self.store.remove_telegram_photo(work_id)
                 self.update_task_card(self.store.job(work_id),'cancelled')
                 return True,'이전 요청을 취소했습니다.'
         if previous.get('status') not in ('queued','running') and self.context_observations.cancel_work_requests(work_id):
             # #774: a finished Work that asked for a location continues only on its
             # answer; cancelling it withdraws the request, so the answer continues nothing.
+            self.store.remove_telegram_photo(work_id)
             return True,'이전 요청을 취소했습니다. 위치를 보내도 이어서 처리하지 않습니다.'
         return False,'이전 요청은 이미 실행 중이거나 끝난 상태라 여기서 취소하지 않았습니다.'
 
@@ -4760,7 +4770,7 @@ class AgentService:
                 # refuses its next call too, not only this process's loop.
                 self.store.append_config_list(WORK_STOP_KEY,job['id'],WORK_STOP_KEEP)
                 # #774: a stopped Work's location request continues nothing.
-                self.context_observations.cancel_work_requests(job['id'])
+                if self.context_observations.cancel_work_requests(job['id']):self.store.remove_telegram_photo(job['id'])
                 text=self.STOP_RUNNING_TEXT
             else:
                 return 'finished'
@@ -6462,7 +6472,7 @@ class AgentService:
                         changed=db.total_changes==1
                         job=dict(job)
                 if changed:
-                    self.context_observations.cancel_work_requests(job_id)
+                    if self.context_observations.cancel_work_requests(job_id):self.store.remove_telegram_photo(job_id)
                     self.update_task_card(job,'cancelled')
             elif authorized and isinstance(data,str) and data.startswith('p7x:'):
                 choice=self.store.telegram_context_choice(data[4:])
@@ -6693,7 +6703,11 @@ class AgentService:
             raise ValueError('이 작업은 Telegram에서 위치를 요청할 수 없습니다.')
         if not isinstance(prompt,str) or not 0<len(prompt.strip())<=300:
             raise ValueError('위치를 요청하는 목적을 짧게 적어 주세요.')
-        request_id=self.context_observations.open_location_request(job_id,cfg['user_id'],cfg.get('generation'))
+        with self.lock:
+            superseded=self.context_observations.pending_location_work_ids(cfg['user_id'],cfg.get('generation'))
+            request_id=self.context_observations.open_location_request(job_id,cfg['user_id'],cfg.get('generation'))
+        for work_id in superseded:
+            if work_id!=job_id:self.store.remove_telegram_photo(work_id)
         markup={'keyboard':[[{'text':'현재 위치 보내기','request_location':True}]],
                 'one_time_keyboard':True,'resize_keyboard':True}
         try:
@@ -6754,6 +6768,7 @@ class AgentService:
         if work['status']=='cancelled' or self._stopped_in(db,work['id']):
             # The position stays recorded for the asking Work; nothing runs again.
             LOG.info('location continuation skipped work=%s reason=stopped',work['id'])
+            db.execute('DELETE FROM telegram_photo_attachments WHERE job_id=?',(work['id'],))
             return None
         preparation_id=prep.preparation_of(work['request_key'])
         if preparation_id:
@@ -6761,6 +6776,7 @@ class AgentService:
             if not row or row['state'] not in prep.ACTIVE_STATES:
                 # A cancelled or removed preparation's goal never runs again.
                 LOG.info('location continuation skipped work=%s reason=preparation_inactive',work['id'])
+                db.execute('DELETE FROM telegram_photo_attachments WHERE job_id=?',(work['id'],))
                 return None
         try:
             task_id=self.store.enqueue(work['message'],continuation_key(answer['request_id'],work['request_key']),
@@ -6770,6 +6786,7 @@ class AgentService:
             LOG.warning('location continuation not queued work=%s reason=%s',work['id'],exc)
             self.context_observations.reopen_request(db,answer['request_id'])
             return False
+        self.store.transfer_telegram_photo(work['id'],task_id,db=db)
         self.store.link_work_relation(task_id,work['id'],'reference',db=db)
         prep.Preparations.continue_run(db,work['id'],task_id,self.preparations.clock())
         self.context_observations.rebind_task_observation(db,answer['observation_id'],task_id)
@@ -7747,8 +7764,9 @@ class AgentService:
                                                               provider=runtime_config.get('provider'))
                             except Exception as exc:
                                 if image_inputs:
+                                    received=self.photo_attempt_received_model_response(job['id'],attempt_start)
                                     self.record_photo_attempt(job['id'],attempt_id=photo_attempt_id,
-                                                              status='unknown' if isinstance(exc,ProviderError) else 'not-sent',
+                                                              status='included-in-request' if received else ('unknown' if isinstance(exc,ProviderError) else 'not-sent'),
                                                               count=len(image_inputs),route='direct-api',
                                                               provider=runtime_config.get('provider'))
                                 self.record_turn_provenance(job['id'],status='failed',failure_class=type(exc).__name__,egress_taint=sorted(capabilities.private_provenance))

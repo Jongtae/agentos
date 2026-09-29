@@ -254,9 +254,12 @@ def work_information_use(store, job_id, redact=None):
     add('prepared', sections.get('prepared') or ())
     add('spliced', [f"{row.get('kind')}: {row.get('label') or row.get('ref')}" for row in sections.get('spliced') or ()
                     if isinstance(row, dict)])
-    photo = record.get('photo_input') if isinstance(record.get('photo_input'), dict) else None
-    if photo and photo.get('status') == 'included-in-request' and photo.get('count'):
-        try:photo_count=min(10,max(1,int(photo.get('count') or 0)))
+    photo_rows=record.get('photo_inputs') if isinstance(record.get('photo_inputs'),list) else []
+    if not photo_rows and isinstance(record.get('photo_input'),dict):photo_rows=[record['photo_input']]
+    photo_rows=[row for row in photo_rows if isinstance(row,dict)]
+    included_photos=[row for row in photo_rows if row.get('status')=='included-in-request' and row.get('count')]
+    if included_photos:
+        try:photo_count=min(10,max(1,max(int(row.get('count') or 0) for row in included_photos)))
         except (TypeError,ValueError):photo_count=1
         add('spliced', [f'Telegram 사진 {photo_count}개'])
     lookups, results, started = [], [], {}
@@ -303,14 +306,13 @@ def work_information_use(store, job_id, redact=None):
     judgments = [row for row in (audit if isinstance(audit, list) else ()) if isinstance(row, dict) and row.get('work_id') == job_id]
     judgment_models = sorted({label(row.get('observed_model') or row.get('model') or row.get('engine') or row.get('provider'), 80)
                               for row in judgments} - {''})
-    photo_input=None
-    if photo:
-        photo_input={key: (label(value,80) if isinstance(value,str) else value)
-                     for key,value in photo.items() if key in ('source','count','status','route','engine','provider')}
+    photo_inputs=[{key: (label(value,80) if isinstance(value,str) else value)
+                   for key,value in photo.items() if key in ('attempt','source','count','status','route','engine','provider')}
+                  for photo in photo_rows]
     sent_to={'workers': workers,
              'judgment_ai': {'calls': len(judgments), 'models': judgment_models},
              'web_search_ran': bool(lookups), 'lookups': lookups[:MAX_ITEMS]}
-    if photo_input is not None:sent_to['attachments']=photo_input
+    if photo_inputs:sent_to['attachments']=photo_inputs
     return {'work_id': job_id, 'recorded': bool(record), 'evidence_class': EVIDENCE_CLASS,
             'used': used,
             'conversation_turns': int(record.get('context_messages') or 0),
@@ -342,6 +344,11 @@ def render_korean(audit):
     workers = sent.get('workers') or ()
     lines.append('보낸 곳')
     lines.append('- 작업 AI: ' + ('; '.join(_worker_text(row) for row in workers) if workers else '기록 없음'))
+    for photo in sent.get('attachments') or ():
+        destination=photo.get('engine') or photo.get('provider') or photo.get('route') or '경로 기록 없음'
+        state={'included-in-request':'요청에 포함','staged':'전달 대기','not-sent':'전달하지 않음',
+               'unknown':'전달 여부 확인 불가','unsupported':'지원하지 않음','failed':'가져오기 실패'}.get(photo.get('status'),photo.get('status') or '상태 기록 없음')
+        lines.append(f"- Telegram 사진 → {destination}: {state}")
     judgment = sent.get('judgment_ai') or {}
     if judgment.get('calls'):
         models = ', '.join(judgment.get('models') or ()) or '판단 AI'

@@ -1708,6 +1708,31 @@ class AgentService:
         except Exception:
             LOG.warning('turn provenance could not be recorded job=%s',job_id)
 
+    def record_photo_attempt(self, job_id, *, status, count=1, route=None, engine=None, provider=None, attempt_id=None):
+        """Accumulate one Work's image destination evidence without storing image bytes."""
+        try:
+            current=self.store.turn_provenance(job_id) or {}
+            rows=current.get('photo_inputs') if isinstance(current.get('photo_inputs'),list) else []
+            if attempt_id is None:
+                attempt_id=max((row.get('attempt',0) for row in rows if isinstance(row,dict)
+                                and isinstance(row.get('attempt'),int)),default=0)+1
+            row={'attempt':attempt_id,'source':'Telegram photo','count':count,'status':status}
+            if route:row['route']=route
+            if engine:row['engine']=engine
+            if provider:row['provider']=provider
+            updated=[{**item} for item in rows if isinstance(item,dict)]
+            for index,item in enumerate(updated):
+                if item.get('attempt')==attempt_id:
+                    updated[index]=row
+                    break
+            else:
+                updated.append(row)
+            self.record_turn_provenance(job_id,photo_inputs=updated,photo_input=row)
+            return attempt_id
+        except Exception:
+            LOG.warning('photo provenance could not be recorded job=%s',job_id)
+            return attempt_id
+
     # Private sources whose content existing guards keep out of durable
     # records (Drive excerpts, the expiring context inbox, notes, documents,
     # Memory reads, calendar). A turn that carried any of them keeps only a
@@ -5645,6 +5670,7 @@ class AgentService:
             self._put_browser_login(work_id,{**row,'state':final,'cause':shown,'closed_at':time.time()})
             # #749/#765: the site(s) the owner signed in to through the window, each by its own evidence.
             self._record_owner_signins(signed)
+        if final!='resumed':self.store.remove_telegram_photo(work_id)
         self._finish_login_notification(work_id,shown)
         return final
 
@@ -5694,11 +5720,14 @@ class AgentService:
                     current=self._browser_login(work_id)
                     if current and current.get('state')=='opening' and current.get('nonce')==row.get('nonce'):
                         self._put_browser_login(work_id,{**current,'state':'unavailable','closed_at':now})
+                self.store.remove_telegram_photo(work_id)
             elif state=='requested' and now-float(row.get('requested_at') or 0)>=BROWSER_LOGIN_SECONDS:
                 # The run that asked never finished (a restart): nothing to show.
                 self._put_browser_login(work_id,{**row,'state':'expired','cause':'expired','closed_at':now})
+                self.store.remove_telegram_photo(work_id)
             elif state not in ('requested','opening','offered','closing','resuming') and now-float(row.get('closed_at') or 0)>=BROWSER_LOGIN_KEEP_SECONDS:
                 self._put_browser_login(work_id,None)
+                self.store.remove_telegram_photo(work_id)
         return settled
 
     def calendar_for(self, job):
@@ -7040,7 +7069,7 @@ class AgentService:
                     try:
                         image_inputs=[self.telegram.download_photo(photo_file_id)]
                     except ProviderError as exc:
-                        self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':1,'status':'failed'})
+                        self.record_photo_attempt(job['id'],status='failed',count=1,route='telegram-download')
                         raise ValueError(str(exc)) from None
                 # #606 T4: a natural-language rule-matched read that needs
                 # clarification or finds nothing is re-judged by the Work
@@ -7451,6 +7480,9 @@ class AgentService:
                             listing=facade(capabilities);listing.native_search=native_search
                             listing.native_search_reason=native_reason or ''
                             offered=listing.definitions()
+                            photo_attempt_id=(self.record_photo_attempt(job['id'],status='staged',count=len(image_inputs),
+                                                                        route='subscription',engine=subscription['id'])
+                                              if image_inputs else None)
                             self.record_turn_sent(job['id'],sent=sent if separate else engine_prompt,
                                 exposed_tools=[tool.get('name') for tool in offered],build=self.build,
                                 capability_profile=facade.PROFILE,unavailable_tools=route_unavailable(facade.PROFILE),
@@ -7469,8 +7501,6 @@ class AgentService:
                                 route='subscription',engine=subscription['id'],mode=mode,status='sent',
                                 context_mode=engine_context.get('mode','shared-context'),instructions_version=engine_context.get('version'),
                                 context_messages=len(engine_context['conversation']),egress_taint=sorted(capabilities.private_provenance),
-                                photo_input=({'source':'Telegram photo','count':len(image_inputs),'status':'staged',
-                                              'route':'subscription','engine':subscription['id']} if image_inputs else None),
                                 # #678: the CLI's own tools offered besides the bridge.
                                 cli_native_tools=['web_search'] if native_search else [],native_search_reason=native_reason or None,
                                 # #826: what the owner-model sections and splices referred to.
@@ -7486,8 +7516,9 @@ class AgentService:
                             try:
                                 if isolated:
                                     if image_inputs:
-                                        self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
-                                                                                         'status':'unsupported','route':'isolated-agentos-mcp'})
+                                        self.record_photo_attempt(job['id'],attempt_id=photo_attempt_id,status='unsupported',
+                                                                  count=len(image_inputs),route='isolated-agentos-mcp',
+                                                                  engine=subscription['id'])
                                         raise ExecutionError('격리 런타임 배포는 사진 입력을 지원하지 않습니다. 현재 AI 연결을 바꿔 실행해 주세요.',
                                                              failure_class='unsupported-image-input')
                                     # #679: the sidecar's closed contract carries no model; a Work
@@ -7534,9 +7565,8 @@ class AgentService:
                                         if work_model:execution_options['model']=work_model
                                         result=self.execution_adapter.execute(subscription['id'],engine_prompt,served,**execution_options)
                                         if image_inputs:
-                                            self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
-                                                                                             'status':'included-in-request','route':'subscription',
-                                                                                             'engine':subscription['id']})
+                                            self.record_photo_attempt(job['id'],attempt_id=photo_attempt_id,status='included-in-request',
+                                                                      count=len(image_inputs),route='subscription',engine=subscription['id'])
                                     finally:
                                         # #718: a live CLI step ends with its attempt.
                                         self.live_steps.pop(job['id'],None)
@@ -7546,14 +7576,13 @@ class AgentService:
                             except (ExecutionError,EngineGatewayError) as exc:
                                 diagnostics=exc.diagnostics() if isinstance(exc,ExecutionError) else {}
                                 if image_inputs and diagnostics.get('failure_class')=='unsupported-image-input':
-                                    self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
-                                                                                     'status':'unsupported','route':'subscription',
-                                                                                     'engine':subscription['id']})
+                                    self.record_photo_attempt(job['id'],attempt_id=photo_attempt_id,status='unsupported',
+                                                              count=len(image_inputs),route='subscription',engine=subscription['id'])
                                 elif image_inputs:
                                     launched=bool((getattr(exc,'meta',None) or {}).get('argv'))
-                                    self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
-                                                                                     'status':'included-in-request' if launched else 'not-sent',
-                                                                                     'route':'subscription','engine':subscription['id']})
+                                    self.record_photo_attempt(job['id'],attempt_id=photo_attempt_id,
+                                                              status='included-in-request' if launched else 'not-sent',
+                                                              count=len(image_inputs),route='subscription',engine=subscription['id'])
                                 # #678: searches the CLI reported before it failed are still observed.
                                 if not isolated:self.record_cli_native_searches(job['id'],subscription['id'],getattr(exc,'meta',None),record,native_search)
                                 # #729: a bridge call the CLI never saw completed is a typed failure.
@@ -7664,6 +7693,9 @@ class AgentService:
                             # Evidence that the direct route was attempted, even if the
                             # provider fails before any response event.
                             record('model','requested',json.dumps({'provider':runtime_config.get('provider'),'model':runtime_config.get('model')},ensure_ascii=False))
+                            photo_attempt_id=(self.record_photo_attempt(job['id'],status='staged',count=len(image_inputs),
+                                                                        route='direct-api',provider=runtime_config.get('provider'))
+                                              if image_inputs else None)
                             self.record_turn_sent(job['id'],sent=render_turn_prompt(api_context),instructions=api_context['instructions'],
                                 instructions_channel='system-message',build=self.build,
                                 exposed_tools=[tool['function']['name'] for tool in capabilities.definitions()],
@@ -7678,8 +7710,6 @@ class AgentService:
                                 route='direct-api',provider=runtime_config.get('provider'),status='sent',
                                 requested_model=runtime_config.get('model'),instructions_version=api_context.get('version'),
                                 context_messages=len(api_context['conversation']),egress_taint=sorted(capabilities.private_provenance),
-                                photo_input=({'source':'Telegram photo','count':len(image_inputs),'status':'staged',
-                                              'route':'direct-api','provider':runtime_config.get('provider')} if image_inputs else None),
                                 # #826: what the owner-model sections and splices referred to.
                                 owner_information=owner_information)
                             self.record_turn_worker(job['id'],{'attempt':attempt.number if attempt is not None else 1,'route':'direct-api',
@@ -7694,14 +7724,15 @@ class AgentService:
                                 if image_inputs:run_options['images']=image_inputs
                                 result=run_agent(self.adapter,runtime_config,key,[*api_context['conversation'],{'role':'user','content':api_context['request']}],context_sections(api_context),capabilities,record,**run_options)
                                 if image_inputs:
-                                    self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
-                                                                                     'status':'included-in-request','route':'direct-api',
-                                                                                     'provider':runtime_config.get('provider')})
+                                    self.record_photo_attempt(job['id'],attempt_id=photo_attempt_id,status='included-in-request',
+                                                              count=len(image_inputs),route='direct-api',
+                                                              provider=runtime_config.get('provider'))
                             except Exception as exc:
                                 if image_inputs:
-                                    self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
-                                                                                     'status':'unknown' if isinstance(exc,ProviderError) else 'not-sent',
-                                                                                     'route':'direct-api','provider':runtime_config.get('provider')})
+                                    self.record_photo_attempt(job['id'],attempt_id=photo_attempt_id,
+                                                              status='unknown' if isinstance(exc,ProviderError) else 'not-sent',
+                                                              count=len(image_inputs),route='direct-api',
+                                                              provider=runtime_config.get('provider'))
                                 self.record_turn_provenance(job['id'],status='failed',failure_class=type(exc).__name__,egress_taint=sorted(capabilities.private_provenance))
                                 # #710: a failed worker may be re-delegated within the Work's bounds.
                                 following=(self.orchestration_step(orchestration,attempt,job['id'],attempt_start,failed=str(exc))
@@ -7873,6 +7904,10 @@ class AgentService:
             # run released the profile, and ask the owner to log in.  #752: only
             # when the Work did not succeed; a reached goal did not need it.
             if outcome!='succeeded':self.offer_browser_login(job)
+            if outcome in ('failed','partial'):
+                login=self._browser_login(job['id']) or {}
+                if login.get('state') not in ('requested','opening','offered','closing','resuming'):
+                    self.store.remove_telegram_photo(job['id'])
             if resolved_blocker:
                 self.projection.clear(self.connector_owner_id(job))
             if approval_needed[0]:

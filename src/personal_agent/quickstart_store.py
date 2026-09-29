@@ -50,8 +50,14 @@ class QuickStore:
             CREATE TABLE IF NOT EXISTS memory_approvals(token_hash TEXT PRIMARY KEY, owner_key TEXT NOT NULL, work_key TEXT NOT NULL, action TEXT NOT NULL, subject_id TEXT NOT NULL, memory_key TEXT NOT NULL, source_digest TEXT NOT NULL, content_digest TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, state TEXT NOT NULL DEFAULT 'issued', result_id TEXT, expected_memory_id TEXT, expected_memory_digest TEXT);
             CREATE TABLE IF NOT EXISTS telegram_task_cards(job_id TEXT PRIMARY KEY, chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL, state TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS telegram_photo_attachments(job_id TEXT PRIMARY KEY, file_id TEXT NOT NULL, created REAL NOT NULL);
-            CREATE TRIGGER IF NOT EXISTS telegram_photo_terminal_cleanup AFTER UPDATE OF status ON jobs
+            DROP TRIGGER IF EXISTS telegram_photo_terminal_cleanup;
+            CREATE TRIGGER telegram_photo_terminal_cleanup AFTER UPDATE OF status ON jobs
               WHEN NEW.status IN ('succeeded','failed','partial','cancelled','interrupted','unknown','blocked')
+               AND NOT (NEW.status IN ('failed','partial') AND EXISTS (
+                 SELECT 1 FROM config, json_each(CASE WHEN json_valid(config.value) THEN config.value ELSE '{}' END)
+                 WHERE config.key='browser_login_requests' AND json_each.key=NEW.id
+                   AND json_extract(json_each.value,'$.state') IN ('requested','opening','offered','closing','resuming')
+               ))
               BEGIN DELETE FROM telegram_photo_attachments WHERE job_id=NEW.id; END;
             CREATE TABLE IF NOT EXISTS telegram_notifications(id TEXT PRIMARY KEY, job_id TEXT NOT NULL, chat_id INTEGER NOT NULL, generation TEXT NOT NULL, kind TEXT NOT NULL, fingerprint TEXT, state TEXT NOT NULL, message_id INTEGER, created REAL NOT NULL, UNIQUE(job_id, kind));
             CREATE TABLE IF NOT EXISTS context_events(id TEXT PRIMARY KEY, captured_at REAL NOT NULL, source_kind TEXT NOT NULL, content TEXT NOT NULL, content_hash TEXT NOT NULL, expires_at REAL NOT NULL, sharing_state TEXT NOT NULL, source_app TEXT NOT NULL, source_domain TEXT NOT NULL);

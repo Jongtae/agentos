@@ -1264,6 +1264,12 @@ class QuickStore:
             db.execute('INSERT INTO telegram_task_cards VALUES (?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET chat_id=excluded.chat_id,message_id=excluded.message_id,state=excluded.state,created=CASE WHEN telegram_task_cards.message_id=-1 THEN excluded.created ELSE telegram_task_cards.created END',
                        (job_id,chat_id,message_id,state,time.time()))
 
+    def mark_task_card_deleting(self, job_id, message_id):
+        """Persist deletion intent before the Telegram side effect can race restart."""
+        with self.db() as db:
+            return db.execute("UPDATE telegram_task_cards SET state='deleting' WHERE job_id=? AND message_id=?",
+                              (job_id,message_id)).rowcount == 1
+
     def delete_task_card(self, job_id, message_id):
         """Forget only the Telegram card whose deletion was confirmed."""
         with self.db() as db:

@@ -547,6 +547,10 @@ CLOSING_REACTION_QUESTION = ('The assistant has answered the owner\'s message; t
                              'Vary with the exchange; do not default to the same emoji. Choose none-of-these only if '
                              'no listed emoji fits. This judgment is presentation only and never claims more than '
                              'the observed Work outcome.')
+PROGRESS_REACTION_QUESTION = ('The assistant is partway through the current step described here. Choose the one listed '
+                              'reaction emoji that best acknowledges this progress without implying the whole request '
+                              'is finished. Vary it across different steps when a different emoji fits. Choose '
+                              'none-of-these if no listed emoji fits. This judgment is presentation only.')
 #: Recipient/source endings trimmed from a query-term candidate so a Gmail
 #: search gets the bare name ("집주인한테" -> "집주인").  Query formatting only;
 #: which term is used is the DecisionEngine's selection.
@@ -790,6 +794,20 @@ class ConversationJudgments:
                  'saved_a_note_or_memory': 'yes' if wrote else 'no'}
         context = self._context('closing-reaction', facts, uncut='owner_message')
         decision = self.engine.choose(context, candidates, CLOSING_REACTION_QUESTION)
+        return self.policy.selection(decision)
+
+    def progress_reaction(self, step_description, candidates):
+        """Choose a presentation reaction for one already-redacted running step.
+
+        The context contains only the current generic progress line, never the
+        owner request or Work history. AgentOS sends a result only if it is in
+        the curated candidates; unavailable leaves the current reaction alone.
+        """
+        candidates = tuple(candidates)
+        if not candidates:
+            return None
+        context = self._context('progress-reaction', {'current_step': step_description})
+        decision = self.engine.choose(context, candidates, PROGRESS_REACTION_QUESTION)
         return self.policy.selection(decision)
 
     def mail_query_term(self, utterance, terms):

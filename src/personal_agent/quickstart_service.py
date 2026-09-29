@@ -6962,8 +6962,12 @@ class AgentService:
         with self.lock:
             cfg=self.store.config('telegram',{})
             token=self.store.secret('telegram_token')
-        self.settle_expired_telegram_photo_albums()
-        if not cfg.get('enabled') or not token: return
+        if not cfg.get('enabled') or not token:
+            # With no active update stream this is the explicit release path;
+            # a failed enabled poll below must keep the marker until a later
+            # successful poll confirms the album's quiet window.
+            self.settle_expired_telegram_photo_albums()
+            return
         updates=self.telegram.get_updates(cfg.get('cursor',0), timeout=1)
         for update in sorted(updates,key=lambda u:u.get('update_id',0)):
             control=None

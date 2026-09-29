@@ -454,7 +454,7 @@ class WaitSurfaceTests(NativePresenceTestCase):
         self.service.acknowledge_long_work(now=job['created'] + 30)
         self.assertEqual(len(self.calls), before)
 
-    def test_queued_work_keeps_one_card_that_ends_without_result_framing(self):
+    def test_queued_acknowledgement_is_removed_when_work_starts(self):
         self.connect_model()
         job_id, _ = self.receive('줄 서 있는 요청')
         self.service.acknowledge_long_work(now=time.time() + 10)
@@ -464,10 +464,10 @@ class WaitSurfaceTests(NativePresenceTestCase):
         self.service.deliver_one()
         texts = [body['text'] for method, body in self.calls if method in ('sendMessage', 'editMessageText')]
         self.assertEqual(texts[0], '요청을 받았습니다. 곧 시작할게요.')
-        self.assertEqual(texts[-2], '요청을 처리했어요.')
-        final_edit = [body for method, body in self.calls if method == 'editMessageText'][-1]
-        self.assertEqual(final_edit['reply_markup'], {'inline_keyboard': []}, 'no 결과 상태 보기 button')
         self.assertEqual(texts[-1], self.text)
+        self.assertEqual(texts, ['요청을 받았습니다. 곧 시작할게요.', self.text])
+        self.assertTrue(any(method == 'deleteMessage' for method, _body in self.calls))
+        self.assertIsNone(self.store.task_card(job_id))
 
 
 class PresentationFailureTests(NativePresenceTestCase):

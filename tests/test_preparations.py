@@ -19,7 +19,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from personal_agent import preparations as prep
-from personal_agent.agent_runtime import (PROFILE_HEADING, Capabilities, action_definitions, recorded_arguments,
+from personal_agent.agent_runtime import (PROFILE_HEADING, Capabilities, ToolError, action_definitions, recorded_arguments,
                                           turn_context, render_turn_prompt)
 from personal_agent.conversation_handoff import ConversationJudgments, PREPARATION_REQUEST_PROPOSITION
 from personal_agent.decision import OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, fixture_confidence
@@ -1055,7 +1055,8 @@ class WatchAcceptanceTests(_WatchCase):
                  every_minutes='1', until=self.due_iso(600 + 7200), delivery='when_needed')]}]
         for index in range(5):
             self.script.append({'content': None, 'tool_calls': [
-                call(f'daily-{index}', 'schedule_preparation', kind='prepare', goal=goal,
+                call(f'daily-{index}', 'schedule_preparation', kind='prepare',
+                     goal=f'10월 4일까지 {goal} 알려 주세요',
                      due=self.due_iso(600 + index * 86400), recurrence='daily', delivery='when_needed')]})
         self.script.extend([
             {'content': None, 'tool_calls': [
@@ -1079,6 +1080,32 @@ class WatchAcceptanceTests(_WatchCase):
         self.assertTrue(all('window_retry_required' in json.dumps(result) for result in results[1:6]))
         self.assertEqual(results[6]['preparation_id'], row['id'])
         self.assertTrue(results[6]['requires_owner_acceptance'])
+
+    def test_failed_watch_guard_is_rebuilt_from_tool_events_after_work_resume(self):
+        """#860 review P2: the guard survives a resumable Work and service restart."""
+        job_id='resumable-watch-work'
+        details=[
+            ('running',{'call_id':'bad-window','host_action':'schedule_preparation',
+                        'arguments':{'goal':'가격 변동 확인'}}),
+            ('failed',{'call_id':'bad-window','code':'invalid_window'}),
+        ]
+        with self.store.db() as db:
+            for status,detail in details:
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           (job_id,'schedule_preparation',status,json.dumps(detail,ensure_ascii=False),self.now))
+
+        restarted=self.make_service()
+        job={'id':job_id,'message':'가격 변동을 확인해줘'}
+        scheduler=restarted.preparation_scheduler(job,job['message'])
+        with self.assertRaises(ToolError) as caught:
+            scheduler({'kind':'prepare','goal':'10월 4일까지 가격 변동을 확인해 주세요',
+                       'due':self.due_iso(600),'recurrence':'daily','delivery':'when_needed'})
+        self.assertEqual(caught.exception.code,'window_retry_required')
+        self.assertEqual(self.rows(),[])
+
+    def test_related_goal_comparison_leaves_separate_topics_independent(self):
+        self.assertTrue(prep.same_goal('가격 변동 확인', '10월 4일까지 가격 변동을 알려 주세요'))
+        self.assertFalse(prep.same_goal('가격 변동 확인', '다른 약속 알림'))
 
     def test_failed_watch_retry_guard_does_not_block_a_different_explicit_goal(self):
         """#860: the guard is scoped to the rejected watch goal, not the whole Work."""

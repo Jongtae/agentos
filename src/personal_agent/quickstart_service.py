@@ -498,7 +498,6 @@ class AgentService:
         self.drive_read=None
         self.drive_picker_config=None
         self.lock=threading.RLock()
-        self._failed_preparation_windows={}
         #: #749: the Settings login window's observed outcome (in memory; a restart forgets it).
         self._settings_login=None
         self.worker_lock=threading.Lock()
@@ -722,6 +721,34 @@ class AgentService:
 
     # -- SEC-ATTN-01 (#659): owner-accepted preparations ------------------------
 
+    def failed_preparation_watch_goals(self, job_id):
+        """Redacted goals of this Work's failed bounded-watch attempts.
+
+        Reconstruct from the normal tool Evidence so the retry guard survives
+        a resumable Work and a service restart. The running event already
+        stores the goal with the standard secret redactor; failed events pair
+        it by tool-call ID and stable refusal code.
+        """
+        with self.store.db() as db:
+            rows=db.execute("SELECT status,detail FROM tool_events WHERE job_id=? AND tool='schedule_preparation' ORDER BY id",
+                            (job_id,)).fetchall()
+        goals_by_call={}
+        failed=[]
+        for row in rows:
+            try:detail=json.loads(row['detail'])
+            except (TypeError,ValueError):continue
+            call_id=detail.get('call_id')
+            if not isinstance(call_id,str):continue
+            if row['status']=='running' and detail.get('host_action')=='schedule_preparation':
+                args=detail.get('arguments')
+                goal=args.get('goal') if isinstance(args,dict) else None
+                if isinstance(goal,str) and not goal.startswith('[가림:'):
+                    goals_by_call[call_id]=goal
+            elif row['status']=='failed' and detail.get('code')=='invalid_window':
+                goal=goals_by_call.get(call_id)
+                if goal:failed.append(goal)
+        return failed
+
     def prepared_text(self, job):
         """The bounded "Prepared for you" section for this Work, or None (#659).
 
@@ -745,7 +772,6 @@ class AgentService:
         that a preparation itself started - it stays ``proposed`` until the
         owner accepts it with the Telegram button or in Settings.
         """
-        failed_window_goals=self._failed_preparation_windows.setdefault(job['id'],set())
         def schedule(args):
             now=self.preparations.clock()
             has_window=args.get('every_minutes') not in (None,'') or args.get('until') not in (None,'')
@@ -756,7 +782,8 @@ class AgentService:
                 # Pilot boundary 1: a stored secret never becomes goal text.
                 goal=prep.normalize_goal(self._redact_known_secrets(args.get('goal')))
                 request_key=goal
-                if not has_window and request_key in failed_window_goals:
+                if not has_window and any(prep.same_goal(request_key,failed_goal)
+                                          for failed_goal in self.failed_preparation_watch_goals(job['id'])):
                     raise prep.PreparationRefusal('window_retry_required')
                 zone_name=self.context_observations.settings().get('timezone') or ''
                 due_at,timezone=prep.parse_due(args.get('due'),args.get('timezone') or '',zone_name,now)
@@ -770,10 +797,6 @@ class AgentService:
                 when_needed=args.get('delivery')==prep.DELIVERY_WHEN_NEEDED
                 if when_needed and kind!=prep.KIND_PREPARE:raise prep.PreparationRefusal('invalid_delivery')
             except prep.PreparationRefusal as exc:
-                if has_window and request_key is not None:
-                    # A rejected watch can be corrected, but it must not turn
-                    # into several separately approvable one-shot schedules.
-                    failed_window_goals.add(request_key)
                 raise ToolError(str(exc),exc.code) from None
             channel=(prep.CHANNEL_TELEGRAM if kind==prep.KIND_REMINDER or args.get('delivery') in ('send',prep.DELIVERY_WHEN_NEEDED)
                      else prep.CHANNEL_WEB)
@@ -6729,12 +6752,9 @@ class AgentService:
             else:self.ingest_update(update,cfg['generation'])
 
     def run_one(self):
-        work_id=None
         try:
             return self._run_one()
         finally:
-            work_id=self.current_work_id
-            if work_id is not None:self._failed_preparation_windows.pop(work_id,None)
             self.current_work_id=None
 
     def _run_one(self):

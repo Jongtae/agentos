@@ -41,6 +41,7 @@ model reads the calendar with ``calendar_query`` and schedules with
 import hashlib
 import json
 import math
+import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone as dt_timezone
@@ -254,6 +255,39 @@ def normalize_goal(goal):
     if not goal or len(goal) > GOAL_MAX_CHARS:
         raise PreparationRefusal('invalid_goal')
     return goal
+
+
+_GOAL_PARTICLES = ('으로', '에서', '까지', '부터', '에게', '한테', '이랑', '하고', '을', '를', '은', '는', '이', '가', '에', '와', '과', '도', '만')
+_GOAL_FILLER = {'확인', '체크', '알려', '알림', '준비', '해줘', '해주세요', '부탁', '매일', '매번', 'daily', 'check', 'notify'}
+
+
+def same_goal(left, right):
+    """Whether two worker-written goals refer to the same preparation intent.
+
+    A failed watch can be paraphrased or have its deadline added when the
+    model retries it. Compare topic terms after removing common Korean
+    particles, dates and generic action words; require at least one shared
+    topic term so a separate goal in the same Work remains schedulable.
+    """
+    def terms(value):
+        words = re.findall(r'[a-z]+|[가-힣]+', str(value or '').casefold())
+        normalized = []
+        for word in words:
+            if word.isascii():
+                if word in _GOAL_FILLER:
+                    continue
+                normalized.append(word)
+                continue
+            for particle in _GOAL_PARTICLES:
+                if word.endswith(particle) and len(word) - len(particle) >= 2:
+                    word = word[:-len(particle)]
+                    break
+            if word not in _GOAL_FILLER and len(word) >= 2:
+                normalized.append(word)
+        return set(normalized)
+
+    left_terms, right_terms = terms(left), terms(right)
+    return bool(left_terms and right_terms and left_terms & right_terms)
 
 
 def _whole_number(value):

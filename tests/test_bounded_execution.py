@@ -38,7 +38,7 @@ BOUNDED_NAMES = ['ask_location', 'bounded_public_research', 'browser_click', 'br
                  'calendar_draft_cancel', 'calendar_draft_create', 'calendar_draft_update', 'calendar_query', 'find_files',
                  'information_use', 'list_memory', 'list_notes', 'list_roots', 'propose_current_state', 'public_page_read',
                  'read_file', 'save_memory', 'save_note', 'schedule_preparation',
-                 'settings_change', 'settings_read', 'weather', 'web_search']
+                 'search_memory', 'settings_change', 'settings_read', 'weather', 'web_search']
 
 
 class BoundedExecutionTests(unittest.TestCase):

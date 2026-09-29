@@ -498,6 +498,7 @@ class AgentService:
         self.drive_read=None
         self.drive_picker_config=None
         self.lock=threading.RLock()
+        self._failed_preparation_windows={}
         #: #749: the Settings login window's observed outcome (in memory; a restart forgets it).
         self._settings_login=None
         self.worker_lock=threading.Lock()
@@ -744,25 +745,35 @@ class AgentService:
         that a preparation itself started - it stays ``proposed`` until the
         owner accepts it with the Telegram button or in Settings.
         """
+        failed_window_goals=self._failed_preparation_windows.setdefault(job['id'],set())
         def schedule(args):
             now=self.preparations.clock()
+            has_window=args.get('every_minutes') not in (None,'') or args.get('until') not in (None,'')
+            request_key=None
             try:
                 kind=args.get('kind')
                 if kind not in prep.KINDS:raise prep.PreparationRefusal('invalid_kind')
                 # Pilot boundary 1: a stored secret never becomes goal text.
                 goal=prep.normalize_goal(self._redact_known_secrets(args.get('goal')))
+                request_key=goal
+                if not has_window and request_key in failed_window_goals:
+                    raise prep.PreparationRefusal('window_retry_required')
                 zone_name=self.context_observations.settings().get('timezone') or ''
                 due_at,timezone=prep.parse_due(args.get('due'),args.get('timezone') or '',zone_name,now)
                 recurrence=prep.normalize_recurrence(args.get('recurrence'))
                 # #719: a watch - every N minutes from due until a deadline, bounded.
                 window=None
-                if args.get('every_minutes') not in (None,'') or args.get('until') not in (None,''):
+                if has_window:
                     if recurrence:raise prep.PreparationRefusal('invalid_window')
                     window=prep.normalize_window(args.get('every_minutes'),args.get('until'),args.get('max_runs'),
                                                  due_at,timezone,now)
                 when_needed=args.get('delivery')==prep.DELIVERY_WHEN_NEEDED
                 if when_needed and kind!=prep.KIND_PREPARE:raise prep.PreparationRefusal('invalid_delivery')
             except prep.PreparationRefusal as exc:
+                if has_window and request_key is not None:
+                    # A rejected watch can be corrected, but it must not turn
+                    # into several separately approvable one-shot schedules.
+                    failed_window_goals.add(request_key)
                 raise ToolError(str(exc),exc.code) from None
             channel=(prep.CHANNEL_TELEGRAM if kind==prep.KIND_REMINDER or args.get('delivery') in ('send',prep.DELIVERY_WHEN_NEEDED)
                      else prep.CHANNEL_WEB)
@@ -6718,9 +6729,12 @@ class AgentService:
             else:self.ingest_update(update,cfg['generation'])
 
     def run_one(self):
+        work_id=None
         try:
             return self._run_one()
         finally:
+            work_id=self.current_work_id
+            if work_id is not None:self._failed_preparation_windows.pop(work_id,None)
             self.current_work_id=None
 
     def _run_one(self):

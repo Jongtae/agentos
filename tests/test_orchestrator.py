@@ -1572,6 +1572,8 @@ class SecretaryStandard(Harness):
             self.assertIn('every_minutes around 360 to 480', text)
             self.assertIn('hourly or closer only when the owner asks for it or the deadline is within hours', text)
             self.assertIn('never save the request sentence with save_memory', text)
+            self.assertIn('After an invalid_window result, correct and retry that same bounded watch', text)
+            self.assertIn('never replace it with separately dated one-shot or daily preparations', text)
             self.assertEqual(scenario_tokens(text), [])
         self.assertIn('A value is a fact about the owner, never the request itself', by_name['save_memory'])
         # PROFILE_KEY_GUIDANCE is pre-existing key text; the save_memory sentence itself names no task.
@@ -1585,8 +1587,9 @@ class SecretaryStandard(Harness):
         for guidance in (API_TOOL_GUIDANCE, CLI_TOOL_GUIDANCE):
             self.assertIn('ordinary conversation that needs no current facts', guidance)
         # #846: a standing wish about something that changes is proposed as a watch, never saved as the request.
-        self.assertIn('propose a watch (schedule_preparation with every_minutes and until, about three checks a day by default)',
+        self.assertIn('propose one bounded watch (schedule_preparation with every_minutes and until, about three checks a day by default)',
                       CORE_INSTRUCTIONS)
+        self.assertIn('if it cannot be corrected, say the watch was not scheduled', CORE_INSTRUCTIONS)
         self.assertIn('never the request sentence itself', CORE_INSTRUCTIONS)
         self.assertIn('capable personal secretary', GOAL_REACHED_PROPOSITION)
         self.assertIn('read in the light of the recent conversation', GOAL_REACHED_PROPOSITION)

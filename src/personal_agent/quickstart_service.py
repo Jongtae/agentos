@@ -4316,7 +4316,7 @@ class AgentService:
             # owner's message order.
             with self.lock:
                 current=self.store.job(row['id'])
-                if not current or current['status'] not in ('queued','running'):
+                if not current or current['status']!='queued':
                     continue
                 self.create_task_card(row['id'],row['message'],row['chat_id'],state=current['status'])
                 card=self.store.task_card(row['id'])
@@ -6372,6 +6372,17 @@ class AgentService:
     def update_task_card(self, job, state):
         card=self.store.task_card(job['id'])
         if not card or card['message_id']<1 or card['state']==state:return
+        if state=='running':
+            try:
+                deleted=self.telegram.delete_message(card['chat_id'],card['message_id'])
+            except ProviderError:
+                self.store.save_task_card(job['id'],card['chat_id'],card['message_id'],'running')
+                return
+            if deleted is True:
+                self.store.delete_task_card(job['id'],card['message_id'])
+            else:
+                self.store.save_task_card(job['id'],card['chat_id'],card['message_id'],'running')
+            return
         markup=self.task_card_markup(job['id'],state)
         try:
             self.telegram.edit_message_text(card['chat_id'],card['message_id'],

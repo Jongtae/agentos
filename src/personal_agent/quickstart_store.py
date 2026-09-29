@@ -1243,7 +1243,7 @@ class QuickStore:
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             job=db.execute('SELECT status FROM jobs WHERE id=?',(job_id,)).fetchone()
-            if not job or job['status'] not in ('queued','running'):
+            if not job or job['status']!='queued':
                 return None
             inserted=db.execute('INSERT OR IGNORE INTO telegram_task_cards VALUES (?,?,?,?,?)',
                                 (job_id,chat_id,-1,job['status'],time.time())).rowcount
@@ -1263,6 +1263,12 @@ class QuickStore:
         with self.db() as db:
             db.execute('INSERT INTO telegram_task_cards VALUES (?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET chat_id=excluded.chat_id,message_id=excluded.message_id,state=excluded.state,created=CASE WHEN telegram_task_cards.message_id=-1 THEN excluded.created ELSE telegram_task_cards.created END',
                        (job_id,chat_id,message_id,state,time.time()))
+
+    def delete_task_card(self, job_id, message_id):
+        """Forget only the Telegram card whose deletion was confirmed."""
+        with self.db() as db:
+            return db.execute('DELETE FROM telegram_task_cards WHERE job_id=? AND message_id=?',
+                              (job_id,message_id)).rowcount == 1
 
     def notification(self, notification_id):
         with self.db() as db:

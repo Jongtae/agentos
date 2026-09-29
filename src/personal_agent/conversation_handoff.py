@@ -170,6 +170,9 @@ class TelegramChannel:
         return self.call('editMessageReplyMarkup', {'chat_id': chat_id, 'message_id': message_id,
                                                     'reply_markup': reply_markup})
 
+    def delete_message(self, chat_id, message_id):
+        return self.call('deleteMessage', {'chat_id': chat_id, 'message_id': message_id})
+
     def answer_callback_query(self, callback_query_id, text=None, show_alert=False):
         body = {'callback_query_id': callback_query_id}
         if text:

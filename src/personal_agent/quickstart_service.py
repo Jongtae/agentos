@@ -2074,7 +2074,8 @@ class AgentService:
         if previous.get('delivery')=='unknown':
             return False,'이전 Telegram 전달 여부를 확인할 수 없어 자동으로 다시 실행하지 않았습니다.'
         photo_record=self.store.turn_provenance(previous['id']) or {}
-        if photo_record.get('photo_inputs') or photo_record.get('photo_input'):
+        if (photo_record.get('telegram_photo_attached') or photo_record.get('photo_inputs')
+                or photo_record.get('photo_input')):
             return False,'사진이 포함된 이전 요청은 첨부를 다시 확인할 수 없어 자동 재시도하지 않았습니다. 사진을 다시 첨부해 새 요청으로 보내 주세요.'
         if self.store.context_attachment(previous['id']):
             return False,'이전 요청에 일회성 개인 컨텍스트가 연결되어 있어 자동으로 다시 실행하지 않았습니다.'
@@ -6857,6 +6858,7 @@ class AgentService:
                             guided_context=True
                     if photo_file_id:
                         self.store.attach_telegram_photo(task_id,photo_file_id,db=db)
+                        self.store.mark_telegram_photo_attached(task_id,db=db)
                     # #581: the owner's own message is the reaction target and
                     # reply anchor for this Work.
                     self.telegram_turns.record_source(task_id,sender,message.get('message_id'),db=db)

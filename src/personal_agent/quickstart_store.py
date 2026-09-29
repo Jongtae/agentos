@@ -995,6 +995,20 @@ class QuickStore:
             db.execute('INSERT INTO telegram_photo_attachments VALUES (?,?,?)',
                        (job_id, file_id, time.time()))
 
+    def mark_telegram_photo_attached(self, job_id, db=None):
+        """Persist that the owner's request had an image before any worker can start or crash."""
+        if db is None:
+            with self.db() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                return self.mark_telegram_photo_attached(job_id,conn)
+        row=db.execute('SELECT record FROM turn_provenance WHERE job_id=?',(job_id,)).fetchone()
+        try:record=json.loads(row['record']) if row else {}
+        except (TypeError,ValueError):record={}
+        if not isinstance(record,dict):record={}
+        record['telegram_photo_attached']=True
+        db.execute('INSERT INTO turn_provenance VALUES (?,?,?) ON CONFLICT(job_id) DO UPDATE SET record=excluded.record,created=excluded.created',
+                   (job_id,json.dumps(record,ensure_ascii=False),time.time()))
+
     def telegram_photo_file_id(self, job_id):
         with self.db() as db:
             row = db.execute('SELECT file_id FROM telegram_photo_attachments WHERE job_id=?', (job_id,)).fetchone()
@@ -1017,6 +1031,7 @@ class QuickStore:
         db.execute('INSERT INTO telegram_photo_attachments(job_id,file_id,created) VALUES (?,?,?) '
                    'ON CONFLICT(job_id) DO UPDATE SET file_id=excluded.file_id,created=excluded.created',
                    (target_job_id,row['file_id'],row['created']))
+        self.mark_telegram_photo_attached(target_job_id,db=db)
         db.execute('DELETE FROM telegram_photo_attachments WHERE job_id=?',(source_job_id,))
         return True
 

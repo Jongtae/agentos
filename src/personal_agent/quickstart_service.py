@@ -54,6 +54,7 @@ from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_NO, JUDGMENT_YES,
                                    FOLLOWUP_CANCEL, FOLLOWUP_CORRECTION, FOLLOWUP_REFERENCE,
                                    FOLLOWUP_RETRY, eligible_for_followup_judgment,
                                    ConversationJudgments, TelegramChannel, TelegramRejected, telegram_request_json,
+                                   telegram_request_file,
                                    ConnectorHandoff,
                                    ConversationFocus,
                                    ConversationHandoffError, IntentClassifier,
@@ -383,7 +384,7 @@ class AgentService:
     def __init__(self, store, adapter=None, telegram_transport=None, subscription_engines=None, execution_adapter=None,
                  isolated_engine_adapter=None, isolated_mcp_registry=None,
                  drive_web_oauth=None, connector_registry=None, gmail=None, calendar=None, calendar_oauth=None, calendar_factory=None,
-                 browser_profile=None):
+                 browser_profile=None, telegram_file_transport=None):
         self.store=store
         # #656/#680: the one browser profile this installation owns (its encrypted session jar),
         # under the owner-only private directory.  The embedded WebKit worker
@@ -401,11 +402,13 @@ class AgentService:
         self.build=build_identity()
         self.adapter=adapter or ModelAdapter()
         self.telegram_transport=telegram_transport or telegram_request_json
+        self.telegram_file_transport=telegram_file_transport or telegram_request_file
         # Transport seam.  Both resolvers are late bound: `telegram_transport`
         # stays a live reassignable attribute and the bot token is read from
         # the secret store per call, never captured here.
         self.telegram=TelegramChannel(lambda:self.telegram_transport,
-                                      lambda:self.store.secret('telegram_token'))
+                                      lambda:self.store.secret('telegram_token'),
+                                      lambda:self.telegram_file_transport)
         # #581: which Telegram messages belong to a Work (reaction target,
         # reply anchor, control message) and the in-memory wait surface of
         # running Work.  Neither is a truth source.
@@ -1717,7 +1720,7 @@ class AgentService:
     # saved-private-value redaction in ``record_turn_sent``, and never exported
     # (``portable_state``).
     PROVENANCE_WITHHELD_SOURCES=frozenset({'personal-space','owner-context-inbox','connected-drive-file','connected-document',
-                                           'owner-memory','owner-folder-names','owner-calendar','owner-mail','owner-settings',
+                                           'owner-memory','owner-folder-names','owner-calendar','owner-mail','owner-settings','telegram-photo',
                                            'conversation-history','unattributed-tool-evidence','owner-browser-session'})
 
     def record_turn_sent(self, job_id, *, sent, instructions, instructions_channel, private_sources=(), **fields):
@@ -6740,7 +6743,16 @@ class AgentService:
             message=update['edited_message'] if edited else update.get('message',{})
             sender=message.get('from',{}).get('id')
             chat=message.get('chat',{})
-            text='' if edited else message.get('text','')
+            photo=message.get('photo') if not edited else None
+            has_photo=isinstance(photo,list) and bool(photo)
+            text='' if edited else (message.get('text') or message.get('caption',''))
+            photo_file_id=None
+            if has_photo:
+                candidates=[item for item in photo if isinstance(item,dict) and isinstance(item.get('file_id'),str)
+                            and item.get('file_id')]
+                chosen=max(candidates,key=lambda item:item.get('file_size',0) if isinstance(item.get('file_size'),int) else 0) if candidates else {}
+                photo_file_id=chosen.get('file_id') or 'invalid-telegram-file-id'
+                if not isinstance(text,str) or not text.strip():text='[사진 첨부]'
             private=chat.get('type')=='private' and isinstance(sender,int) and chat.get('id')==sender
             authorized=private and sender==cfg.get('user_id')
             paired=False
@@ -6771,6 +6783,8 @@ class AgentService:
                         if guided_context_requested:
                             db.execute("UPDATE jobs SET status='awaiting_context' WHERE id=?",(task_id,))
                             guided_context=True
+                    if photo_file_id:
+                        self.store.attach_telegram_photo(task_id,photo_file_id,db=db)
                     # #581: the owner's own message is the reaction target and
                     # reply anchor for this Work.
                     self.telegram_turns.record_source(task_id,sender,message.get('message_id'),db=db)
@@ -6869,6 +6883,16 @@ class AgentService:
             work_sources={OWNER_CONVERSATION}
             work_capabilities=[None]
             try:
+                image_inputs=[]
+                photo_file_id=self.store.telegram_photo_file_id(job['id'])
+                if photo_file_id:
+                    try:
+                        image_inputs=[self.telegram.download_photo(photo_file_id)]
+                    except ProviderError as exc:
+                        self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':1,'status':'failed'})
+                        raise ValueError(str(exc)) from None
+                    finally:
+                        self.store.remove_telegram_photo(job['id'])
                 owner_prompt=job['message'].strip()
                 prompt=owner_prompt
                 #: The Work whose message is `prompt` (a retry replays another's).
@@ -7431,10 +7455,13 @@ class AgentService:
                                 # stored after deterministic secret/private-value redaction.
                                 private_sources=set(turn_provenance)|{base_label(label) for label in capabilities.private_provenance}|({'owner-profile'} if engine_context.get('profile') else set())
                                                 |({'owner-current-context'} if engine_context.get('current_context') else set())
-                                                |({'owner-preparations'} if engine_context.get('prepared') else set()),
+                                                |({'owner-preparations'} if engine_context.get('prepared') else set())
+                                                |({'telegram-photo'} if image_inputs else set()),
                                 route='subscription',engine=subscription['id'],mode=mode,status='sent',
                                 context_mode=engine_context.get('mode','shared-context'),instructions_version=engine_context.get('version'),
                                 context_messages=len(engine_context['conversation']),egress_taint=sorted(capabilities.private_provenance),
+                                photo_input=({'source':'Telegram photo','count':len(image_inputs),'status':'included-in-request',
+                                              'route':'subscription','engine':subscription['id']} if image_inputs else None),
                                 # #678: the CLI's own tools offered besides the bridge.
                                 cli_native_tools=['web_search'] if native_search else [],native_search_reason=native_reason or None,
                                 # #826: what the owner-model sections and splices referred to.
@@ -7449,6 +7476,11 @@ class AgentService:
                             work_model=''
                             try:
                                 if isolated:
+                                    if image_inputs:
+                                        self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
+                                                                                         'status':'unsupported','route':'isolated-agentos-mcp'})
+                                        raise ExecutionError('격리 런타임 배포는 사진 입력을 지원하지 않습니다. 현재 AI 연결을 바꿔 실행해 주세요.',
+                                                             failure_class='unsupported-image-input')
                                     # #679: the sidecar's closed contract carries no model; a Work
                                     # model stored before isolation was configured is refused, not
                                     # silently replaced by the CLI default.
@@ -7488,8 +7520,10 @@ class AgentService:
                                         except OSError:
                                             LOG.warning('cli browser relay could not start job=%s',job['id'])
                                     try:
-                                        result=self.execution_adapter.execute(subscription['id'],engine_prompt,served,context=adapter_context,
-                                                                              **({'model':work_model} if work_model else {}))
+                                        execution_options={'context':adapter_context}
+                                        if image_inputs:execution_options['images']=image_inputs
+                                        if work_model:execution_options['model']=work_model
+                                        result=self.execution_adapter.execute(subscription['id'],engine_prompt,served,**execution_options)
                                     finally:
                                         # #718: a live CLI step ends with its attempt.
                                         self.live_steps.pop(job['id'],None)
@@ -7498,6 +7532,10 @@ class AgentService:
                                         capabilities.close_browser()
                             except (ExecutionError,EngineGatewayError) as exc:
                                 diagnostics=exc.diagnostics() if isinstance(exc,ExecutionError) else {}
+                                if image_inputs and diagnostics.get('failure_class')=='unsupported-image-input':
+                                    self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
+                                                                                     'status':'unsupported','route':'subscription',
+                                                                                     'engine':subscription['id']})
                                 # #678: searches the CLI reported before it failed are still observed.
                                 if not isolated:self.record_cli_native_searches(job['id'],subscription['id'],getattr(exc,'meta',None),record,native_search)
                                 # #729: a bridge call the CLI never saw completed is a typed failure.
@@ -7617,10 +7655,13 @@ class AgentService:
                                                 # #627: record-only label for the current-context section.
                                                 |({'owner-current-context'} if api_context.get('current_context') else set())
                                                 # #659: record-only label for the prepared answers section.
-                                                |({'owner-preparations'} if api_context.get('prepared') else set()),
+                                                |({'owner-preparations'} if api_context.get('prepared') else set())
+                                                |({'telegram-photo'} if image_inputs else set()),
                                 route='direct-api',provider=runtime_config.get('provider'),status='sent',
                                 requested_model=runtime_config.get('model'),instructions_version=api_context.get('version'),
                                 context_messages=len(api_context['conversation']),egress_taint=sorted(capabilities.private_provenance),
+                                photo_input=({'source':'Telegram photo','count':len(image_inputs),'status':'included-in-request',
+                                              'route':'direct-api','provider':runtime_config.get('provider')} if image_inputs else None),
                                 # #826: what the owner-model sections and splices referred to.
                                 owner_information=owner_information)
                             self.record_turn_worker(job['id'],{'attempt':attempt.number if attempt is not None else 1,'route':'direct-api',
@@ -7631,7 +7672,9 @@ class AgentService:
                                 # current-context sections in its system text, the same
                                 # sections the CLI envelope renders.
                                 # #833: the outcome judgment reads the same profile / current-context sections.
-                                result=run_agent(self.adapter,runtime_config,key,[*api_context['conversation'],{'role':'user','content':api_context['request']}],context_sections(api_context),capabilities,record,owner_context=api_context)
+                                run_options={'owner_context':api_context}
+                                if image_inputs:run_options['images']=image_inputs
+                                result=run_agent(self.adapter,runtime_config,key,[*api_context['conversation'],{'role':'user','content':api_context['request']}],context_sections(api_context),capabilities,record,**run_options)
                             except Exception as exc:
                                 self.record_turn_provenance(job['id'],status='failed',failure_class=type(exc).__name__,egress_taint=sorted(capabilities.private_provenance))
                                 # #710: a failed worker may be re-delegated within the Work's bounds.

@@ -20,12 +20,15 @@ that path cannot use the stored-token resolver.
 import json as _json
 from urllib.error import HTTPError as _HTTPError, URLError as _URLError
 from urllib.request import Request as _Request, build_opener as _build_opener
+from urllib.parse import quote as _quote
 
 from .conversation_projection import object_particle
 from .providers import NoRedirect, ProviderError
 
 TELEGRAM_API_ROOT = 'https://api.telegram.org'
+TELEGRAM_FILE_ROOT = 'https://api.telegram.org/file'
 TELEGRAM_TIMEOUT = 15
+TELEGRAM_MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
 TELEGRAM_FAILURE_TEXT = 'Telegram 요청이 실패했습니다. 봇 설정을 확인하세요.'
 #: ``stopped_message_generation`` carries the owner's Stop on a draft (#581).
 # #626: edited_message carries live-location updates and owner text edits;
@@ -99,6 +102,19 @@ def telegram_request_json(url, body, headers=None, timeout=TELEGRAM_TIMEOUT):
         raise ProviderError('연결 대상이 올바른 JSON 응답을 반환하지 않았습니다.') from None
 
 
+def telegram_request_file(url, timeout=TELEGRAM_TIMEOUT, max_bytes=TELEGRAM_MAX_DOWNLOAD_BYTES):
+    """Fetch one Bot API file without redirects and with a hard byte bound."""
+    req = _Request(url, headers={'Accept': 'image/jpeg,image/png,image/webp'})
+    try:
+        with _build_opener(NoRedirect()).open(req, timeout=timeout) as response:
+            raw = response.read(max_bytes + 1)
+    except (_HTTPError, _URLError, TimeoutError, OSError) as exc:
+        raise ProviderError('Telegram 사진을 내려받지 못했습니다.') from None
+    if not isinstance(raw, bytes) or len(raw) > max_bytes:
+        raise ProviderError('Telegram 사진이 내려받기 크기 제한을 넘었습니다.')
+    return raw
+
+
 class TelegramChannel:
     """Bounded Telegram Bot API surface used by the personal conversation.
 
@@ -107,9 +123,10 @@ class TelegramChannel:
     captured at construction time.
     """
 
-    def __init__(self, transport_source, token_source):
+    def __init__(self, transport_source, token_source, file_transport_source=None):
         self._transport_source = transport_source
         self._token_source = token_source
+        self._file_transport_source = file_transport_source or (lambda: telegram_request_file)
 
     @property
     def transport(self):
@@ -203,6 +220,36 @@ class TelegramChannel:
         kinds = TELEGRAM_POLL_UPDATE_KINDS if allowed_updates is None else allowed_updates
         return self.call('getUpdates', {'offset': offset, 'timeout': timeout,
                                         'allowed_updates': list(kinds), 'limit': limit})
+
+    def download_photo(self, file_id):
+        """Download a Telegram photo via getFile, returning bounded bytes and MIME type."""
+        if not isinstance(file_id, str) or not file_id or len(file_id) > 512:
+            raise ProviderError('Telegram 사진 식별자가 올바르지 않습니다.')
+        result = self.call('getFile', {'file_id': file_id})
+        path = result.get('file_path') if isinstance(result, dict) else None
+        size = result.get('file_size') if isinstance(result, dict) else None
+        if isinstance(size, int) and not isinstance(size, bool) and size > TELEGRAM_MAX_DOWNLOAD_BYTES:
+            raise ProviderError('Telegram 사진이 내려받기 크기 제한을 넘었습니다.')
+        if not isinstance(path, str) or not path or len(path) > 1024 or path.startswith('/'):
+            raise ProviderError('Telegram 사진 경로를 확인할 수 없습니다.')
+        pieces = path.split('/')
+        if any(piece in ('', '.', '..') for piece in pieces):
+            raise ProviderError('Telegram 사진 경로를 확인할 수 없습니다.')
+        token = self._token_source()
+        url = f'{TELEGRAM_FILE_ROOT}/bot{token}/' + '/'.join(_quote(piece, safe='') for piece in pieces)
+        data = self._file_transport_source()(url, timeout=TELEGRAM_TIMEOUT,
+                                             max_bytes=TELEGRAM_MAX_DOWNLOAD_BYTES)
+        if not isinstance(data, bytes) or len(data) > TELEGRAM_MAX_DOWNLOAD_BYTES:
+            raise ProviderError('Telegram 사진이 내려받기 크기 제한을 넘었습니다.')
+        if data.startswith(b'\xff\xd8\xff'):
+            mime = 'image/jpeg'
+        elif data.startswith(b'\x89PNG\r\n\x1a\n'):
+            mime = 'image/png'
+        elif len(data) >= 12 and data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+            mime = 'image/webp'
+        else:
+            raise ProviderError('Telegram에서 지원하지 않는 사진 형식을 받았습니다.')
+        return {'data': data, 'mime_type': mime}
 
     def get_me(self, token):
         """Verify an owner-supplied token before it is stored."""

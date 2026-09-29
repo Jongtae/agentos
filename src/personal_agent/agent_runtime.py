@@ -2994,7 +2994,7 @@ def _external(trail):
  # #818: a memory proposal concludes like internal bookkeeping too.
  return [row for row in trail if row[0] not in INTERNAL_STATE_ACTIONS and row[1]!='proposed']
 
-def run_agent(adapter,config,key,history,system,capabilities,record,scope='main',owner_context=None):
+def run_agent(adapter,config,key,history,system,capabilities,record,scope='main',owner_context=None,images=None):
  """The direct-API tool loop.  ``owner_context`` (#833) is the turn context whose
  ``profile`` / ``current_context`` sections ``system`` already carries, so the outcome
  judgment reads the same owner model the worker was given; None reads ``none``."""
@@ -3079,7 +3079,9 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
   try:
    # report_observed: an unreported response model stays unreported (#598 R1);
    # the configured name is the *requested* model, never the observed one.
-   message,actual=adapter.tool_turn(active_config,key,messages,definitions,report_observed=True)
+   model_options={'report_observed':True}
+   if images:model_options['images']=images
+   message,actual=adapter.tool_turn(active_config,key,messages,definitions,**model_options)
   except ProviderError as exc:
    if exc.status!=429 or config.get('model')!='openrouter/free' or rerouted:raise
    rerouted=True;active_config=dict(config)
@@ -3090,7 +3092,9 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
     record('model','stopped',json.dumps({'scope':scope,'code':stop.code,'reason':str(stop)},ensure_ascii=False))
     return _budget_end(stop,executions,sources,successful,incomplete,verified,config,actual,draft)
    messages=[{k:v for k,v in m.items() if k!='reasoning_details'} for m in messages]
-   message,actual=adapter.tool_turn(active_config,key,messages,definitions,report_observed=True)
+   model_options={'report_observed':True}
+   if images:model_options['images']=images
+   message,actual=adapter.tool_turn(active_config,key,messages,definitions,**model_options)
   # The model this call was sent with, before free-router pinning below.
   requested=active_config.get('model')
   if actual and active_config.get('model')=='openrouter/free' and actual!='openrouter/free':active_config['model']=actual

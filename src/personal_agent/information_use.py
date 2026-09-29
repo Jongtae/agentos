@@ -254,6 +254,11 @@ def work_information_use(store, job_id, redact=None):
     add('prepared', sections.get('prepared') or ())
     add('spliced', [f"{row.get('kind')}: {row.get('label') or row.get('ref')}" for row in sections.get('spliced') or ()
                     if isinstance(row, dict)])
+    photo = record.get('photo_input') if isinstance(record.get('photo_input'), dict) else None
+    if photo and photo.get('count'):
+        try:photo_count=min(10,max(1,int(photo.get('count') or 0)))
+        except (TypeError,ValueError):photo_count=1
+        add('spliced', [f'Telegram 사진 {photo_count}개'])
     lookups, results, started = [], [], {}
     for event in store.task_events(job_id):
         tool, status, trace = event.get('tool'), event.get('status'), event.get('trace') or {}
@@ -298,12 +303,18 @@ def work_information_use(store, job_id, redact=None):
     judgments = [row for row in (audit if isinstance(audit, list) else ()) if isinstance(row, dict) and row.get('work_id') == job_id]
     judgment_models = sorted({label(row.get('observed_model') or row.get('model') or row.get('engine') or row.get('provider'), 80)
                               for row in judgments} - {''})
+    photo_input=None
+    if photo:
+        photo_input={key: (label(value,80) if isinstance(value,str) else value)
+                     for key,value in photo.items() if key in ('source','count','status','route','engine','provider')}
+    sent_to={'workers': workers,
+             'judgment_ai': {'calls': len(judgments), 'models': judgment_models},
+             'web_search_ran': bool(lookups), 'lookups': lookups[:MAX_ITEMS]}
+    if photo_input is not None:sent_to['attachments']=photo_input
     return {'work_id': job_id, 'recorded': bool(record), 'evidence_class': EVIDENCE_CLASS,
             'used': used,
             'conversation_turns': int(record.get('context_messages') or 0),
-            'sent_to': {'workers': workers,
-                        'judgment_ai': {'calls': len(judgments), 'models': judgment_models},
-                        'web_search_ran': bool(lookups), 'lookups': lookups[:MAX_ITEMS]},
+            'sent_to': sent_to,
             'results': results[-MAX_ITEMS:]}
 
 

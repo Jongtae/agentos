@@ -49,6 +49,10 @@ class QuickStore:
             CREATE TABLE IF NOT EXISTS memory_candidates(id TEXT PRIMARY KEY, job_id TEXT, memory_key TEXT NOT NULL, content TEXT NOT NULL, created REAL NOT NULL, state TEXT NOT NULL DEFAULT 'pending');
             CREATE TABLE IF NOT EXISTS memory_approvals(token_hash TEXT PRIMARY KEY, owner_key TEXT NOT NULL, work_key TEXT NOT NULL, action TEXT NOT NULL, subject_id TEXT NOT NULL, memory_key TEXT NOT NULL, source_digest TEXT NOT NULL, content_digest TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, state TEXT NOT NULL DEFAULT 'issued', result_id TEXT, expected_memory_id TEXT, expected_memory_digest TEXT);
             CREATE TABLE IF NOT EXISTS telegram_task_cards(job_id TEXT PRIMARY KEY, chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL, state TEXT NOT NULL, created REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS telegram_photo_attachments(job_id TEXT PRIMARY KEY, file_id TEXT NOT NULL, created REAL NOT NULL);
+            CREATE TRIGGER IF NOT EXISTS telegram_photo_terminal_cleanup AFTER UPDATE OF status ON jobs
+              WHEN NEW.status IN ('succeeded','failed','partial','cancelled','interrupted','unknown','blocked')
+              BEGIN DELETE FROM telegram_photo_attachments WHERE job_id=NEW.id; END;
             CREATE TABLE IF NOT EXISTS telegram_notifications(id TEXT PRIMARY KEY, job_id TEXT NOT NULL, chat_id INTEGER NOT NULL, generation TEXT NOT NULL, kind TEXT NOT NULL, fingerprint TEXT, state TEXT NOT NULL, message_id INTEGER, created REAL NOT NULL, UNIQUE(job_id, kind));
             CREATE TABLE IF NOT EXISTS context_events(id TEXT PRIMARY KEY, captured_at REAL NOT NULL, source_kind TEXT NOT NULL, content TEXT NOT NULL, content_hash TEXT NOT NULL, expires_at REAL NOT NULL, sharing_state TEXT NOT NULL, source_app TEXT NOT NULL, source_domain TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS context_events_expiry ON context_events(expires_at);
@@ -956,6 +960,27 @@ class QuickStore:
             with self.db() as conn:return self.workspace(workspace_id, conn)
         row=db.execute('SELECT * FROM workspaces WHERE id=?',(workspace_id,)).fetchone()
         return dict(row) if row else None
+
+    def attach_telegram_photo(self, job_id, file_id, db=None):
+        """Keep only Telegram's fetch handle until this Work attempts one image read."""
+        if not isinstance(job_id, str) or not job_id or not isinstance(file_id, str) or not 1 <= len(file_id) <= 512:
+            raise ValueError('Telegram 사진 정보를 확인하세요.')
+        if db is None:
+            with self.db() as conn:
+                conn.execute('INSERT INTO telegram_photo_attachments VALUES (?,?,?)',
+                             (job_id, file_id, time.time()))
+        else:
+            db.execute('INSERT INTO telegram_photo_attachments VALUES (?,?,?)',
+                       (job_id, file_id, time.time()))
+
+    def telegram_photo_file_id(self, job_id):
+        with self.db() as db:
+            row = db.execute('SELECT file_id FROM telegram_photo_attachments WHERE job_id=?', (job_id,)).fetchone()
+        return row['file_id'] if row else None
+
+    def remove_telegram_photo(self, job_id):
+        with self.db() as db:
+            db.execute('DELETE FROM telegram_photo_attachments WHERE job_id=?', (job_id,))
 
     def create_workspace(self, title, purpose=''):
         if not isinstance(title,str) or not 1<=len(title.strip())<=120:raise ValueError('작업공간 이름은 1~120자로 입력하세요.')

@@ -41,6 +41,7 @@ model reads the calendar with ``calendar_query`` and schedules with
 import hashlib
 import json
 import math
+import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone as dt_timezone
@@ -144,6 +145,9 @@ REFUSALS = {
     'invalid_recurrence': 'recurrence는 비우거나 daily, weekdays, weekly 중 하나입니다.',
     'invalid_window': (f'every_minutes는 {MIN_EVERY_MINUTES}~{MAX_EVERY_MINUTES} 사이의 정수이고, until은 due보다 늦고 '
                        f'due부터 {MAX_WINDOW_SECONDS // 86400}일 이내인 RFC3339 시각입니다. recurrence와 함께 쓰지 않습니다.'),
+    'window_retry_required': ('같은 목표의 반복 watch 요청이 이 Work에서 이미 있었습니다. 날짜별 단발 준비 여러 건으로 나누지 말고, '
+                              'every_minutes와 until을 바로잡아 같은 watch를 다시 호출하세요. 필요한 값이 없으면 대체 일정을 만들지 말고 '
+                              '소유자에게 한 가지 질문을 하세요. 이 호출은 새 준비를 만들지 않았습니다.'),
     'invalid_max_runs': f'max_runs는 1~{MAX_WINDOW_RUNS} 사이의 정수입니다.',
     'invalid_delivery': 'delivery when_needed는 kind prepare에만 쓸 수 있습니다.',
     'too_many': f'진행 중인 준비가 {MAX_ACTIVE}개를 넘어 더 만들지 않았습니다. 설정에서 필요 없는 준비를 정리해 주세요.',
@@ -251,6 +255,39 @@ def normalize_goal(goal):
     if not goal or len(goal) > GOAL_MAX_CHARS:
         raise PreparationRefusal('invalid_goal')
     return goal
+
+
+_GOAL_PARTICLES = ('으로', '에서', '까지', '부터', '에게', '한테', '이랑', '하고', '을', '를', '은', '는', '이', '가', '에', '와', '과', '도', '만')
+_GOAL_FILLER = {'확인', '체크', '알려', '알림', '준비', '해줘', '해주세요', '부탁', '매일', '매번', 'daily', 'check', 'notify'}
+
+
+def same_goal(left, right):
+    """Whether two worker-written goals refer to the same preparation intent.
+
+    A failed watch can be paraphrased or have its deadline added when the
+    model retries it. Compare topic terms after removing common Korean
+    particles, dates and generic action words; require at least one shared
+    topic term so a separate goal in the same Work remains schedulable.
+    """
+    def terms(value):
+        words = re.findall(r'[a-z]+|[가-힣]+', str(value or '').casefold())
+        normalized = []
+        for word in words:
+            if word.isascii():
+                if word in _GOAL_FILLER:
+                    continue
+                normalized.append(word)
+                continue
+            for particle in _GOAL_PARTICLES:
+                if word.endswith(particle) and len(word) - len(particle) >= 2:
+                    word = word[:-len(particle)]
+                    break
+            if word not in _GOAL_FILLER and len(word) >= 2:
+                normalized.append(word)
+        return set(normalized)
+
+    left_terms, right_terms = terms(left), terms(right)
+    return bool(left_terms and right_terms and left_terms & right_terms)
 
 
 def _whole_number(value):

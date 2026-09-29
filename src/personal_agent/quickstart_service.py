@@ -721,6 +721,34 @@ class AgentService:
 
     # -- SEC-ATTN-01 (#659): owner-accepted preparations ------------------------
 
+    def failed_preparation_watch_goals(self, job_id):
+        """Redacted goals of this Work's failed bounded-watch attempts.
+
+        Reconstruct from the normal tool Evidence so the retry guard survives
+        a resumable Work and a service restart. The running event already
+        stores the goal with the standard secret redactor; failed events pair
+        it by tool-call ID and stable refusal code.
+        """
+        with self.store.db() as db:
+            rows=db.execute("SELECT status,detail FROM tool_events WHERE job_id=? AND tool='schedule_preparation' ORDER BY id",
+                            (job_id,)).fetchall()
+        goals_by_call={}
+        failed=[]
+        for row in rows:
+            try:detail=json.loads(row['detail'])
+            except (TypeError,ValueError):continue
+            call_id=detail.get('call_id')
+            if not isinstance(call_id,str):continue
+            if row['status']=='running' and detail.get('host_action')=='schedule_preparation':
+                args=detail.get('arguments')
+                goal=args.get('goal') if isinstance(args,dict) else None
+                if isinstance(goal,str) and not goal.startswith('[가림:'):
+                    goals_by_call[call_id]=goal
+            elif row['status']=='failed' and detail.get('code')=='invalid_window':
+                goal=goals_by_call.get(call_id)
+                if goal:failed.append(goal)
+        return failed
+
     def prepared_text(self, job):
         """The bounded "Prepared for you" section for this Work, or None (#659).
 
@@ -746,17 +774,23 @@ class AgentService:
         """
         def schedule(args):
             now=self.preparations.clock()
+            has_window=args.get('every_minutes') not in (None,'') or args.get('until') not in (None,'')
+            request_key=None
             try:
                 kind=args.get('kind')
                 if kind not in prep.KINDS:raise prep.PreparationRefusal('invalid_kind')
                 # Pilot boundary 1: a stored secret never becomes goal text.
                 goal=prep.normalize_goal(self._redact_known_secrets(args.get('goal')))
+                request_key=goal
+                if not has_window and any(prep.same_goal(request_key,failed_goal)
+                                          for failed_goal in self.failed_preparation_watch_goals(job['id'])):
+                    raise prep.PreparationRefusal('window_retry_required')
                 zone_name=self.context_observations.settings().get('timezone') or ''
                 due_at,timezone=prep.parse_due(args.get('due'),args.get('timezone') or '',zone_name,now)
                 recurrence=prep.normalize_recurrence(args.get('recurrence'))
                 # #719: a watch - every N minutes from due until a deadline, bounded.
                 window=None
-                if args.get('every_minutes') not in (None,'') or args.get('until') not in (None,''):
+                if has_window:
                     if recurrence:raise prep.PreparationRefusal('invalid_window')
                     window=prep.normalize_window(args.get('every_minutes'),args.get('until'),args.get('max_runs'),
                                                  due_at,timezone,now)

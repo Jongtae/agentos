@@ -19,7 +19,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from personal_agent import preparations as prep
-from personal_agent.agent_runtime import (PROFILE_HEADING, Capabilities, action_definitions, recorded_arguments,
+from personal_agent.agent_runtime import (PROFILE_HEADING, Capabilities, ToolError, action_definitions, recorded_arguments,
                                           turn_context, render_turn_prompt)
 from personal_agent.conversation_handoff import ConversationJudgments, PREPARATION_REQUEST_PROPOSITION
 from personal_agent.decision import OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, fixture_confidence
@@ -1044,6 +1044,91 @@ class WatchAcceptanceTests(_WatchCase):
         self.assertEqual(len(results), 3)
         self.assertTrue(all('every_minutes' in text or 'when_needed' in text for text in results), results)
         self.assertEqual(self.rows(), [])
+
+    def test_rejected_watch_cannot_fan_out_into_same_goal_daily_preparations(self):
+        """#860: correct one rejected watch; never replace it with dated one-shot rows."""
+        self.judge = watch_engine([], preparation=False)
+        self.service.use_decision_engine(self.judge)
+        goal = '같은 목표의 변동을 확인하고 달라질 때 알리기'
+        self.script = [{'content': None, 'tool_calls': [
+            call('window-bad', 'schedule_preparation', kind='prepare', goal=goal, due=self.due_iso(600),
+                 every_minutes='1', until=self.due_iso(600 + 7200), delivery='when_needed')]}]
+        for index in range(5):
+            self.script.append({'content': None, 'tool_calls': [
+                call(f'daily-{index}', 'schedule_preparation', kind='prepare',
+                     goal=f'10월 4일까지 {goal} 알려 주세요',
+                     due=self.due_iso(600 + index * 86400), recurrence='daily', delivery='when_needed')]})
+        self.script.extend([
+            {'content': None, 'tool_calls': [
+                call('window-corrected', 'schedule_preparation', kind='prepare', goal=goal,
+                     due=self.due_iso(600), every_minutes='420', until=self.due_iso(600 + 4 * 86400),
+                     delivery='when_needed')]},
+            finish('finish-watch', 'window-corrected', summary='반복 확인을 제안했습니다.')
+        ])
+
+        self.receive('마감 때까지 변동을 매일 확인해줘')
+
+        results = [json.loads(message['content']) for message in self.model_calls[-1]['messages']
+                   if message['role'] == 'tool']
+        rows = self.rows()
+        self.assertEqual(len(rows), 1, ([(row['goal_text'], row['state'], row['recurrence'], row['every_seconds']) for row in rows], results))
+        [row] = rows
+        self.assertEqual((row['goal_text'], row['state'], row['recurrence'], row['every_seconds'], row['delivery_mode']),
+                         (goal, 'proposed', prep.RECURRENCE_WINDOW, 420 * 60, prep.DELIVERY_WHEN_NEEDED))
+        self.assertEqual(len(results), 8)  # includes the final finish-tool receipt
+        self.assertIn('invalid_window', json.dumps(results[0]))
+        self.assertTrue(all('window_retry_required' in json.dumps(result) for result in results[1:6]))
+        self.assertEqual(results[6]['preparation_id'], row['id'])
+        self.assertTrue(results[6]['requires_owner_acceptance'])
+
+    def test_failed_watch_guard_is_rebuilt_from_tool_events_after_work_resume(self):
+        """#860 review P2: the guard survives a resumable Work and service restart."""
+        job_id='resumable-watch-work'
+        details=[
+            ('running',{'call_id':'bad-window','host_action':'schedule_preparation',
+                        'arguments':{'goal':'가격 변동 확인'}}),
+            ('failed',{'call_id':'bad-window','code':'invalid_window'}),
+        ]
+        with self.store.db() as db:
+            for status,detail in details:
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           (job_id,'schedule_preparation',status,json.dumps(detail,ensure_ascii=False),self.now))
+
+        restarted=self.make_service()
+        job={'id':job_id,'message':'가격 변동을 확인해줘'}
+        scheduler=restarted.preparation_scheduler(job,job['message'])
+        with self.assertRaises(ToolError) as caught:
+            scheduler({'kind':'prepare','goal':'10월 4일까지 가격 변동을 확인해 주세요',
+                       'due':self.due_iso(600),'recurrence':'daily','delivery':'when_needed'})
+        self.assertEqual(caught.exception.code,'window_retry_required')
+        self.assertEqual(self.rows(),[])
+
+    def test_related_goal_comparison_leaves_separate_topics_independent(self):
+        self.assertTrue(prep.same_goal('가격 변동 확인', '10월 4일까지 가격 변동을 알려 주세요'))
+        self.assertFalse(prep.same_goal('가격 변동 확인', '다른 약속 알림'))
+
+    def test_failed_watch_retry_guard_does_not_block_a_different_explicit_goal(self):
+        """#860: the guard is scoped to the rejected watch goal, not the whole Work."""
+        self.judge = watch_engine([], preparation=False)
+        self.service.use_decision_engine(self.judge)
+        self.script = [
+            {'content': None, 'tool_calls': [
+                call('window-bad', 'schedule_preparation', kind='prepare', goal='가격 변동 확인',
+                     due=self.due_iso(600), every_minutes='1', until=self.due_iso(600 + 7200),
+                     delivery='when_needed')]},
+            {'content': None, 'tool_calls': [
+                call('other-goal', 'schedule_preparation', kind='reminder', goal='다른 약속 알림',
+                     due=self.due_iso(3600))]},
+            finish('finish-other', 'other-goal', summary='두 번째 준비는 제안했습니다.')
+        ]
+
+        self.receive('가격 변동을 마감까지 살펴보고 별도로 약속도 알려줘')
+
+        [row] = self.rows()
+        self.assertEqual((row['goal_text'], row['kind'], row['state']), ('다른 약속 알림', 'reminder', 'proposed'))
+        results = [json.loads(message['content']) for message in self.model_calls[-1]['messages']
+                   if message['role'] == 'tool']
+        self.assertEqual([result['preparation_id'] for result in results if 'preparation_id' in result], [row['id']])
 
 
 class SurfaceTests(unittest.TestCase):

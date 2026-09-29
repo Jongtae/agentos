@@ -54,6 +54,7 @@ from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_NO, JUDGMENT_YES,
                                    FOLLOWUP_CANCEL, FOLLOWUP_CORRECTION, FOLLOWUP_REFERENCE,
                                    FOLLOWUP_RETRY, eligible_for_followup_judgment,
                                    ConversationJudgments, TelegramChannel, TelegramRejected, telegram_request_json,
+                                   telegram_request_file,
                                    ConnectorHandoff,
                                    ConversationFocus,
                                    ConversationHandoffError, IntentClassifier,
@@ -383,7 +384,7 @@ class AgentService:
     def __init__(self, store, adapter=None, telegram_transport=None, subscription_engines=None, execution_adapter=None,
                  isolated_engine_adapter=None, isolated_mcp_registry=None,
                  drive_web_oauth=None, connector_registry=None, gmail=None, calendar=None, calendar_oauth=None, calendar_factory=None,
-                 browser_profile=None):
+                 browser_profile=None, telegram_file_transport=None):
         self.store=store
         # #656/#680: the one browser profile this installation owns (its encrypted session jar),
         # under the owner-only private directory.  The embedded WebKit worker
@@ -401,11 +402,13 @@ class AgentService:
         self.build=build_identity()
         self.adapter=adapter or ModelAdapter()
         self.telegram_transport=telegram_transport or telegram_request_json
+        self.telegram_file_transport=telegram_file_transport or telegram_request_file
         # Transport seam.  Both resolvers are late bound: `telegram_transport`
         # stays a live reassignable attribute and the bot token is read from
         # the secret store per call, never captured here.
         self.telegram=TelegramChannel(lambda:self.telegram_transport,
-                                      lambda:self.store.secret('telegram_token'))
+                                      lambda:self.store.secret('telegram_token'),
+                                      lambda:self.telegram_file_transport)
         # #581: which Telegram messages belong to a Work (reaction target,
         # reply anchor, control message) and the in-memory wait surface of
         # running Work.  Neither is a truth source.
@@ -1406,7 +1409,8 @@ class AgentService:
         """
         row=self.preparations.cancel(preparation_id)
         if row['state']==prep.STATE_CANCELLED and row.get('last_run_job_id'):
-            self.context_observations.cancel_work_requests(row['last_run_job_id'])
+            if self.context_observations.cancel_work_requests(row['last_run_job_id']):
+                self.store.remove_telegram_photo(row['last_run_job_id'])
         return row
 
     def preparation_request(self, body):
@@ -1705,6 +1709,52 @@ class AgentService:
         except Exception:
             LOG.warning('turn provenance could not be recorded job=%s',job_id)
 
+    def record_photo_attempt(self, job_id, *, status, count=1, route=None, engine=None, provider=None, attempt_id=None):
+        """Accumulate one Work's image destination evidence without storing image bytes."""
+        try:
+            current=self.store.turn_provenance(job_id) or {}
+            rows=current.get('photo_inputs') if isinstance(current.get('photo_inputs'),list) else []
+            if attempt_id is None:
+                attempt_id=max((row.get('attempt',0) for row in rows if isinstance(row,dict)
+                                and isinstance(row.get('attempt'),int)),default=0)+1
+            row={'attempt':attempt_id,'source':'Telegram photo','count':count,'status':status}
+            if route:row['route']=route
+            if engine:row['engine']=engine
+            if provider:row['provider']=provider
+            updated=[{**item} for item in rows if isinstance(item,dict)]
+            for index,item in enumerate(updated):
+                if item.get('attempt')==attempt_id:
+                    updated[index]=row
+                    break
+            else:
+                updated.append(row)
+            self.record_turn_provenance(job_id,photo_inputs=updated,photo_input=row)
+            return attempt_id
+        except Exception:
+            LOG.warning('photo provenance could not be recorded job=%s',job_id)
+            return attempt_id
+
+    def photo_work_has_pending_resume(self, work_id):
+        """Keep the Telegram photo available while an owner-approved continuation can requeue this Work."""
+        login=self._browser_login(work_id) or {}
+        if login.get('state') in ('requested','opening','offered','closing','resuming'):
+            return True
+        browser=self._browser_request(work_id) or {}
+        if browser.get('state') in ('requested','issued'):
+            return True
+        attachment=self.store.context_attachment(work_id)
+        if attachment and not attachment.get('approved'):
+            return True
+        if self.context_observations.awaiting_answer(work_id):
+            return True
+        return work_id in self._document_resume_rows()
+
+    def photo_attempt_received_model_response(self, work_id, since_event_id):
+        """Whether a direct model turn responded after this photo-backed attempt began."""
+        with self.store.db() as db:
+            return db.execute("SELECT 1 FROM tool_events WHERE job_id=? AND tool='model' AND status='responded' AND id>? LIMIT 1",
+                              (work_id,since_event_id or 0)).fetchone() is not None
+
     # Private sources whose content existing guards keep out of durable
     # records (Drive excerpts, the expiring context inbox, notes, documents,
     # Memory reads, calendar). A turn that carried any of them keeps only a
@@ -1717,7 +1767,7 @@ class AgentService:
     # saved-private-value redaction in ``record_turn_sent``, and never exported
     # (``portable_state``).
     PROVENANCE_WITHHELD_SOURCES=frozenset({'personal-space','owner-context-inbox','connected-drive-file','connected-document',
-                                           'owner-memory','owner-folder-names','owner-calendar','owner-mail','owner-settings',
+                                           'owner-memory','owner-folder-names','owner-calendar','owner-mail','owner-settings','telegram-photo',
                                            'conversation-history','unattributed-tool-evidence','owner-browser-session'})
 
     def record_turn_sent(self, job_id, *, sent, instructions, instructions_channel, private_sources=(), **fields):
@@ -2023,6 +2073,10 @@ class AgentService:
             return False,ALREADY_RETRIED_REFUSAL
         if previous.get('delivery')=='unknown':
             return False,'이전 Telegram 전달 여부를 확인할 수 없어 자동으로 다시 실행하지 않았습니다.'
+        photo_record=self.store.turn_provenance(previous['id']) or {}
+        if (photo_record.get('telegram_photo_attached') or photo_record.get('photo_inputs')
+                or photo_record.get('photo_input')):
+            return False,'사진이 포함된 이전 요청은 첨부를 다시 확인할 수 없어 자동 재시도하지 않았습니다. 사진을 다시 첨부해 새 요청으로 보내 주세요.'
         if self.store.context_attachment(previous['id']):
             return False,'이전 요청에 일회성 개인 컨텍스트가 연결되어 있어 자동으로 다시 실행하지 않았습니다.'
         if previous['id'] in set(self.store.config('file_workspace_document_jobs',[])):
@@ -2167,12 +2221,13 @@ class AgentService:
                 changed=db.execute("UPDATE jobs SET status='cancelled',error=?,delivery='cancelled' WHERE id=? AND status='queued'",
                                    ('소유자가 후속 대화에서 취소했습니다.',work_id)).rowcount
             if changed:
-                self.context_observations.cancel_work_requests(work_id)
+                if self.context_observations.cancel_work_requests(work_id):self.store.remove_telegram_photo(work_id)
                 self.update_task_card(self.store.job(work_id),'cancelled')
                 return True,'이전 요청을 취소했습니다.'
         if previous.get('status') not in ('queued','running') and self.context_observations.cancel_work_requests(work_id):
             # #774: a finished Work that asked for a location continues only on its
             # answer; cancelling it withdraws the request, so the answer continues nothing.
+            self.store.remove_telegram_photo(work_id)
             return True,'이전 요청을 취소했습니다. 위치를 보내도 이어서 처리하지 않습니다.'
         return False,'이전 요청은 이미 실행 중이거나 끝난 상태라 여기서 취소하지 않았습니다.'
 
@@ -4141,21 +4196,42 @@ class AgentService:
         """Withdraw continuation eligibility: a newer request, supersede or cancel."""
         owner=_owner_key(owner_id) if owner_id is not None else None
         with self.lock:
+            raw=self.store.config(LOCAL_DOCUMENT_RESUME_KEY,{})
             rows=self._document_resume_rows()
+            stale=set(raw)-set(rows) if isinstance(raw,dict) else set()
             dropped=[key for key,row in rows.items() if key!=except_work_id
                      and (work_id is None or key==work_id)
                      and (owner is None or hmac.compare_digest(str(row.get('owner','')),owner))]
             for key in dropped:rows.pop(key,None)
             self.store.put(LOCAL_DOCUMENT_RESUME_KEY,rows)
+        for key in set(dropped)|stale:
+            if not self.photo_work_has_pending_resume(key):self.store.remove_telegram_photo(key)
         return dropped
+
+    def prune_expired_document_resumes(self):
+        """Drop expired local-document continuation records and their now-unneeded photo handles."""
+        with self.lock:
+            raw=self.store.config(LOCAL_DOCUMENT_RESUME_KEY,{})
+            rows=self._document_resume_rows()
+            stale=set(raw)-set(rows) if isinstance(raw,dict) else set()
+            if stale:self.store.put(LOCAL_DOCUMENT_RESUME_KEY,rows)
+        for work_id in stale:
+            if not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
+        return len(stale)
 
     def resume_after_document_approval(self, work_id):
         """Re-queue exactly the eligible, unexpired, unwithdrawn Work once, after sharing is approved."""
-        if not self.document_resume_eligible(work_id) or not self.drop_document_resume(work_id=work_id):return False
-        self._forget_work(LOCAL_RESUMED_KEY,work_id)
-        with self.store.db() as db:
-            db.execute('BEGIN IMMEDIATE')
-            return db.execute("UPDATE jobs SET status='queued',error=NULL,delivery='none' WHERE id=? AND status='failed'",(work_id,)).rowcount==1
+        with self.lock:
+            rows=self._document_resume_rows()
+            if work_id not in rows:return False
+            rows.pop(work_id,None)
+            self.store.put(LOCAL_DOCUMENT_RESUME_KEY,rows)
+            self._forget_work(LOCAL_RESUMED_KEY,work_id)
+            with self.store.db() as db:
+                db.execute('BEGIN IMMEDIATE')
+                resumed=db.execute("UPDATE jobs SET status='queued',error=NULL,delivery='none' WHERE id=? AND status='failed'",(work_id,)).rowcount==1
+        if not resumed and not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
+        return resumed
 
     def _abandon_local_work(self, work_id, reason):
         text=local_refusal_text(reason)
@@ -4719,7 +4795,7 @@ class AgentService:
                 # refuses its next call too, not only this process's loop.
                 self.store.append_config_list(WORK_STOP_KEY,job['id'],WORK_STOP_KEEP)
                 # #774: a stopped Work's location request continues nothing.
-                self.context_observations.cancel_work_requests(job['id'])
+                if self.context_observations.cancel_work_requests(job['id']):self.store.remove_telegram_photo(job['id'])
                 text=self.STOP_RUNNING_TEXT
             else:
                 return 'finished'
@@ -5272,6 +5348,7 @@ class AgentService:
         if not job or not row:return {'approved':False,'resumed':False,'work_id':work_id}
         if not approve:
             self._put_browser_request(work_id,None)
+            if not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
             return {'approved':False,'resumed':False,'work_id':work_id}
         approval=self.store.issue_browser_step_approval(self.connector_owner_id(job),work_id,row['action'],
                                                         row['page_digest'],row['target_digest'],row['step_digest'])
@@ -5281,6 +5358,9 @@ class AgentService:
         with self.store.db() as db:
             db.execute('BEGIN IMMEDIATE')
             resumed=db.execute("UPDATE jobs SET status='queued',error=NULL,delivery='none' WHERE id=? AND status IN ('failed','partial')",(work_id,)).rowcount==1
+        if not resumed:
+            self._put_browser_request(work_id,None)
+            if not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
         return {'approved':True,'resumed':resumed,'work_id':work_id}
 
     # -- in-flow login (SEC-FLOW-01 #709) ------------------------------------
@@ -5642,6 +5722,7 @@ class AgentService:
             self._put_browser_login(work_id,{**row,'state':final,'cause':shown,'closed_at':time.time()})
             # #749/#765: the site(s) the owner signed in to through the window, each by its own evidence.
             self._record_owner_signins(signed)
+        if final!='resumed' and not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
         self._finish_login_notification(work_id,shown)
         return final
 
@@ -5691,11 +5772,14 @@ class AgentService:
                     current=self._browser_login(work_id)
                     if current and current.get('state')=='opening' and current.get('nonce')==row.get('nonce'):
                         self._put_browser_login(work_id,{**current,'state':'unavailable','closed_at':now})
+                if not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
             elif state=='requested' and now-float(row.get('requested_at') or 0)>=BROWSER_LOGIN_SECONDS:
                 # The run that asked never finished (a restart): nothing to show.
                 self._put_browser_login(work_id,{**row,'state':'expired','cause':'expired','closed_at':now})
+                if not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
             elif state not in ('requested','opening','offered','closing','resuming') and now-float(row.get('closed_at') or 0)>=BROWSER_LOGIN_KEEP_SECONDS:
                 self._put_browser_login(work_id,None)
+                if not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
         return settled
 
     def calendar_for(self, job):
@@ -6413,7 +6497,7 @@ class AgentService:
                         changed=db.total_changes==1
                         job=dict(job)
                 if changed:
-                    self.context_observations.cancel_work_requests(job_id)
+                    if self.context_observations.cancel_work_requests(job_id):self.store.remove_telegram_photo(job_id)
                     self.update_task_card(job,'cancelled')
             elif authorized and isinstance(data,str) and data.startswith('p7x:'):
                 choice=self.store.telegram_context_choice(data[4:])
@@ -6612,6 +6696,7 @@ class AgentService:
                             result_kind='approved'
                         else:
                             result_kind='denied'
+                            self.store.remove_telegram_photo(notification['job_id'])
                         self.store.update_notification(notification['id'],result_kind)
                         try:self.telegram.edit_message_text(sender,notification['message_id'],
                             ('이 작업의 컨텍스트 공유를 승인했습니다. 작업을 계속합니다.' if parts[2]=='approve' else '이 작업의 컨텍스트 공유를 허용하지 않았습니다.'),
@@ -6643,7 +6728,11 @@ class AgentService:
             raise ValueError('이 작업은 Telegram에서 위치를 요청할 수 없습니다.')
         if not isinstance(prompt,str) or not 0<len(prompt.strip())<=300:
             raise ValueError('위치를 요청하는 목적을 짧게 적어 주세요.')
-        request_id=self.context_observations.open_location_request(job_id,cfg['user_id'],cfg.get('generation'))
+        with self.lock:
+            superseded=self.context_observations.pending_location_work_ids(cfg['user_id'],cfg.get('generation'))
+            request_id=self.context_observations.open_location_request(job_id,cfg['user_id'],cfg.get('generation'))
+        for work_id in superseded:
+            if work_id!=job_id:self.store.remove_telegram_photo(work_id)
         markup={'keyboard':[[{'text':'현재 위치 보내기','request_location':True}]],
                 'one_time_keyboard':True,'resize_keyboard':True}
         try:
@@ -6704,6 +6793,7 @@ class AgentService:
         if work['status']=='cancelled' or self._stopped_in(db,work['id']):
             # The position stays recorded for the asking Work; nothing runs again.
             LOG.info('location continuation skipped work=%s reason=stopped',work['id'])
+            db.execute('DELETE FROM telegram_photo_attachments WHERE job_id=?',(work['id'],))
             return None
         preparation_id=prep.preparation_of(work['request_key'])
         if preparation_id:
@@ -6711,6 +6801,7 @@ class AgentService:
             if not row or row['state'] not in prep.ACTIVE_STATES:
                 # A cancelled or removed preparation's goal never runs again.
                 LOG.info('location continuation skipped work=%s reason=preparation_inactive',work['id'])
+                db.execute('DELETE FROM telegram_photo_attachments WHERE job_id=?',(work['id'],))
                 return None
         try:
             task_id=self.store.enqueue(work['message'],continuation_key(answer['request_id'],work['request_key']),
@@ -6720,6 +6811,7 @@ class AgentService:
             LOG.warning('location continuation not queued work=%s reason=%s',work['id'],exc)
             self.context_observations.reopen_request(db,answer['request_id'])
             return False
+        self.store.transfer_telegram_photo(work['id'],task_id,db=db)
         self.store.link_work_relation(task_id,work['id'],'reference',db=db)
         prep.Preparations.continue_run(db,work['id'],task_id,self.preparations.clock())
         self.context_observations.rebind_task_observation(db,answer['observation_id'],task_id)
@@ -6740,7 +6832,21 @@ class AgentService:
             message=update['edited_message'] if edited else update.get('message',{})
             sender=message.get('from',{}).get('id')
             chat=message.get('chat',{})
-            text='' if edited else message.get('text','')
+            photo=message.get('photo') if not edited else None
+            has_photo=isinstance(photo,list) and bool(photo)
+            text='' if edited else (message.get('text') or message.get('caption',''))
+            photo_file_id=None
+            if has_photo:
+                candidates=[item for item in photo if isinstance(item,dict) and isinstance(item.get('file_id'),str)
+                            and item.get('file_id')]
+                def photo_rank(item):
+                    width=item.get('width');height=item.get('height');size=item.get('file_size')
+                    pixels=(width*height if isinstance(width,int) and not isinstance(width,bool)
+                            and isinstance(height,int) and not isinstance(height,bool) else 0)
+                    return pixels,size if isinstance(size,int) and not isinstance(size,bool) else 0
+                chosen=max(candidates,key=photo_rank) if candidates else {}
+                photo_file_id=chosen.get('file_id') or 'invalid-telegram-file-id'
+                if not isinstance(text,str) or not text.strip():text='[사진 첨부]'
             private=chat.get('type')=='private' and isinstance(sender,int) and chat.get('id')==sender
             authorized=private and sender==cfg.get('user_id')
             paired=False
@@ -6771,6 +6877,9 @@ class AgentService:
                         if guided_context_requested:
                             db.execute("UPDATE jobs SET status='awaiting_context' WHERE id=?",(task_id,))
                             guided_context=True
+                    if photo_file_id:
+                        self.store.attach_telegram_photo(task_id,photo_file_id,db=db)
+                        self.store.mark_telegram_photo_attached(task_id,db=db)
                     # #581: the owner's own message is the reaction target and
                     # reply anchor for this Work.
                     self.telegram_turns.record_source(task_id,sender,message.get('message_id'),db=db)
@@ -6869,6 +6978,8 @@ class AgentService:
             work_sources={OWNER_CONVERSATION}
             work_capabilities=[None]
             try:
+                image_inputs=[]
+                photo_file_id=self.store.telegram_photo_file_id(job['id'])
                 owner_prompt=job['message'].strip()
                 prompt=owner_prompt
                 #: The Work whose message is `prompt` (a retry replays another's).
@@ -7015,6 +7126,12 @@ class AgentService:
                         db.execute("UPDATE jobs SET status='awaiting_connection',response=?,error=NULL,delivery=? WHERE id=?",(guidance,'pending' if job['chat_id'] else 'none',job['id']))
                     self.update_task_card(job,'awaiting_connection')
                     return True
+                if photo_file_id:
+                    try:
+                        image_inputs=[self.telegram.download_photo(photo_file_id)]
+                    except ProviderError as exc:
+                        self.record_photo_attempt(job['id'],status='failed',count=1,route='telegram-download')
+                        raise ValueError(str(exc)) from None
                 # #606 T4: a natural-language rule-matched read that needs
                 # clarification or finds nothing is re-judged by the Work
                 # model loop (not re-run): the loop gets the observation, never
@@ -7022,7 +7139,13 @@ class AgentService:
                 # added.  Explicit forms, approvals, parked/retry/cancel and
                 # calendar-pending state stay terminal.
                 handled=True;fallthrough_note=None
-                if rule_note is not None:
+                if image_inputs:
+                    # The selected Work AI owns image interpretation. Keep the photo
+                    # with the request instead of letting text-only deterministic
+                    # intent handlers answer while ignoring the attached pixels.
+                    handled=False
+                    fallthrough_note='사진 자료를 포함한 요청을 선택된 AI 작업자에게 전달합니다.'
+                elif rule_note is not None:
                     handled=False;fallthrough_note=rule_note
                 elif not decision.executes:
                     # Ambiguous, missing a required detail, or a consequential
@@ -7418,6 +7541,9 @@ class AgentService:
                             listing=facade(capabilities);listing.native_search=native_search
                             listing.native_search_reason=native_reason or ''
                             offered=listing.definitions()
+                            photo_attempt_id=(self.record_photo_attempt(job['id'],status='staged',count=len(image_inputs),
+                                                                        route='subscription',engine=subscription['id'])
+                                              if image_inputs else None)
                             self.record_turn_sent(job['id'],sent=sent if separate else engine_prompt,
                                 exposed_tools=[tool.get('name') for tool in offered],build=self.build,
                                 capability_profile=facade.PROFILE,unavailable_tools=route_unavailable(facade.PROFILE),
@@ -7431,7 +7557,8 @@ class AgentService:
                                 # stored after deterministic secret/private-value redaction.
                                 private_sources=set(turn_provenance)|{base_label(label) for label in capabilities.private_provenance}|({'owner-profile'} if engine_context.get('profile') else set())
                                                 |({'owner-current-context'} if engine_context.get('current_context') else set())
-                                                |({'owner-preparations'} if engine_context.get('prepared') else set()),
+                                                |({'owner-preparations'} if engine_context.get('prepared') else set())
+                                                |({'telegram-photo'} if image_inputs else set()),
                                 route='subscription',engine=subscription['id'],mode=mode,status='sent',
                                 context_mode=engine_context.get('mode','shared-context'),instructions_version=engine_context.get('version'),
                                 context_messages=len(engine_context['conversation']),egress_taint=sorted(capabilities.private_provenance),
@@ -7449,6 +7576,12 @@ class AgentService:
                             work_model=''
                             try:
                                 if isolated:
+                                    if image_inputs:
+                                        self.record_photo_attempt(job['id'],attempt_id=photo_attempt_id,status='unsupported',
+                                                                  count=len(image_inputs),route='isolated-agentos-mcp',
+                                                                  engine=subscription['id'])
+                                        raise ExecutionError('격리 런타임 배포는 사진 입력을 지원하지 않습니다. 현재 AI 연결을 바꿔 실행해 주세요.',
+                                                             failure_class='unsupported-image-input')
                                     # #679: the sidecar's closed contract carries no model; a Work
                                     # model stored before isolation was configured is refused, not
                                     # silently replaced by the CLI default.
@@ -7488,8 +7621,13 @@ class AgentService:
                                         except OSError:
                                             LOG.warning('cli browser relay could not start job=%s',job['id'])
                                     try:
-                                        result=self.execution_adapter.execute(subscription['id'],engine_prompt,served,context=adapter_context,
-                                                                              **({'model':work_model} if work_model else {}))
+                                        execution_options={'context':adapter_context}
+                                        if image_inputs:execution_options['images']=image_inputs
+                                        if work_model:execution_options['model']=work_model
+                                        result=self.execution_adapter.execute(subscription['id'],engine_prompt,served,**execution_options)
+                                        if image_inputs:
+                                            self.record_photo_attempt(job['id'],attempt_id=photo_attempt_id,status='included-in-request',
+                                                                      count=len(image_inputs),route='subscription',engine=subscription['id'])
                                     finally:
                                         # #718: a live CLI step ends with its attempt.
                                         self.live_steps.pop(job['id'],None)
@@ -7498,6 +7636,14 @@ class AgentService:
                                         capabilities.close_browser()
                             except (ExecutionError,EngineGatewayError) as exc:
                                 diagnostics=exc.diagnostics() if isinstance(exc,ExecutionError) else {}
+                                if image_inputs and diagnostics.get('failure_class')=='unsupported-image-input':
+                                    self.record_photo_attempt(job['id'],attempt_id=photo_attempt_id,status='unsupported',
+                                                              count=len(image_inputs),route='subscription',engine=subscription['id'])
+                                elif image_inputs:
+                                    launched=bool((getattr(exc,'meta',None) or {}).get('argv'))
+                                    self.record_photo_attempt(job['id'],attempt_id=photo_attempt_id,
+                                                              status='included-in-request' if launched else 'not-sent',
+                                                              count=len(image_inputs),route='subscription',engine=subscription['id'])
                                 # #678: searches the CLI reported before it failed are still observed.
                                 if not isolated:self.record_cli_native_searches(job['id'],subscription['id'],getattr(exc,'meta',None),record,native_search)
                                 # #729: a bridge call the CLI never saw completed is a typed failure.
@@ -7608,6 +7754,9 @@ class AgentService:
                             # Evidence that the direct route was attempted, even if the
                             # provider fails before any response event.
                             record('model','requested',json.dumps({'provider':runtime_config.get('provider'),'model':runtime_config.get('model')},ensure_ascii=False))
+                            photo_attempt_id=(self.record_photo_attempt(job['id'],status='staged',count=len(image_inputs),
+                                                                        route='direct-api',provider=runtime_config.get('provider'))
+                                              if image_inputs else None)
                             self.record_turn_sent(job['id'],sent=render_turn_prompt(api_context),instructions=api_context['instructions'],
                                 instructions_channel='system-message',build=self.build,
                                 exposed_tools=[tool['function']['name'] for tool in capabilities.definitions()],
@@ -7617,7 +7766,8 @@ class AgentService:
                                                 # #627: record-only label for the current-context section.
                                                 |({'owner-current-context'} if api_context.get('current_context') else set())
                                                 # #659: record-only label for the prepared answers section.
-                                                |({'owner-preparations'} if api_context.get('prepared') else set()),
+                                                |({'owner-preparations'} if api_context.get('prepared') else set())
+                                                |({'telegram-photo'} if image_inputs else set()),
                                 route='direct-api',provider=runtime_config.get('provider'),status='sent',
                                 requested_model=runtime_config.get('model'),instructions_version=api_context.get('version'),
                                 context_messages=len(api_context['conversation']),egress_taint=sorted(capabilities.private_provenance),
@@ -7631,8 +7781,20 @@ class AgentService:
                                 # current-context sections in its system text, the same
                                 # sections the CLI envelope renders.
                                 # #833: the outcome judgment reads the same profile / current-context sections.
-                                result=run_agent(self.adapter,runtime_config,key,[*api_context['conversation'],{'role':'user','content':api_context['request']}],context_sections(api_context),capabilities,record,owner_context=api_context)
+                                run_options={'owner_context':api_context}
+                                if image_inputs:run_options['images']=image_inputs
+                                result=run_agent(self.adapter,runtime_config,key,[*api_context['conversation'],{'role':'user','content':api_context['request']}],context_sections(api_context),capabilities,record,**run_options)
+                                if image_inputs:
+                                    self.record_photo_attempt(job['id'],attempt_id=photo_attempt_id,status='included-in-request',
+                                                              count=len(image_inputs),route='direct-api',
+                                                              provider=runtime_config.get('provider'))
                             except Exception as exc:
+                                if image_inputs:
+                                    received=self.photo_attempt_received_model_response(job['id'],attempt_start)
+                                    self.record_photo_attempt(job['id'],attempt_id=photo_attempt_id,
+                                                              status='included-in-request' if received else ('unknown' if isinstance(exc,ProviderError) else 'not-sent'),
+                                                              count=len(image_inputs),route='direct-api',
+                                                              provider=runtime_config.get('provider'))
                                 self.record_turn_provenance(job['id'],status='failed',failure_class=type(exc).__name__,egress_taint=sorted(capabilities.private_provenance))
                                 # #710: a failed worker may be re-delegated within the Work's bounds.
                                 following=(self.orchestration_step(orchestration,attempt,job['id'],attempt_start,failed=str(exc))
@@ -7790,6 +7952,10 @@ class AgentService:
                 # durable tool events; this records what was declared so far
                 # plus the run-time labels of a worker that had started.
                 self.record_work_sources(job['id'],work_sources|set(getattr(work_capabilities[0],'private_provenance',()) or ()))
+                # Register the exact local-document continuation before the
+                # terminal-status trigger decides whether to discard its photo.
+                if approval_needed[0]:
+                    with self.lock:self.mark_document_resume(job)
                 with self.store.db() as db:
                     # #787 review: an unknown effect recorded while the report was built still wins.
                     if outcome=='failed' and self._work_has_unknown_effect(job['id']):
@@ -7804,6 +7970,8 @@ class AgentService:
             # run released the profile, and ask the owner to log in.  #752: only
             # when the Work did not succeed; a reached goal did not need it.
             if outcome!='succeeded':self.offer_browser_login(job)
+            if outcome in ('failed','partial') and not self.photo_work_has_pending_resume(job['id']):
+                self.store.remove_telegram_photo(job['id'])
             if resolved_blocker:
                 self.projection.clear(self.connector_owner_id(job))
             if approval_needed[0]:
@@ -7934,6 +8102,7 @@ class AgentService:
         # #814 review: a settings draft a restart cut off mid-apply is settled unknown (never re-applied).
         self.settings_orchestrator.reconcile()
         def work():
+            next_document_resume_prune=0.0
             while not self.stop.is_set():
                 # #659: one indexed query; nothing due costs no model or network call.
                 self.run_due_preparation()
@@ -7946,6 +8115,10 @@ class AgentService:
                 self.expire_memory_prompts()
                 # #709: close and settle in-flow logins (decisions, owner closes, timeouts).
                 self.process_browser_logins()
+                now=time.monotonic()
+                if now>=next_document_resume_prune:
+                    self.prune_expired_document_resumes()
+                    next_document_resume_prune=now+30
                 # #805: claim one pending owner-model upkeep when idle; it runs off this thread.
                 self.run_owner_model_upkeep()
                 self.stop.wait(.3)

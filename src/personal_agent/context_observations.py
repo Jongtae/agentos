@@ -265,6 +265,11 @@ class ContextObservations:
                 # Kept only for Works still in flight, which must withdraw them.
                 _drop_finished_exposures(db)
                 db.execute("UPDATE context_location_requests SET state='cleared' WHERE state='pending'")
+                db.execute("DELETE FROM telegram_photo_attachments WHERE job_id IN "
+                           "(SELECT job_id FROM context_location_requests WHERE state='cleared') "
+                           "AND NOT EXISTS (SELECT 1 FROM context_location_requests pending "
+                           "WHERE pending.job_id=telegram_photo_attachments.job_id AND pending.state='pending' AND pending.expires>?)",
+                           (now,))
             self._put(db, settings)
         return self.status()
 
@@ -292,6 +297,11 @@ class ContextObservations:
         db.execute('DELETE FROM current_state_claims WHERE expires_at<=?', (now,))
         _drop_finished_exposures(db)
         db.execute("UPDATE context_location_requests SET state='expired' WHERE state='pending' AND expires<=?", (now,))
+        db.execute("DELETE FROM telegram_photo_attachments WHERE job_id IN "
+                   "(SELECT job_id FROM context_location_requests WHERE state IN ('expired','cleared')) "
+                   "AND NOT EXISTS (SELECT 1 FROM context_location_requests pending "
+                   "WHERE pending.job_id=telegram_photo_attachments.job_id AND pending.state='pending' AND pending.expires>?)",
+                   (now,))
 
     @staticmethod
     def _entry(row, now):
@@ -370,7 +380,20 @@ class ContextObservations:
             db.execute('INSERT INTO context_location_requests VALUES (?,?,?,?,?,?,?,?)',
                        (request_id, job_id, chat_id, generation, epoch, now, now + LOCATION_REQUEST_TTL_SECONDS,
                         'pending'))
+            db.execute("DELETE FROM telegram_photo_attachments WHERE job_id IN "
+                       "(SELECT job_id FROM context_location_requests WHERE state='superseded' AND chat_id=? AND generation=?) "
+                       "AND NOT EXISTS (SELECT 1 FROM context_location_requests pending "
+                       "WHERE pending.job_id=telegram_photo_attachments.job_id AND pending.state='pending' AND pending.expires>?)",
+                       (chat_id,generation,now))
         return request_id
+
+    def pending_location_work_ids(self, chat_id, generation, now=None):
+        """The Works whose location prompts this owner will supersede by opening another."""
+        now = self.clock() if now is None else now
+        with self.store.db() as db:
+            rows=db.execute("SELECT DISTINCT job_id FROM context_location_requests WHERE state='pending' "
+                            'AND chat_id=? AND generation=? AND expires>?',(chat_id,generation,now)).fetchall()
+        return [row['job_id'] for row in rows]
 
     def cancel_location_request(self, request_id):
         with self.store.db() as db:
@@ -383,8 +406,13 @@ class ContextObservations:
         Its answer then continues nothing.  Returns how many were pending.
         """
         with self.store.db() as db:
-            return db.execute("UPDATE context_location_requests SET state='cancelled' WHERE job_id=? AND state='pending'",
-                              (job_id,)).rowcount
+            changed=db.execute("UPDATE context_location_requests SET state='cancelled' WHERE job_id=? AND state='pending'",
+                               (job_id,)).rowcount
+            if changed:
+                db.execute("DELETE FROM telegram_photo_attachments WHERE job_id=? AND NOT EXISTS "
+                           "(SELECT 1 FROM context_location_requests WHERE job_id=? AND state='pending' AND expires>?)",
+                           (job_id,job_id,self.clock()))
+            return changed
 
     def awaiting_answer(self, job_id, now=None):
         """Whether Work ``job_id`` still waits for the owner's location answer (#774)."""

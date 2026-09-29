@@ -49,11 +49,37 @@ class QuickStore:
             CREATE TABLE IF NOT EXISTS memory_candidates(id TEXT PRIMARY KEY, job_id TEXT, memory_key TEXT NOT NULL, content TEXT NOT NULL, created REAL NOT NULL, state TEXT NOT NULL DEFAULT 'pending');
             CREATE TABLE IF NOT EXISTS memory_approvals(token_hash TEXT PRIMARY KEY, owner_key TEXT NOT NULL, work_key TEXT NOT NULL, action TEXT NOT NULL, subject_id TEXT NOT NULL, memory_key TEXT NOT NULL, source_digest TEXT NOT NULL, content_digest TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, state TEXT NOT NULL DEFAULT 'issued', result_id TEXT, expected_memory_id TEXT, expected_memory_digest TEXT);
             CREATE TABLE IF NOT EXISTS telegram_task_cards(job_id TEXT PRIMARY KEY, chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL, state TEXT NOT NULL, created REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS telegram_photo_attachments(job_id TEXT PRIMARY KEY, file_id TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS telegram_notifications(id TEXT PRIMARY KEY, job_id TEXT NOT NULL, chat_id INTEGER NOT NULL, generation TEXT NOT NULL, kind TEXT NOT NULL, fingerprint TEXT, state TEXT NOT NULL, message_id INTEGER, created REAL NOT NULL, UNIQUE(job_id, kind));
             CREATE TABLE IF NOT EXISTS context_events(id TEXT PRIMARY KEY, captured_at REAL NOT NULL, source_kind TEXT NOT NULL, content TEXT NOT NULL, content_hash TEXT NOT NULL, expires_at REAL NOT NULL, sharing_state TEXT NOT NULL, source_app TEXT NOT NULL, source_domain TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS context_events_expiry ON context_events(expires_at);
             CREATE TABLE IF NOT EXISTS context_sharing_policies(assistant_id TEXT PRIMARY KEY, approved INTEGER NOT NULL, approved_at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS context_job_attachments(job_id TEXT PRIMARY KEY, event_ids TEXT NOT NULL, assistant_id TEXT NOT NULL, approved INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS context_location_requests(
+              id TEXT PRIMARY KEY, job_id TEXT NOT NULL, chat_id INTEGER NOT NULL, generation TEXT NOT NULL,
+              context_epoch INTEGER NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, state TEXT NOT NULL);
+            DROP TRIGGER IF EXISTS telegram_photo_terminal_cleanup;
+            CREATE TRIGGER telegram_photo_terminal_cleanup AFTER UPDATE OF status ON jobs
+              WHEN NEW.status IN ('succeeded','failed','partial','cancelled','interrupted','unknown','blocked')
+               AND NOT (
+                 (NEW.status IN ('failed','partial') AND (
+                   EXISTS (
+                     SELECT 1 FROM config, json_each(CASE WHEN json_valid(config.value) THEN config.value ELSE '{}' END)
+                     WHERE config.key IN ('browser_login_requests','browser_step_requests','local_authority_document_resume_jobs')
+                       AND json_each.key=NEW.id
+                       AND (
+                         (config.key='browser_login_requests' AND json_extract(json_each.value,'$.state') IN ('requested','opening','offered','closing','resuming'))
+                         OR (config.key='browser_step_requests' AND json_extract(json_each.value,'$.state') IN ('requested','issued'))
+                         OR (config.key='local_authority_document_resume_jobs'
+                             AND CAST(json_extract(json_each.value,'$.expires_at') AS REAL) > CAST(strftime('%s','now') AS REAL))
+                       )
+                   )
+                   OR EXISTS (SELECT 1 FROM context_job_attachments WHERE job_id=NEW.id AND approved=0)
+                 ))
+                 OR EXISTS (SELECT 1 FROM context_location_requests WHERE job_id=NEW.id AND state='pending'
+                              AND expires>CAST(strftime('%s','now') AS REAL))
+               )
+              BEGIN DELETE FROM telegram_photo_attachments WHERE job_id=NEW.id; END;
             CREATE TABLE IF NOT EXISTS telegram_context_choices(token TEXT PRIMARY KEY, job_id TEXT NOT NULL, event_id TEXT NOT NULL, chat_id INTEGER NOT NULL, generation TEXT NOT NULL, message_id INTEGER, state TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS workspaces(id TEXT PRIMARY KEY, title TEXT NOT NULL, purpose TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', created REAL NOT NULL, updated REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS workspace_results(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, job_id TEXT NOT NULL, content TEXT NOT NULL, evidence TEXT NOT NULL DEFAULT '', created REAL NOT NULL, UNIQUE(workspace_id, job_id));
@@ -956,6 +982,58 @@ class QuickStore:
             with self.db() as conn:return self.workspace(workspace_id, conn)
         row=db.execute('SELECT * FROM workspaces WHERE id=?',(workspace_id,)).fetchone()
         return dict(row) if row else None
+
+    def attach_telegram_photo(self, job_id, file_id, db=None):
+        """Keep only Telegram's fetch handle until this Work attempts one image read."""
+        if not isinstance(job_id, str) or not job_id or not isinstance(file_id, str) or not 1 <= len(file_id) <= 512:
+            raise ValueError('Telegram 사진 정보를 확인하세요.')
+        if db is None:
+            with self.db() as conn:
+                conn.execute('INSERT INTO telegram_photo_attachments VALUES (?,?,?)',
+                             (job_id, file_id, time.time()))
+        else:
+            db.execute('INSERT INTO telegram_photo_attachments VALUES (?,?,?)',
+                       (job_id, file_id, time.time()))
+
+    def mark_telegram_photo_attached(self, job_id, db=None):
+        """Persist that the owner's request had an image before any worker can start or crash."""
+        if db is None:
+            with self.db() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                return self.mark_telegram_photo_attached(job_id,conn)
+        row=db.execute('SELECT record FROM turn_provenance WHERE job_id=?',(job_id,)).fetchone()
+        try:record=json.loads(row['record']) if row else {}
+        except (TypeError,ValueError):record={}
+        if not isinstance(record,dict):record={}
+        record['telegram_photo_attached']=True
+        db.execute('INSERT INTO turn_provenance VALUES (?,?,?) ON CONFLICT(job_id) DO UPDATE SET record=excluded.record,created=excluded.created',
+                   (job_id,json.dumps(record,ensure_ascii=False),time.time()))
+
+    def telegram_photo_file_id(self, job_id):
+        with self.db() as db:
+            row = db.execute('SELECT file_id FROM telegram_photo_attachments WHERE job_id=?', (job_id,)).fetchone()
+        return row['file_id'] if row else None
+
+    def remove_telegram_photo(self, job_id):
+        with self.db() as db:
+            db.execute('DELETE FROM telegram_photo_attachments WHERE job_id=?', (job_id,))
+
+    def transfer_telegram_photo(self, source_job_id, target_job_id, db=None):
+        """Move an owner-supplied Telegram photo handle to its one continuation Work."""
+        if not isinstance(source_job_id,str) or not isinstance(target_job_id,str) or source_job_id==target_job_id:
+            return False
+        if db is None:
+            with self.db() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                return self.transfer_telegram_photo(source_job_id,target_job_id,conn)
+        row=db.execute('SELECT file_id,created FROM telegram_photo_attachments WHERE job_id=?',(source_job_id,)).fetchone()
+        if not row:return False
+        db.execute('INSERT INTO telegram_photo_attachments(job_id,file_id,created) VALUES (?,?,?) '
+                   'ON CONFLICT(job_id) DO UPDATE SET file_id=excluded.file_id,created=excluded.created',
+                   (target_job_id,row['file_id'],row['created']))
+        self.mark_telegram_photo_attached(target_job_id,db=db)
+        db.execute('DELETE FROM telegram_photo_attachments WHERE job_id=?',(source_job_id,))
+        return True
 
     def create_workspace(self, title, purpose=''):
         if not isinstance(title,str) or not 1<=len(title.strip())<=120:raise ValueError('작업공간 이름은 1~120자로 입력하세요.')

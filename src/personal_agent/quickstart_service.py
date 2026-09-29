@@ -2073,6 +2073,9 @@ class AgentService:
             return False,ALREADY_RETRIED_REFUSAL
         if previous.get('delivery')=='unknown':
             return False,'이전 Telegram 전달 여부를 확인할 수 없어 자동으로 다시 실행하지 않았습니다.'
+        photo_record=self.store.turn_provenance(previous['id']) or {}
+        if photo_record.get('photo_inputs') or photo_record.get('photo_input'):
+            return False,'사진이 포함된 이전 요청은 첨부를 다시 확인할 수 없어 자동 재시도하지 않았습니다. 사진을 다시 첨부해 새 요청으로 보내 주세요.'
         if self.store.context_attachment(previous['id']):
             return False,'이전 요청에 일회성 개인 컨텍스트가 연결되어 있어 자동으로 다시 실행하지 않았습니다.'
         if previous['id'] in set(self.store.config('file_workspace_document_jobs',[])):

@@ -283,12 +283,16 @@ class MemoryService:
         # unicode61 indexes them as words; semantic alternatives are selected
         # by the worker and passed as additional words in the query.
         terms = list(dict.fromkeys(re.findall(r"[^\W_]+", query.casefold(), flags=re.UNICODE)))[:12]
-        rows = self.store.search_memories(owner_id, terms, limit=limit) if terms else []
+        searched = self.store.search_memories(owner_id, terms, limit=limit + 1, include_mode=True) if terms else {
+            'memories': [], 'search_mode': 'fts5' if getattr(self.store, 'memory_search_available', False) else 'bounded-like',
+        }
+        rows = searched['memories']
+        page = rows[:limit]
         return self._private_read("memory_service.search_memories", {
-            "state": "current", "memories": rows, "query_terms": terms,
-            "search_mode": "fts5" if getattr(self.store, "memory_search_available", False) else "bounded-like",
-            "truncated": len(rows) == limit,
-        }, len(rows))
+            "state": "current", "memories": page, "query_terms": terms,
+            "search_mode": searched['search_mode'],
+            "truncated": len(rows) > limit,
+        }, len(page))
 
     def inspect_memory(self, owner_id, memory_id):
         self._identity(owner_id, "owner")

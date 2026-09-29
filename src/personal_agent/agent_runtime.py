@@ -1324,7 +1324,7 @@ def work_stop_requested(store, job_id):
 #: Host actions that only read and have no external or durable effect.  A Work
 #: whose every failed attempt is one of these may still succeed after a later
 #: read recovers (#606 owner Q2); the service's parking guard reuses the set.
-EFFECT_FREE_READS=frozenset({'list_roots','find_files','read_file','list_notes','list_memory','calendar_query',
+EFFECT_FREE_READS=frozenset({'list_roots','find_files','read_file','list_notes','list_memory','search_memory','calendar_query',
                              'web_search','public_page_read','weather','list_agents','bounded_public_research',
                              # A navigation or read in the owner's browser session (#656): no form is submitted.
                              'browser_open','browser_read','browser_find',

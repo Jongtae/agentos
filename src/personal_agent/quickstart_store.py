@@ -504,24 +504,27 @@ class QuickStore:
         with self.db() as db:
             return [self._memory_row(r) for r in db.execute('SELECT * FROM memories WHERE '+where+' ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',(*parameters,limit,offset))]
 
-    def search_memories(self, owner_id, terms, *, limit=10):
+    def search_memories(self, owner_id, terms, *, limit=10, include_mode=False):
         """Search current owner Memory with a rebuildable FTS index or safe LIKE fallback.
 
         ``terms`` are already normalized literal tokens, never raw FTS syntax.
         The returned rows are always joined back to the authoritative Memory
         table and owner/state filtered there.
         """
-        if isinstance(limit,bool) or not isinstance(limit,int) or not 1<=limit<=20:
+        if isinstance(limit,bool) or not isinstance(limit,int) or not 1<=limit<=21:
             raise ValueError('기억 검색 범위를 확인하세요.')
         if not isinstance(terms,(list,tuple)) or not terms or any(not isinstance(t,str) or not t for t in terms):
-            return []
+            return {'memories': [], 'search_mode': 'fts5' if self.memory_search_available else 'bounded-like'} if include_mode else []
         owner_key=self._memory_binding(owner_id)
         terms=list(dict.fromkeys(terms))[:12]
-        def source_row(row):
-            value=self._memory_row(row)
-            work_key=row['work_key']
-            value['work_ref']='workref:'+work_key if work_key else None
-            return value
+        def result_rows(rows, mode):
+            memories=[]
+            for row in rows:
+                value=self._memory_row(row)
+                work_key=row['work_key']
+                value['work_ref']='workref:'+work_key if work_key else None
+                memories.append(value)
+            return {'memories':memories,'search_mode':mode} if include_mode else memories
         with self.db() as db:
             if self.memory_search_available:
                 # Each token is quoted and escaped before it enters MATCH. The
@@ -534,7 +537,7 @@ class QuickStore:
                         WHERE memories_search MATCH ? AND m.owner_key=? AND m.state='current'
                         ORDER BY bm25(memories_search),m.created DESC,m.id DESC LIMIT ?''',
                         (match,owner_key,limit))
-                    return [source_row(row) for row in rows]
+                    return result_rows(rows, 'fts5')
                 except sqlite3.OperationalError:
                     # An existing but incompatible index must not make Memory
                     # inaccessible; the bounded fallback below stays owner-scoped.
@@ -548,7 +551,7 @@ class QuickStore:
             rows=db.execute('SELECT * FROM memories WHERE owner_key=? AND state=? AND '+where+
                             ' ORDER BY created DESC,id DESC LIMIT ?',
                             (owner_key,'current',*parameters,limit))
-            return [source_row(row) for row in rows]
+            return result_rows(rows, 'bounded-like')
 
     def memory_status_counts(self, owner_id):
         """Return authoritative aggregate counts, independent of list pagination."""

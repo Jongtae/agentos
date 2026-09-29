@@ -4,7 +4,7 @@ from pathlib import Path
 
 from personal_agent.memory_service import MemoryService, MemoryServiceError
 from personal_agent.quickstart_store import QuickStore
-from personal_agent.agent_runtime import Capabilities, recorded_arguments
+from personal_agent.agent_runtime import Capabilities, EFFECT_FREE_READS, recorded_arguments
 
 
 class MemorySearchTests(unittest.TestCase):
@@ -40,6 +40,34 @@ class MemorySearchTests(unittest.TestCase):
         self.assertEqual([row['id'] for row in result['memories']], [current['id']])
         self.assertEqual(empty['memories'], [])
         self.assertEqual(result['search_mode'], 'bounded-like')
+
+    def test_search_mode_reports_actual_fallback_after_incompatible_fts_index(self):
+        expected = self.store.save_memory('profile.note', '여행 노트를 보관합니다', owner_id='owner-a', work_id='w1')
+        with self.store.db() as db:
+            db.executescript('''
+                DROP TRIGGER IF EXISTS memories_search_ai;
+                DROP TRIGGER IF EXISTS memories_search_ad;
+                DROP TRIGGER IF EXISTS memories_search_au;
+                DROP TABLE memories_search;
+                CREATE TABLE memories_search(rowid INTEGER, memory_key TEXT, content TEXT);
+            ''')
+
+        result = self.service.search_memories('owner-a', '여행')
+
+        self.assertEqual([row['id'] for row in result['memories']], [expected['id']])
+        self.assertEqual(result['search_mode'], 'bounded-like')
+
+    def test_truncated_only_when_an_additional_match_exists(self):
+        self.store.save_memory('profile.note.first', '여행 노트 하나', owner_id='owner-a', work_id='w1')
+        one = self.service.search_memories('owner-a', '여행', limit=1)
+        self.store.save_memory('profile.note.second', '여행 노트 둘', owner_id='owner-a', work_id='w2')
+        more = self.service.search_memories('owner-a', '여행', limit=1)
+
+        self.assertFalse(one['truncated'])
+        self.assertTrue(more['truncated'])
+
+    def test_memory_search_is_classified_as_effect_free_read(self):
+        self.assertIn('search_memory', EFFECT_FREE_READS)
 
     def test_literal_fallback_keeps_owner_filter_around_multiple_terms(self):
         owner_row = self.store.save_memory('profile.food', '김밥을 좋아합니다', owner_id='owner-a', work_id='a')

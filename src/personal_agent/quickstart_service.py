@@ -167,6 +167,9 @@ TELEGRAM_CARD_GRACE_SECONDS = 3
 #: A Telegram request still queued/running after this long gets its one
 #: acknowledgement card; a shorter one answers in a single bubble (#510).
 TELEGRAM_ACK_AFTER_SECONDS = 4
+TELEGRAM_PHOTO_ALBUM_SETTLE_SECONDS = 2
+TELEGRAM_WORK_PHOTO_LIMIT = 10
+TELEGRAM_WORK_PHOTO_BYTES_LIMIT = 20 * 1024 * 1024
 #: The terminal Telegram bubble for a turn that did not fully succeed.  Kept
 #: beside the preview limit because they are read together, and separate from
 #: the model's own text on purpose: these are the only sentences in that
@@ -6834,6 +6837,7 @@ class AgentService:
             chat=message.get('chat',{})
             photo=message.get('photo') if not edited else None
             has_photo=isinstance(photo,list) and bool(photo)
+            media_group_id=message.get('media_group_id') if has_photo else None
             text='' if edited else (message.get('text') or message.get('caption',''))
             photo_file_id=None
             if has_photo:
@@ -6867,23 +6871,70 @@ class AgentService:
                 db.execute('BEGIN IMMEDIATE')
                 guided_context=False
                 if authorized and isinstance(text,str) and 0<len(text)<=MAX_OWNER_MESSAGE_CHARS:
-                    parsed=self.parse_context_request(text)
-                    if parsed:
-                        event_ids,text=parsed
-                        task_id=self.store.enqueue(text,f'tg:{generation}:{update_id}',f'telegram:{generation}',sender,db=db,owner_typed=True)
-                        self.store.attach_context(task_id,event_ids,self.context_assistant_id(),db)
-                    else:
-                        task_id=self.store.enqueue(text,f'tg:{generation}:{update_id}',f'telegram:{generation}',sender,db=db,owner_typed=True)
-                        if guided_context_requested:
-                            db.execute("UPDATE jobs SET status='awaiting_context' WHERE id=?",(task_id,))
-                            guided_context=True
-                    if photo_file_id:
-                        self.store.attach_telegram_photo(task_id,photo_file_id,db=db)
-                        self.store.mark_telegram_photo_attached(task_id,db=db)
-                    # #581: the owner's own message is the reaction target and
-                    # reply anchor for this Work.
-                    self.telegram_turns.record_source(task_id,sender,message.get('message_id'),db=db)
-                    self.context_observations.note_text_source(db,task_id,message,generation)
+                    album_key=(f'tg-album:{generation}:{sender}:{hashlib.sha256(media_group_id.encode()).hexdigest()}'
+                               if isinstance(media_group_id,str) and 1<=len(media_group_id)<=128 else None)
+                    album=(db.execute('SELECT * FROM telegram_photo_albums WHERE generation=? AND chat_id=? AND media_group_id=?',
+                                      (generation,sender,media_group_id)).fetchone() if album_key else None)
+                    album_created=False
+                    if album_key:
+                        if album:
+                            task_id=album['job_id']
+                        else:
+                            existing=db.execute('SELECT id,status,message FROM jobs WHERE request_key=?',(album_key,)).fetchone()
+                            album_caption=''
+                            if existing and existing['status']=='queued':
+                                task_id=existing['id']
+                                album_caption=existing['message'] if existing['message']!='[사진 첨부]' else ''
+                            elif existing:
+                                # A protocol-late album member must not mutate a Work already in flight.
+                                album_key=None
+                            else:
+                                task_id=self.store.enqueue('[사진 첨부]',album_key,f'telegram:{generation}',sender,db=db,owner_typed=True)
+                            if album_key:
+                                db.execute('INSERT INTO telegram_photo_albums(job_id,generation,chat_id,media_group_id,last_received,caption) VALUES (?,?,?,?,?,?)',
+                                           (task_id,generation,sender,media_group_id,time.time(),album_caption))
+                                album_created=True
+                        if album_key:
+                            current=db.execute('SELECT caption FROM telegram_photo_albums WHERE job_id=?',(task_id,)).fetchone()
+                            captions=[part for part in (current['caption'] or '').split('\n\n') if part]
+                            if text!='[사진 첨부]' and text not in captions:captions.append(text)
+                            caption='\n\n'.join(captions)[:MAX_OWNER_MESSAGE_CHARS]
+                            parsed_album_context=self.parse_context_request(caption)
+                            if parsed_album_context:
+                                event_ids,caption=parsed_album_context
+                                self.store.attach_context(task_id,event_ids,self.context_assistant_id(),db)
+                            elif guided_context_requested:
+                                db.execute("UPDATE jobs SET status='awaiting_context' WHERE id=? AND status='queued'",(task_id,))
+                                guided_context=True
+                            db.execute('UPDATE telegram_photo_albums SET last_received=?,caption=? WHERE job_id=?',
+                                       (time.time(),caption,task_id))
+                            db.execute("UPDATE jobs SET message=? WHERE id=? AND status IN ('queued','awaiting_context')",
+                                       (caption or '[사진 첨부]',task_id))
+                            self.store.attach_telegram_photo(task_id,photo_file_id,db=db)
+                            self.store.mark_telegram_photo_attached(task_id,db=db)
+                            if album_created:
+                                self.telegram_turns.record_source(task_id,sender,message.get('message_id'),db=db)
+                                self.context_observations.note_text_source(db,task_id,message,generation)
+                            text=caption or '[사진 첨부]'
+                        else:
+                            album_key=None
+                    if not album_key:
+                        parsed=self.parse_context_request(text)
+                        if parsed:
+                            event_ids,text=parsed
+                            task_id=self.store.enqueue(text,f'tg:{generation}:{update_id}',f'telegram:{generation}',sender,db=db,owner_typed=True)
+                            self.store.attach_context(task_id,event_ids,self.context_assistant_id(),db)
+                        else:
+                            task_id=self.store.enqueue(text,f'tg:{generation}:{update_id}',f'telegram:{generation}',sender,db=db,owner_typed=True)
+                            if guided_context_requested:
+                                db.execute("UPDATE jobs SET status='awaiting_context' WHERE id=?",(task_id,))
+                                guided_context=True
+                        if photo_file_id:
+                            self.store.attach_telegram_photo(task_id,photo_file_id,db=db)
+                            self.store.mark_telegram_photo_attached(task_id,db=db)
+                        # #581: the owner's own message is the reaction target and reply anchor.
+                        self.telegram_turns.record_source(task_id,sender,message.get('message_id'),db=db)
+                        self.context_observations.note_text_source(db,task_id,message,generation)
                 else:
                     task_id=None
                 if authorized and not paired:
@@ -6918,7 +6969,12 @@ class AgentService:
         with self.lock:
             cfg=self.store.config('telegram',{})
             token=self.store.secret('telegram_token')
-        if not cfg.get('enabled') or not token: return
+        if not cfg.get('enabled') or not token:
+            # With no active update stream this is the explicit release path;
+            # a failed enabled poll below must keep the marker until a later
+            # successful poll confirms the album's quiet window.
+            self.settle_expired_telegram_photo_albums()
+            return
         updates=self.telegram.get_updates(cfg.get('cursor',0), timeout=1)
         for update in sorted(updates,key=lambda u:u.get('update_id',0)):
             control=None
@@ -6937,6 +6993,13 @@ class AgentService:
                         current['cursor']=update['update_id']+1
                         self.store.put('telegram',current)
             else:self.ingest_update(update,cfg['generation'])
+        self.settle_expired_telegram_photo_albums()
+
+    def settle_expired_telegram_photo_albums(self, now=None):
+        """Release persisted album Works after their short update-collection window."""
+        cutoff=(time.time() if now is None else now)-TELEGRAM_PHOTO_ALBUM_SETTLE_SECONDS
+        with self.store.db() as db:
+            db.execute('DELETE FROM telegram_photo_albums WHERE last_received<=?',(cutoff,))
 
     def run_one(self):
         try:
@@ -6949,9 +7012,12 @@ class AgentService:
         with self.worker_lock:
             with self.store.db() as db:
                 db.execute('BEGIN IMMEDIATE')
-                row=db.execute("SELECT j.* FROM jobs j WHERE j.status='queued' AND (NOT EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id) OR EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id AND c.message_id!=-1 AND c.created<=?)) ORDER BY j.created LIMIT 1",(time.time()-TELEGRAM_CARD_GRACE_SECONDS,)).fetchone()
+                row=db.execute("SELECT j.* FROM jobs j WHERE j.status='queued' ORDER BY j.created LIMIT 1").fetchone()
                 if not row:return False
                 job=dict(row)
+                if db.execute('SELECT 1 FROM telegram_photo_albums WHERE job_id=?',(job['id'],)).fetchone():return False
+                card=db.execute('SELECT message_id,created FROM telegram_task_cards WHERE job_id=?',(job['id'],)).fetchone()
+                if card and (card['message_id']==-1 or card['created']>time.time()-TELEGRAM_CARD_GRACE_SECONDS):return False
                 db.execute("UPDATE jobs SET status='running' WHERE id=?",(job['id'],))
                 db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('user',job['message'],job['channel'],time.time(),job.get('workspace_id'),job['id']))
             self.current_work_id=job['id']
@@ -6979,7 +7045,7 @@ class AgentService:
             work_capabilities=[None]
             try:
                 image_inputs=[]
-                photo_file_id=self.store.telegram_photo_file_id(job['id'])
+                photo_file_ids=self.store.telegram_photo_file_ids(job['id'])
                 owner_prompt=job['message'].strip()
                 prompt=owner_prompt
                 #: The Work whose message is `prompt` (a retry replays another's).
@@ -7126,11 +7192,19 @@ class AgentService:
                         db.execute("UPDATE jobs SET status='awaiting_connection',response=?,error=NULL,delivery=? WHERE id=?",(guidance,'pending' if job['chat_id'] else 'none',job['id']))
                     self.update_task_card(job,'awaiting_connection')
                     return True
-                if photo_file_id:
+                if photo_file_ids:
                     try:
-                        image_inputs=[self.telegram.download_photo(photo_file_id)]
+                        image_bytes=0
+                        for file_id in photo_file_ids[:TELEGRAM_WORK_PHOTO_LIMIT]:
+                            remaining=TELEGRAM_WORK_PHOTO_BYTES_LIMIT-image_bytes
+                            if remaining<=0:raise ProviderError('앨범 사진의 총 용량이 한도보다 큽니다.')
+                            image=self.telegram.download_photo(file_id,max_bytes=remaining)
+                            payload=image.get('data') if isinstance(image,dict) else None
+                            if not isinstance(payload,bytes):raise ProviderError('Telegram 사진을 읽을 수 없습니다.')
+                            image_bytes+=len(payload)
+                            image_inputs.append(image)
                     except ProviderError as exc:
-                        self.record_photo_attempt(job['id'],status='failed',count=1,route='telegram-download')
+                        self.record_photo_attempt(job['id'],status='failed',count=len(photo_file_ids),route='telegram-download')
                         raise ValueError(str(exc)) from None
                 # #606 T4: a natural-language rule-matched read that needs
                 # clarification or finds nothing is re-judged by the Work
@@ -7640,9 +7714,12 @@ class AgentService:
                                     self.record_photo_attempt(job['id'],attempt_id=photo_attempt_id,status='unsupported',
                                                               count=len(image_inputs),route='subscription',engine=subscription['id'])
                                 elif image_inputs:
-                                    launched=bool((getattr(exc,'meta',None) or {}).get('argv'))
+                                    meta=getattr(exc,'meta',None) or {}
+                                    launched=bool(meta.get('argv'))
+                                    reason=str(diagnostics.get('reason') or '').lower()
+                                    definitely_no_prompt='no prompt provided via stdin' in reason
                                     self.record_photo_attempt(job['id'],attempt_id=photo_attempt_id,
-                                                              status='included-in-request' if launched else 'not-sent',
+                                                              status='unknown' if launched and not definitely_no_prompt else 'not-sent',
                                                               count=len(image_inputs),route='subscription',engine=subscription['id'])
                                 # #678: searches the CLI reported before it failed are still observed.
                                 if not isolated:self.record_cli_native_searches(job['id'],subscription['id'],getattr(exc,'meta',None),record,native_search)

@@ -50,6 +50,7 @@ class QuickStore:
             CREATE TABLE IF NOT EXISTS memory_approvals(token_hash TEXT PRIMARY KEY, owner_key TEXT NOT NULL, work_key TEXT NOT NULL, action TEXT NOT NULL, subject_id TEXT NOT NULL, memory_key TEXT NOT NULL, source_digest TEXT NOT NULL, content_digest TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, state TEXT NOT NULL DEFAULT 'issued', result_id TEXT, expected_memory_id TEXT, expected_memory_digest TEXT);
             CREATE TABLE IF NOT EXISTS telegram_task_cards(job_id TEXT PRIMARY KEY, chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL, state TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS telegram_photo_attachments(job_id TEXT PRIMARY KEY, file_id TEXT NOT NULL, created REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS telegram_photo_albums(job_id TEXT PRIMARY KEY, generation TEXT NOT NULL, chat_id INTEGER NOT NULL, media_group_id TEXT NOT NULL, last_received REAL NOT NULL, caption TEXT NOT NULL DEFAULT '', UNIQUE(generation,chat_id,media_group_id));
             CREATE TABLE IF NOT EXISTS telegram_notifications(id TEXT PRIMARY KEY, job_id TEXT NOT NULL, chat_id INTEGER NOT NULL, generation TEXT NOT NULL, kind TEXT NOT NULL, fingerprint TEXT, state TEXT NOT NULL, message_id INTEGER, created REAL NOT NULL, UNIQUE(job_id, kind));
             CREATE TABLE IF NOT EXISTS context_events(id TEXT PRIMARY KEY, captured_at REAL NOT NULL, source_kind TEXT NOT NULL, content TEXT NOT NULL, content_hash TEXT NOT NULL, expires_at REAL NOT NULL, sharing_state TEXT NOT NULL, source_app TEXT NOT NULL, source_domain TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS context_events_expiry ON context_events(expires_at);
@@ -79,7 +80,10 @@ class QuickStore:
                  OR EXISTS (SELECT 1 FROM context_location_requests WHERE job_id=NEW.id AND state='pending'
                               AND expires>CAST(strftime('%s','now') AS REAL))
                )
-              BEGIN DELETE FROM telegram_photo_attachments WHERE job_id=NEW.id; END;
+              BEGIN
+                DELETE FROM telegram_photo_attachments WHERE job_id=NEW.id;
+                DELETE FROM telegram_photo_albums WHERE job_id=NEW.id;
+              END;
             CREATE TABLE IF NOT EXISTS telegram_context_choices(token TEXT PRIMARY KEY, job_id TEXT NOT NULL, event_id TEXT NOT NULL, chat_id INTEGER NOT NULL, generation TEXT NOT NULL, message_id INTEGER, state TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS workspaces(id TEXT PRIMARY KEY, title TEXT NOT NULL, purpose TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', created REAL NOT NULL, updated REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS workspace_results(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, job_id TEXT NOT NULL, content TEXT NOT NULL, evidence TEXT NOT NULL DEFAULT '', created REAL NOT NULL, UNIQUE(workspace_id, job_id));
@@ -984,16 +988,21 @@ class QuickStore:
         return dict(row) if row else None
 
     def attach_telegram_photo(self, job_id, file_id, db=None):
-        """Keep only Telegram's fetch handle until this Work attempts one image read."""
+        """Keep Telegram fetch handles until this Work attempts its image read(s)."""
         if not isinstance(job_id, str) or not job_id or not isinstance(file_id, str) or not 1 <= len(file_id) <= 512:
             raise ValueError('Telegram 사진 정보를 확인하세요.')
         if db is None:
             with self.db() as conn:
-                conn.execute('INSERT INTO telegram_photo_attachments VALUES (?,?,?)',
-                             (job_id, file_id, time.time()))
-        else:
-            db.execute('INSERT INTO telegram_photo_attachments VALUES (?,?,?)',
-                       (job_id, file_id, time.time()))
+                conn.execute('BEGIN IMMEDIATE')
+                return self.attach_telegram_photo(job_id,file_id,conn)
+        row=db.execute('SELECT file_id FROM telegram_photo_attachments WHERE job_id=?',(job_id,)).fetchone()
+        try:values=json.loads(row['file_id']) if row and row['file_id'].startswith('[') else ([row['file_id']] if row else [])
+        except (TypeError,ValueError):values=[row['file_id']] if row else []
+        values=[value for value in values if isinstance(value,str) and value]
+        if file_id not in values:values.append(file_id)
+        if len(values)>10:raise ValueError('Telegram 사진은 한 번에 최대 10장까지 처리할 수 있습니다.')
+        db.execute('INSERT INTO telegram_photo_attachments VALUES (?,?,?) ON CONFLICT(job_id) DO UPDATE SET file_id=excluded.file_id,created=excluded.created',
+                   (job_id,json.dumps(values),time.time()))
 
     def mark_telegram_photo_attached(self, job_id, db=None):
         """Persist that the owner's request had an image before any worker can start or crash."""
@@ -1010,9 +1019,18 @@ class QuickStore:
                    (job_id,json.dumps(record,ensure_ascii=False),time.time()))
 
     def telegram_photo_file_id(self, job_id):
+        values=self.telegram_photo_file_ids(job_id)
+        return values[0] if values else None
+
+    def telegram_photo_file_ids(self, job_id):
+        """Return all Telegram photo handles for this Work, including legacy single-photo rows."""
         with self.db() as db:
             row = db.execute('SELECT file_id FROM telegram_photo_attachments WHERE job_id=?', (job_id,)).fetchone()
-        return row['file_id'] if row else None
+        if not row:return []
+        value=row['file_id']
+        try:values=json.loads(value) if value.startswith('[') else [value]
+        except (TypeError,ValueError):values=[value]
+        return [item for item in values if isinstance(item,str) and item][:10] if isinstance(values,list) else [value]
 
     def remove_telegram_photo(self, job_id):
         with self.db() as db:

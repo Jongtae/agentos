@@ -221,14 +221,16 @@ class TelegramChannel:
         return self.call('getUpdates', {'offset': offset, 'timeout': timeout,
                                         'allowed_updates': list(kinds), 'limit': limit})
 
-    def download_photo(self, file_id):
+    def download_photo(self, file_id, max_bytes=TELEGRAM_MAX_DOWNLOAD_BYTES):
         """Download a Telegram photo via getFile, returning bounded bytes and MIME type."""
         if not isinstance(file_id, str) or not file_id or len(file_id) > 512:
             raise ProviderError('Telegram 사진 식별자가 올바르지 않습니다.')
+        if not isinstance(max_bytes,int) or isinstance(max_bytes,bool) or not 1<=max_bytes<=TELEGRAM_MAX_DOWNLOAD_BYTES:
+            raise ProviderError('Telegram 사진 다운로드 한도를 확인하세요.')
         result = self.call('getFile', {'file_id': file_id})
         path = result.get('file_path') if isinstance(result, dict) else None
         size = result.get('file_size') if isinstance(result, dict) else None
-        if isinstance(size, int) and not isinstance(size, bool) and size > TELEGRAM_MAX_DOWNLOAD_BYTES:
+        if isinstance(size, int) and not isinstance(size, bool) and size > max_bytes:
             raise ProviderError('Telegram 사진이 내려받기 크기 제한을 넘었습니다.')
         if not isinstance(path, str) or not path or len(path) > 1024 or path.startswith('/'):
             raise ProviderError('Telegram 사진 경로를 확인할 수 없습니다.')
@@ -238,8 +240,8 @@ class TelegramChannel:
         token = self._token_source()
         url = f'{TELEGRAM_FILE_ROOT}/bot{token}/' + '/'.join(_quote(piece, safe='') for piece in pieces)
         data = self._file_transport_source()(url, timeout=TELEGRAM_TIMEOUT,
-                                             max_bytes=TELEGRAM_MAX_DOWNLOAD_BYTES)
-        if not isinstance(data, bytes) or len(data) > TELEGRAM_MAX_DOWNLOAD_BYTES:
+                                             max_bytes=max_bytes)
+        if not isinstance(data, bytes) or len(data) > max_bytes:
             raise ProviderError('Telegram 사진이 내려받기 크기 제한을 넘었습니다.')
         if data.startswith(b'\xff\xd8\xff'):
             mime = 'image/jpeg'

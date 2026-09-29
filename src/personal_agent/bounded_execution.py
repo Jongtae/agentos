@@ -1339,7 +1339,11 @@ class BoundedExecutionAdapter:
                     '-c', codex_bridge_approval_argument(),
                     # #729: the agentos server's own tool-call timeout (see CODEX_TOOL_TIMEOUT_KEY).
                     *(['-c', codex_bridge_timeout_argument(tool_timeout)] if tool_timeout else []), *model_args,
-                    *sum((['--image', path] for path in image_paths), []), prompt]
+                    # Codex declares --image as a variadic FILE... option. Put
+                    # the positional prompt before it so the prompt cannot be
+                    # consumed as another image path (which leaves exec reading
+                    # the intentionally closed stdin and failing before a turn).
+                    prompt, *sum((['--image', path] for path in image_paths), [])]
         if engine_id == 'claude-code':
             if image_paths and strict:
                 raise ExecutionError('현재 엄격 격리 Claude Code 프로필은 사진 입력을 지원하지 않습니다.',

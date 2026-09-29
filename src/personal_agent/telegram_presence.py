@@ -684,13 +684,29 @@ def _spans(text, in_bold=False):
 #: with ``TABLE_CELL_JOIN`` and the header row is kept as one bold line.
 _TABLE_ROW = re.compile(r'^[ \t]*\|.*\|[ \t]*$')
 _TABLE_SEPARATOR = re.compile(r'^[ \t]*\|(?:[ \t]*:?-+:?[ \t]*\|)+[ \t]*$')
-_TABLE_SPLIT = re.compile(r'(?<!\\)\|')
+#: The tokens that matter in a row: a run of backslashes, or a pipe.  Only an
+#: odd run right before a pipe escapes it (``\|`` is content, ``\\|`` is a
+#: cell ending in a backslash then a delimiter); a fixed-width lookbehind
+#: cannot count the run (#852).  Each run is matched once, so a long run
+#: (a pathological model response) scans in linear time (#872 review P2).
+_TABLE_TOKEN = re.compile(r'\\+|\|')
 TABLE_CELL_JOIN = ' · '
 
 
 def _table_cells(line):
-    cells = [cell.strip().replace('\\|', '|') for cell in _TABLE_SPLIT.split(line.strip())]
-    return cells[1:-1]
+    """The cells of one row: the text between unescaped pipes, an escaped pipe unescaped."""
+    line = line.strip()
+    cells, start, run_len, run_end = [], 0, 0, -1
+    for match in _TABLE_TOKEN.finditer(line):
+        if match.group()[0] == '\\':
+            run_len, run_end = len(match.group()), match.end()
+            continue
+        if run_end == match.start() and run_len % 2:
+            continue  # an odd run of backslashes: the pipe is cell content
+        cells.append(line[start:match.start()])
+        start = match.end()
+    cells.append(line[start:])
+    return [cell.strip().replace('\\|', '|') for cell in cells][1:-1]
 
 
 def _table_lines(rows):

@@ -4196,21 +4196,42 @@ class AgentService:
         """Withdraw continuation eligibility: a newer request, supersede or cancel."""
         owner=_owner_key(owner_id) if owner_id is not None else None
         with self.lock:
+            raw=self.store.config(LOCAL_DOCUMENT_RESUME_KEY,{})
             rows=self._document_resume_rows()
+            stale=set(raw)-set(rows) if isinstance(raw,dict) else set()
             dropped=[key for key,row in rows.items() if key!=except_work_id
                      and (work_id is None or key==work_id)
                      and (owner is None or hmac.compare_digest(str(row.get('owner','')),owner))]
             for key in dropped:rows.pop(key,None)
             self.store.put(LOCAL_DOCUMENT_RESUME_KEY,rows)
+        for key in set(dropped)|stale:
+            if not self.photo_work_has_pending_resume(key):self.store.remove_telegram_photo(key)
         return dropped
+
+    def prune_expired_document_resumes(self):
+        """Drop expired local-document continuation records and their now-unneeded photo handles."""
+        with self.lock:
+            raw=self.store.config(LOCAL_DOCUMENT_RESUME_KEY,{})
+            rows=self._document_resume_rows()
+            stale=set(raw)-set(rows) if isinstance(raw,dict) else set()
+            if stale:self.store.put(LOCAL_DOCUMENT_RESUME_KEY,rows)
+        for work_id in stale:
+            if not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
+        return len(stale)
 
     def resume_after_document_approval(self, work_id):
         """Re-queue exactly the eligible, unexpired, unwithdrawn Work once, after sharing is approved."""
-        if not self.document_resume_eligible(work_id) or not self.drop_document_resume(work_id=work_id):return False
-        self._forget_work(LOCAL_RESUMED_KEY,work_id)
-        with self.store.db() as db:
-            db.execute('BEGIN IMMEDIATE')
-            return db.execute("UPDATE jobs SET status='queued',error=NULL,delivery='none' WHERE id=? AND status='failed'",(work_id,)).rowcount==1
+        with self.lock:
+            rows=self._document_resume_rows()
+            if work_id not in rows:return False
+            rows.pop(work_id,None)
+            self.store.put(LOCAL_DOCUMENT_RESUME_KEY,rows)
+            self._forget_work(LOCAL_RESUMED_KEY,work_id)
+            with self.store.db() as db:
+                db.execute('BEGIN IMMEDIATE')
+                resumed=db.execute("UPDATE jobs SET status='queued',error=NULL,delivery='none' WHERE id=? AND status='failed'",(work_id,)).rowcount==1
+        if not resumed and not self.photo_work_has_pending_resume(work_id):self.store.remove_telegram_photo(work_id)
+        return resumed
 
     def _abandon_local_work(self, work_id, reason):
         text=local_refusal_text(reason)
@@ -8081,6 +8102,7 @@ class AgentService:
         # #814 review: a settings draft a restart cut off mid-apply is settled unknown (never re-applied).
         self.settings_orchestrator.reconcile()
         def work():
+            next_document_resume_prune=0.0
             while not self.stop.is_set():
                 # #659: one indexed query; nothing due costs no model or network call.
                 self.run_due_preparation()
@@ -8093,6 +8115,10 @@ class AgentService:
                 self.expire_memory_prompts()
                 # #709: close and settle in-flow logins (decisions, owner closes, timeouts).
                 self.process_browser_logins()
+                now=time.monotonic()
+                if now>=next_document_resume_prune:
+                    self.prune_expired_document_resumes()
+                    next_document_resume_prune=now+30
                 # #805: claim one pending owner-model upkeep when idle; it runs off this thread.
                 self.run_owner_model_upkeep()
                 self.stop.wait(.3)

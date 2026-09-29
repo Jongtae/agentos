@@ -7469,7 +7469,7 @@ class AgentService:
                                 route='subscription',engine=subscription['id'],mode=mode,status='sent',
                                 context_mode=engine_context.get('mode','shared-context'),instructions_version=engine_context.get('version'),
                                 context_messages=len(engine_context['conversation']),egress_taint=sorted(capabilities.private_provenance),
-                                photo_input=({'source':'Telegram photo','count':len(image_inputs),'status':'included-in-request',
+                                photo_input=({'source':'Telegram photo','count':len(image_inputs),'status':'staged',
                                               'route':'subscription','engine':subscription['id']} if image_inputs else None),
                                 # #678: the CLI's own tools offered besides the bridge.
                                 cli_native_tools=['web_search'] if native_search else [],native_search_reason=native_reason or None,
@@ -7535,6 +7535,10 @@ class AgentService:
                                         if work_model:execution_options['model']=work_model
                                         if image_inputs:self.store.remove_telegram_photo(job['id'])
                                         result=self.execution_adapter.execute(subscription['id'],engine_prompt,served,**execution_options)
+                                        if image_inputs:
+                                            self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
+                                                                                             'status':'included-in-request','route':'subscription',
+                                                                                             'engine':subscription['id']})
                                     finally:
                                         # #718: a live CLI step ends with its attempt.
                                         self.live_steps.pop(job['id'],None)
@@ -7547,6 +7551,11 @@ class AgentService:
                                     self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
                                                                                      'status':'unsupported','route':'subscription',
                                                                                      'engine':subscription['id']})
+                                elif image_inputs:
+                                    launched=bool((getattr(exc,'meta',None) or {}).get('argv'))
+                                    self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
+                                                                                     'status':'included-in-request' if launched else 'not-sent',
+                                                                                     'route':'subscription','engine':subscription['id']})
                                 # #678: searches the CLI reported before it failed are still observed.
                                 if not isolated:self.record_cli_native_searches(job['id'],subscription['id'],getattr(exc,'meta',None),record,native_search)
                                 # #729: a bridge call the CLI never saw completed is a typed failure.
@@ -7671,7 +7680,7 @@ class AgentService:
                                 route='direct-api',provider=runtime_config.get('provider'),status='sent',
                                 requested_model=runtime_config.get('model'),instructions_version=api_context.get('version'),
                                 context_messages=len(api_context['conversation']),egress_taint=sorted(capabilities.private_provenance),
-                                photo_input=({'source':'Telegram photo','count':len(image_inputs),'status':'included-in-request',
+                                photo_input=({'source':'Telegram photo','count':len(image_inputs),'status':'staged',
                                               'route':'direct-api','provider':runtime_config.get('provider')} if image_inputs else None),
                                 # #826: what the owner-model sections and splices referred to.
                                 owner_information=owner_information)
@@ -7687,7 +7696,15 @@ class AgentService:
                                 if image_inputs:run_options['images']=image_inputs
                                 if image_inputs:self.store.remove_telegram_photo(job['id'])
                                 result=run_agent(self.adapter,runtime_config,key,[*api_context['conversation'],{'role':'user','content':api_context['request']}],context_sections(api_context),capabilities,record,**run_options)
+                                if image_inputs:
+                                    self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
+                                                                                     'status':'included-in-request','route':'direct-api',
+                                                                                     'provider':runtime_config.get('provider')})
                             except Exception as exc:
+                                if image_inputs:
+                                    self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
+                                                                                     'status':'unknown' if isinstance(exc,ProviderError) else 'not-sent',
+                                                                                     'route':'direct-api','provider':runtime_config.get('provider')})
                                 self.record_turn_provenance(job['id'],status='failed',failure_class=type(exc).__name__,egress_taint=sorted(capabilities.private_provenance))
                                 # #710: a failed worker may be re-delegated within the Work's bounds.
                                 following=(self.orchestration_step(orchestration,attempt,job['id'],attempt_start,failed=str(exc))

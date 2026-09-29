@@ -395,6 +395,11 @@ class SubscriptionCliTests(Temp):
                 stderr=''), OUTCOME_UNAVAILABLE, 'auth'),
             (lambda e, a: types.SimpleNamespace(returncode=1, stdout='', stderr='Error: not logged in'),
              OUTCOME_UNAVAILABLE, 'auth'),
+            # #873: the CLI's own usage-limit message carries no status.
+            (lambda e, a: types.SimpleNamespace(returncode=1, stdout=json.dumps(
+                {'type': 'error', 'message': "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage "
+                                             "to purchase more credits or try again at Oct 4th, 2026 2:09 AM."}),
+                stderr=''), OUTCOME_UNAVAILABLE, 'usage-limit'),
             (lambda e, a: types.SimpleNamespace(returncode=1, stdout=json.dumps(
                 {'type': 'error', 'message': json.dumps({'status': 400, 'error': {'message': 'model not supported'}})}),
                 stderr=''), OUTCOME_UNAVAILABLE, 'request-rejected'),

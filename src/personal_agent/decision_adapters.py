@@ -47,7 +47,7 @@ import subprocess
 import tempfile
 import time
 
-from .bounded_execution import (ExecutionError, bounded_run, cli_metadata, failure_details, is_not_signed_in,  # noqa: F401
+from .bounded_execution import (ExecutionError, bounded_run, cli_metadata, failure_details, is_not_signed_in, is_usage_limited,  # noqa: F401
                                 jsonl_lines,
                                 kill_process_group, strict_launch_arguments)
 from .decision import (DECISION_SYSTEM, MAX_CONTEXT_CHARS, NO_CANDIDATE, OUTCOME_CANCELLED,
@@ -293,7 +293,7 @@ class SubscriptionCliDecisionEngine(SchemaDecisionEngine):
             status, reason = failure_details(self.engine_id, stdout, stderr)
             if (isinstance(status, int) and status in (401, 403)) or is_not_signed_in(' '.join((reason or '', stderr[-4000:]))):
                 failure = 'auth'
-            elif status == 429:
+            elif status == 429 or is_usage_limited(' '.join((reason or '', stderr[-4000:]))):
                 failure = 'usage-limit'
             elif (isinstance(status, int) and 400 <= status < 500) or '[claude-code:unrecognized_model]' in stderr:
                 # Codex reports the provider's structured 4xx; Claude Code 2.1.x

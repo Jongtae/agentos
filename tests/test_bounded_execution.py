@@ -213,6 +213,37 @@ class EngineFailureDiagnosticsTests(unittest.TestCase):
             out = json.dumps({'type': 'error', 'message': json.dumps({'status': status, 'error': {'message': 'nope'}})})
             self.assertEqual(self._run(out)[0].failure_class, expected)
 
+    CODEX_USAGE_LIMIT = json.dumps({'type': 'error', 'message': "You've hit your usage limit. Visit https://chatgpt.com/"
+                                    "codex/settings/usage to purchase more credits or try again at Oct 4th, 2026 2:09 AM."})
+
+    def test_codex_usage_limit_is_named_to_the_owner_with_its_reset_time(self):
+        # #873 (owner observation 2026-09-30): the CLI states the limit without a
+        # status, so the status hints never fired and the owner read "종료 코드 1".
+        from personal_agent.conversation_projection import owner_cause
+        error, logs = self._run(self.CODEX_USAGE_LIMIT)
+        self.assertEqual(error.failure_class, 'usage-limit')
+        self.assertTrue(str(error).startswith('Codex 구독의 사용량 한도에 도달했습니다(재개: Oct 4th, 2026 2:09 AM). '), str(error))
+        self.assertIn('종료 코드 1', str(error))
+        self.assertIn('class=usage-limit', logs)
+        # The bubble's cause is that one sentence, not the exit code.
+        cause = owner_cause([('subscription_engine', str(error))])
+        self.assertIn('구독 CLI 실행: Codex 구독의 사용량 한도에 도달했습니다(재개: Oct 4th, 2026 2:09 AM).', cause)
+        self.assertNotIn('종료 코드', cause)
+        self.assertNotIn('…', cause)
+
+    def test_usage_limit_without_a_reset_time_and_from_stderr(self):
+        error, _ = self._run('', stderr='Error: usage limit reached\n', engine='claude-code')
+        self.assertEqual(error.failure_class, 'usage-limit')
+        self.assertTrue(str(error).startswith('Claude Code 구독의 사용량 한도에 도달했습니다. '), str(error))
+        self.assertEqual(bounded_execution.limit_reset('resets at 3:00 PM (UTC). more'), '3:00 PM (UTC)')
+        self.assertEqual(bounded_execution.limit_reset('try again later'), '')
+        self.assertFalse(bounded_execution.is_usage_limited('the limit of this tool is 5 files'))
+
+    def test_a_status_hint_leads_the_message(self):
+        out = json.dumps({'type': 'error', 'message': json.dumps({'status': 401, 'error': {'message': 'nope'}})})
+        error, _ = self._run(out)
+        self.assertTrue(str(error).startswith('엔진 로그인이 만료되었거나 권한이 없습니다. '), str(error))
+
     def test_claude_code_is_error_result_is_reported(self):
         error, _ = self._run(json.dumps({'is_error': True, 'result': 'Credit balance is too low'}), engine='claude-code')
         self.assertIn('Credit balance is too low', str(error))

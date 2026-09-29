@@ -555,6 +555,36 @@ def is_not_signed_in(text):
     return bool(_NOT_SIGNED_IN.search(text or ''))
 
 
+# The CLIs' own "usage limit" signal, which comes without an HTTP status
+# (#873; Codex 0.153.4 observed 2026-09-30, Work 6dbf020e: ``You've hit your
+# usage limit. Visit … to purchase more credits or try again at Oct 4th, 2026
+# 2:09 AM.``).  Deterministic protocol classification like _NOT_SIGNED_IN.
+_USAGE_LIMIT = re.compile(r"hit your (?:usage )?limit|reached your (?:usage )?limit|usage limit", re.I)
+#: The reset time as the CLI states it ("try again at …", "resets at …").
+_LIMIT_RESET = re.compile(r'(?:try again|resets?|available again)\s+(?:at|in|on|after)\s+([^.\n]{1,80}?)(?:\.(?=\s|$)|\s*$)', re.I)
+
+
+def is_usage_limited(text):
+    return bool(_USAGE_LIMIT.search(text or ''))
+
+
+def limit_reset(text):
+    """The reset time phrase the CLI gave, or ``''``."""
+    match = _LIMIT_RESET.search(text or '')
+    return ' '.join(match.group(1).split()) if match else ''
+
+
+def usage_limit_hint(engine_id, text=''):
+    """One owner sentence: which subscription hit its limit, when it resets, what to do.
+
+    It leads the failure message, so ``conversation_projection.owner_cause``
+    (the first sentence, at most its ``OWNER_REASON_CHARS``) shows exactly this.
+    """
+    when = limit_reset(text)
+    reset = f'(재개: {when})' if when else ''
+    return f'{ENGINE_NAMES.get(engine_id, engine_id)} 구독의 사용량 한도에 도달했습니다{reset}. 그때까지 다른 AI로 바꾸려면 말씀해 주세요.'
+
+
 #: #735: the CLIs' own "this model is not available to this account" signals,
 #: as they print them (protocol classification, not a judgment of text).
 #: Codex 0.153.4 (observed, Work a8e6aa7b): ``The '<model>' model is not
@@ -1834,13 +1864,20 @@ class BoundedExecutionAdapter:
                         break
                 # Only the structured error and stderr: stdout carries model
                 # and tool text that may merely mention signing in.
-                if failure_class == 'engine-failed' and is_not_signed_in(' '.join((reason or '', stderr[-4000:]))):
+                evidence = ' '.join((reason or '', stderr[-4000:]))
+                if failure_class == 'engine-failed' and is_not_signed_in(evidence):
                     failure_class, hint = 'auth', AUTH_HINT
+                elif failure_class == 'engine-failed' and is_usage_limited(evidence):
+                    # #873: the CLI reports its usage limit without a status.
+                    failure_class, hint = 'usage-limit', usage_limit_hint(engine_id, evidence)
                 LOG.warning('engine turn failed engine=%s exit_code=%s class=%s status=%s duration=%.1fs reason=%s',
                             engine_id, completed.returncode, failure_class, status, elapsed, reason or '-')
                 message = f'{ENGINE_NAMES[engine_id]} 엔진이 작업을 완료하지 못했습니다(종료 코드 {completed.returncode}).'
                 if hint:
-                    message += ' ' + hint
+                    # The hint is the owner sentence; it leads so the bubble's
+                    # first-sentence cause (#598 owner_cause) is the hint, not
+                    # the exit code (#873).
+                    message = hint + ' ' + message
                 if reason:
                     message += f' 엔진 응답: {reason}'
                 # #735: the CLI's own unsupported-model signal, for the requested model only.

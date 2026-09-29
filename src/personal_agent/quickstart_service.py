@@ -7488,7 +7488,6 @@ class AgentService:
                                     if image_inputs:
                                         self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
                                                                                          'status':'unsupported','route':'isolated-agentos-mcp'})
-                                        self.store.remove_telegram_photo(job['id'])
                                         raise ExecutionError('격리 런타임 배포는 사진 입력을 지원하지 않습니다. 현재 AI 연결을 바꿔 실행해 주세요.',
                                                              failure_class='unsupported-image-input')
                                     # #679: the sidecar's closed contract carries no model; a Work
@@ -7533,7 +7532,6 @@ class AgentService:
                                         execution_options={'context':adapter_context}
                                         if image_inputs:execution_options['images']=image_inputs
                                         if work_model:execution_options['model']=work_model
-                                        if image_inputs:self.store.remove_telegram_photo(job['id'])
                                         result=self.execution_adapter.execute(subscription['id'],engine_prompt,served,**execution_options)
                                         if image_inputs:
                                             self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
@@ -7694,7 +7692,6 @@ class AgentService:
                                 # #833: the outcome judgment reads the same profile / current-context sections.
                                 run_options={'owner_context':api_context}
                                 if image_inputs:run_options['images']=image_inputs
-                                if image_inputs:self.store.remove_telegram_photo(job['id'])
                                 result=run_agent(self.adapter,runtime_config,key,[*api_context['conversation'],{'role':'user','content':api_context['request']}],context_sections(api_context),capabilities,record,**run_options)
                                 if image_inputs:
                                     self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),

@@ -265,6 +265,11 @@ class ContextObservations:
                 # Kept only for Works still in flight, which must withdraw them.
                 _drop_finished_exposures(db)
                 db.execute("UPDATE context_location_requests SET state='cleared' WHERE state='pending'")
+                db.execute("DELETE FROM telegram_photo_attachments WHERE job_id IN "
+                           "(SELECT job_id FROM context_location_requests WHERE state='cleared') "
+                           "AND NOT EXISTS (SELECT 1 FROM context_location_requests pending "
+                           "WHERE pending.job_id=telegram_photo_attachments.job_id AND pending.state='pending' AND pending.expires>?)",
+                           (now,))
             self._put(db, settings)
         return self.status()
 
@@ -293,7 +298,7 @@ class ContextObservations:
         _drop_finished_exposures(db)
         db.execute("UPDATE context_location_requests SET state='expired' WHERE state='pending' AND expires<=?", (now,))
         db.execute("DELETE FROM telegram_photo_attachments WHERE job_id IN "
-                   "(SELECT job_id FROM context_location_requests WHERE state='expired') "
+                   "(SELECT job_id FROM context_location_requests WHERE state IN ('expired','cleared')) "
                    "AND NOT EXISTS (SELECT 1 FROM context_location_requests pending "
                    "WHERE pending.job_id=telegram_photo_attachments.job_id AND pending.state='pending' AND pending.expires>?)",
                    (now,))

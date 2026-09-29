@@ -454,7 +454,7 @@ class WaitSurfaceTests(NativePresenceTestCase):
         self.service.acknowledge_long_work(now=job['created'] + 30)
         self.assertEqual(len(self.calls), before)
 
-    def test_queued_work_keeps_one_card_that_ends_without_result_framing(self):
+    def test_queued_acknowledgement_is_removed_when_work_starts(self):
         self.connect_model()
         job_id, _ = self.receive('줄 서 있는 요청')
         self.service.acknowledge_long_work(now=time.time() + 10)
@@ -464,10 +464,10 @@ class WaitSurfaceTests(NativePresenceTestCase):
         self.service.deliver_one()
         texts = [body['text'] for method, body in self.calls if method in ('sendMessage', 'editMessageText')]
         self.assertEqual(texts[0], '요청을 받았습니다. 곧 시작할게요.')
-        self.assertEqual(texts[-2], '요청을 처리했어요.')
-        final_edit = [body for method, body in self.calls if method == 'editMessageText'][-1]
-        self.assertEqual(final_edit['reply_markup'], {'inline_keyboard': []}, 'no 결과 상태 보기 button')
         self.assertEqual(texts[-1], self.text)
+        self.assertEqual(texts, ['요청을 받았습니다. 곧 시작할게요.', self.text])
+        self.assertTrue(any(method == 'deleteMessage' for method, _body in self.calls))
+        self.assertIsNone(self.store.task_card(job_id))
 
 
 class PresentationFailureTests(NativePresenceTestCase):
@@ -785,25 +785,32 @@ class StopTests(NativePresenceTestCase):
 class RestartRecoveryTests(NativePresenceTestCase):
     def test_running_work_without_a_card_gets_one_truthful_interrupted_reply_after_restart(self):
         running, source = self.receive('긴 요청')
+        deleting, deleting_source = self.receive('카드를 지우던 요청')
         carded, _ = self.receive('카드가 있던 요청')
         web = self.store.enqueue('웹 요청', 'web-1', channel='web')
         with self.store.db() as db:
-            db.execute("UPDATE jobs SET status='running' WHERE id IN (?,?,?)", (running, carded, web))
+            db.execute("UPDATE jobs SET status='running' WHERE id IN (?,?,?,?)", (running, deleting, carded, web))
+            db.execute('INSERT INTO telegram_task_cards VALUES (?,?,?,?,?)', (deleting, CHAT, 78, 'deleting', time.time()))
             db.execute('INSERT INTO telegram_task_cards VALUES (?,?,?,?,?)', (carded, CHAT, 77, 'running', time.time()))
         restarted = AgentService(self.store, self.service.adapter, self.service.telegram_transport)
-        self.assertEqual(restarted.recover_interrupted_work(), [running])
+        self.assertCountEqual(restarted.recover_interrupted_work(), [running, deleting])
         self.assertEqual(self.store.job(running)['status'], 'interrupted')
+        self.assertEqual(self.store.job(deleting)['status'], 'interrupted')
         self.assertEqual(self.store.job(carded)['delivery'], 'none', 'the card remains its recovery surface')
         self.assertEqual(self.store.job(web)['delivery'], 'none')
+        self.assertIsNone(self.store.task_card(deleting), 'restart settles the deletion marker')
         restarted.deliver_one()
         restarted.deliver_one()
-        [reply] = self.sends()
-        self.assertEqual(reply['text'], '이 요청은 중단되었습니다. 자동으로 다시 실행하지 않았습니다.\n\n'
-                                        '실행 중 재시작되었습니다. 자동으로 재호출하지 않습니다.\n\n'
-                                        'AgentOS 웹에서 실행 기록과 다음 단계를 확인하세요.')
-        self.assertEqual(reply['reply_parameters']['message_id'], source)
-        labels = [button['text'] for button in reply['reply_markup']['inline_keyboard'][0]]
-        self.assertEqual(labels, ['다시 시도', '상세'])
+        replies = self.sends()
+        self.assertEqual(len(replies), 2)
+        expected='이 요청은 중단되었습니다. 자동으로 다시 실행하지 않았습니다.\n\n'
+        expected+='실행 중 재시작되었습니다. 자동으로 재호출하지 않습니다.\n\n'
+        expected+='AgentOS 웹에서 실행 기록과 다음 단계를 확인하세요.'
+        self.assertEqual({reply['reply_parameters']['message_id'] for reply in replies}, {source,deleting_source})
+        self.assertTrue(all(reply['text']==expected for reply in replies))
+        for reply in replies:
+            labels = [button['text'] for button in reply['reply_markup']['inline_keyboard'][0]]
+            self.assertEqual(labels, ['다시 시도', '상세'])
         self.assertFalse(restarted.run_one(), 'nothing is re-run automatically')
 
     def test_uncertain_delivery_is_not_resent_by_restart_recovery(self):

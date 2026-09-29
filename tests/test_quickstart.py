@@ -63,6 +63,7 @@ class QuickstartTests(unittest.TestCase):
             if url.endswith('/getUpdates'):return {'ok':True,'result':[]}
             if url.endswith('/sendMessage'):return {'ok':True,'result':{'message_id':len([c for c in self.calls if c[0].endswith('/sendMessage')])}}
             if url.endswith('/editMessageText'):return {'ok':True,'result':True}
+            if url.endswith('/deleteMessage'):return {'ok':True,'result':True}
             if url.endswith('/answerCallbackQuery'):return {'ok':True,'result':True}
             raise AssertionError(url)
         self.transport=transport
@@ -907,8 +908,9 @@ finally:
         self.service.ingest_callback(callback,generation)
         self.assertEqual(self.store.jobs()[0]['status'],'queued')
         self.make_due(job['id'])
-        self.service.run_one()
         card=self.store.task_card(job['id'])
+        self.service.run_one()
+        self.assertIsNone(self.store.task_card(job['id']))
         self.service.ingest_callback({'id':'late','from':{'id':42},'message':{'chat':{'id':42,'type':'private'},'message_id':card['message_id']},'data':f"p7c:{job['id']}"},generation)
         self.assertIn(self.store.jobs()[0]['status'],('succeeded','failed'))
 
@@ -1022,9 +1024,8 @@ finally:
         self.assertNotIn(job['id'],progress[1]['text'])
         self.make_due(job['id'])
         self.service.run_one()
-        edit=[c for c in self.calls if c[0].endswith('/editMessageText')][-1]
-        # #581: an unsuccessful card keeps one on-demand 상세, never "결과 상태 보기".
-        self.assertEqual(edit[1]['reply_markup']['inline_keyboard'][0][0]['text'],'상세')
+        self.assertIsNone(self.store.task_card(job['id']), 'running Work uses native presence without a task-card bubble')
+        self.assertTrue(any(c[0].endswith('/deleteMessage') for c in self.calls))
 
     def test_telegram_normal_request_has_one_terminal_answer_without_generic_completion(self):
         generation=self.pair()

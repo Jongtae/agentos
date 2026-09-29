@@ -60,6 +60,10 @@ class RecordingChannel:
         return self._record('edit_message_text', chat_id=chat_id, message_id=message_id,
                             text=text, reply_markup=reply_markup)
 
+    def delete_message(self, chat_id, message_id):
+        result=self._record('delete_message', chat_id=chat_id, message_id=message_id)
+        return result if isinstance(result,bool) else True
+
     def answer_callback_query(self, callback_query_id, text=None, show_alert=False):
         return self._record('answer_callback_query', callback_query_id=callback_query_id, text=text,
                             show_alert=show_alert)
@@ -193,13 +197,12 @@ class TelegramPolicyRoutingTests(unittest.TestCase):
         job_id=self.store.enqueue('자료를 요약해 줘','card-lifecycle')
         self.service.create_task_card(job_id, '자료를 요약해 줘', 42)
         self.service.update_task_card({'id': job_id, 'message': '자료를 요약해 줘'}, 'running')
-        self.assertEqual(self.channel.names, ['send_message', 'edit_message_text'])
+        self.assertEqual(self.channel.names, ['send_message', 'delete_message'])
         sent = self.channel.calls[0][1]
         self.assertEqual(sent['chat_id'], 42)
         self.assertEqual(sent['reply_markup'], self.service.task_card_markup(job_id, 'queued'))
-        edited = self.channel.calls[1][1]
-        self.assertEqual((edited['chat_id'], edited['message_id']), (42, 7))
-        self.assertEqual(edited['reply_markup'], self.service.task_card_markup(job_id, 'running'))
+        self.assertEqual(self.channel.calls[1][1], {'chat_id': 42, 'message_id': 7})
+        self.assertIsNone(self.store.task_card(job_id))
 
     def test_polling_routes_through_get_updates_with_the_durable_cursor(self):
         self.pair()

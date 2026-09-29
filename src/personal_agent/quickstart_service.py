@@ -4316,7 +4316,7 @@ class AgentService:
             # owner's message order.
             with self.lock:
                 current=self.store.job(row['id'])
-                if not current or current['status'] not in ('queued','running'):
+                if not current or current['status']!='queued':
                     continue
                 self.create_task_card(row['id'],row['message'],row['chat_id'],state=current['status'])
                 card=self.store.task_card(row['id'])
@@ -6372,6 +6372,15 @@ class AgentService:
     def update_task_card(self, job, state):
         card=self.store.task_card(job['id'])
         if not card or card['message_id']<1 or card['state']==state:return
+        if state=='running':
+            if not self.store.mark_task_card_deleting(job['id'],card['message_id']):return
+            try:
+                deleted=self.telegram.delete_message(card['chat_id'],card['message_id'])
+            except ProviderError:
+                return
+            if deleted is True:
+                self.store.delete_task_card(job['id'],card['message_id'])
+            return
         markup=self.task_card_markup(job['id'],state)
         try:
             self.telegram.edit_message_text(card['chat_id'],card['message_id'],
@@ -8165,9 +8174,10 @@ class AgentService:
         with self.store.db() as db:
             running=[row['id'] for row in db.execute(
                 "SELECT j.id FROM jobs j WHERE j.status='running' AND j.channel LIKE 'telegram:%' AND j.delivery='none' "
-                "AND NOT EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id)")]
+                "AND NOT EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id AND c.state!='deleting')")]
         self.store.recover()
         with self.store.db() as db:
+            db.execute("DELETE FROM telegram_task_cards WHERE state='deleting' AND job_id IN (SELECT id FROM jobs WHERE status='interrupted')")
             for work_id in running:
                 db.execute("UPDATE jobs SET delivery='pending' WHERE id=? AND status='interrupted' AND delivery='none'",(work_id,))
         return running

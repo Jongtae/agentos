@@ -684,13 +684,24 @@ def _spans(text, in_bold=False):
 #: with ``TABLE_CELL_JOIN`` and the header row is kept as one bold line.
 _TABLE_ROW = re.compile(r'^[ \t]*\|.*\|[ \t]*$')
 _TABLE_SEPARATOR = re.compile(r'^[ \t]*\|(?:[ \t]*:?-+:?[ \t]*\|)+[ \t]*$')
-_TABLE_SPLIT = re.compile(r'(?<!\\)\|')
+#: A pipe with the run of backslashes before it.  Only an odd run escapes the
+#: pipe (``\|`` is content, ``\\|`` is a cell ending in a backslash then a
+#: delimiter); a fixed-width lookbehind cannot count the run (#852).
+_TABLE_PIPE = re.compile(r'(\\*)\|')
 TABLE_CELL_JOIN = ' · '
 
 
 def _table_cells(line):
-    cells = [cell.strip().replace('\\|', '|') for cell in _TABLE_SPLIT.split(line.strip())]
-    return cells[1:-1]
+    """The cells of one row: the text between unescaped pipes, ``\|`` unescaped."""
+    line = line.strip()
+    cells, start = [], 0
+    for match in _TABLE_PIPE.finditer(line):
+        if len(match.group(1)) % 2:
+            continue  # an odd run of backslashes: the pipe is cell content
+        cells.append(line[start:match.start() + len(match.group(1))])
+        start = match.end()
+    cells.append(line[start:])
+    return [cell.strip().replace('\\|', '|') for cell in cells][1:-1]
 
 
 def _table_lines(rows):

@@ -1107,6 +1107,16 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(render_telegram_html('| a \\| b | c |\n|--|--|\n| 1 |  |'), '<b>a | b · c</b>\n1')
         self.valid(text)
 
+    def test_a_cell_ending_in_a_backslash_still_ends_at_the_pipe(self):
+        # #852 (#851 review P2): only an odd run of backslashes escapes a pipe.  A
+        # cell that ends in one backslash (an even run of two before the
+        # delimiter) keeps its backslash and the pipe stays a delimiter.
+        self.assertEqual(render_telegram_html('| C:\\\\| yes |\n|--|--|\n| x | y |'), '<b>C:\\\\ · yes</b>\nx · y')
+        self.assertEqual(render_telegram_html('| a \\\\\\| b | c |\n|--|--|\n| 1 | 2 |'), '<b>a \\\\| b · c</b>\n1 · 2')
+        # Unchanged: a lone escaped pipe, and a backslash elsewhere in a cell.
+        self.assertEqual(render_telegram_html('| a \\| b | c |\n|--|--|\n| 1 | 2 |'), '<b>a | b · c</b>\n1 · 2')
+        self.assertEqual(render_telegram_html('| C:\\\\tmp | y |\n|--|--|\n| 1 | 2 |'), '<b>C:\\\\tmp · y</b>\n1 · 2')
+
 
 def visible(rendered):
     """What the owner reads: tags removed, entities decoded."""

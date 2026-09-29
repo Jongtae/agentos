@@ -255,7 +255,7 @@ class ExposedToolWireBoundary(unittest.TestCase):
         self.assertEqual(names, ["bounded_public_research", "calendar_draft_cancel", "calendar_draft_create",
                                  "calendar_draft_update", "calendar_query", "find_files", "information_use",
                                  "list_memory", "list_notes", "list_roots", "public_page_read", "read_file", "save_memory",
-                                 "save_note", "schedule_preparation", "settings_change", "settings_read", "weather",
+                                 "save_note", "schedule_preparation", "search_memory", "settings_change", "settings_read", "weather",
                                  "web_search"])
         replies = self._wire(
             {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
@@ -264,6 +264,11 @@ class ExposedToolWireBoundary(unittest.TestCase):
         self.assertIn("result", replies[2])
         listed = json.loads(replies[3]["result"]["content"][0]["text"])
         self.assertIn("wire note", [note["content"] for note in listed["notes"]])
+        expected = self.store.save_memory('profile.store.books', '교보문고에서 책을 삽니다', work_id='source-work')
+        replies = self._wire({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                              "params": {"name": "search_memory", "arguments": {"query": "교보문고 책"}}})
+        result = json.loads(replies[2]["result"]["content"][0]["text"])
+        self.assertEqual([row['id'] for row in result['memories']], [expected['id']])
 
     def test_a_native_search_turn_gets_the_private_reads_over_the_real_bridge(self):
         """#826 (owner decision): the exact bridge command of a native-search turn lists and serves list_notes.
@@ -277,7 +282,7 @@ class ExposedToolWireBoundary(unittest.TestCase):
         self.assertEqual([tool["name"] for tool in replies[2]["result"]["tools"]],
                          ["calendar_draft_cancel", "calendar_draft_create", "calendar_draft_update", "calendar_query",
                           "find_files", "information_use", "list_memory", "list_notes", "list_roots", "public_page_read",
-                          "read_file", "save_memory", "save_note", "schedule_preparation", "settings_change",
+                          "read_file", "save_memory", "save_note", "schedule_preparation", "search_memory", "settings_change",
                           "settings_read", "weather"])
         self.assertFalse(_refused(replies[3]))
         self.assertIn("notes", json.loads(replies[3]["result"]["content"][0]["text"]))

@@ -77,7 +77,7 @@ class ProfileJudgmentAndGuidance(unittest.TestCase):
     def test_save_memory_asks_the_ai_to_save_what_the_owner_states(self):
         """#804: a stated durable fact is saved; #597 still decides Memory or candidate."""
         described = {tool['function']['name']: tool['function']['description'] for tool in DEFINITIONS}
-        save_memory, list_memory = described['save_memory'], described['list_memory']
+        save_memory, list_memory, search_memory = described['save_memory'], described['list_memory'], described['search_memory']
         self.assertIn('When the owner states a durable fact about themselves', save_memory)
         self.assertIn('where they live or work, a preference, an allergy, a routine', save_memory)
         self.assertIn('unless the owner asked you to remember it, the owner is asked with one tap whether to remember it', save_memory)
@@ -87,6 +87,9 @@ class ProfileJudgmentAndGuidance(unittest.TestCase):
             self.assertNotIn('explicitly owner-authorized', text)
             self.assertNotIn('explicit owner-authorized', text)
         self.assertIn('save_memory when the owner states a durable fact about themselves', API_TOOL_GUIDANCE)
+        self.assertIn('synonyms', search_memory)
+        self.assertIn('source reference', search_memory)
+        self.assertIn('search_memory', API_TOOL_GUIDANCE)
 
 
 class ProfileFactsInConversation(_OwnerSurface):
@@ -222,6 +225,12 @@ class ProfileFactsInSettings(_OwnerSurface):
         snapshot = self.service.owner_profile_snapshot()
         self.assertNotIn(secret, snapshot)
         self.assertRegex(snapshot, r'^profile\.wifi\.[^\n]*\[redacted\] \(saved ')
+
+    def test_owner_profile_prompt_reports_omitted_rows(self):
+        for index in range(20):
+            self.remember(f'profile.preference.item{index}', ('기억 내용 ' * 8) + str(index))
+        text = self.service.owner_profile_snapshot()
+        self.assertIn('saved profile facts omitted by the context limit; use search_memory if relevant', text)
 
     def test_settings_copy_says_profile_text_reaches_the_ai_and_excludes_secrets(self):
         html = (WEB / 'index.html').read_text(encoding='utf-8')

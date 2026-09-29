@@ -100,7 +100,7 @@ _BROWSER_ACTIONS = ('browser_open', 'browser_read', 'browser_find', 'browser_cli
 _PREPARATIONS = 'owner-preparations-not-bound-to-cli-route'
 #: #774: relayed to the service on the trusted-local route only.
 _OWNER_STATE_RELAYED = ('calendar_query', 'calendar_draft_create', 'calendar_draft_update', 'calendar_draft_cancel',
-                        'list_memory', 'save_memory', 'schedule_preparation', 'ask_location',
+                        'list_memory', 'search_memory', 'save_memory', 'schedule_preparation', 'ask_location',
                         # #814: owner settings and their confirm-before-apply drafts, held by the service.
                         'settings_read', 'settings_change',
                         # #826: the information-use audit, read from the Work records the service holds.
@@ -208,7 +208,7 @@ CLI_PROFILES = {
         'unavailable': {action: _ISOLATED for action in (
             'bounded_public_research', 'save_note', 'weather', 'web_search', 'public_page_read',
             'find_files', 'read_file', 'list_roots', 'calendar_query', 'calendar_draft_create',
-            'calendar_draft_update', 'calendar_draft_cancel', 'save_memory', 'list_memory',
+            'calendar_draft_update', 'calendar_draft_cancel', 'save_memory', 'list_memory', 'search_memory',
             'list_agents', 'delegate_agent', 'propose_current_state', 'schedule_preparation', 'ask_location',
             'settings_read', 'settings_change', 'information_use', *_BROWSER_ACTIONS)},
         # Pinned in Dockerfile.engine; a test keeps the two in step.
@@ -230,7 +230,7 @@ CLI_PROFILES = {
             'find_files': _STRICT_FILES, 'read_file': _STRICT_FILES, 'list_roots': _STRICT_FILES,
             'calendar_query': _CALENDAR, 'calendar_draft_create': _CALENDAR,
             'calendar_draft_update': _CALENDAR, 'calendar_draft_cancel': _CALENDAR,
-            'save_memory': _MEMORY, 'list_memory': _MEMORY,
+            'save_memory': _MEMORY, 'list_memory': _MEMORY, 'search_memory': _MEMORY,
             'list_agents': _SPECIALISTS, 'delegate_agent': _SPECIALISTS,
             **{action: _BROWSER for action in _BROWSER_ACTIONS},
             'schedule_preparation': _PREPARATIONS,

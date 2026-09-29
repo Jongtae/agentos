@@ -25,6 +25,7 @@ refs, paths, titles, counts, queries - never payloads; a secret redactor is
 applied to every label before it leaves this module.
 """
 import json
+from datetime import datetime, timezone
 
 #: Evidence class of every audit this module returns.
 EVIDENCE_CLASS = 'observed AgentOS records (turn_provenance, tool_events, decision_audit); not model claims'
@@ -35,7 +36,7 @@ QUERY_CHARS = 200
 
 #: Owner-private reads, by host action, and the category their items belong to.
 READ_CATEGORIES = {
-    'list_memory': 'memory', 'save_memory': 'memory',
+    'list_memory': 'memory', 'search_memory': 'memory', 'save_memory': 'memory',
     'calendar_query': 'calendar', 'calendar_draft_create': 'calendar', 'calendar_draft_update': 'calendar',
     'calendar_draft_cancel': 'calendar',
     'find_files': 'files', 'read_file': 'files', 'list_roots': 'files',
@@ -134,6 +135,27 @@ def _event_items(action, evidence):
     if action == 'list_memory':
         keys = [_text(key, 80) for key in evidence.get('memory_keys') or ()]
         return keys or [f"기억 {int(evidence.get('memory_count') or 0)}개"]
+    if action == 'search_memory':
+        query = _text(' '.join(evidence.get('query_terms') or ()), 80)
+        refs = []
+        for item in evidence.get('memory_refs') or ():
+            if not isinstance(item, dict):
+                continue
+            saved = item.get('saved_at')
+            if not saved and item.get('created') is not None:
+                try:
+                    saved = datetime.fromtimestamp(float(item['created']), timezone.utc).isoformat(timespec='seconds')
+                except (TypeError, ValueError, OverflowError, OSError):
+                    saved = None
+            label = _text(item.get('memory_key'), 80)
+            if saved:
+                label += f" (saved { _text(saved, 25) }"
+                if item.get('work_ref'):
+                    label += f", {_text(item.get('work_ref'), 60)}"
+                label += ')'
+            refs.append(label)
+        keys = [_text(key, 80) for key in evidence.get('memory_keys') or ()]
+        return [f"기억 검색: {query} → {', '.join(refs or keys) if refs or keys else '일치 없음'}"]
     if action == 'save_memory':
         key = _text(evidence.get('memory_key'), 80)
         state = '저장' if evidence.get('saved') else '제안'

@@ -136,6 +136,10 @@ Six axes, all of which are part of the product and none of which is optional:
 5. **Family and other-agent collaboration** — delegating work that belongs to another person's agent (for example adding an item to a spouse's cart) through an agent-to-agent request rather than by acting with that person's authority. Second phase of this program.
 6. **Capabilities** — web search, page reading, browser action in a logged-in session, calendar, mail and files, shopping. Each is a replaceable module behind a generic interface; providers and sites are chosen by the model at run time, not fixed in code.
 
+### Cross-Work Memory recall (OWNER-MEMORY-01 #862)
+
+The profile snapshot is bounded. Its text says when saved profile rows were omitted; the worker may use `search_memory` for a relevant saved fact outside the snapshot. The worker chooses whether to search and which owner words or plausible synonyms to query. Search is owner-scoped, bounded to current Memory rows, and returns each match with its saved time and source Work reference. `list_memory` remains a bounded first-page read; search can find matching rows beyond it. Search uses a rebuildable SQLite FTS5 index over the canonical Memory table where available, with a bounded literal-match fallback; the index is never owner state. Each search, its query terms and returned key, time and source references appear in the per-Work information-use audit. Querying does not change capture, candidate, approval, correction, deletion or egress rules. Temporary today-only situations remain current context, not durable profile facts.
+
 ## The agency loop
 
 ### Roles

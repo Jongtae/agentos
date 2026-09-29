@@ -6885,14 +6885,6 @@ class AgentService:
             try:
                 image_inputs=[]
                 photo_file_id=self.store.telegram_photo_file_id(job['id'])
-                if photo_file_id:
-                    try:
-                        image_inputs=[self.telegram.download_photo(photo_file_id)]
-                    except ProviderError as exc:
-                        self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':1,'status':'failed'})
-                        raise ValueError(str(exc)) from None
-                    finally:
-                        self.store.remove_telegram_photo(job['id'])
                 owner_prompt=job['message'].strip()
                 prompt=owner_prompt
                 #: The Work whose message is `prompt` (a retry replays another's).
@@ -7039,6 +7031,12 @@ class AgentService:
                         db.execute("UPDATE jobs SET status='awaiting_connection',response=?,error=NULL,delivery=? WHERE id=?",(guidance,'pending' if job['chat_id'] else 'none',job['id']))
                     self.update_task_card(job,'awaiting_connection')
                     return True
+                if photo_file_id:
+                    try:
+                        image_inputs=[self.telegram.download_photo(photo_file_id)]
+                    except ProviderError as exc:
+                        self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':1,'status':'failed'})
+                        raise ValueError(str(exc)) from None
                 # #606 T4: a natural-language rule-matched read that needs
                 # clarification or finds nothing is re-judged by the Work
                 # model loop (not re-run): the loop gets the observation, never
@@ -7046,7 +7044,13 @@ class AgentService:
                 # added.  Explicit forms, approvals, parked/retry/cancel and
                 # calendar-pending state stay terminal.
                 handled=True;fallthrough_note=None
-                if rule_note is not None:
+                if image_inputs:
+                    # The selected Work AI owns image interpretation. Keep the photo
+                    # with the request instead of letting text-only deterministic
+                    # intent handlers answer while ignoring the attached pixels.
+                    handled=False
+                    fallthrough_note='사진 자료를 포함한 요청을 선택된 AI 작업자에게 전달합니다.'
+                elif rule_note is not None:
                     handled=False;fallthrough_note=rule_note
                 elif not decision.executes:
                     # Ambiguous, missing a required detail, or a consequential
@@ -7479,6 +7483,7 @@ class AgentService:
                                     if image_inputs:
                                         self.record_turn_provenance(job['id'],photo_input={'source':'Telegram photo','count':len(image_inputs),
                                                                                          'status':'unsupported','route':'isolated-agentos-mcp'})
+                                        self.store.remove_telegram_photo(job['id'])
                                         raise ExecutionError('격리 런타임 배포는 사진 입력을 지원하지 않습니다. 현재 AI 연결을 바꿔 실행해 주세요.',
                                                              failure_class='unsupported-image-input')
                                     # #679: the sidecar's closed contract carries no model; a Work
@@ -7523,6 +7528,7 @@ class AgentService:
                                         execution_options={'context':adapter_context}
                                         if image_inputs:execution_options['images']=image_inputs
                                         if work_model:execution_options['model']=work_model
+                                        if image_inputs:self.store.remove_telegram_photo(job['id'])
                                         result=self.execution_adapter.execute(subscription['id'],engine_prompt,served,**execution_options)
                                     finally:
                                         # #718: a live CLI step ends with its attempt.
@@ -7674,6 +7680,7 @@ class AgentService:
                                 # #833: the outcome judgment reads the same profile / current-context sections.
                                 run_options={'owner_context':api_context}
                                 if image_inputs:run_options['images']=image_inputs
+                                if image_inputs:self.store.remove_telegram_photo(job['id'])
                                 result=run_agent(self.adapter,runtime_config,key,[*api_context['conversation'],{'role':'user','content':api_context['request']}],context_sections(api_context),capabilities,record,**run_options)
                             except Exception as exc:
                                 self.record_turn_provenance(job['id'],status='failed',failure_class=type(exc).__name__,egress_taint=sorted(capabilities.private_provenance))

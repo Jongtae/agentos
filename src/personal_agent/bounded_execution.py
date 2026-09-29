@@ -1364,11 +1364,12 @@ class BoundedExecutionAdapter:
             elif native_search:
                 # Only WebSearch among the built-in tools, pre-approved by its exact name,
                 # beside every offered bridge tool (#826: private reads included).
-                allowed=claude_bridge_allowlist(BOUNDED_PROFILE, native_search=True, read_paths=image_paths)
+                allowed=claude_bridge_allowlist(BOUNDED_PROFILE, native_search=True,
+                                                read_paths=[Path(path).name for path in image_paths])
                 builtins=[CLAUDE_NATIVE_SEARCH_TOOL, *(('Read',) if image_paths else ())]
                 argv += ['--tools', *builtins, allowed[0], ','.join(filter(None, (allowed[1], CLAUDE_NATIVE_SEARCH_TOOL)))]
             else:
-                argv += claude_bridge_allowlist(BOUNDED_PROFILE, read_paths=image_paths)
+                argv += claude_bridge_allowlist(BOUNDED_PROFILE, read_paths=[Path(path).name for path in image_paths])
             return argv
         raise ExecutionError('지원하는 구독 엔진을 선택하세요.')
 

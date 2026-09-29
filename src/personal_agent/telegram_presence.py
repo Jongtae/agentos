@@ -694,7 +694,7 @@ TABLE_CELL_JOIN = ' · '
 
 
 def _table_cells(line):
-    """The cells of one row: the text between unescaped pipes, ``\|`` unescaped."""
+    """The cells of one row: the text between unescaped pipes, an escaped pipe unescaped."""
     line = line.strip()
     cells, start, run_len, run_end = [], 0, 0, -1
     for match in _TABLE_TOKEN.finditer(line):

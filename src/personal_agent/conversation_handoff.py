@@ -184,6 +184,20 @@ class TelegramChannel:
             body['can_stop'] = True
         return self.call('sendMessageDraft', body, timeout=TELEGRAM_PRESENCE_TIMEOUT)
 
+    def send_rich_message_draft(self, chat_id, draft_id, blocks, can_stop=True):
+        """Show an ephemeral rich draft: Telegram's animated thinking block (#858).
+
+        ``blocks`` is the ``InputRichMessage.blocks`` list
+        (``telegram_presence.rich_draft_blocks``): first an
+        ``InputRichBlockThinking`` (``<tg-thinking>``), which Bot API 10.3
+        allows only in ``sendRichMessageDraft``, then optionally one paragraph.
+        The same ``draft_id`` as the plain draft, so Stop maps back the same way.
+        """
+        body = {'chat_id': chat_id, 'draft_id': draft_id, 'rich_message': {'blocks': list(blocks)}}
+        if can_stop:
+            body['can_stop'] = True
+        return self.call('sendRichMessageDraft', body, timeout=TELEGRAM_PRESENCE_TIMEOUT)
+
     def get_updates(self, offset, timeout=5, allowed_updates=None, limit=20):
         """Long-poll only the update kinds this conversation actually handles."""
         kinds = TELEGRAM_POLL_UPDATE_KINDS if allowed_updates is None else allowed_updates
@@ -518,6 +532,21 @@ MAIL_QUERY_TERM_QUESTION = ('The owner is asking about their own mail. Which one
                             'not authorize any action.')
 #: At most this many of the owner's own words are offered as query terms.
 MAIL_QUERY_MAX_TERMS = 12
+# #858: the reaction emoji on the owner's Telegram message, chosen by the
+# Judgment AI.  The candidates come from the caller (``telegram_presence``
+# keeps the curated, documented set); the questions here only frame the choice.
+TURN_REACTION_QUESTION = ('The owner just sent this message to their personal assistant, which is starting to work '
+                          'on it. Choose the one reaction emoji that best acknowledges the message itself - its '
+                          'tone, mood and what it asks - as a warm, attentive secretary would tap on it. Vary with '
+                          'the message; do not default to the same emoji. Choose none-of-these only if no listed '
+                          'emoji fits. This judgment is presentation only and does not authorize any action.')
+CLOSING_REACTION_QUESTION = ('The assistant has answered the owner\'s message; the answer was delivered and the work '
+                             'succeeded. Choose the one reaction emoji that best closes this exchange, fitting the '
+                             'owner\'s message and the content-free fact that it received a successful answer, '
+                             'as a warm secretary would tap on the request once it is done. '
+                             'Vary with the exchange; do not default to the same emoji. Choose none-of-these only if '
+                             'no listed emoji fits. This judgment is presentation only and never claims more than '
+                             'the observed Work outcome.')
 #: Recipient/source endings trimmed from a query-term candidate so a Gmail
 #: search gets the bare name ("집주인한테" -> "집주인").  Query formatting only;
 #: which term is used is the DecisionEngine's selection.
@@ -729,6 +758,39 @@ class ConversationJudgments:
         if self.policy.confident_selection(decision):
             return Judgment(JUDGMENT_NO, source=decision.confidence.provider or decision.outcome)
         return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
+
+    def turn_reaction(self, utterance, candidates):
+        """The reaction emoji for the owner's message when its Work starts (#858).
+
+        ``candidates`` is the curated set of documented Telegram reactions;
+        the choice is one of them or None (unavailable, unconfident, or
+        none-of-these), in which case the caller keeps its deterministic emoji.
+        The context is the one owner message only.
+        """
+        candidates = tuple(candidates)
+        if not candidates:
+            return None
+        context = self._context('turn-reaction', {'owner_message': utterance}, uncut='owner_message')
+        decision = self.engine.choose(context, candidates, TURN_REACTION_QUESTION)
+        return self.policy.selection(decision)
+
+    def closing_reaction(self, utterance, candidates, wrote=False):
+        """The reaction emoji that closes a succeeded, delivered answer (#858).
+
+        Asked only when ``outcome_reaction`` already allows a closing emoji;
+        the context contains the owner message and content-free delivery facts,
+        never the answer text, which may contain private source material.
+        ``wrote`` says the Work observably saved a note or Memory item.
+        """
+        candidates = tuple(candidates)
+        if not candidates:
+            return None
+        facts = {'owner_message': utterance,
+                 'answer_delivered': 'yes',
+                 'saved_a_note_or_memory': 'yes' if wrote else 'no'}
+        context = self._context('closing-reaction', facts, uncut='owner_message')
+        decision = self.engine.choose(context, candidates, CLOSING_REACTION_QUESTION)
+        return self.policy.selection(decision)
 
     def mail_query_term(self, utterance, terms):
         """Which of ``terms`` (the owner's own words) identifies the mail sought?

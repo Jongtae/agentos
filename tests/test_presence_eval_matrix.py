@@ -73,7 +73,8 @@ CAL_NOW = datetime(2026, 9, 22, 10, 0, tzinfo=ZoneInfo(ZONE)).timestamp()
 #: ``calendar-create`` (#672: no request word selects it).
 CALENDAR_REQUESTS = ('내일 오후 3시에 치과 일정 잡아줘', 'book a dentist appointment tomorrow at 3pm for 30 minutes',
                      '금요일 오전 9시 스탠드업 30분 일정 등록해줘', '다음 주 화요일 10시 반 병원 예약 일정 추가해줘')
-PRESENCE_METHODS = ('setMessageReaction', 'sendChatAction', 'sendMessageDraft')
+PRESENCE_METHODS = ('setMessageReaction', 'sendChatAction', 'sendMessageDraft', 'sendRichMessageDraft')
+DRAFT_METHODS = ('sendMessageDraft', 'sendRichMessageDraft')
 #: Administrative lifecycle phrasing that must never be a routine bubble.
 LIFECYCLE_CHATTER = ('처리 중입니다', '처리가 끝났습니다', '요청을 받았습니다', '작업을 시작', '작업이 완료',
                      '결과 상태 보기', 'queued', 'running', 'completed')
@@ -572,11 +573,13 @@ class G_LongResearch(PresenceEval):
         self.assertEqual(methods[-2:], ['sendMessage', 'setMessageReaction'])
         self.assertEqual(self.reactions(), [RECEIVED_REACTION, DONE_REACTION])
         self.assertEqual(len(self.bubbles()), 1, 'progress never becomes a durable bubble')
-        drafts = [body for method, body in self.wire if method == 'sendMessageDraft']
-        # #835: one plain draft edited in place, the dots advancing at 6s, 9s, 14s and 27s.
-        self.assertEqual(drafts, [{'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'text': frame, 'can_stop': True}
+        drafts = [body for method, body in self.wire if method == 'sendRichMessageDraft']
+        # #835: one draft edited in place, the dots advancing at 6s, 9s, 14s and
+        # 27s; #858: as Telegram's animated thinking block, no label.
+        self.assertEqual(drafts, [{'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'can_stop': True,
+                                   'rich_message': {'blocks': [{'type': 'thinking', 'text': frame}]}}
                                   for frame in DOTS_FRAMES + DOTS_FRAMES[:1]])
-        self.assertNotIn('sendRichMessageDraft', methods)
+        self.assertNotIn('sendMessageDraft', methods)
         self.assertEqual(self.bubbles()[0]['reply_parameters']['message_id'], message_id)
         self.assertIsNone(self.store.task_card(job['id']))
         self.assert_no_lifecycle_chatter(self.texts())
@@ -595,7 +598,7 @@ class G_LongResearch(PresenceEval):
             self.service.acknowledge_long_work(now=job['created'] + 30)
         job, message_id = self.research_turn('캠핑 의자 조사 좀 해줄래', EvalNet(), '의자 A가 가볍습니다.', think)
         self.assertEqual(outcomes, ['running', 'duplicate'])
-        self.assertEqual(self.methods().count('sendMessageDraft'), 1, 'no draft after Stop')
+        self.assertEqual(sum(self.methods().count(m) for m in DRAFT_METHODS), 1, 'no draft after Stop')
         # #606 T1: Stop is checked before the next model turn or tool call.
         self.assertEqual(job['status'], 'failed', 'Stop ended the Work before its next step')
         notice, answer = self.bubbles()

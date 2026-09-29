@@ -207,7 +207,7 @@ class AttentionWaitTests(NativePresenceTestCase):
             db.execute('INSERT INTO telegram_notifications VALUES (?,?,?,?,?,?,?,?,?)',
                        ('n-approval', job_id, CHAT, GENERATION, 'approval_needed', None, 'queued', None, time.time()))
         self.service.run_one()
-        self.assertNotIn('sendMessageDraft', self.methods())
+        self.assertEqual(self.draft_methods(), [])
         self.assertEqual(self.surfacings(job_id), [])
 
     # --- (g) the audit -------------------------------------------------------------------

@@ -83,8 +83,10 @@ from .browser_jar import unexpired
 from .cli_browser_relay import BrowserRelay
 from .telegram_presence import (ATTENTION_ACTION, ATTENTION_ASK, ATTENTION_COOLDOWN, ATTENTION_PREPARED, ATTENTION_REMINDER,
                                 ATTENTION_REMINDER_HORIZON, ATTENTION_TOOL, CONTROL_DETAILS, CONTROL_RETRY, NO_STEP_LINE,
-                                RECEIVED_REACTION, WAIT_CHAT_ACTION, WAIT_DRAFT, PresenceTiming, TelegramTurnAddressing,
+                                CLOSING_CANDIDATES, DONE_REACTIONS, RECEIVED_CANDIDATES,
+                                RECEIVED_REACTION, WAIT_CHAT_ACTION, WAIT_DRAFT, WROTE_REACTION, PresenceTiming, TelegramTurnAddressing,
                                 WaitState, draft_frame, draft_id_for, draft_step, outcome_reaction, pick_attention,
+                                rich_draft_blocks, with_note,
                                 render_telegram_html, reply_controls_markup, without_consumed)
 LOCAL_RESUMED_KEY='local_authority_resumed_jobs'
 LOCAL_DOCUMENT_RESUME_KEY='local_authority_document_resume_jobs'
@@ -4228,16 +4230,48 @@ class AgentService:
             return False
 
     def present_turn(self, job):
-        """React 👀 once to the owner's message when its Work starts (#835).
+        """React to the owner's message when its Work starts (#835, #858).
 
-        Every natural-language owner turn gets the same "looking" reaction:
-        nothing is read from its words and no model is called.  Only
-        `deliver_one` replaces it, after the outcome is decided
-        (`outcome_reaction`).  `present_waiting_work` usually shows it
-        first, as soon as the Work runs; this call is idempotent with that.
+        Every natural-language owner turn gets 👀 at once, with nothing read
+        from its words.  Then, once per run and from the worker thread like
+        every other per-turn judgment, the owner's Judgment AI chooses the
+        emoji that fits the message (`ConversationJudgments.turn_reaction`,
+        `RECEIVED_CANDIDATES`) and it replaces the 👀; an unavailable or
+        unconfident judgment keeps 👀.  At delivery, the outcome truth gate
+        decides whether a closing judgment is allowed; other terminal
+        outcomes clear the reaction, and parked work keeps it.
+        `present_waiting_work` usually shows the 👀 first, as soon as the
+        Work runs; this call is idempotent with that.
         """
         if not self._telegram_work(job) or not self.is_natural_language(job.get('message')):return
-        self._react_received(job,self.presence.setdefault(job['id'],WaitState()))
+        state=self.presence.setdefault(job['id'],WaitState())
+        self._react_received(job,state)
+        if state.reaction is None or state.reaction_asked:return
+        state.reaction_asked=True
+        self._react_chosen(job,state)
+
+    def _react_chosen(self, job, state):
+        """Replace the 👀 by the Judgment AI's choice for this message (#858).
+
+        The judgment runs outside the lock (it may take a model round trip);
+        the send is under `self.lock` and only while the Work is still
+        running with its presence state, so it can never follow the outcome
+        reaction of a Work that finished meanwhile.  Best-effort like every
+        presence call.
+        """
+        try:
+            emoji=self.decision_judge.turn_reaction(job.get('message'),RECEIVED_CANDIDATES)
+        except Exception as exc:  # presentation only
+            LOG.info('telegram turn reaction judgment skipped: %s',type(exc).__name__)
+            return
+        if not emoji or emoji==state.reaction or emoji not in RECEIVED_CANDIDATES:return
+        with self.lock:
+            current=self.store.job(job['id'])
+            if not current or current['status']!='running' or self.presence.get(job['id']) is not state:return
+            source=self.telegram_turns.source(job['id'])
+            if not isinstance(source,int):return
+            if self._presence_call('set_message_reaction',job['chat_id'],source,emoji):
+                state.reaction=emoji
 
     def _react_received(self, job, state):
         """Set 👀 once per Work run; True when a Telegram call was made.
@@ -4250,7 +4284,8 @@ class AgentService:
         if self._answered_before(job['id']):return False
         source=self.telegram_turns.source(job['id'])
         if not isinstance(source,int):return False
-        self._presence_call('set_message_reaction',job['chat_id'],source,RECEIVED_REACTION)
+        if self._presence_call('set_message_reaction',job['chat_id'],source,RECEIVED_REACTION):
+            state.reaction=RECEIVED_REACTION
         return True
 
     def _present_outcome(self, job, *, delivered, blocked, awaiting_owner=False):
@@ -4258,12 +4293,14 @@ class AgentService:
 
         Called by `deliver_one` under `self.lock` once the Work's outcome is
         decided and its one reply was sent (or its delivery became unknown).
-        Deterministic from the decided status and observed tool events
-        (`outcome_reaction`); a "done" reaction only for `succeeded` with a
-        delivered, non-blocked reply and nothing left for the owner to approve
+        The deterministic truth gate (`outcome_reaction`) allows the Judgment AI
+        to choose a closing emoji only for `succeeded` with a delivered,
+        non-blocked reply and nothing left for the owner to approve
         (``awaiting_owner``: pending memory candidates; a pending approval
-        prompt; a draft awaiting approval in the events); otherwise the
-        reaction is removed.  A non-terminal (parked) Work keeps 👀.
+        prompt; a draft awaiting approval in the events). Otherwise the
+        reaction is removed. A non-terminal (parked) Work keeps its reaction.
+        The closing decision is attributed to this Work for the #826
+        information-use audit.
         Best-effort like every presence call: a failure here never changes
         Work or its delivery.
         """
@@ -4276,11 +4313,34 @@ class AgentService:
                 for row in self.store.task_notifications(job['id']))
             emoji=outcome_reaction(job.get('status'),self.store.task_events(job['id']),delivered=delivered,
                                    blocked=blocked,awaiting_owner=awaiting_owner)
+            state=self.presence.get(job['id'])
+            if emoji in DONE_REACTIONS:
+                # #858: only when the truth rule already allows a closing emoji,
+                # the Judgment AI chooses which; unavailable keeps 👌 / ✍.
+                # #826: delivery happens outside run_one's Work context, so
+                # attribute this decision audit row to the source Work here.
+                previous_work_id=self.current_work_id
+                self.current_work_id=job['id']
+                try:
+                    try:
+                        chosen=self.decision_judge.closing_reaction(job.get('message'),CLOSING_CANDIDATES,
+                                                                  wrote=emoji==WROTE_REACTION)
+                    except Exception as exc:
+                        # A failed optional judgment keeps the truth-gated,
+                        # deterministic completion reaction.
+                        LOG.info('telegram closing reaction judgment skipped: %s',type(exc).__name__)
+                        chosen=None
+                finally:
+                    self.current_work_id=previous_work_id
+                if chosen in CLOSING_CANDIDATES:emoji=chosen
+            if state is not None and emoji==state.reaction:
+                emoji=None
         except Exception as exc:  # presentation only
             LOG.info('telegram presence outcome reaction skipped: %s',type(exc).__name__)
             return
         if emoji is not None:
-            self._presence_call('set_message_reaction',job['chat_id'],source,emoji)
+            if self._presence_call('set_message_reaction',job['chat_id'],source,emoji) and state is not None:
+                state.reaction=emoji
 
     def present_waiting_work(self, now=None):
         """Show 👀, `typing…` and a Stop-able dots draft for running Telegram Work.
@@ -4333,7 +4393,7 @@ class AgentService:
                         if state.attention is None:
                             state.attention=self.waiting_attention(job,now) or {}
                         text=draft_frame(line,state.dots_frame,state.attention.get('line'))
-                        if self._send_draft(job,text):
+                        if self._send_draft(job,state,draft_frame(line,state.dots_frame),state.attention.get('line')):
                             state.draft_at=now
                             state.draft_text=text
                             state.dots_frame+=1
@@ -4444,16 +4504,25 @@ class AgentService:
         except Exception as exc:
             LOG.info('waiting attention record skipped job=%s: %s',job.get('id'),type(exc).__name__)
 
-    def _send_draft(self, job, text):
-        """One Stop-able plain `sendMessageDraft`: the dots after any step line (#718/#835).
+    def _send_draft(self, job, state, text, note=None):
+        """One Stop-able draft edit: the dots after any step line (#718/#835/#858).
 
-        The text is never empty (an empty draft is a blank bubble on the
-        owner's iOS client, #581).  The rich draft's thinking block is no
-        longer used: it renders its own "thinking" label, which the owner
-        asked to lose (2026-09-28).  The `draft_id` maps Stop back to the Work.
+        First Telegram's animated thinking block (`sendRichMessageDraft`,
+        `rich_draft_blocks`: the thinking block holds `text`, the #839
+        attention `note` follows as a paragraph).  Once that is refused for
+        this Work (`state.rich_draft_failed`) the plain `sendMessageDraft`
+        carries the same text; a refusal there too is the caller's fallback
+        to typing.  The text is never empty (an empty draft is a blank bubble
+        on the owner's iOS client, #581).  The same `draft_id` maps Stop back
+        to the Work either way.
         """
-        return self._presence_call('send_message_draft',job['chat_id'],draft_id_for(job['id']),text or draft_frame('',0),
-                                   can_stop=True)
+        text=text or draft_frame('',0)
+        draft_id=draft_id_for(job['id'])
+        if not state.rich_draft_failed:
+            if self._presence_call('send_rich_message_draft',job['chat_id'],draft_id,rich_draft_blocks(text,note),can_stop=True):
+                return True
+            state.rich_draft_failed=True
+        return self._presence_call('send_message_draft',job['chat_id'],draft_id,with_note(text,note),can_stop=True)
 
     #: Notification kinds whose prompt is the Work's only surface while pending (#718).
     APPROVAL_NOTIFICATIONS=('approval_needed','context_approval_needed','browser_approval_needed')
@@ -7702,9 +7771,6 @@ class AgentService:
                 status='unknown'
             with self.store.db() as db:
                 db.execute('UPDATE jobs SET delivery=? WHERE id=?',(status,job['id']))
-            self.presence.pop(job['id'],None)
-            # #835: only now, with the outcome decided and the reply sent, 👀 becomes the outcome reaction.
-            self._present_outcome(job,delivered=status=='sent',blocked=bool(blocked),awaiting_owner=memory_pending)
             if markup and isinstance(message_id,int):
                 self.telegram_turns.record_reply(job['id'],job['chat_id'],message_id)
             # #818/#836: after a reply confirmed sent (never 'unknown'), the Work's
@@ -7713,6 +7779,11 @@ class AgentService:
                 if memory_pending and status=='sent':self.queue_memory_candidates(job)
             except Exception as exc:
                 LOG.warning('memory candidate offer failed work=%s kind=%s',job['id'],type(exc).__name__)
+        # #835/#858: delivery is durable before the truth-gated outcome
+        # presentation. This optional remote Judgment call runs outside the
+        # service lock, so it cannot stall polling, Stop updates or work.
+        self._present_outcome(job,delivered=status=='sent',blocked=bool(blocked),awaiting_owner=memory_pending)
+        self.presence.pop(job['id'],None)
 
     def mark_telegram_connected(self):
         cfg=self.store.config('telegram',{})

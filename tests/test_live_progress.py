@@ -31,7 +31,8 @@ from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.telegram_presence import (DEFAULT_STEP_TEXT, NO_STEP_LINE, RETRY_STEP_TEXT, PresenceTiming,
-                                              draft_body_text, draft_frame, draft_id_for, draft_step, step_line)
+                                              draft_body_text, draft_frame, draft_id_for, draft_step,
+                                              draft_step_details, step_line)
 
 CHAT = 4242
 GENERATION = 'g1'
@@ -135,8 +136,17 @@ class StepLineTests(unittest.TestCase):
     def test_a_step_is_shown_only_while_its_call_runs(self):
         events = [running('web_search', {'action': 'web_search', 'status': '찾는 중'}, 'c1')]
         self.assertEqual(draft_step(events), ('찾는 중', False))
+        self.assertEqual(draft_step_details(events), ('찾는 중', False, (None, 1.0, 'web_search', 'c1')))
         events.append(finished('web_search', 'c1'))
         self.assertEqual(draft_step(events), (NO_STEP_LINE, False))
+        self.assertIsNone(draft_step_details(events)[2])
+
+    def test_same_visible_line_on_a_new_call_is_a_new_step_identity(self):
+        events = [running('web_search', {'action': 'web_search', 'status': '찾는 중'}, 'c1')]
+        first = draft_step_details(events)[2]
+        events.append(running('web_search', {'action': 'web_search', 'status': '찾는 중'}, 'c2', created=3.0))
+        self.assertEqual(draft_step(events)[0], '찾는 중')
+        self.assertNotEqual(draft_step_details(events)[2], first)
 
     def test_a_call_that_never_ran_shows_nothing(self):
         # Refused before its running event (invalid arguments, repeat path): no step exists.

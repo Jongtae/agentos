@@ -295,7 +295,18 @@ def draft_step(events, live=None):
     the only surface is the existing approval prompt and ``text`` is None.
     With no step in flight ``text`` is NO_STEP_LINE (the draft shows dots).
     """
-    current = None          # (created, tool, call_id, step, host)
+    text, approval, _identity = draft_step_details(events, live)
+    return text, approval
+
+
+def draft_step_details(events, live=None):
+    """Return ``(text, approval, identity)`` for the current observed step.
+
+    ``identity`` is present only for a real running tool/CLI step and remains
+    stable across wait polls. Presentation can therefore react once per
+    observed transition instead of once per refresh.
+    """
+    current = None          # (created, tool, call_id, step, host, identity)
     last_host = None
     for event in events or ():
         trace = event.get('trace') if isinstance(event.get('trace'), dict) else {}
@@ -306,12 +317,15 @@ def draft_step(events, live=None):
             attempt = trace.get('attempt')
             if event.get('status') == ORCHESTRATION_PLANNED and isinstance(attempt, int):
                 # #753: attempt 1 closes any earlier step's line (for example a preflight).
-                current = ((event.get('created') or 0, ORCHESTRATION_TOOL, None, {'announce': RETRY_STEP_TEXT}, last_host)
+                current = ((event.get('created') or 0, ORCHESTRATION_TOOL, None, {'announce': RETRY_STEP_TEXT}, last_host, None)
                            if attempt > 1 else None)
             continue
         if event.get('status') == 'running' and isinstance(step, dict):
-            current = (event.get('created') or 0, event.get('tool'), trace.get('call_id'), step,
-                       step.get('host') or last_host)
+            created = event.get('created') or 0
+            tool = event.get('tool')
+            call_id = trace.get('call_id')
+            identity = (event.get('id'), created, tool, call_id)
+            current = (created, tool, call_id, step, step.get('host') or last_host, identity)
             if step.get('host'):
                 last_host = step['host']
         elif (event.get('status') != 'running' and current is not None and event.get('tool') == current[1]
@@ -319,12 +333,13 @@ def draft_step(events, live=None):
             current = None
     if isinstance(live, dict) and isinstance(live.get('step'), dict):
         if live.get('at', 0) >= (current[0] if current else float('-inf')):
-            current = (live.get('at', 0), None, None, live['step'], last_host) if live.get('running') else None
+            identity = ('live', live.get('id')) if live.get('id') is not None else ('live', live.get('at'))
+            current = (live.get('at', 0), None, None, live['step'], last_host, identity) if live.get('running') else None
     if current is not None:
         if current[3].get('approval'):
-            return None, True
-        return step_line(current[3], current[4]), False
-    return NO_STEP_LINE, False
+            return None, True, current[5]
+        return step_line(current[3], current[4]), False, current[5]
+    return NO_STEP_LINE, False, None
 
 CONTROL_RETRY = 'retry'
 CONTROL_DETAILS = 'details'
@@ -376,6 +391,11 @@ RECEIVED_CANDIDATES = (
 CLOSING_CANDIDATES = (
     '👌', '✍', '👍', '🎉', '🏆', '💯', '🔥', '🤝', '🫡', '🙏', '😎', '🤓', '🍾', '⚡', '🆒', '❤', '🥰',
     '😁', '🤗', '😇', '🕊', '🤩', '☃', '🎄',
+)
+#: Offered for an observed running step. The Judgment AI selects from these;
+#: no action/tool/category is mapped to a fixed reaction in AgentOS.
+PROGRESS_CANDIDATES = (
+    '👀', '🤔', '👍', '🫡', '🤗', '🔥', '🤩', '🤓', '👨\u200d💻', '⚡', '🤝', '🙏', '💯', '🆒',
 )
 #: The deterministic closing emoji, the only ones that let the AI be asked.
 DONE_REACTIONS = (DONE_REACTION, WROTE_REACTION)
@@ -503,6 +523,8 @@ class WaitState:
     #: this run), and whether the Judgment AI was already asked for it.
     reaction: str = None
     reaction_asked: bool = False
+    #: Identity of the last observed progress step considered for a reaction.
+    progress_reaction_step: object = None
     chat_action_at: float = None
     draft_at: float = None
     draft_failed: bool = False

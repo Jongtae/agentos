@@ -83,10 +83,10 @@ from .browser_jar import unexpired
 from .cli_browser_relay import BrowserRelay
 from .telegram_presence import (ATTENTION_ACTION, ATTENTION_ASK, ATTENTION_COOLDOWN, ATTENTION_PREPARED, ATTENTION_REMINDER,
                                 ATTENTION_REMINDER_HORIZON, ATTENTION_TOOL, CONTROL_DETAILS, CONTROL_RETRY, NO_STEP_LINE,
-                                CLOSING_CANDIDATES, DONE_REACTIONS, RECEIVED_CANDIDATES,
+                                CLOSING_CANDIDATES, DONE_REACTIONS, PROGRESS_CANDIDATES, RECEIVED_CANDIDATES,
                                 RECEIVED_REACTION, WAIT_CHAT_ACTION, WAIT_DRAFT, WROTE_REACTION, PresenceTiming, TelegramTurnAddressing,
                                 WaitState, draft_frame, draft_id_for, draft_step, outcome_reaction, pick_attention,
-                                rich_draft_blocks, with_note,
+                                draft_step_details, rich_draft_blocks, with_note,
                                 render_telegram_html, reply_controls_markup, without_consumed)
 LOCAL_RESUMED_KEY='local_authority_resumed_jobs'
 LOCAL_DOCUMENT_RESUME_KEY='local_authority_document_resume_jobs'
@@ -4306,6 +4306,8 @@ class AgentService:
         with self.lock:
             current=self.store.job(job['id'])
             if not current or current['status']!='running' or self.presence.get(job['id']) is not state:return
+            # A real progress stage supersedes a late-arriving start judgment.
+            if state.progress_reaction_step is not None:return
             source=self.telegram_turns.source(job['id'])
             if not isinstance(source,int):return
             if self._presence_call('set_message_reaction',job['chat_id'],source,emoji):
@@ -4325,6 +4327,47 @@ class AgentService:
         if self._presence_call('set_message_reaction',job['chat_id'],source,RECEIVED_REACTION):
             state.reaction=RECEIVED_REACTION
         return True
+
+    def _pending_progress_reaction(self, job, state):
+        """Claim one new observed running step for an optional reaction judgment.
+
+        Called with ``self.lock`` held. Marking it before the judgment prevents
+        duplicate decisions on the next wait poll, including after an
+        unavailable judgment.
+        """
+        text,approval,identity=draft_step_details(self.store.task_events(job['id']),self.live_steps.get(job['id']))
+        if identity is None or approval or not text or identity==state.progress_reaction_step:return None
+        state.progress_reaction_step=identity
+        return identity,text
+
+    def _react_progress_choice(self, job, state, pending):
+        """Judge outside the service lock, then apply only to the still-current step."""
+        identity,text=pending
+        try:
+            # Use the same Work-scoped redaction as the live progress line, then
+            # let ConversationJudgments apply its normal secret redaction too.
+            step=' '.join(str(self.scrub_work_text(job['id'],text)).split())
+            if not step:return
+            previous_work_id=self.current_work_id
+            self.current_work_id=job['id']
+            try:
+                emoji=self.decision_judge.progress_reaction(step,PROGRESS_CANDIDATES)
+            finally:
+                self.current_work_id=previous_work_id
+        except Exception as exc:  # optional presentation only
+            LOG.info('telegram progress reaction judgment skipped: %s',type(exc).__name__)
+            return
+        if not emoji or emoji not in PROGRESS_CANDIDATES:return
+        with self.lock:
+            current=self.store.job(job['id'])
+            if not current or current['status']!='running' or self.presence.get(job['id']) is not state:return
+            _text,approval,current_identity=draft_step_details(
+                self.store.task_events(job['id']),self.live_steps.get(job['id']))
+            if approval or current_identity!=identity:return
+            source=self.telegram_turns.source(job['id'])
+            if not isinstance(source,int) or emoji==state.reaction:return
+            if self._presence_call('set_message_reaction',job['chat_id'],source,emoji):
+                state.reaction=emoji
 
     def _present_outcome(self, job, *, delivered, blocked, awaiting_owner=False):
         """Replace 👀 by the outcome reaction, after the answer was sent (#835).
@@ -4417,6 +4460,14 @@ class AgentService:
                 if state.stopped:continue
                 # #835: 👀 as soon as the Work runs, before its first decision.
                 if self._react_received(job,state):continue
+                progress=self._pending_progress_reaction(job,state)
+            if progress:
+                self._react_progress_choice(job,state,progress)
+            with self.lock:
+                job=self.store.job(row['id'])
+                if not job or job['status']!='running' or not self._telegram_work(job):continue
+                state=self.presence.get(job['id'])
+                if state is None or state.stopped:continue
                 surface=timing.wait_surface(now-job['created'],
                                             durable_surface=self.store.task_card(job['id']) is not None,
                                             draft_available=not state.draft_failed)

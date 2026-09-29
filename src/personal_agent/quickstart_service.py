@@ -6962,6 +6962,7 @@ class AgentService:
         with self.lock:
             cfg=self.store.config('telegram',{})
             token=self.store.secret('telegram_token')
+        self.settle_expired_telegram_photo_albums()
         if not cfg.get('enabled') or not token: return
         updates=self.telegram.get_updates(cfg.get('cursor',0), timeout=1)
         for update in sorted(updates,key=lambda u:u.get('update_id',0)):
@@ -6981,7 +6982,11 @@ class AgentService:
                         current['cursor']=update['update_id']+1
                         self.store.put('telegram',current)
             else:self.ingest_update(update,cfg['generation'])
-        cutoff=time.time()-TELEGRAM_PHOTO_ALBUM_SETTLE_SECONDS
+        self.settle_expired_telegram_photo_albums()
+
+    def settle_expired_telegram_photo_albums(self, now=None):
+        """Release persisted album Works after their short update-collection window."""
+        cutoff=(time.time() if now is None else now)-TELEGRAM_PHOTO_ALBUM_SETTLE_SECONDS
         with self.store.db() as db:
             db.execute('DELETE FROM telegram_photo_albums WHERE last_received<=?',(cutoff,))
 
@@ -6996,9 +7001,12 @@ class AgentService:
         with self.worker_lock:
             with self.store.db() as db:
                 db.execute('BEGIN IMMEDIATE')
-                row=db.execute("SELECT j.* FROM jobs j WHERE j.status='queued' AND NOT EXISTS (SELECT 1 FROM telegram_photo_albums a WHERE a.job_id=j.id) AND (NOT EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id) OR EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id AND c.message_id!=-1 AND c.created<=?)) ORDER BY j.created LIMIT 1",(time.time()-TELEGRAM_CARD_GRACE_SECONDS,)).fetchone()
+                row=db.execute("SELECT j.* FROM jobs j WHERE j.status='queued' ORDER BY j.created LIMIT 1").fetchone()
                 if not row:return False
                 job=dict(row)
+                if db.execute('SELECT 1 FROM telegram_photo_albums WHERE job_id=?',(job['id'],)).fetchone():return False
+                card=db.execute('SELECT message_id,created FROM telegram_task_cards WHERE job_id=?',(job['id'],)).fetchone()
+                if card and (card['message_id']==-1 or card['created']>time.time()-TELEGRAM_CARD_GRACE_SECONDS):return False
                 db.execute("UPDATE jobs SET status='running' WHERE id=?",(job['id'],))
                 db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('user',job['message'],job['channel'],time.time(),job.get('workspace_id'),job['id']))
             self.current_work_id=job['id']
@@ -7175,9 +7183,15 @@ class AgentService:
                     return True
                 if photo_file_ids:
                     try:
-                        image_inputs=[self.telegram.download_photo(file_id) for file_id in photo_file_ids[:TELEGRAM_WORK_PHOTO_LIMIT]]
-                        if sum(len(image) for image in image_inputs)>TELEGRAM_WORK_PHOTO_BYTES_LIMIT:
-                            raise ProviderError('앨범 사진의 총 용량이 한도보다 큽니다.')
+                        image_bytes=0
+                        for file_id in photo_file_ids[:TELEGRAM_WORK_PHOTO_LIMIT]:
+                            remaining=TELEGRAM_WORK_PHOTO_BYTES_LIMIT-image_bytes
+                            if remaining<=0:raise ProviderError('앨범 사진의 총 용량이 한도보다 큽니다.')
+                            image=self.telegram.download_photo(file_id,max_bytes=remaining)
+                            payload=image.get('data') if isinstance(image,dict) else None
+                            if not isinstance(payload,bytes):raise ProviderError('Telegram 사진을 읽을 수 없습니다.')
+                            image_bytes+=len(payload)
+                            image_inputs.append(image)
                     except ProviderError as exc:
                         self.record_photo_attempt(job['id'],status='failed',count=len(photo_file_ids),route='telegram-download')
                         raise ValueError(str(exc)) from None

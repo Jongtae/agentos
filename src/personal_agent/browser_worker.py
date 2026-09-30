@@ -194,8 +194,10 @@ const buttonish = (el) => { const tag = el.tagName.toLowerCase();
   if (tag === 'select' || tag === 'textarea') return false;
   return !roles.some((role) => VALUE_ROLES.includes(role)); };
 // A link that goes somewhere (a styled ``href="#"`` or ``javascript:`` link runs a script instead).
+// #899: only an http(s) address, and no inline click handler: pressing it can only open a page.
 const navLink = (el) => el.tagName.toLowerCase() === 'a' && el.hasAttribute('href') &&
-  !/^\s*(?:#|javascript:)/i.test(el.getAttribute('href') || '');
+  !/^\s*(?:#|javascript:)/i.test(el.getAttribute('href') || '') && /^https?:/i.test(el.href || '') &&
+  !el.hasAttribute('onclick');
 const commitText = (el) => nameOf(el) + ' | ' + ownText(el);
 const labelName = (el) => { const control = labelControl(el); return control && buttonish(control) ? commitText(control) : ''; };
 // The nearest pressable ancestor a press on ``el`` also activates (a trusted click bubbles).

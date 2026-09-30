@@ -169,8 +169,7 @@ COMMIT_PHRASES = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
     r"\b(?:pay|buy)\b\s*[$€£¥₩]?\s*\d",
     r"\btop\s*-?\s*up\b",
     r"(?:결제|구매|주문|구독|후원|충전|송금|이체)\s*(?:하기|진행|완료|확정|신청|시작)",
-    r"바로\s*(?:결제|구매|주문)|간편\s*결제|정기\s*결제",
-    r"(?:결제|구매|주문|송금|이체)\s*(?:$|[\d(₩])",
+    r"(?:바로|즉시)\s*(?:결제|구매|주문)|간편\s*결제|정기\s*결제",
     r"\d[\d,.]*\s*원\s*(?:결제|구매|주문)",
     r"注文(?:する|を確定|確定)|購入(?:する|手続き|確定)",
     r"立即(?:购买|購買|订购|訂購|支付|付款)|提交(?:订单|訂單)|确认(?:支付|付款)|確認(?:支付|付款)",
@@ -182,6 +181,14 @@ COMMIT_VERBS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
     r"購入(?!履歴|方法)|支払(?!い?方法)|決済(?!方法)|寄付|送金|チャージ",
     r"支付(?!方式|方法|宝|寶)|付款(?!方式|方法)|购买(?!方式|方法|记录)|購買(?!方式|方法|紀錄)|下单|下單|订购|訂購|充值|转账|轉帳|捐款|订阅|訂閱",
 ))
+#: #899 (owner decision 2026-09-30: judge a link by where it goes): a label *ending*
+#: in a commit noun ("구매", "결제 ₩12,000").  On a control that is not a navigating
+#: link this counts as before.  A navigating link - an http(s) address with no inline
+#: click handler (``nav_link``, measured by the worker) - only opens a page, so there
+#: it counts only when the noun is the whole label: "자주구매" or "재구매" is the name
+#: of a list page.  A ``#``/``javascript:``/``onclick`` link is judged as a button.
+COMMIT_NOUN_END = re.compile(r"(?:결제|구매|주문|송금|이체)\s*(?:$|[\d(₩])")
+COMMIT_NOUN_ALONE = re.compile(r"^(?:결제|구매|주문|송금|이체)\s*(?:$|[\d(₩])")
 #: A name at most this long is a control's label, not an article or result title.
 COMMIT_SHORT = 24
 #: A pressable ancestor's text longer than this is a content wrapper, not a control (#758).
@@ -203,6 +210,8 @@ def commit_name(name, link=False):
     if not text:
         return False
     if any(pattern.search(text) for pattern in COMMIT_PHRASES):
+        return True
+    if (COMMIT_NOUN_ALONE if link else COMMIT_NOUN_END).search(text):
         return True
     return (not link or len(text) <= COMMIT_SHORT) and any(pattern.search(text) for pattern in COMMIT_VERBS)
 

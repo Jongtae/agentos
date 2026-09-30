@@ -65,7 +65,7 @@ The owner-facing projection should instead read as:
 3. **Continue before restarting.** Resolve a new turn against recent conversation focus, unresolved Work, corrections and approval state before creating an unrelated interaction.
 4. **Communicate semantic progress, not scheduler state.** Do not mechanically project queued/running/completed lifecycle events. Send only progress that changes what the owner needs to know.
 5. **Truth before fluency.** failed, partial, unknown and approval-pending state constrain the response before conversational wording is applied. Model prose never outranks observed Evidence.
-6. **Ask at the moment of need; manage afterward.** Capability, folder and account authority should be requested contextually when needed. Settings is primarily for inspect/change/revoke/manage.
+6. **Ask at the moment of need; the agent manages.** Capability, folder and account authority should be requested contextually when needed. The owner does not operate a management console: the owner's AI reads and changes settings in conversation. A page appears only when conversation text cannot carry a result, or cannot safely carry an input (owner direction 2026-09-30, #880; see *Pages* below).
 7. **Memory is useful, scoped and correctable.** Short-horizon conversational focus and durable Memory are distinct. Durable memory remains inspectable, correctable and revocable.
 8. **Proactivity must earn the interruption.** Attention/heartbeat can amplify Presence later, but reactive Presence must work without it and unsolicited contact requires relevance, authority and timing.
 9. **Model-first semantics; rules only where exactness is unavoidable.** Ordinary language/intent/reference/routing/recovery/projection decisions should use the provider-neutral DecisionEngine rather than keyword lists, regexes or capability-specific branches. Deterministic code remains authoritative for security, owner authority, approval, idempotency, effect/Evidence truth and protocol/state invariants.
@@ -93,7 +93,8 @@ The model never owns truth or authority. Grants, approvals, effect classificatio
 | --- | --- | --- |
 | Conversation / Telegram | intent, clarification, repair, answer, contextual handoff, meaningful progress, recovery, conversational approval | a Work-status or engine-log console |
 | Local approval surface | filesystem picker, read/write grants, owner-bound OAuth, consequential preview, allow/deny | a remote chat link that silently grants host authority |
-| Settings | inspect/manage/change/revoke AI route, connections, folder grants, Memory/preferences | mandatory tutorial/onboarding before ordinary tasks |
+| Result pages | views opened from a conversation link when text is a poor fit: what AgentOS believes about the owner with sources, a Work's decision tree and information-use audit, long tables, Artifacts, calendars | a management console the owner is expected to operate, or mandatory tutorial/onboarding before ordinary tasks |
+| Settings (existing screens) | inspect/change/revoke AI route, connections, folder grants, Memory/preferences until the #880 census reassigns each screen | a place new management pages are added |
 | Task / Evidence detail | exact Work timeline, worker/tool IDs, sources, errors, approvals, partial/unknown details | the primary path for every ordinary result or failure |
 | Internal kernel | Work/Event/Evidence/Context/Memory/Grant/effect state/idempotency/routing | the user-visible personality |
 
@@ -164,9 +165,17 @@ Examples:
 
 Conversation may trigger the handoff; it must not bypass the local/owner authority boundary.
 
+## Pages
+
+Owner direction 2026-09-30 (#880): designing Settings as a management page was a misjudgment. The agent does the work, so the owner manages AgentOS by talking to it. Pages exist at the level of need:
+
+- **Result pages.** Open one from a conversation link when text cannot carry the result well. Examples are the owner model with sources (#794), a Work's decision tree and information-use audit (#826), long tables and comparisons, Artifacts and calendars. The conversation still gives the useful answer first.
+- **Necessary input surfaces.** Keep a local surface when conversation cannot safely carry the input: secret entry (a secret never enters a model prompt), OAuth consent, the OS folder picker, payment and consequential-effect approval, and connecting the first AI before any agent exists. Reach each one at the moment of need through a conversation link, not a management menu. Their authority semantics stay in the approval contracts and the [Owner Control Contract](owner-control-contract.en.md).
+- **No new management pages.** New work must not add a settings or management screen that the owner is expected to operate. The existing Settings screens below remain as implemented until a census classifies each one as conversation-handled, a necessary input surface or a result page, and retires the rest. That census is a separate follow-up and is not selected by #880.
+
 ## Settings contract
 
-Settings is a preferences/management surface.
+Settings is a preferences/management surface. It describes the existing screens; *Pages* above governs new work.
 
 Default rows should expose owner concepts such as:
 - service / route / folder name;

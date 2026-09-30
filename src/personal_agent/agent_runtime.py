@@ -182,9 +182,10 @@ BROWSER_SESSION_NOTE=(' The owner cannot see this browser session: whatever it h
 #: #910 (live, Work 6b3bf077): the cart page showed "signed out" as ordinary content,
 #: so no login_required state arose and the owner was only told in text.  The
 #: in-flow login (#709) starts when a page carries a sign-in form.
-BROWSER_SIGN_IN_NOTE=(' When the request needs the owner\'s own account (their cart, orders, saved items) and a page shows '
-                      'you are signed out, open the site\'s own sign-in page with browser_open: AgentOS then asks the owner to '
-                      'sign in on this Mac and continues the request once they have. Never type a password yourself.')
+BROWSER_SIGN_IN_NOTE=(' Whenever a page you open or reach shows a sign-in form, AgentOS asks the owner to sign in on this Mac '
+                      'and continues the request once they have. So when the owner\'s own account is needed and a page shows '
+                      'you are signed out, reach the site\'s sign-in form, by its address or its sign-in control. Never type '
+                      'a password yourself.')
 BROWSER_EFFECT_NOTE=' Declare effect: read (only looking), navigate (moving between pages), mutate (changes account state such as a cart or a form), payment (pays or enters card data; always needs owner approval). AgentOS refuses card/one-time-code/password fields and their form buttons without the owner\'s approval whatever the label says.'
 #: #655: actions whose one public search takes the model's provider/locale.
 SEARCH_BACKED_ACTIONS=frozenset({'web_search','bounded_public_research'})

@@ -134,7 +134,9 @@ class OneActionSource(_Store):
         self.assertIn(BROWSER_SESSION_NOTE, NATIVE['browser_open']['description'])
         # #910: a signed-out page leads the AI to the site's own sign-in page, which starts the in-flow login.
         self.assertIn(BROWSER_SIGN_IN_NOTE, NATIVE['browser_open']['description'])
-        self.assertIn("open the site's own sign-in page", BROWSER_SIGN_IN_NOTE)
+        self.assertIn("reach the site's sign-in form, by its address or its sign-in control", BROWSER_SIGN_IN_NOTE)
+        for scripted in ('cart', 'order', 'saved item'):
+            self.assertNotIn(scripted, BROWSER_SIGN_IN_NOTE, 'the capability, not a task (C16)')
         self.assertIn('Never type a password', BROWSER_SIGN_IN_NOTE)
         wire = {tool['name']: tool for tool in AgentOSMcpTools(self.caps(browser=lambda: None)).definitions()}
         self.assertIn(BROWSER_SESSION_NOTE, wire['browser_open']['description'])

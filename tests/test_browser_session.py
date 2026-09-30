@@ -489,10 +489,20 @@ class MediationTests(unittest.TestCase):
         from personal_agent.agent_runtime import page_exclusions
         self.assertEqual(page_exclusions(['배민'], '배민'), [])
         self.assertEqual(page_exclusions(['카카오골프, 더블이글 비교해 가장 싼 티 선호'], '카카오골프, 더블이글에서 가장 싼 티를 찾아줘'),
-                         ['비교해 티 선호'])  # a one-character word is not a stem match (#597): kept
+                         ['비교해 싼 티 선호'])  # a one-character word is never left out: kept
         self.assertEqual(page_exclusions([PASSPORT, '010-1234-5678'], '세탁세제 찾아줘'), [PASSPORT, '010-1234-5678'])
         self.assertEqual(page_exclusions([PASSPORT], ''), [PASSPORT])
         self.assertEqual(page_exclusions(['보관함 비밀 4719'], '보관함 알려줘'), ['비밀 4719'])
+        # A particle-bearing owner word covers the value word it starts with.
+        self.assertEqual(page_exclusions(['배민'], '배민으로 시켜줘'), [])
+        # #889 review P2: a shorter owner word never covers a longer value word.
+        self.assertEqual(page_exclusions(['johnsmith'], 'john 에게 메일 보내줘'), ['johnsmith'])
+        self.assertEqual(page_exclusions(['golfzonpassword'], 'golfzon 예약해줘'), ['golfzonpassword'])
+        self.assertEqual(page_exclusions(['김치냉장고 모델 X100'], '김치 레시피'), ['김치냉장고 모델 X100'])
+        # #889 review P3: digits need the owner's exact words in the owner's order.
+        self.assertEqual(page_exclusions(['333333-222-110'], '110-222-333333'), ['333333-222-110'])
+        self.assertEqual(page_exclusions(['110-222-333333'], '110-222-333333 계좌'), [])
+        self.assertEqual(page_exclusions(['010-1234-5678'], '1234번'), ['010 5678'])
 
     def test_saved_private_values_are_redacted_from_page_text(self):
         sess, _ = session(excluded=lambda: [PASSPORT])
@@ -1114,10 +1124,22 @@ class LoopTests(unittest.TestCase):
     def caps(self, transport, driver, **kwargs):
         return Capabilities(self.store, ModelAdapter(transport), CFG, '', 'job', self.record, browser=lambda: driver, **kwargs)
 
-    def owner_asked(self, message):
+    def owner_asked(self, message, typed=True):
         with self.store.db() as db:
-            db.execute("INSERT INTO jobs(id,request_key,message,status,created) VALUES ('job','k-job',?,'running',?)",
-                       (message, time.time()))
+            db.execute("INSERT INTO jobs(id,request_key,message,status,created,owner_typed) VALUES ('job','k-job',?,'running',?,?)",
+                       (message, time.time(), 1 if typed else None))
+
+    def test_only_an_owner_typed_request_of_this_worker_narrows_the_set(self):
+        """#889 review P3: a preparation's goal and a delegated specialist keep the full set."""
+        self.owner_asked('세탁세제 찾아줘', typed=False)
+        caps = self.caps(Script(), FakeDriver())
+        caps.written_private = ['세탁세제']
+        self.assertEqual(caps._page_excluded(), ['세탁세제'])
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET owner_typed=1 WHERE id='job'")
+        self.assertEqual(caps._page_excluded(), [])
+        child = self.caps(Script(), FakeDriver(), delegated=True, inherited_excluded=['세탁세제'])
+        self.assertEqual(child._page_excluded(), ['세탁세제'])
 
     def test_the_owners_own_words_in_this_request_do_not_mask_the_page(self):
         """#889: a value the Work saved from the owner's own words no longer blanks those words on public pages."""

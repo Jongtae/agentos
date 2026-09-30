@@ -343,6 +343,29 @@ class OwnerCommand(unittest.TestCase):
         self.assertEqual(self.actions, [])
         self.assertFalse((self.root / 'home/.local/share/agentos-instances/spouse').exists())
 
+    def test_each_route_travels_with_its_companions_and_only_its_secrets(self):
+        """Re-review P2-7/P3-8/P3-9."""
+        family = QuickStore(self.root / 'family-direct')
+        self.owner.put('subscription_engine', {})
+        self.owner.put('model', {'provider': 'openai', 'endpoint': 'https://api.openai.com/v1', 'model': 'gpt-x'})
+        self.owner.put('model_test', {'ok': True, 'fingerprint': 'f'})
+        self.owner.secret('model_key', 'sk-owner-model')
+        self.owner.put('decision_route', {'transport': 'direct_api'})
+        self.owner.put('decision_route_checks', [{'ok': True}])
+        self.owner.put('decision_jev', {'model': 'jev'})
+        self.owner.secret('decision_jev_key', 'jev-key')
+        self.owner.secret('decision_model_key', 'orphan-key')
+        copied = family_setup.share_ai_route(self.owner, family)
+        self.assertEqual(family.config('model_test'), {'ok': True, 'fingerprint': 'f'}, 'a direct route arrives ready')
+        self.assertEqual((family.secret('model_key'), family.secret('decision_jev_key')), ('sk-owner-model', 'jev-key'))
+        self.assertEqual(family.config('decision_route_checks'), [{'ok': True}])
+        self.assertEqual(family.secret('decision_model_key'), '', 'a secret without its row stays behind')
+        self.assertNotIn('sk-owner-model', json.dumps(copied))
+        # A route the family instance already has is kept on a re-run.
+        self.owner.put('model', {'provider': 'anthropic', 'endpoint': 'https://api.anthropic.com', 'model': 'other'})
+        self.assertEqual(family_setup.share_ai_route(self.owner, family), [])
+        self.assertEqual(family.config('model')['model'], 'gpt-x')
+
     def test_without_an_owner_ai_route_nothing_is_installed(self):
         self.owner.put('subscription_engine', {})
         self.assertEqual(self.invoke('add', 'spouse'), 1)

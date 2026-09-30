@@ -141,6 +141,8 @@ The family member opens the link on their phone:
 
 The link then closes by itself. Through the link, only the setup page and its status answer, and only with the link's one-time code. Once an instance was set up this way, no tunnel reaches anything else on it: a family instance is not meant to be served through `--public-tunnel-host`. The page tells the family member that the agent runs on your Mac with your AI subscription.
 
+The instance runs on **your** AI route. `family add` copies your main AI and judgment AI settings, with only the keys or tokens those routes use. It copies nothing else: not your Telegram bot, folders, memory or other connections. An instance that already has a route keeps it. If you later change or rotate your AI key, the family instance keeps the old one until you set its route again.
+
 The manual commands below remain available.
 
 ```sh

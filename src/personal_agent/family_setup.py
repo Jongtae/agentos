@@ -419,33 +419,53 @@ def _local_status(port, code, opener=_LOOPBACK.open):
 
 
 #: The owner's AI route a family instance runs on (#893: the owner shares the
-#: subscription).  Configuration rows, and only the secrets those routes use.
-SHARED_ROUTE_CONFIG = ('subscription_engine', 'model', 'decision_route')
-SHARED_ROUTE_SECRETS = ('claude_code_token', 'model_key', 'decision_model_key')
+#: subscription).  Each configuration row travels with the rows it needs and the
+#: secrets it consumes, and a secret only with its row (re-review P2-7).
+SHARED_ROUTE_ROWS = {
+    'subscription_engine': ((), ('claude_code_token',)),
+    'model': (('model_test',), ('model_key',)),
+    'decision_route': (('decision_route_checks',), ()),
+    'decision_model': ((), ('decision_model_key',)),
+    'decision_jev': ((), ('decision_jev_key',)),
+}
+
+
+def _has_route(store):
+    engine = store.config('subscription_engine', {})
+    model = store.config('model', {})
+    return bool((isinstance(engine, dict) and engine.get('id')) or (isinstance(model, dict) and model.get('provider')))
 
 
 def share_ai_route(owner_store, family_store):
-    """Give the family instance the owner's AI route; returns the copied names (never values).
+    """Give a family instance the owner's AI route; returns the copied names (never values).
 
     Without a route a paired family member would only be told to connect a
-    model (review P1).  Only the route rows and their secrets are copied; the
-    owner's memory, folders, Telegram bot and every other secret stay behind.
+    model (review P1).  Only the route rows, their companion rows and the
+    secrets they consume are copied; the owner's memory, folders, Telegram bot
+    and every other secret stay behind.  An instance that already has a route
+    keeps it (re-review P3-9).  Returns None when the owner has no route.
     """
-    engine = owner_store.config('subscription_engine', {})
-    model = owner_store.config('model', {})
-    if not ((isinstance(engine, dict) and engine.get('id')) or (isinstance(model, dict) and model.get('provider'))):
+    if not _has_route(owner_store):
         return None
+    if _has_route(family_store):
+        return []
     copied = []
-    for key in SHARED_ROUTE_CONFIG:
+    for key, (companions, secret_keys) in SHARED_ROUTE_ROWS.items():
         value = owner_store.config(key, None)
-        if value:
-            family_store.put(key, value)
-            copied.append(key)
-    for key in SHARED_ROUTE_SECRETS:
-        value = owner_store.secret(key)
-        if value:
-            family_store.secret(key, value)
-            copied.append(key)
+        if not value:
+            continue
+        family_store.put(key, value)
+        copied.append(key)
+        for companion in companions:
+            extra = owner_store.config(companion, None)
+            if extra:
+                family_store.put(companion, extra)
+                copied.append(companion)
+        for secret_key in secret_keys:
+            secret = owner_store.secret(secret_key)
+            if secret:
+                family_store.secret(secret_key, secret)
+                copied.append(secret_key)
     return copied
 
 

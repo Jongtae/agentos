@@ -82,7 +82,7 @@ from . import information_use
 from .browser_session import BrowserProfile, ascii_host, binding_digest, registrable_domain
 from .browser_jar import unexpired
 from .cli_browser_relay import BrowserRelay
-from .telegram_presence import (ATTENTION_ACTION, ATTENTION_ASK, ATTENTION_COOLDOWN, ATTENTION_PREPARED, ATTENTION_REMINDER,
+from .telegram_presence import (ATTENTION_ACTION, ATTENTION_ASK, ATTENTION_COOLDOWN, ATTENTION_MEMORY_ASK_FRESH, ATTENTION_PREPARED, ATTENTION_REMINDER,
                                 ATTENTION_REMINDER_HORIZON, ATTENTION_TOOL, CONTROL_DETAILS, CONTROL_RETRY, NO_STEP_LINE,
                                 CLOSING_CANDIDATES, DONE_REACTIONS, PROGRESS_CANDIDATES, RECEIVED_CANDIDATES,
                                 RECEIVED_REACTION, WAIT_CHAT_ACTION, WAIT_DRAFT, WROTE_REACTION, PresenceTiming, TelegramTurnAddressing,
@@ -4676,6 +4676,9 @@ class AgentService:
         for row in asks:
             binding=self.memory_binding(row)
             if not binding or not self.memory_open(binding):continue
+            # #888: only while the ask is fresh; an older one is not repeated on unrelated turns.
+            sent=binding.get('sent') if isinstance(binding.get('sent'),(int,float)) else row['created']
+            if now-sent>ATTENTION_MEMORY_ASK_FRESH:continue
             first=binding['candidates'][self.memory_open(binding)[0]-1]
             candidate=self.memory_candidate_still(row['job_id'],first.get('id'),first.get('digest'))
             if not candidate:continue

@@ -12,7 +12,7 @@ import unittest
 from personal_agent import preparations as prep
 from personal_agent.information_use import work_information_use
 from personal_agent.quickstart_service import MEMORY_CANDIDATES_KIND
-from personal_agent.telegram_presence import (ATTENTION_ASK, ATTENTION_PREFIX, ATTENTION_PREPARED, ATTENTION_REMINDER,
+from personal_agent.telegram_presence import (ATTENTION_ASK, ATTENTION_COOLDOWN, ATTENTION_MEMORY_ASK_FRESH, ATTENTION_PREFIX, ATTENTION_PREPARED, ATTENTION_REMINDER,
                                               DOTS_FRAMES, attention_line, draft_frame, pick_attention)
 from test_telegram_native_presence import CHAT, GENERATION, NativePresenceTestCase
 
@@ -139,6 +139,19 @@ class AttentionWaitTests(NativePresenceTestCase):
         self.assertIn('저녁은 매운 음식 선호', lines[0])
         self.assertIn('기억해 둘까요', lines[0])
         self.assertNotIn('food_preference', lines[0], 'the value, never the memory key')
+
+    def test_a_memory_ask_older_than_its_conversation_is_not_repeated(self):
+        """#888: an ask sent more than an hour ago stays in 내 기록, never on an unrelated turn's draft."""
+        self.assertLess(ATTENTION_MEMORY_ASK_FRESH, ATTENTION_COOLDOWN, 'surfaced at most once')
+        self.memory_ask()
+        with self.store.db() as db:
+            row = db.execute('SELECT fingerprint FROM telegram_notifications').fetchone()
+            binding = json.loads(row['fingerprint'])
+            binding['sent'] = time.time() - ATTENTION_MEMORY_ASK_FRESH - 60
+            db.execute('UPDATE telegram_notifications SET fingerprint=?,created=?',
+                       (json.dumps(binding), binding['sent']))
+        self.turn('질문')
+        self.assertEqual(self.attention_lines(), [])
 
     def test_selection_order_prepared_then_reminder_then_ask(self):
         self.memory_ask()

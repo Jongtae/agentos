@@ -16,6 +16,9 @@ from personal_agent.telegram_presence import (ATTENTION_ASK, ATTENTION_COOLDOWN,
                                               DOTS_FRAMES, attention_line, draft_frame, pick_attention)
 from test_telegram_native_presence import CHAT, GENERATION, NativePresenceTestCase
 
+#: The dots of the first four drafts, whatever the frame count (#921).
+DOTS = tuple(DOTS_FRAMES[index % len(DOTS_FRAMES)] for index in range(4))
+
 SECRET = 'sk-live-ATTNSECRET1234567890'
 
 
@@ -82,7 +85,7 @@ class AttentionWaitTests(NativePresenceTestCase):
         self.assertEqual(len(drafts), 2)
         # Dots first, the "참, …" line under them; the same line on every frame of this Work, never empty.
         self.assertEqual(drafts[0], draft_frame('', 0, attention_line(ATTENTION_PREPARED, row['goal_text'])))
-        self.assertEqual(drafts[1].split('\n')[0], DOTS_FRAMES[1])
+        self.assertEqual(drafts[1].split('\n')[0], DOTS[1])
         self.assertTrue(all(line.startswith(ATTENTION_PREFIX) and row['goal_text'] in line for line in self.attention_lines()))
         self.assertNotIn(SECRET, '\n'.join(drafts))
         # The durable surfaces are unchanged: one reply, no extra message, the preparation row untouched.
@@ -94,7 +97,7 @@ class AttentionWaitTests(NativePresenceTestCase):
         self.prepared(delivered=True)
         self.turn('질문')
         self.assertEqual(self.attention_lines(), [])
-        self.assertEqual(self.drafts(), [DOTS_FRAMES[0], DOTS_FRAMES[1]])
+        self.assertEqual(self.drafts(), [DOTS[0], DOTS[1]])
 
     def test_a_when_needed_watch_is_never_surfaced(self):
         # #719: its judgment already decided what the owner hears (notified, or deliberately quiet).

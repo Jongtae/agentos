@@ -231,9 +231,10 @@ const contextOf = (el) => { let node = el.parentElement; const own = (el.innerTe
 // is refused (target_changed) rather than pressed.
 const describe = (el, tokens) => ({tag: el.tagName.toLowerCase(), type: typeOf(el), autocomplete: autocompleteOf(el), name: nameOf(el),
   own_text: ownText(el), label_name: labelName(el), ancestor_text: ancestorText(el), in_form: !!formOf(el),
-  payment_form: paymentForm(el, tokens), nav_link: navLink(el), pressable: buttonish(el)});
+  payment_form: paymentForm(el, tokens), nav_link: navLink(el), pressable: buttonish(el),
+  href: el.tagName.toLowerCase() === 'a' ? cut(el.href, 2000) : ''});
 const same = (actual, expect) => !!expect && ['tag', 'type', 'autocomplete', 'name', 'own_text', 'label_name', 'ancestor_text',
-  'in_form', 'payment_form', 'nav_link', 'pressable']
+  'in_form', 'payment_form', 'nav_link', 'pressable', 'href']
   .every((key) => key in expect && actual[key] === expect[key]);
 const state = () => (window.__agentos = window.__agentos || {targets: new Map(), guard: null, listening: false,
   off: false, allow: null, cancelled: null, held: null, vetted: [], submitListening: false});

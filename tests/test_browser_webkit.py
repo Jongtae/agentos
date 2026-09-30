@@ -491,7 +491,7 @@ class DriverProtocolTests(unittest.TestCase):
         # The full descriptor the guard classified, and the guard's payment tokens.
         self.assertEqual(ops[3]['expect'], {'tag': 'button', 'type': 'submit', 'autocomplete': '', 'name': 'Go',
                                             'own_text': '', 'label_name': '', 'ancestor_text': '', 'in_form': False,
-                                            'payment_form': False, 'nav_link': False, 'pressable': True})
+                                            'payment_form': False, 'nav_link': False, 'pressable': True, 'href': ''})
         self.assertEqual(ops[3]['tokens'], sorted(bs.PAYMENT_AUTOCOMPLETE))
         self.assertEqual(ops[4]['expect'], ops[3]['expect'])
         self.assertEqual((ops[3]['approved'], ops[4]['approved']), (False, False), 'unapproved unless the session says so')

@@ -190,6 +190,9 @@ COMMIT_VERBS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
 #: of a list page.  A ``#``/``javascript:``/``onclick`` link is judged as a button.
 COMMIT_NOUN_END = re.compile(r"(?:결제|구매|주문|송금|이체)\s*(?:$|[\d(₩])")
 COMMIT_NOUN_ALONE = re.compile(r"^(?:결제|구매|주문|송금|이체)\s*(?:$|[\d(₩])")
+#: A commit noun followed by a price ("세제 구매 ₩12,000") names a purchase wherever it
+#: stands, so it counts on a navigating link too (#905 review).
+COMMIT_NOUN_PRICE = re.compile(r"(?:결제|구매|주문|송금|이체)\s*[\d(₩]")
 #: A name at most this long is a control's label, not an article or result title.
 COMMIT_SHORT = 24
 #: A pressable ancestor's text longer than this is a content wrapper, not a control (#758).
@@ -212,7 +215,7 @@ def commit_name(name, link=False):
         return False
     if any(pattern.search(text) for pattern in COMMIT_PHRASES):
         return True
-    if (COMMIT_NOUN_ALONE if link else COMMIT_NOUN_END).search(text):
+    if (COMMIT_NOUN_ALONE if link else COMMIT_NOUN_END).search(text) or COMMIT_NOUN_PRICE.search(text):
         return True
     return (not link or len(text) <= COMMIT_SHORT) and any(pattern.search(text) for pattern in COMMIT_VERBS)
 
@@ -1316,6 +1319,8 @@ class WebKitWorkerDriver:
                                            # #899 review P2-2: a link rewritten or given a handler after
                                            # the snapshot no longer matches and is not pressed.
                                            'nav_link': bool(element.get('nav_link')),
+                                           # #905 review: a link rewritten to another address is refused too.
+                                           'href': str(element.get('href') or ''),
                                            'pressable': bool(element.get('pressable', True))}
                         for element in elements if isinstance(element.get('index'), int) and not isinstance(element.get('index'), bool)}
         return page

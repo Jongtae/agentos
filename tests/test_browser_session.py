@@ -997,7 +997,7 @@ class CommitControlTests(unittest.TestCase):
             self.assertTrue(bs.commit_control({'role': 'link', 'tag': 'a', 'name': name, 'nav_link': False}), name)
             self.assertFalse(bs.commit_control({'role': 'link', 'tag': 'a', 'name': name, 'nav_link': True}), name)
         for name in ('구매', '결제', '주문 ₩12,000', '결제 (12,000원)', '바로구매', '구매하기', '즉시구매', '즉시 결제',
-                     '지금 구매', '지금결제', '2개 구매', '3 개 주문'):
+                     '지금 구매', '지금결제', '2개 구매', '3 개 주문', '세제 구매 ₩12,000', '우유 2팩 결제 (5,980원)'):
             self.assertTrue(bs.commit_name(name, link=True), name)
             self.assertTrue(bs.commit_control({'role': 'link', 'tag': 'a', 'name': name}), name)
         self.assertFalse(bs.commit_control({'role': 'textbox', 'tag': 'input', 'name': 'Buy now', 'pressable': False}),

@@ -310,6 +310,9 @@ CONTINUATION_EFFECT_NOTE_HEAD=('AgentOS note (not from the owner): the request b
                                'earlier Work called tools that may have changed state:')
 #: #774 review: an answered location request whose continuation could not be queued.
 LOCATION_NOT_CONTINUED_TEXT='대기 중인 작업이 많아 보내 주신 위치로 요청을 이어서 처리하지 못했습니다. 잠시 후 위치를 다시 보내 주세요.'
+#: Owner direction 2026-09-30: approval prompts answer with the same pair as the
+#: memory ask (#881).  The message above the buttons names what is approved.
+APPROVE_BUTTON,DENY_BUTTON='👍','👎'
 BROWSER_APPROVAL_PROMPT='결제 단계는 승인이 필요합니다. 승인하면 이 요청을 한 번만 이어서 처리하고, 승인한 단계 하나만 실행합니다.'
 #: #709: owner-private config row of in-flow login requests, by Work id.  At
 #: most one per Work: a row stays (resumed/skipped/expired) until it is pruned.
@@ -4847,12 +4850,12 @@ class AgentService:
     def reply_controls(self, job, blocked):
         """Bounded recovery controls for a reply that did not simply succeed."""
         status=job.get('status')
+        # Owner direction 2026-09-30: no 상세 button.  It read an in-memory turn
+        # record, so after a restart it did nothing; the reply itself says what happened.
         if status in ('failed','interrupted') and not blocked:
             allowed,_reason=self.safe_retry(job)
-            return (CONTROL_RETRY,CONTROL_DETAILS) if allowed else (CONTROL_DETAILS,)
-        if status in ('partial','unknown'):
-            # Never a retry for an unknown effect: the owner checks first.
-            return (CONTROL_DETAILS,)
+            return (CONTROL_RETRY,) if allowed else ()
+        # Never a retry for an unknown effect: the owner checks first.
         return ()
 
     def _consume_control(self, chat_id, message_id, markup):
@@ -6223,19 +6226,19 @@ class AgentService:
                     self.store.update_notification(notification['id'],'cancelled')
                     return True
                 reply_markup={'inline_keyboard':[[
-                    {'text':'문서 공유 승인','callback_data':f"p7a:{notification['id']}:approve"},
-                    {'text':'허용 안 함','callback_data':f"p7a:{notification['id']}:deny"},
+                    {'text':APPROVE_BUTTON,'callback_data':f"p7a:{notification['id']}:approve"},
+                    {'text':DENY_BUTTON,'callback_data':f"p7a:{notification['id']}:deny"},
                 ]]}
             elif notification['kind']=='context_approval_needed':
                 reply_markup={'inline_keyboard':[[
-                    {'text':'이번 작업에 컨텍스트 공유 승인','callback_data':f"v1c:{notification['id']}:approve"},
-                    {'text':'허용 안 함','callback_data':f"v1c:{notification['id']}:deny"},
+                    {'text':APPROVE_BUTTON,'callback_data':f"v1c:{notification['id']}:approve"},
+                    {'text':DENY_BUTTON,'callback_data':f"v1c:{notification['id']}:deny"},
                 ]]}
             elif notification['kind']=='browser_approval_needed':
                 # #656: the same owner-only inline buttons; the step is named, never the page.
                 reply_markup={'inline_keyboard':[[
-                    {'text':'이 단계 승인','callback_data':f"p7w:{notification['id']}:approve"},
-                    {'text':'허용 안 함','callback_data':f"p7w:{notification['id']}:deny"},
+                    {'text':APPROVE_BUTTON,'callback_data':f"p7w:{notification['id']}:approve"},
+                    {'text':DENY_BUTTON,'callback_data':f"p7w:{notification['id']}:deny"},
                 ]]}
             elif notification['kind']=='browser_login_needed':
                 # #709: only while this Work's login is still offered with this nonce.
@@ -6506,7 +6509,7 @@ class AgentService:
                         alert=('다시 시도할게요.',False)
                         changed=True
                         self._consume_control(sender,message.get('message_id'),
-                                              reply_controls_markup(job_id,(CONTROL_RETRY,CONTROL_DETAILS),consumed=(CONTROL_RETRY,)))
+                                              reply_controls_markup(job_id,(CONTROL_RETRY,),consumed=(CONTROL_RETRY,)))
                     else:
                         alert=(reason,True)
             elif authorized and isinstance(data,str) and data.startswith('p7c:'):

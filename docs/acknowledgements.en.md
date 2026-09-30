@@ -12,7 +12,7 @@ Being listed here does not mean affiliation, endorsement, partnership, co-develo
   - Used in: [Presence research](research/presence-and-settings-ux.ko.md), the [Presence Experience Contract](presence-experience-contract.en.md), and the owner-model and Attention work ([Secretary Agency Contract](secretary-agency-contract.en.md)).
 - **b3os, [b3rys/b3rys-team-os](https://github.com/b3rys/b3rys-team-os)** (Apache-2.0)
   - Operating principles for agent teams: explicitly registered roles and responsibilities, runtimes kept separate from operational ownership, tracked ownership, verification and reporting of work, messages between agents treated as untrusted input, and loop and duplicate-run prevention.
-  - Used in: [b3os design reference](b3os-design-reference.ko.md), which covers the extension, manifest and interoperability direction. No b3os code is included; that document records the reviewed revision and the licence obligations that would apply if code were ever included.
+  - Used in: [b3os design reference](archive/concepts/b3os-design-reference.ko.md), which covers the extension, manifest and interoperability direction. No b3os code is included; that document records the reviewed revision and the licence obligations that would apply if code were ever included.
 
 ## Development process patterns
 

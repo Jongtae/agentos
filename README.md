@@ -13,6 +13,16 @@
 
 Both conversations are the product's real behaviour, condensed and translated from its Korean replies. Nothing is created until you say approve, and the note you saved is still there after a restart. It runs on your own computer (macOS or Linux, Python 3.12 or newer) and you bring your own model: a local Ollama model, an OpenAI-compatible endpoint or Anthropic. Local-first is not local-only: with a hosted model, the context you approve goes to that provider.
 
+<!-- readme-section:concept -->
+
+## The idea in one sentence
+
+> 내가 설치하고 통제하는 개인 AI 환경에서, 좋은 기본 기능으로 실제 일을 끝내고, 더 좋은 에이전트를 앱처럼 설치·교체해도 내 기억과 결과는 나에게 남는다.
+>
+> *A personal AI environment I install and control: good built-in abilities finish real work, and even when I install or swap in better agents like apps, my memory and results stay with me.*
+
+The author's sentence, in the original Korean. Why the project exists and the documents that define the concept are gathered on one page: [VISION.md](VISION.md).
+
 <!-- readme-section:try-today -->
 
 ## Install

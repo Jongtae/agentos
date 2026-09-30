@@ -71,7 +71,7 @@ class GovUsePreservationTests(unittest.TestCase):
 
     def test_current_alignment_documents_have_existing_local_link_targets(self):
         paths = ["README.md", "README.ko.md", "README.ja.md", "README.zh-CN.md",
-                 "PRD.md", "PRODUCT_VISION.ko.md", "AGENTS.md", "QUICKSTART.md", "TASKS.md",
+                 "VISION.md", "AGENTS.md", "QUICKSTART.md", "TASKS.md",
                  "docs/roadmap.md", "docs/personal-agentos-architecture.en.md",
                  "docs/agent-distribution-platform-foundation.en.md",
                  "docs/owner-control-contract.en.md", "docs/default-agent-usefulness.en.md",

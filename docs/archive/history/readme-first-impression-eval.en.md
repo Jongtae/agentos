@@ -10,7 +10,7 @@ After reading only the README (hero, "Install", "Then try these", "The settings 
 
 > My own AI assistant, running on my own machine, that can reach the files, mail, calendar, memory and public pages I allow. I pick the model. It stops and asks before anything consequential, keeps the result so I can continue later, and reports what actually happened rather than what the model claims.
 
-The README deliberately stops after the settings; the evidence table, the product-direction scene, the comparison and the internals live on [docs/product-status.en.md](product-status.en.md) (Korean mirror: product-status.ko.md). A reader who follows the "More" links should understand that the household-purchase scene there is product direction, not a claim that autonomous checkout ships today.
+The README deliberately stops after the settings; the evidence table, the product-direction scene, the comparison and the internals live on [docs/product-status.en.md](../../product-status.en.md) (Korean mirror: product-status.ko.md). A reader who follows the "More" links should understand that the household-purchase scene there is product direction, not a claim that autonomous checkout ships today.
 
 ## Synthetic first-reader prompt
 

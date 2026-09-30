@@ -2,7 +2,7 @@
 
 ## Purpose and status
 
-This document describes the long-term **assistant experience** delivered by Personal AgentOS. The canonical product/runtime boundary is [Personal AgentOS Architecture](personal-agentos-architecture.en.md). This document is not a list of shipped or live-verified capabilities; support is determined only by the [current roadmap](roadmap.md) and named acceptance evidence.
+This document describes the long-term **assistant experience** delivered by Personal AgentOS. The canonical product/runtime boundary is [Personal AgentOS Architecture](../../personal-agentos-architecture.en.md). This document is not a list of shipped or live-verified capabilities; support is determined only by the [current roadmap](../../roadmap.md) and named acceptance evidence.
 
 ## Identity
 
@@ -64,4 +64,4 @@ The finite file-workspace program #314/#315/#316 is complete through PR #320 and
 
 MP1 does not include an open marketplace, arbitrary code execution, unbounded automatic delegation, or a central control plane that copies personal data. Future capability acquisition cannot bypass a reviewed catalogue or owner approval, isolation, and validation. AgentOS does not make general claims of superior security over general AI assistants or enterprise agent platforms; it makes the location of personal state and trust boundaries explicit.
 
-No capability is claimed as supported in Master Plan delivery until its declared contract and automated tests pass. External credentials, OAuth clients, endpoints, and activation are configured only in an owner-controlled operating-mode deployment after the relevant plan permits it; mock validation does not claim that an external connection is live. The long-term execution plan is managed in [Master Plan 1](master-plan-01-personal-assistant-core.en.md), and the next-plan selection process in [Master Plan 2](master-plan-02-proposal.en.md).
+No capability is claimed as supported in Master Plan delivery until its declared contract and automated tests pass. External credentials, OAuth clients, endpoints, and activation are configured only in an owner-controlled operating-mode deployment after the relevant plan permits it; mock validation does not claim that an external connection is live. The long-term execution plan is managed in [Master Plan 1](../../master-plan-01-personal-assistant-core.en.md), and the next-plan selection process in [Master Plan 2](../../master-plan-02-proposal.en.md).

@@ -82,5 +82,15 @@ This repository is an attempt to turn an ideal into something that can be run, c
 
 ---
 
-For the concrete product definition and current design constraints, see [PRODUCT_VISION.ko.md](PRODUCT_VISION.ko.md). For what the project can do today, see [README.md](README.md) and the linked product-status documents.
+## The concept on one page
 
+This page is the entry point to the concept. Each idea below links to the document that defines it. Those documents govern; this list only points to them.
+
+- **A secretary, not a chatbot.** One personal agent for one owner. It keeps the owner's preferences, situation and history in view and reaches the owner's goals through replaceable capabilities. See the [Secretary Agency Contract](docs/secretary-agency-contract.en.md).
+- **AI is the engine.** The owner's chosen AI does the work: Codex, Claude Code or a configured model API. A decision model chooses the worker, writes the brief, checks the result and re-delegates when the goal is not met. AgentOS code never implements a specific request. See [C16 in the Development Constitution](docs/development-constitution.en.md).
+- **The owner's state stays with the owner.** Memory, context, permissions, work records and evidence belong to AgentOS and the owner, not to whichever model or agent does the work. See the [architecture](docs/personal-agentos-architecture.en.md) and the [Owner Control Contract](docs/owner-control-contract.en.md).
+- **Conversation first.** The owner manages AgentOS by talking to it. A page appears only for a result that text cannot carry, or an input that conversation cannot safely carry. See the [Presence Experience Contract](docs/presence-experience-contract.en.md).
+- **Few protections, each one real.** During the pilot two rules hold on every request: secrets never reach a model, a log or Evidence, and each payment needs the owner's approval. Instead of more guards, each Work is to show which owner information it used and where it went. See the [pilot posture](docs/secretary-agency-contract.en.md#pilot-posture).
+- **Installable agents, later.** In the long run, better agents can be installed and replaced like apps without taking the owner's memory or authority with them. See the [Agent Distribution Platform Foundation](docs/agent-distribution-platform-foundation.en.md).
+
+What works today, and how we know, is on the [product status](docs/product-status.en.md) page. Earlier concept documents that this page replaces are kept in the [concept archive](docs/archive/concepts/README.md).

@@ -48,7 +48,7 @@ Development uses local mock peers and fixtures only. It never requires live cred
 
 ## Operating-mode deployment
 
-Production operating-mode deployment remains separately owner-authorized under its active deployment contract. The owner may also explicitly select a narrow experimental local smoke test before the entire long-term roadmap is complete. Such a test declares the exact revision, fresh data scope, provider/destination and budget approval; it is not production deployment, blanket private-data permission or retroactive acceptance of all capabilities. See [the early-access runbook](early-access-smoke.en.md).
+Production operating-mode deployment remains separately owner-authorized under its active deployment contract. The owner may also explicitly select a narrow experimental local smoke test before the entire long-term roadmap is complete. Such a test declares the exact revision, fresh data scope, provider/destination and budget approval; it is not production deployment, blanket private-data permission or retroactive acceptance of all capabilities. See [the early-access runbook](archive/history/early-access-smoke.en.md).
 
 The deployed runtime must use automated startup and health checks, fail closed on missing or invalid configuration, redact secrets from evidence, and retain a machine-readable deployment report. An operating connection may be described as configured only when its automated health check succeeds. Mock evidence remains labelled as development evidence and never as proof that the external service is live.
 

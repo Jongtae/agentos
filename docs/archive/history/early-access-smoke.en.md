@@ -94,5 +94,5 @@ leave it disabled; fix only a reproduced blocker to these three tasks in a small
 Continue under the owner-selected #358 smoke substep; no second preparation cycle or
 heartbeat is needed. Keep #358 open until its remaining scope is explicitly accounted for.
 Do not activate #363/#364 or other roadmap items wholesale. Scope each real first-use fix
-and follow [incremental delivery](incremental-delivery.en.md) for any merge wait.
+and follow [incremental delivery](../../incremental-delivery.en.md) for any merge wait.
 A working browser URL and runnable commands are more useful than another design document.

@@ -2515,7 +2515,10 @@ class AgentService:
             return job.get('status') if job.get('status') in ('failed','interrupted','cancelled') else 'unknown'
         engine=[event for event in events if event['tool']=='subscription_engine']
         if engine:
-            name=next((event['trace'].get('engine') for event in engine if isinstance(event['trace'].get('engine'),str)),None)
+            # The terminal outcome and its engine must come from the same
+            # (last) observed attempt. A Work can be delegated across CLIs.
+            name=next((event['trace'].get('engine') for event in reversed(engine)
+                       if isinstance(event['trace'].get('engine'),str)),None)
             return {'kind':'subscription','engine':name,'status':outcome(engine[-1]['status'])}
         attempt=model_events.get(job['id'])
         if attempt:
@@ -2907,9 +2910,30 @@ class AgentService:
         return [{'id':item['id'],'name':item['name']} for item in status['engines']
                 if item['id']!=engine_id and item.get('installed') and item.get('login',{}).get('state')=='signed-in']
 
+    def _validate_usage_limit_recovery(self, work_id, target_engine, expected_current):
+        """Require a still-failed Work and its still-selected exhausted route."""
+        job=self.store.job(work_id)
+        provenance=self.store.turn_provenance(work_id) or {}
+        if (not job or job.get('status')!='failed' or provenance.get('route')!='subscription'
+                or provenance.get('failure_class')!='usage-limit'
+                or provenance.get('engine')!=expected_current
+                or provenance.get('usage_limit_recovery_selected')):
+            raise ValueError('이 사용량 한도 요청은 이미 처리되었거나 더 이상 유효하지 않습니다. AI 설정에서 다시 확인하세요.')
+        if not any(item['id']==target_engine for item in self.usage_limit_route_options(job)):
+            raise ValueError('선택할 수 있는 로그인된 AI 연결이 아니거나 현재 선택이 바뀌었습니다. AI 설정에서 다시 확인하세요.')
+        return job
+
     def connect_subscription_engine(self, body, *, expected_current=None, require_signed_in=False):
         if not isinstance(body,dict):raise ValueError('연결 정보를 확인하세요.')
-        record=self.subscription_engines.connect(body.get('engine',''),body.get('officially_authenticated'))
+        engine_id=body.get('engine','')
+        recovery_work_id=body.get('recovery_work_id')
+        if expected_current is None:expected_current=body.get('expected_current')
+        if recovery_work_id is not None:
+            if not isinstance(recovery_work_id,str) or not isinstance(expected_current,str) or not expected_current:
+                raise ValueError('사용량 한도 요청의 현재 AI 정보를 확인할 수 없습니다. AI 설정에서 다시 선택하세요.')
+            require_signed_in=True
+            with self.lock:self._validate_usage_limit_recovery(recovery_work_id,engine_id,expected_current)
+        record=self.subscription_engines.connect(engine_id,body.get('officially_authenticated'))
         # #571: check the CLI's own login, in the environment AgentOS runs it
         # with, before switching. A known sign-out refuses the switch; an
         # unknown result is allowed only as this explicit owner action and is
@@ -2928,7 +2952,11 @@ class AgentService:
             current=self.store.config('subscription_engine',{}).get('id','')
             if expected_current is not None and current!=expected_current:
                 raise ValueError('현재 선택된 AI가 바뀌어 전환하지 않았습니다. AI 설정에서 다시 선택하세요.')
+            if recovery_work_id is not None:
+                job=self._validate_usage_limit_recovery(recovery_work_id,engine_id,expected_current)
             self.store.put('subscription_engine',record)
+            if recovery_work_id is not None:
+                self.record_turn_provenance(recovery_work_id,usage_limit_recovery_selected=engine_id)
         return self.subscription_engine_status()
 
     def runtime_packages(self):
@@ -6490,6 +6518,7 @@ class AgentService:
         callback_id=callback.get('id')
         parts=str(callback.get('data') or '').split(':')
         selected_name=None
+        selected_engine=None
         reason='처리할 수 있는 요청이 아닙니다.'
         job=None
         with self.lock:
@@ -6507,16 +6536,18 @@ class AgentService:
                 options=self.usage_limit_route_options(job) if exact else []
                 option=next((item for item in options if item['id']==parts[2]),None)
                 if option and engine_id:
-                    try:
-                        self.connect_subscription_engine({'engine':parts[2],'officially_authenticated':True},
-                                                          expected_current=engine_id,require_signed_in=True)
-                        self.record_turn_provenance(job['id'],usage_limit_recovery_selected=parts[2])
-                        selected_name=option['name']
-                    except ValueError as exc:
-                        reason=str(exc)
-                    except Exception as exc:
-                        LOG.warning('usage-limit route change failed work=%s kind=%s',job['id'],type(exc).__name__)
-                        reason='AI 연결을 확인하지 못했어요. AI 설정에서 상태를 확인하세요.'
+                    selected_name=option['name']
+                    selected_engine=parts[2]
+        if selected_engine and job and engine_id:
+            try:
+                self.connect_subscription_engine({'engine':selected_engine,'officially_authenticated':True,
+                                                  'recovery_work_id':job['id'],'expected_current':engine_id})
+            except ValueError as exc:
+                reason=str(exc)
+                selected_name=None
+            except Exception as exc:
+                LOG.warning('usage-limit route change failed work=%s kind=%s',job['id'],type(exc).__name__)
+                reason='AI 연결을 확인하지 못했어요. AI 설정에서 상태를 확인하세요.'
         if selected_name:
             # Keep the existing retry/details controls, but consume every route
             # choice on this one failed reply. The failed Work is never queued.

@@ -578,7 +578,10 @@ class FailedTurnTests(NativePresenceTestCase):
         self.tap(f"p7e:{job['id']}:codex",reply_id,sender=999,callback_id='foreign')
         self.tap(f"p7e:{job['id']}:codex",reply_id+1,callback_id='wrong-message')
         self.assertEqual(self.store.config('subscription_engine')['id'],'claude-code')
-        with mock.patch.object(self.service,'check_engine_login',return_value={'state':'signed-in'}):
+        def login_without_service_lock(*args,**kwargs):
+            self.assertFalse(self.service.lock._is_owned(),'CLI login checks run outside the service lock')
+            return {'state':'signed-in'}
+        with mock.patch.object(self.service,'check_engine_login',side_effect=login_without_service_lock):
             self.tap(f"p7e:{job['id']}:codex",reply_id,callback_id='choose')
         self.assertEqual(self.store.config('subscription_engine')['id'],'codex')
         self.assertEqual(len(self.store.jobs()),1,'route selection does not retry the failed Work')
@@ -593,6 +596,25 @@ class FailedTurnTests(NativePresenceTestCase):
             self.tap(f"p7e:{job['id']}:codex",reply_id,callback_id='stale')
         self.assertEqual(self.store.config('subscription_engine')['id'],'claude-code')
         self.assertEqual(len(self.store.jobs()),1)
+
+    def test_web_usage_limit_route_choice_is_bound_and_revalidated_by_the_server(self):
+        job=self.usage_limit_reply()
+        body={'engine':'codex','officially_authenticated':True,'recovery_work_id':job['id'],
+              'expected_current':'claude-code'}
+        with mock.patch.object(self.service,'check_engine_login',return_value={'state':'signed-in'}):
+            self.service.connect_subscription_engine(body)
+        self.assertEqual(self.store.config('subscription_engine')['id'],'codex')
+        self.assertEqual(self.store.turn_provenance(job['id'])['usage_limit_recovery_selected'],'codex')
+        self.assertEqual(len(self.store.jobs()),1,'route selection does not replay the failed Work')
+        with mock.patch.object(self.service,'check_engine_login',return_value={'state':'signed-in'}):
+            with self.assertRaisesRegex(ValueError,'이미 처리되었거나 더 이상 유효하지 않습니다'):
+                self.service.connect_subscription_engine(body)
+        self.store.put('subscription_engine',{'id':'claude-code'})
+        self.store.put_turn_provenance(job['id'],{**self.store.turn_provenance(job['id']),
+                                                   'usage_limit_recovery_selected':None})
+        stale={**body,'engine':'claude-code'}
+        with self.assertRaisesRegex(ValueError,'선택할 수 있는 로그인된 AI 연결이 아니거나 현재 선택이 바뀌었습니다'):
+            self.service.connect_subscription_engine(stale)
 
     def test_usage_limit_without_an_alternate_points_to_ai_settings(self):
         self.usage_limit_reply(alternate_signed_in=False)

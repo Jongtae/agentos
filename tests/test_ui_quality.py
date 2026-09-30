@@ -378,6 +378,7 @@ class EngineAuthUi(unittest.TestCase):
         self.assertIn("current===engineId", recovery)
         self.assertIn("engine.installed&&engine.login?.state==='signed-in'", recovery)
         self.assertIn("'/api/subscription-engines/connect'", recovery)
+        self.assertIn("recovery_work_id:task.id,expected_current:engineId", recovery)
         self.assertIn("AI 설정 열기", recovery)
         self.assertIn("실패한 요청은 자동으로 다시 실행하지 않았어요", recovery)
         self.assertNotIn("retry_from_control", recovery)

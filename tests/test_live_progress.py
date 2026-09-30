@@ -38,6 +38,7 @@ CHAT = 4242
 GENERATION = 'g1'
 SECRET = 'zq9Wm4LtHv82PkXr'
 DRAFT_METHODS = ('sendMessageDraft', 'sendRichMessageDraft')
+from personal_agent.telegram_presence import DOTS_FRAMES as DOTS
 
 
 def running(tool, step, call_id=None, created=1.0):
@@ -122,7 +123,7 @@ class StepLineTests(unittest.TestCase):
     def test_before_any_call_the_draft_has_no_step_line(self):
         # #835: the draft then shows the dots alone.
         self.assertEqual(draft_step([]), (NO_STEP_LINE, False))
-        self.assertEqual(draft_frame(NO_STEP_LINE, 0), '·')
+        self.assertEqual(draft_frame(NO_STEP_LINE, 0), DOTS[0])
 
     def test_model_status_wins_and_generic_lines_are_keyed_on_kind_and_target(self):
         self.assertEqual(step_line({'action': 'web_search', 'status': '환율을 찾고 있어요', 'query': 'q'}), '환율을 찾고 있어요')
@@ -462,7 +463,7 @@ class ScriptedLoopDraftTests(_TelegramCase):
         self.ticks = {'model': [6, 9, 13], 'list_notes': [8], 'list_memory': [(9.2, 10)]}
         job = self.run_turn('메모랑 기억 좀 정리해줘')
         # #835: each edit advances the dots; the step line (if any) comes first.
-        self.assertEqual(self.drafts(), ['·', '저장한 메모를 훑어보고 있어요 · ·', '기억 확인 중 · · ·', '·'])
+        self.assertEqual(self.drafts(), [DOTS[0], f'저장한 메모를 훑어보고 있어요 {DOTS[1]}', f'기억 확인 중 {DOTS[2]}', DOTS[0]])
         draft_ids = {body['draft_id'] for method, body in self.calls if method in DRAFT_METHODS}
         self.assertEqual(draft_ids, {draft_id_for(job['id'])}, 'one draft, edited in place (Stop maps back)')
         for method, body in self.calls:
@@ -479,7 +480,7 @@ class ScriptedLoopDraftTests(_TelegramCase):
         # Draft at +6; +6.5 inside the interval (first step skipped); +7.6 shows the latest (second step).
         self.ticks = {'model': [6], 'list_notes': [6.5], 'list_memory': [7.6]}
         self.run_turn('두 단계 해줘')
-        self.assertEqual(self.drafts(), ['·', '둘째 단계 · ·'])
+        self.assertEqual(self.drafts(), [DOTS[0], f'둘째 단계 {DOTS[1]}'])
         self.assertEqual(PresenceTiming().dots_refresh, 1.5)
 
     def test_stop_ends_step_drafts(self):
@@ -499,7 +500,7 @@ class ScriptedLoopDraftTests(_TelegramCase):
         self.tick = tick
         self.run_turn('긴 조사 부탁해')
         self.assertEqual(outcomes, ['running'])
-        self.assertEqual(self.drafts(), ['·', '메모 보는 중 · ·'], 'no draft after Stop')
+        self.assertEqual(self.drafts(), [DOTS[0], f'메모 보는 중 {DOTS[1]}'], 'no draft after Stop')
 
     def test_a_stored_secret_in_the_status_never_reaches_the_draft(self):
         self.store.secret('decision_model_key', SECRET)
@@ -521,7 +522,7 @@ class ScriptedLoopDraftTests(_TelegramCase):
         self.assertTrue(saved, 'the note write ran, so its value is a saved private value of this Work')
         shown = self.drafts()
         # #881: the masked status gives way to the step's plain line.
-        self.assertEqual(shown, ['·', '메모 확인 중 · ·'])
+        self.assertEqual(shown, [DOTS[0], f'메모 확인 중 {DOTS[1]}'])
         steps = [event['trace']['step'] for event in self.store.task_events(job['id'])
                  if event['status'] == 'running' and event['tool'] == 'list_notes']
         self.assertNotIn('4719', json.dumps(steps, ensure_ascii=False), 'redacted before it is recorded')
@@ -549,7 +550,7 @@ class ScriptedLoopDraftTests(_TelegramCase):
         self.tick = tick
         self.run_turn('사물함 정보 보여줘')
         # #881: the masked status gives way to the step's plain line; the internal mark is never shown.
-        self.assertEqual(self.drafts(), ['·', '메모 확인 중 · ·'])
+        self.assertEqual(self.drafts(), [DOTS[0], f'메모 확인 중 {DOTS[1]}'])
 
     def test_pending_approval_prompt_is_the_only_surface(self):
         self.script = [[('list_notes', {'status': '메모 보는 중'})], '끝']
@@ -563,7 +564,7 @@ class ScriptedLoopDraftTests(_TelegramCase):
             original_tick(hook)
         self.tick = tick
         self.run_turn('메모 보여줘')
-        self.assertEqual(self.drafts(), ['·'])
+        self.assertEqual(self.drafts(), [DOTS[0]])
 
 
 CLI_WITH_SEARCH = '''#!{python}

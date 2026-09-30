@@ -593,8 +593,12 @@ CLICK_SETTLE_SECONDS = 8.0
 #: #709: a client-rendered page is read once its visible content stops
 #: changing for ``RENDER_QUIET_SECONDS`` (and shows some text), or when
 #: ``RENDER_SETTLE_SECONDS`` have passed, whichever comes first.
-RENDER_QUIET_SECONDS = 0.5
-RENDER_SETTLE_SECONDS = 4.0
+# #899 (live, Work 4a2b6d1c): a search page whose results arrive by a request
+# after load stayed quiet for 0.5 s between its shell and its product list, so the
+# quiet window is longer.  Only rendered state counts as change: background
+# polling or analytics requests must not keep a stable page "unsettled" (#900 review).
+RENDER_QUIET_SECONDS = 1.2
+RENDER_SETTLE_SECONDS = 6.0
 POLL_SECONDS = 0.05
 FOCUS_SECONDS = 0.1
 RESOLVE_SECONDS = 3.0

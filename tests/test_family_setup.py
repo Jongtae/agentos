@@ -260,6 +260,52 @@ class SetupSurface(unittest.TestCase):
         self.assertEqual(self.store.config('telegram').get('user_id'), 555, 'a repeated hand-over never un-pairs')
 
 
+    def start_update(self, sender, update_id, text):
+        cfg = self.store.config('telegram')
+        self.service.ingest_update({'update_id': update_id, 'message': {'message_id': update_id, 'date': int(time.time()),
+                                    'chat': {'id': sender, 'type': 'private'}, 'from': {'id': sender, 'is_bot': False},
+                                    'text': text}}, cfg['generation'])
+
+    def test_the_creators_plain_start_pairs(self):
+        """#927: Telegram's bot-creation screen opens the chat and sends a plain /start."""
+        header = {family_setup.HANDOFF_HEADER: self.record['handoff']}
+        self.request('/api/family/telegram-token', 'POST', {'token': FAMILY_TOKEN, 'creator_id': 555}, headers=header)
+        self.start_update(777, 1, '/start')
+        self.start_update(777, 2, '안녕')
+        self.assertIsNone(self.store.config('telegram').get('user_id'), 'a stranger never pairs')
+        self.start_update(555, 3, '/start')
+        cfg = self.store.config('telegram')
+        self.assertEqual(cfg.get('user_id'), 555)
+        self.assertEqual((cfg.get('pair_code'), cfg.get('pair_expires')), ('', 0), 'the code is spent')
+
+    def test_the_creators_first_message_pairs_even_after_the_code_expired(self):
+        header = {family_setup.HANDOFF_HEADER: self.record['handoff']}
+        self.request('/api/family/telegram-token', 'POST', {'token': FAMILY_TOKEN, 'creator_id': 555}, headers=header)
+        cfg = self.store.config('telegram')
+        cfg['pair_expires'] = time.time() - 1
+        self.store.put('telegram', cfg)
+        self.start_update(555, 1, '내가 할 수 있는 건 뭐야?')
+        self.assertEqual(self.store.config('telegram').get('user_id'), 555)
+        self.assertTrue(any(job['message'] == '내가 할 수 있는 건 뭐야?' for job in self.store.jobs()), 'the message is handled')
+
+    def test_the_hand_over_describes_the_bot(self):
+        header = {family_setup.HANDOFF_HEADER: self.record['handoff']}
+        calls = []
+        original = self.service.telegram.call
+        self.service.telegram.call = lambda method, body, **kw: calls.append((method, body)) or original(method, body, **kw)
+        self.request('/api/family/telegram-token', 'POST', {'token': FAMILY_TOKEN, 'creator_id': 555}, headers=header)
+        described = {method: body for method, body in calls if method.startswith('setMy')}
+        self.assertIn(self.record['display_name'], described['setMyDescription']['description'])
+        self.assertIn(self.record['display_name'], described['setMyShortDescription']['short_description'])
+        self.assertLessEqual(len(described['setMyDescription']['description']), 512)
+        self.assertLessEqual(len(described['setMyShortDescription']['short_description']), 120)
+
+    def test_a_failed_description_never_blocks_the_hand_over(self):
+        def refuse(method, body):
+            raise OSError('telegram down')
+        family_setup.describe_bot(refuse, '아내 비서')
+
+
 class OwnerCommand(unittest.TestCase):
     """`agentos family add spouse` with fake Telegram, ngrok and launchd."""
 

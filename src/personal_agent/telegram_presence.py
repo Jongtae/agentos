@@ -88,11 +88,10 @@ WAIT_DRAFT = 'draft'
 # ``sendMessageDraft`` renders as a blank bubble on the owner's iOS client
 # (#581 live check, 2026-09-26).
 
-#: Frames of the waiting animation (U+00B7 MIDDLE DOT), in display order.
-# Owner direction 2026-09-30: always three dots, still animated - the lit dot moves
-# instead of one dot growing to three. The lit dot is U+2022 BULLET: U+25CF rendered
-# far larger than the others on Telegram iOS (#919).
-DOTS_FRAMES = ('• · ·', '· • ·', '· · •')
+#: Frames of the waiting draft (U+00B7 MIDDLE DOT), in display order.
+# Owner direction 2026-10-01 (#921): three still dots; the only motion left is
+# the blink of Telegram's thinking block. (#917's moving dot is removed.)
+DOTS_FRAMES = ('· · ·',)
 #: ``draft_step`` text while no observed step is in flight (before the first
 #: tool call, or between two): the draft then shows the dots alone.
 NO_STEP_LINE = ''

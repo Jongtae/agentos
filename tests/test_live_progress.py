@@ -38,7 +38,10 @@ CHAT = 4242
 GENERATION = 'g1'
 SECRET = 'zq9Wm4LtHv82PkXr'
 DRAFT_METHODS = ('sendMessageDraft', 'sendRichMessageDraft')
-from personal_agent.telegram_presence import DOTS_FRAMES as DOTS
+from personal_agent.telegram_presence import DOTS_FRAMES
+
+#: The dots of the first three drafts, whatever the frame count (#921).
+DOTS = tuple(DOTS_FRAMES[index % len(DOTS_FRAMES)] for index in range(3))
 
 
 def running(tool, step, call_id=None, created=1.0):

@@ -4,7 +4,7 @@ Observed live 2026-09-28 (Works 18c91ca7, 7767e7da): a ``save_memory`` held as
 a pending MemoryCandidate counted as a failed state-changing action, so the
 owner saw only "이 요청은 완료하지 못했습니다".  Now the candidate is a recorded
 proposal: the answer reaches the owner, then one Telegram message lists the
-Work's pending candidates with [기억하기] [아니요], following the #659
+Work's pending candidates with [👍] [👎] (#881; formerly [기억하기] [아니요]), following the #659
 preparation-acceptance buttons (exact notification, chat, message and digest;
 consume once).  A yes is the existing owner approval path.
 
@@ -162,7 +162,7 @@ class TelegramConfirmTests(unittest.TestCase):
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
         self.assertEqual(prompt['text'], f'기억해 둘까요?\n• {VALUE}')
         buttons = prompt['reply_markup']['inline_keyboard']
-        self.assertEqual([[button['text'] for button in line] for line in buttons], [['기억하기', '아니요']])
+        self.assertEqual([[button['text'] for button in line] for line in buttons], [['👍', '👎']])
         self.assertEqual([button['callback_data'] for button in buttons[0]],
                          [f"p7m:{row['id']}:1:accept", f"p7m:{row['id']}:1:reject"])
         self.assertEqual(row['state'], 'sent')
@@ -313,11 +313,11 @@ class TelegramConfirmTests(unittest.TestCase):
         prompt = self.sends()[-1]
         self.assertEqual(prompt['text'], f'기억해 둘까요?\n1. {VALUE}\n2. 매운 음식')
         self.assertEqual([[button['text'] for button in line] for line in prompt['reply_markup']['inline_keyboard']],
-                         [['1 기억하기', '1 아니요'], ['2 기억하기', '2 아니요'], ['모두 기억하기', '모두 아니요']])
+                         [['1 👍', '1 👎'], ['2 👍', '2 👎'], ['모두 👍', '모두 👎']])
         self.tap(f"p7m:{row['id']}:2:reject", row['message_id'])
         self.assertEqual(self.notification(job_id)[0]['state'], 'sent', 'one is still open')
         self.assertEqual([[button['text'] for button in line] for line in self.edits()[-1]['reply_markup']['inline_keyboard']],
-                         [['1 기억하기', '1 아니요']])
+                         [['1 👍', '1 👎']])
         self.tap(f"p7m:{row['id']}:a:accept", row['message_id'])
         self.assertEqual([(m['memory_key'], m['content']) for m in self.store.memories()], [(KEY, VALUE)])
         self.assertEqual(self.notification(job_id)[0]['state'], 'memory_decided')
@@ -439,7 +439,7 @@ class TelegramConfirmTests(unittest.TestCase):
         self.assertEqual(edit['message_id'], row['message_id'])
         self.assertEqual(edit['text'], f'기억해 둘까요?\n1. {VALUE}\n2. 지하철')
         self.assertEqual([[button['text'] for button in line] for line in edit['reply_markup']['inline_keyboard']],
-                         [['1 기억하기', '1 아니요'], ['2 기억하기', '2 아니요'], ['모두 기억하기', '모두 아니요']])
+                         [['1 👍', '1 👎'], ['2 👍', '2 👎'], ['모두 👍', '모두 👎']])
         self.assertEqual(self.notification(job['id'])[0]['state'], 'sent')
         # One answer covers both, as the owner saw them.
         self.tap(f"p7m:{row['id']}:a:accept", row['message_id'])

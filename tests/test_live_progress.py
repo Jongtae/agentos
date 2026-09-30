@@ -133,6 +133,25 @@ class StepLineTests(unittest.TestCase):
         self.assertEqual(step_line({'action': 'weather'}), '날씨 확인 중')
         self.assertEqual(step_line({'action': 'unknown_kind'}), DEFAULT_STEP_TEXT)
 
+    def test_a_masking_mark_is_never_shown(self):
+        """#881: a status or target carrying a masking mark gives way to the plainer line."""
+        self.assertEqual(step_line({'action': 'browser_open', 'status': "'예약 - [가림]' 여는 중", 'host': 'shop.example'}),
+                         'shop.example 페이지 여는 중')
+        self.assertEqual(step_line({'action': 'web_search', 'status': '[가림: 12자] 찾는 중', 'query': '[가림] 후기'}),
+                         '웹 검색 중')
+        self.assertEqual(step_line({'action': 'read_file', 'status': '[경로 가림] 읽는 중'}), '파일 읽는 중')
+        self.assertEqual(step_line({'action': 'web_search', 'status': '[redacted] 넣는 중'}), '웹 검색 중')
+        # Display-time redaction that masks, or fails, moves on the same way.
+        clean = lambda text: text.replace('4719', '[가림]')
+        self.assertEqual(step_line({'action': 'web_search', 'status': '4719 찾는 중', 'query': '4719'}, clean=clean),
+                         '웹 검색 중')
+
+        def broken(text):
+            raise ValueError
+        self.assertEqual(step_line({'action': 'web_search', 'status': '찾는 중'}, clean=broken), NO_STEP_LINE)
+        events = [running('web_search', {'action': 'web_search', 'status': '[가림] 찾는 중'}, 'c1')]
+        self.assertEqual(draft_step(events), ('웹 검색 중', False))
+
     def test_a_step_is_shown_only_while_its_call_runs(self):
         events = [running('web_search', {'action': 'web_search', 'status': '찾는 중'}, 'c1')]
         self.assertEqual(draft_step(events), ('찾는 중', False))
@@ -501,7 +520,8 @@ class ScriptedLoopDraftTests(_TelegramCase):
         saved = [e for e in self.store.task_events(job['id']) if e['tool'] == 'save_note' and e['status'] == 'succeeded']
         self.assertTrue(saved, 'the note write ran, so its value is a saved private value of this Work')
         shown = self.drafts()
-        self.assertEqual(shown, ['·', '[가림] 메모 다시 확인 중 · ·'])
+        # #881: the masked status gives way to the step's plain line.
+        self.assertEqual(shown, ['·', '메모 확인 중 · ·'])
         steps = [event['trace']['step'] for event in self.store.task_events(job['id'])
                  if event['status'] == 'running' and event['tool'] == 'list_notes']
         self.assertNotIn('4719', json.dumps(steps, ensure_ascii=False), 'redacted before it is recorded')
@@ -528,7 +548,8 @@ class ScriptedLoopDraftTests(_TelegramCase):
                 self.service.acknowledge_long_work(now=job['created'] + 8)
         self.tick = tick
         self.run_turn('사물함 정보 보여줘')
-        self.assertEqual(self.drafts(), ['·', '[가림] 확인 중 · ·'])
+        # #881: the masked status gives way to the step's plain line; the internal mark is never shown.
+        self.assertEqual(self.drafts(), ['·', '메모 확인 중 · ·'])
 
     def test_pending_approval_prompt_is_the_only_surface(self):
         self.script = [[('list_notes', {'status': '메모 보는 중'})], '끝']
@@ -596,8 +617,10 @@ class CliRouteDraftTests(_TelegramCase):
         watcher.join(5)
         self.assertEqual(len(during), 1)
         [line] = during[0]
-        self.assertTrue(line.startswith('웹 검색 중: 환율'), line)
+        # #881: the redacted query carries a mark, so the plain search line is shown instead.
+        self.assertTrue(line.startswith('웹 검색 중 '), line)
         self.assertNotIn(SECRET, line, 'the query is redacted like the recorded event')
+        self.assertNotIn('[redacted]', line)
         self.assertNotIn(job_id, self.service.live_steps, 'the live step ends with the run')
         self.assertEqual(self.store.job(job_id)['status'], 'succeeded')
 

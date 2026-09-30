@@ -362,6 +362,8 @@ MEMORY_PROMPT_KINDS=(MEMORY_CANDIDATES_KIND,MEMORY_UPKEEP_KIND)
 MEMORY_PENDING_WEB_NOTE='기억해 둘지는 내 기록에서 골라 주세요.'
 MEMORY_CANDIDATE_IN_RECORDS='내 기록에서 확인해 주세요'
 MEMORY_CANDIDATES_HEADER='기억해 둘까요?'
+#: #881: the ask's buttons (yes / no to remembering one fact, or all).
+MEMORY_BUTTON_YES,MEMORY_BUTTON_NO='👍','👎'
 #: #836: the prompt's first line once every tappable fact was answered.
 MEMORY_CANDIDATES_SETTLED={'accepted':'기억해 둘게요.','rejected':'기억하지 않을게요.','mixed':'말씀하신 것만 기억해 둘게요.'}
 MEMORY_CANDIDATES_SHOWN=5
@@ -1250,14 +1252,21 @@ class AgentService:
 
     @classmethod
     def memory_prompt_markup(cls, notification_id, binding):
-        """Per tappable candidate [기억하기] [아니요], plus both for all when more than one is open (#818)."""
+        """Per tappable candidate [👍] [👎], plus both for all when more than one is open (#818).
+
+        #881: emoji buttons, not message reactions - the Bot API delivers a
+        reaction change only where the bot is a chat administrator, which a
+        private chat has none of, so a reaction could not decide a fact.
+        Each button still names exactly one fact (or all) in its callback.
+        """
         def pair(target,accept,reject):
             return [{'text':accept,'callback_data':f'p7m:{notification_id}:{target}:accept'},
                     {'text':reject,'callback_data':f'p7m:{notification_id}:{target}:reject'}]
         open_=cls.memory_open(binding)
-        if len(binding['candidates'])==1:return {'inline_keyboard':[pair(1,'기억하기','아니요')] if open_ else []}
-        rows=[pair(index,f'{index} 기억하기',f'{index} 아니요') for index in open_]
-        if len(open_)>1:rows.append(pair('a','모두 기억하기','모두 아니요'))
+        yes,no=MEMORY_BUTTON_YES,MEMORY_BUTTON_NO
+        if len(binding['candidates'])==1:return {'inline_keyboard':[pair(1,yes,no)] if open_ else []}
+        rows=[pair(index,f'{index} {yes}',f'{index} {no}') for index in open_]
+        if len(open_)>1:rows.append(pair('a',f'모두 {yes}',f'모두 {no}'))
         return {'inline_keyboard':rows}
 
     def decide_memory_item(self, job_id, item, accept):
@@ -4725,7 +4734,9 @@ class AgentService:
         flight.  None while an approval prompt is pending or the step in flight is a
         payment step: the existing approval prompt is then the only surface.
         A step line was redacted when it was recorded; it passes this Work's
-        saved-value and stored-secret redaction again before display.
+        saved-value and stored-secret redaction again before display.  #881: a
+        line left with a masking mark gives way to the step's plainer line
+        (``step_line``), so the internal mark is never shown.
         """
         if any(row['kind'] in self.APPROVAL_NOTIFICATIONS and row['state'] in ('queued','sent')
                for row in self.store.task_notifications(job['id'])):
@@ -4734,7 +4745,8 @@ class AgentService:
         if approval:return None
         if not text:return NO_STEP_LINE
         if state.scrubbed is None or state.scrubbed[0]!=text:
-            try:shown=' '.join(str(self.scrub_work_text(job['id'],text)).split())
+            try:shown,_approval=draft_step(self.store.task_events(job['id']),self.live_steps.get(job['id']),
+                                           clean=lambda line:self.scrub_work_text(job['id'],line))
             except Exception:shown=NO_STEP_LINE  # never show a line that could not be redacted
             state.scrubbed=(text,shown or NO_STEP_LINE)
         return state.scrubbed[1]

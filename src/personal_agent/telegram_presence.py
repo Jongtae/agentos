@@ -257,33 +257,55 @@ FALLBACK_STEP_LINES = {
 }
 
 
-def step_line(step, last_host=None):
+#: #881: the masking marks redaction leaves in a text (``browser_session.REDACTED``,
+#: ``[가림: N자]``, ``[경로 가림]``, ``[redacted]``, ``[AgentOS data]``, ``[turn folder]``).
+#: They are internal: a step line carrying one is never shown; the next plainer
+#: line for the step is.
+MASK_MARK = re.compile(r'\[(?:가림(?::[^\]]*)?|경로 가림|redacted|AgentOS data|turn folder)\]', re.IGNORECASE)
+
+
+def masked(text):
+    """Whether ``text`` carries a masking mark (#881)."""
+    return isinstance(text, str) and MASK_MARK.search(text) is not None
+
+
+def step_line(step, last_host=None, clean=None):
     """The draft line for one observed running step, or None for an approval step.
 
     ``step`` is the recorded ``progress_step`` dict.  The model's ``status``
     wins; otherwise the generic line for its tool kind with the observed
     host (the call's own, else ``last_host`` - the page an earlier observed
-    call of this Work opened) or query.
+    call of this Work opened) or query.  ``clean`` is the display-time
+    redaction.  #881: a line that carries a masking mark after it (or that it
+    could not redact) gives way to the next plainer one - status, then the
+    line with its target, then the bare line - so a mark never reaches the
+    owner's screen; if even that is masked, NO_STEP_LINE (the dots).
     """
     if not isinstance(step, dict) or step.get('approval'):
         return None
-    if isinstance(step.get('announce'), str) and step['announce'].strip():
-        return step['announce'].strip()
-    status = step.get('status')
-    if isinstance(status, str) and status.strip():
-        return status.strip()
     with_target, bare = FALLBACK_STEP_LINES.get(step.get('action'), (None, DEFAULT_STEP_TEXT))
     host = step.get('host') or last_host
     values = {'host': host if isinstance(host, str) else '',
               'query': step.get('query') if isinstance(step.get('query'), str) else ''}
+    targeted = None
     if with_target:
         needed = 'host' if '{host}' in with_target else 'query'
         if values[needed]:
-            return with_target.format(**values)
-    return bare
+            targeted = with_target.format(**values)
+    lines = [step.get('announce'), step.get('status'), targeted, bare]
+    for line in lines:
+        if not isinstance(line, str) or not line.strip():
+            continue
+        try:
+            shown = ' '.join(str(clean(line.strip()) if clean is not None else line.strip()).split())
+        except Exception:
+            continue  # never show a line that could not be redacted
+        if shown and not masked(shown):
+            return shown
+    return NO_STEP_LINE
 
 
-def draft_step(events, live=None):
+def draft_step(events, live=None, clean=None):
     """``(text, approval)`` for the draft of one running Work, from observed events only.
 
     ``events`` are the Work's tool events in order (``QuickStore.task_events``
@@ -295,11 +317,11 @@ def draft_step(events, live=None):
     the only surface is the existing approval prompt and ``text`` is None.
     With no step in flight ``text`` is NO_STEP_LINE (the draft shows dots).
     """
-    text, approval, _identity = draft_step_details(events, live)
+    text, approval, _identity = draft_step_details(events, live, clean)
     return text, approval
 
 
-def draft_step_details(events, live=None):
+def draft_step_details(events, live=None, clean=None):
     """Return ``(text, approval, identity)`` for the current observed step.
 
     ``identity`` is present only for a real running tool/CLI step and remains
@@ -338,7 +360,7 @@ def draft_step_details(events, live=None):
     if current is not None:
         if current[3].get('approval'):
             return None, True, current[5]
-        return step_line(current[3], current[4]), False, current[5]
+        return step_line(current[3], current[4], clean), False, current[5]
     return NO_STEP_LINE, False, None
 
 CONTROL_RETRY = 'retry'

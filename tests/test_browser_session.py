@@ -484,6 +484,16 @@ class MediationTests(unittest.TestCase):
         self.assertIn('API key: ' + bs.REDACTED, page['text'])
         self.assertGreaterEqual(page['redacted_values'], 1)
 
+    def test_page_exclusions_drop_only_the_words_the_owner_said(self):
+        """#889: each value keeps the words the owner did not say in this request; untouched values stay verbatim."""
+        from personal_agent.agent_runtime import page_exclusions
+        self.assertEqual(page_exclusions(['배민'], '배민'), [])
+        self.assertEqual(page_exclusions(['카카오골프, 더블이글 비교해 가장 싼 티 선호'], '카카오골프, 더블이글에서 가장 싼 티를 찾아줘'),
+                         ['비교해 티 선호'])  # a one-character word is not a stem match (#597): kept
+        self.assertEqual(page_exclusions([PASSPORT, '010-1234-5678'], '세탁세제 찾아줘'), [PASSPORT, '010-1234-5678'])
+        self.assertEqual(page_exclusions([PASSPORT], ''), [PASSPORT])
+        self.assertEqual(page_exclusions(['보관함 비밀 4719'], '보관함 알려줘'), ['비밀 4719'])
+
     def test_saved_private_values_are_redacted_from_page_text(self):
         sess, _ = session(excluded=lambda: [PASSPORT])
         page = sess.open({'url': ORIGIN + '/product', 'effect': 'read'})
@@ -1103,6 +1113,29 @@ class LoopTests(unittest.TestCase):
 
     def caps(self, transport, driver, **kwargs):
         return Capabilities(self.store, ModelAdapter(transport), CFG, '', 'job', self.record, browser=lambda: driver, **kwargs)
+
+    def owner_asked(self, message):
+        with self.store.db() as db:
+            db.execute("INSERT INTO jobs(id,request_key,message,status,created) VALUES ('job','k-job',?,'running',?)",
+                       (message, time.time()))
+
+    def test_the_owners_own_words_in_this_request_do_not_mask_the_page(self):
+        """#889: a value the Work saved from the owner's own words no longer blanks those words on public pages."""
+        self.owner_asked('세탁세제 3L 찾아줘')
+        caps = self.caps(Script(), FakeDriver())
+        caps.written_private = ['세탁세제', PASSPORT]
+        page = caps.browser_session().open({'url': ORIGIN + '/product', 'effect': 'read'})
+        self.assertEqual(page['title'], '세탁세제 3L', 'the owner said it in this request')
+        self.assertNotIn(PASSPORT, flat(page), 'a saved value the owner did not say here stays masked')
+        self.assertIn('보관 위치 ' + bs.REDACTED, page['text'])
+        # Outbound redaction (browser_type values, goals, records) keeps the full set.
+        self.assertIn('세탁세제', caps._browser_excluded())
+        caps.close_browser()
+
+    def test_without_a_request_the_snapshot_set_is_unchanged(self):
+        caps = self.caps(Script(), FakeDriver())
+        caps.written_private = ['세탁세제']
+        self.assertEqual(caps._page_excluded(), ['세탁세제'])
 
     def test_product_to_cart_through_the_loop_with_repeated_reads(self):
         script = Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/product', effect='navigate')]},

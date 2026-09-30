@@ -363,6 +363,29 @@ def _digit_order_ok(words,owner_words):
   index+=1
  return True
 
+def page_exclusions(excluded,owner_request):
+ """The browser snapshot redaction set without the owner's own words of this request (#889).
+
+ ``excluded`` are the Work's private-store values (``_browser_excluded``).
+ The #605 lookup matcher over-blocks by design (any 2+ character contained
+ span), so a value the owner just stated - a service name, a list of sites -
+ masked those words on every public page the worker read for that very
+ request.  Those words already reach the same AI verbatim in the request, so
+ masking them in inbound page text protects nothing.  Each value keeps only
+ its words the owner did not say (the #597 ``owner_said`` stem rule); a
+ value wholly said is dropped.  Outbound redaction is not affected.
+ """
+ owner_words=memory_words(owner_request)
+ if not owner_words:return list(excluded)
+ kept=[]
+ for value in excluded:
+  if not isinstance(value,str):continue
+  words=memory_words(value)
+  rest=[word for word in words if not owner_said(word,owner_words)]
+  if len(rest)==len(words):kept.append(value)  # nothing the owner said: the value exactly as before
+  elif rest:kept.append(' '.join(rest))
+ return kept
+
 def owner_covers(value,owner_words,whole=True):
  """Every word of ``value`` (or, with ``whole=False``, at least one) is the owner's."""
  words=memory_words(value)
@@ -1645,7 +1668,7 @@ class Capabilities:
   """This Work's browser session, created on first use (#656)."""
   if self._browser_session is None:
    from .browser_session import BrowserSession
-   self._browser_session=BrowserSession(self.browser,work_id=self.job_id,budget=self.budget,excluded=self._browser_excluded,
+   self._browser_session=BrowserSession(self.browser,work_id=self.job_id,budget=self.budget,excluded=self._page_excluded,
                                         approvals=self.browser_approvals)
   return self._browser_session
  def close_browser(self):
@@ -1663,6 +1686,12 @@ class Capabilities:
    try:excluded=[*self.lookup_sources()['excluded'],*excluded]
    except Exception:pass
   return excluded
+ def _page_excluded(self):
+  """The snapshot redaction set for pages this Work reads: ``_browser_excluded`` less the request's own words (#889)."""
+  excluded=self._browser_excluded()
+  try:request=(self.store.job(self.job_id) or {}).get('message') or ''
+  except Exception:return excluded
+  return page_exclusions(excluded,request)
  def judgment_text(self,text,private=True):
   """Text as it may reach the completion judgment or a local record (#657, pilot boundary 1).
 

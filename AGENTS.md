@@ -168,6 +168,16 @@ Do not create a follow-up commit or pull request solely to change a work item fr
 
 Before making an implementation or documentation change, create the issue and switch to its matching branch. Enable the repository hooks once per clone with `git config core.hooksPath .githooks`; they reject commits and pushes directly to `main` or `master`.
 
+**One worktree per session (owner direction 2026-09-30, [#884](https://github.com/Jongtae/agentos/issues/884)).** Several sessions (Claude Code, Codex, subagents) work on this repository at the same time, and the owner's live AgentOS runs from the main working copy.
+
+- Each session does its edits, commits, test runs and pushes in its own `git worktree` on its issue branch, created from `origin/main`.
+- Never check out a branch, commit, stash, reset or merge in the main working copy. It stays on `main`.
+- After a merge, fast-forward the main working copy only when it is on `main` with no local changes. Otherwise leave it alone and report.
+- Check `git worktree list` and the current branch before any git command in a shared location.
+- Never run a bare `git stash`: the stash stack is shared across worktrees.
+- In a worktree, run tests with `PYTHONPATH=src`, because the editable install points at the main working copy.
+- Remove your own worktree and local branch after its PR merges or closes. Leave other sessions' worktrees alone.
+
 The active delivery order is `delivery-plan.yaml`. Historical v1/P7/Master Plan work and later successor plans are preserved rather than rewritten. An iteration cannot advance until its predecessor is complete or its explicitly recorded external blocker is resolved.
 
 Every active iteration must satisfy the English canonical [Goal Execution Contract](docs/goal-execution-contract.en.md): establish its goal-ready record before activation, preserve declared authority and non-goals, and close only with current evidence. Vision, roadmap order, issue creation and reserved proposals never activate implementation by themselves.

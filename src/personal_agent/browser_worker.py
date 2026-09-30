@@ -194,8 +194,16 @@ const buttonish = (el) => { const tag = el.tagName.toLowerCase();
   if (tag === 'select' || tag === 'textarea') return false;
   return !roles.some((role) => VALUE_ROLES.includes(role)); };
 // A link that goes somewhere (a styled ``href="#"`` or ``javascript:`` link runs a script instead).
+// #899: only a non-empty http(s) address, no press handler the DOM exposes (any ``on*``
+// attribute, or a handler property set by script), and no ``role=button``: pressing
+// it can only open a page.  A listener added with addEventListener is not visible.
+const PRESS_HANDLERS = ['onclick', 'onmousedown', 'onmouseup', 'onpointerdown', 'onpointerup', 'onauxclick',
+  'ontouchstart', 'ontouchend', 'onkeydown', 'onkeyup', 'onkeypress', 'onsubmit'];
+const scripted = (el) => el.getAttributeNames().some((name) => /^on/i.test(name)) ||
+  PRESS_HANDLERS.some((key) => typeof el[key] === 'function');
 const navLink = (el) => el.tagName.toLowerCase() === 'a' && el.hasAttribute('href') &&
-  !/^\s*(?:#|javascript:)/i.test(el.getAttribute('href') || '');
+  !/^\s*(?:$|#|javascript:)/i.test(el.getAttribute('href') || '') && /^https?:/i.test(el.href || '') &&
+  !(el.getAttribute('role') || '').toLowerCase().split(/\s+/).includes('button') && !scripted(el);
 const commitText = (el) => nameOf(el) + ' | ' + ownText(el);
 const labelName = (el) => { const control = labelControl(el); return control && buttonish(control) ? commitText(control) : ''; };
 // The nearest pressable ancestor a press on ``el`` also activates (a trusted click bubbles).
@@ -218,11 +226,15 @@ const contextOf = (el) => { let node = el.parentElement; const own = (el.innerTe
     if (text.length > own + 12) return cut(text, 300);
   }
   return ''; };
+// #899 review P2-2: whether it navigates and is pressable is part of what the guard
+// classified, so a page that rewrites the link or adds a handler after the snapshot
+// is refused (target_changed) rather than pressed.
 const describe = (el, tokens) => ({tag: el.tagName.toLowerCase(), type: typeOf(el), autocomplete: autocompleteOf(el), name: nameOf(el),
   own_text: ownText(el), label_name: labelName(el), ancestor_text: ancestorText(el), in_form: !!formOf(el),
-  payment_form: paymentForm(el, tokens)});
+  payment_form: paymentForm(el, tokens), nav_link: navLink(el), pressable: buttonish(el),
+  href: el.tagName.toLowerCase() === 'a' ? cut(el.href, 2000) : ''});
 const same = (actual, expect) => !!expect && ['tag', 'type', 'autocomplete', 'name', 'own_text', 'label_name', 'ancestor_text',
-  'in_form', 'payment_form']
+  'in_form', 'payment_form', 'nav_link', 'pressable', 'href']
   .every((key) => key in expect && actual[key] === expect[key]);
 const state = () => (window.__agentos = window.__agentos || {targets: new Map(), guard: null, listening: false,
   off: false, allow: null, cancelled: null, held: null, vetted: [], submitListening: false});

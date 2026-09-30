@@ -491,7 +491,7 @@ class DriverProtocolTests(unittest.TestCase):
         # The full descriptor the guard classified, and the guard's payment tokens.
         self.assertEqual(ops[3]['expect'], {'tag': 'button', 'type': 'submit', 'autocomplete': '', 'name': 'Go',
                                             'own_text': '', 'label_name': '', 'ancestor_text': '', 'in_form': False,
-                                            'payment_form': False})
+                                            'payment_form': False, 'nav_link': False, 'pressable': True, 'href': ''})
         self.assertEqual(ops[3]['tokens'], sorted(bs.PAYMENT_AUTOCOMPLETE))
         self.assertEqual(ops[4]['expect'], ops[3]['expect'])
         self.assertEqual((ops[3]['approved'], ops[4]['approved']), (False, False), 'unapproved unless the session says so')
@@ -888,6 +888,18 @@ class SessionFixtureHandler(FixtureHandler):
                               + self.server.agentos_origin + '/\')">AgentOS 열기</button>'
                               + '<form action="' + self.server.agentos_origin + '/api/browser/approval" method="post">'
                               + '<button type="submit">승인 보내기</button></form></body></html>')
+        if path == '/nav-links':
+            # #899: a list-page link whose label ends in a commit noun is a navigation; a
+            # scripted, empty, role=button or script-assigned one is judged as a button.
+            return self._send('''<html><head><title>링크</title></head><body>
+              <a id="plain" href="/list/often">자주구매</a>
+              <a id="attr" href="/list/often" onmousedown="void 0">선물구매</a>
+              <a id="prop" href="/list/often">재구매</a>
+              <a id="empty" href="">정기주문</a>
+              <a id="role" href="/list/often" role="button">해외결제</a>
+              <a id="noun" href="/list/often">구매</a>
+              <script>document.getElementById('prop').onclick = function () {};</script>
+            </body></html>''')
         if path == '/one-click-names':
             # Review of #763 P1/P2: names from aria-labelledby, a child image's alt, a role that
             # hides the button, and a neutral child inside a pay link; no card field anywhere.
@@ -1292,6 +1304,19 @@ class WebKitIntegrationTests(unittest.TestCase):
             approvals.issued.append(bs.binding_digest(approvals.requests[[row['tag'] for row in committing].index('button')][0]))
             self.assertEqual(sess.click({'target': str(button['n']), 'effect': 'mutate'})['title'], '주문 완료')
             self.assertEqual(self.server.posts, ['/add', '/order'])
+        finally:
+            sess.close()
+
+    def test_a_list_page_link_navigates_and_a_scripted_one_is_judged_as_a_button(self):
+        """#899 review P1/P2-3/P2-4/P2-5: the real worker's navLink, end to end."""
+        sess = bs.BrowserSession(self.profile.driver_factory('work-899'), work_id='work-899', approvals=Approvals(),
+                                 steps=20, allowed_origins_for_tests=(self.fixture,))
+        try:
+            sess.open({'url': self.origin + '/nav-links', 'effect': 'navigate'})
+            flagged = {row['name']: row['commit'] for row in sess.last['_elements']}
+            self.assertEqual(flagged.get('자주구매'), False, 'a plain http(s) list link opens a page')
+            for name in ('선물구매', '재구매', '정기주문', '해외결제', '구매'):
+                self.assertEqual(flagged.get(name), True, name)
         finally:
             sess.close()
 

@@ -169,8 +169,8 @@ COMMIT_PHRASES = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
     r"\b(?:pay|buy)\b\s*[$€£¥₩]?\s*\d",
     r"\btop\s*-?\s*up\b",
     r"(?:결제|구매|주문|구독|후원|충전|송금|이체)\s*(?:하기|진행|완료|확정|신청|시작)",
-    r"바로\s*(?:결제|구매|주문)|간편\s*결제|정기\s*결제",
-    r"(?:결제|구매|주문|송금|이체)\s*(?:$|[\d(₩])",
+    r"(?:바로|즉시|지금)\s*(?:결제|구매|주문)|간편\s*결제|정기\s*결제",
+    r"\d+\s*개\s*(?:구매|주문)",
     r"\d[\d,.]*\s*원\s*(?:결제|구매|주문)",
     r"注文(?:する|を確定|確定)|購入(?:する|手続き|確定)",
     r"立即(?:购买|購買|订购|訂購|支付|付款)|提交(?:订单|訂單)|确认(?:支付|付款)|確認(?:支付|付款)",
@@ -182,6 +182,17 @@ COMMIT_VERBS = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
     r"購入(?!履歴|方法)|支払(?!い?方法)|決済(?!方法)|寄付|送金|チャージ",
     r"支付(?!方式|方法|宝|寶)|付款(?!方式|方法)|购买(?!方式|方法|记录)|購買(?!方式|方法|紀錄)|下单|下單|订购|訂購|充值|转账|轉帳|捐款|订阅|訂閱",
 ))
+#: #899 (owner decision 2026-09-30: judge a link by where it goes): a label *ending*
+#: in a commit noun ("구매", "결제 ₩12,000").  On a control that is not a navigating
+#: link this counts as before.  A navigating link - an http(s) address with no inline
+#: click handler (``nav_link``, measured by the worker) - only opens a page, so there
+#: it counts only when the noun is the whole label: "자주구매" or "재구매" is the name
+#: of a list page.  A ``#``/``javascript:``/``onclick`` link is judged as a button.
+COMMIT_NOUN_END = re.compile(r"(?:결제|구매|주문|송금|이체)\s*(?:$|[\d(₩])")
+COMMIT_NOUN_ALONE = re.compile(r"^(?:결제|구매|주문|송금|이체)\s*(?:$|[\d(₩])")
+#: A commit noun followed by a price ("세제 구매 ₩12,000") names a purchase wherever it
+#: stands, so it counts on a navigating link too (#905 review).
+COMMIT_NOUN_PRICE = re.compile(r"(?:결제|구매|주문|송금|이체)\s*[\d(₩]")
 #: A name at most this long is a control's label, not an article or result title.
 COMMIT_SHORT = 24
 #: A pressable ancestor's text longer than this is a content wrapper, not a control (#758).
@@ -204,6 +215,8 @@ def commit_name(name, link=False):
         return False
     if any(pattern.search(text) for pattern in COMMIT_PHRASES):
         return True
+    if (COMMIT_NOUN_ALONE if link else COMMIT_NOUN_END).search(text) or COMMIT_NOUN_PRICE.search(text):
+        return True
     return (not link or len(text) <= COMMIT_SHORT) and any(pattern.search(text) for pattern in COMMIT_VERBS)
 
 
@@ -225,9 +238,8 @@ def commit_control(element):
 
 def _is_link(element):
     """A link that goes somewhere; a styled ``href="#"``/``javascript:`` link is a button (#758)."""
-    if 'nav_link' in element:
-        return bool(element.get('nav_link'))
-    return element.get('role') == 'link' or element.get('tag') == 'a'
+    # #899 review P3-1: without the worker's measurement a link is judged as a button.
+    return bool(element.get('nav_link'))
 
 
 def _commit_match(element):
@@ -1303,7 +1315,13 @@ class WebKitWorkerDriver:
                                            'ancestor_text': str(element.get('ancestor_text') or ''),
                                            'in_form': element.get('form') is not None,
                                            'payment_form': (element.get('form') is not None and element.get('form') in guarded_forms)
-                                           or forwards_to_payment_form(element, guarded_forms)}
+                                           or forwards_to_payment_form(element, guarded_forms),
+                                           # #899 review P2-2: a link rewritten or given a handler after
+                                           # the snapshot no longer matches and is not pressed.
+                                           'nav_link': bool(element.get('nav_link')),
+                                           # #905 review: a link rewritten to another address is refused too.
+                                           'href': str(element.get('href') or ''),
+                                           'pressable': bool(element.get('pressable', True))}
                         for element in elements if isinstance(element.get('index'), int) and not isinstance(element.get('index'), bool)}
         return page
 

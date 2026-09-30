@@ -771,6 +771,7 @@ class Worker:
         self.step_refused = 0      # ``refused_submits`` when the current step began
         self.reported_refused = 0  # ``refused_submits`` last reported (step answer or snapshot, #758)
         self.hosts = set()         # hosts of committed main-frame navigations in this worker's life
+        self.popups = []           # #914: (view, window, delegate) of sign-in popups while the owner signs in
         self.main_navigations = 0  # main-frame navigations allowed so far (#736)
         self.landed = 0            # main-frame navigations committed or failed so far (#736)
         self.deciding = 0          # main-frame policy decisions still resolving their destination (#736 review)
@@ -1270,12 +1271,49 @@ class Worker:
             return self.op_navigate(ident, command, timeout)
         self.reply(ident)
 
+    def open_popup(self, config):
+        """#914: a popup (``window.open``) in its own window while the owner signs in by hand.
+
+        A social sign-in opens the provider in a popup and hands its result back
+        to the page that opened it (``window.opener``).  Loading the popup in the
+        login window itself destroyed that page, so the provider signed the owner
+        in while the site never did.  The popup is a separate web view built from
+        WebKit's own configuration (same data store, opener kept); its navigations
+        pass the same destination check.  Only while the login window shows.
+        """
+        AppKit, Foundation, WebKit = self.AppKit, self.Foundation, self.WebKit
+        rect = Foundation.NSMakeRect(0, 0, 520, 720)
+        view = WebKit.WKWebView.alloc().initWithFrame_configuration_(rect, config)
+        delegate = _popup_delegate_class().alloc().init()
+        delegate.worker = self
+        view.setNavigationDelegate_(delegate)
+        view.setUIDelegate_(delegate)
+        style = (AppKit.NSWindowStyleMaskTitled | AppKit.NSWindowStyleMaskClosable | AppKit.NSWindowStyleMaskResizable)
+        window = AppKit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(rect, style, AppKit.NSBackingStoreBuffered, False)
+        window.setContentView_(view)
+        window.setReleasedWhenClosed_(False)
+        window.setDelegate_(delegate)
+        window.setTitle_('AgentOS · 로그인')
+        window.center()
+        window.makeKeyAndOrderFront_(None)
+        self.popups.append((view, window, delegate))
+        return view
+
+    def close_popup(self, view=None, window=None):
+        """Close one popup (by its view or window), or every popup when neither is given."""
+        for entry in list(self.popups):
+            if (view is None and window is None) or entry[0] is view or entry[1] is window:
+                entry[1].orderOut_(None)
+                self.popups.remove(entry)
+
     def op_hide(self, ident, command, timeout):
+        self.close_popup()
         self.window.orderOut_(None)
         self.set_guard_off(False)
         self.reply(ident)
 
     def window_closed_by_owner(self):
+        self.close_popup()
         self.window.orderOut_(None)
         self.set_guard_off(False)
         self.emit({'event': 'hidden'})
@@ -1419,6 +1457,58 @@ def _cookie_object(Foundation, row):
 
 
 _DELEGATE = []
+_POPUP_DELEGATE = []
+
+
+def _popup_delegate_class():
+    """#914: the delegate of a sign-in popup window: the same destination check, nothing else."""
+    if _POPUP_DELEGATE:
+        return _POPUP_DELEGATE[0]
+    import Foundation
+    import WebKit
+    import objc
+
+    class AgentOSPopupDelegate(Foundation.NSObject):
+        worker = objc.ivar()
+
+        def webView_decidePolicyForNavigationAction_decisionHandler_(self, view, action, handler):
+            request = action.request()
+            url = str(request.URL().absoluteString()) if request is not None and request.URL() is not None else ''
+            frame = action.targetFrame()
+            top = frame is None or bool(frame.isMainFrame())
+            if top and str(urlsplit(url).scheme or '').lower() in ('data', 'blob'):
+                return handler(WebKit.WKNavigationActionPolicyCancel)
+            # main_frame=False: a popup's navigations never touch the login window's counters.
+            self.worker.decide(url, False, lambda allowed: handler(
+                WebKit.WKNavigationActionPolicyAllow if allowed else WebKit.WKNavigationActionPolicyCancel))
+
+        def webView_createWebViewWithConfiguration_forNavigationAction_windowFeatures_(self, view, config, action, features):
+            request = action.request()
+            url = request.URL() if request is not None else None
+            if url is None or str(url.scheme() or '').lower() not in ('http', 'https'):
+                return None
+            if self.worker.guard_off and self.worker.window.isVisible():
+                return self.worker.open_popup(config)
+            return None
+
+        def webView_didCommitNavigation_(self, view, navigation):
+            url = view.URL()
+            host = _host(url.absoluteString()) if url is not None else ''
+            if host:
+                for entry in self.worker.popups:
+                    if entry[0] is view:
+                        entry[1].setTitle_(f'AgentOS · 로그인 · {host}')
+
+        def webViewDidClose_(self, view):
+            # The page closed its own popup (window.close()), as a finished sign-in does.
+            self.worker.close_popup(view=view)
+
+        def windowShouldClose_(self, window):
+            self.worker.close_popup(window=window)
+            return False
+
+    _POPUP_DELEGATE.append(AgentOSPopupDelegate)
+    return AgentOSPopupDelegate
 
 
 def _delegate_class():
@@ -1499,11 +1589,16 @@ def _delegate_class():
         def webView_createWebViewWithConfiguration_forNavigationAction_windowFeatures_(self, view, config, action, features):
             # A link that asks for a new window opens in this one: one page, one
             # session.  The load still passes the navigation policy above; only
-            # http(s) is handed to it at all.
+            # http(s) is handed to it at all.  #914: while the owner signs in by
+            # hand (the login window shows), a popup gets its own window so a
+            # social sign-in can hand its result back to the page that opened it.
             request = action.request()
             url = request.URL() if request is not None else None
-            if url is not None and str(url.scheme() or '').lower() in ('http', 'https'):
-                view.loadRequest_(request)
+            if url is None or str(url.scheme() or '').lower() not in ('http', 'https'):
+                return None
+            if self.worker.guard_off and self.worker.window.isVisible():
+                return self.worker.open_popup(config)
+            view.loadRequest_(request)
             return None
 
         def windowShouldClose_(self, window):

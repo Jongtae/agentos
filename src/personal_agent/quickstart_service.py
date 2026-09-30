@@ -4404,16 +4404,26 @@ class AgentService:
                     and isinstance(job.get('chat_id'),int) and job.get('chat_id')==cfg.get('user_id'))
 
     def _presence_call(self, method, *args, **kwargs):
+        return self._presence_attempt(method,*args,**kwargs)[0]
+
+    def _presence_attempt(self, method, *args, **kwargs):
+        """``(sent, refused)``: ``refused`` only when Telegram answered ``ok: false`` (``TelegramRejected``).
+
+        A timeout or a lost connection is not a refusal (#908).
+        """
         try:
             getattr(self.telegram,method)(*args,**kwargs)
-            return True
+            return True,False
         except Exception as exc:  # presentation only; see the block comment above
             # INFO, so the owner-private log can tell a Telegram refusal of a
             # reaction/typing/draft apart from code that never sent it (#581
             # live discrepancy).  Only the method, error class and Telegram
             # status code are logged - never the description, text or token.
             LOG.info('telegram presence %s failed: %s status=%s',method,type(exc).__name__,getattr(exc,'status',None))
-            return False
+            from .conversation_handoff import TelegramRejected
+            # Only Telegram's own ok:false answer is a refusal; the transport's timeout
+            # (status='timeout') or a lost connection is not (#909 review).
+            return False,isinstance(exc,TelegramRejected)
 
     def present_turn(self, job):
         """React to the owner's message when its Work starts (#835, #858).
@@ -4776,9 +4786,13 @@ class AgentService:
         text=text or draft_frame('',0)
         draft_id=draft_id_for(job['id'])
         if not state.rich_draft_failed:
-            if self._presence_call('send_rich_message_draft',job['chat_id'],draft_id,rich_draft_blocks(text,note),can_stop=True):
+            sent,refused=self._presence_attempt('send_rich_message_draft',job['chat_id'],draft_id,rich_draft_blocks(text,note),can_stop=True)
+            if sent:
                 return True
-            state.rich_draft_failed=True
+            # #908 (live 2026-09-30 22:58): the first draft after a restart timed out and the
+            # whole Work fell back to the plain draft.  Only Telegram refusing the rich draft
+            # retires it for this Work; a timeout falls back this once and the next edit retries.
+            if refused:state.rich_draft_failed=True
         return self._presence_call('send_message_draft',job['chat_id'],draft_id,with_note(text,note),can_stop=True)
 
     #: Notification kinds whose prompt is the Work's only surface while pending (#718).

@@ -502,7 +502,7 @@ class PresentationFailureTests(NativePresenceTestCase):
 
     def test_unsupported_draft_falls_back_to_typing(self):
         self.connect_model()
-        self.failing = {'sendRichMessageDraft': ProviderError('method not found'),
+        self.failing = {'sendRichMessageDraft': TelegramRejected(400, 'Bad Request: method not found'),
                         'sendMessageDraft': ProviderError('method not found')}
         self.during_model = lambda job: [self.service.acknowledge_long_work(now=job['created'] + t) for t in (6, 7, 9)]
         self.turn('긴 요청')
@@ -514,7 +514,7 @@ class PresentationFailureTests(NativePresenceTestCase):
     def test_a_refused_thinking_block_falls_back_to_the_plain_dots_draft(self):
         # #858: a client/API without the rich draft still gets the dots, as text.
         self.connect_model()
-        self.failing = {'sendRichMessageDraft': ProviderError('Bad Request: method not found')}
+        self.failing = {'sendRichMessageDraft': TelegramRejected(400, 'Bad Request: method not found')}
         self.during_model = lambda job: [self.service.acknowledge_long_work(now=job['created'] + t) for t in (6, 8, 10)]
         job, _ = self.turn('긴 요청')
         self.assertEqual(self.draft_methods(), ['sendRichMessageDraft', 'sendMessageDraft', 'sendMessageDraft',
@@ -523,6 +523,26 @@ class PresentationFailureTests(NativePresenceTestCase):
         self.assertEqual(plain, [{'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'text': frame, 'can_stop': True}
                                  for frame in DOTS_FRAMES[:3]])
         self.assertEqual(len(self.sends()), 1)
+
+    def test_a_timed_out_thinking_block_is_tried_again_on_the_next_edit(self):
+        # #908 (live 2026-09-30 22:58): the first rich draft after a restart timed out and the
+        # whole Work showed the plain draft.  A timeout is not a refusal.
+        self.connect_model()
+        failures = {'count': 1}
+        original = self.service.telegram.send_rich_message_draft
+
+        def flaky(*args, **kwargs):
+            if failures['count']:
+                failures['count'] -= 1
+                self.calls.append(('sendRichMessageDraft', {'timed_out': True}))
+                raise ProviderError('Telegram request timed out', status='timeout')  # as telegram_request_json raises it
+            return original(*args, **kwargs)
+        self.service.telegram.send_rich_message_draft = flaky
+        self.during_model = lambda job: [self.service.acknowledge_long_work(now=job['created'] + t) for t in (6, 8, 10)]
+        self.turn('긴 요청')
+        methods = self.draft_methods()
+        self.assertEqual(methods[:2], ['sendRichMessageDraft', 'sendMessageDraft'], 'this edit falls back once')
+        self.assertEqual(methods[2:], ['sendRichMessageDraft', 'sendRichMessageDraft'], 'the next edits use the thinking block again')
 
     def test_uncertain_final_send_is_not_resent(self):
         self.connect_model()

@@ -7158,9 +7158,12 @@ class AgentService:
 
     def _family_notify(self, text):
         cfg=self.store.config('telegram',{})
-        if cfg.get('enabled') and isinstance(cfg.get('user_id'),int):
-            try:self.telegram.send_message(cfg['user_id'],text)
-            except Exception as exc:LOG.warning('family setup: owner notice not sent (%s)',type(exc).__name__)
+        if not (cfg.get('enabled') and isinstance(cfg.get('user_id'),int)):return False
+        try:self.telegram.send_message(cfg['user_id'],text)
+        except Exception as exc:
+            LOG.warning('family setup: owner notice not sent (%s)',type(exc).__name__)
+            return False
+        return True
 
     def _run_family_setup(self, display_name, name, notify=None):
         from . import family_setup
@@ -7169,7 +7172,10 @@ class AgentService:
         def say(text):
             if notify is None:return self._family_notify(text)
             try:notify(text)
-            except Exception as exc:LOG.warning('family setup: notice not sent (%s)',type(exc).__name__)
+            except Exception as exc:
+                LOG.warning('family setup: notice not sent (%s)',type(exc).__name__)
+                return False
+            return True
         try:
             handle=family_setup.prepare_family_setup(self.store,name,display_name,service_action=service_action)
         except family_setup.SetupError as exc:
@@ -7177,7 +7183,13 @@ class AgentService:
         except Exception as exc:
             LOG.warning('family setup failed to start (%s)',type(exc).__name__)
             return say('가족 비서를 만들지 못했어요. 잠시 뒤에 다시 요청해 주세요.')
-        say(f"{handle['display_name']} 설정 링크예요. 가족에게 보내 주세요. 약 {family_setup.SETUP_SECONDS//60}분 동안 열려 있어요.\n{handle['link']}")
+        if not say(f"{handle['display_name']} 설정 링크예요. 가족에게 보내 주세요. 약 {family_setup.SETUP_SECONDS//60}분 동안 열려 있어요.\n{handle['link']}"):
+            # #913 review: a link nobody received must not keep a public tunnel open; close now so
+            # the owner can simply ask again (the unpaired instance is reused).
+            LOG.warning('family setup: link not delivered; closing the setup')
+            try:family_setup.close_family_setup(handle,self.store)
+            except Exception as exc:LOG.warning('family setup close failed (%s)',type(exc).__name__)
+            return
         try:
             family_setup.watch_family_setup(handle,self.store,on_state=lambda state:state in ('paired','expired')
                                             and say(family_setup.STATE_TEXT.get(state,family_setup.EXPIRED_TEXT)))

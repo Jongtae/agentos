@@ -172,6 +172,25 @@ class FamilySetupInTheService(_Case):
         self.assertIn('연결이 끝났어요', heard[1])
         self.assertEqual(self.sent(), [], 'not duplicated to another chat')
 
+    def test_an_undelivered_link_closes_the_setup_at_once(self):
+        """#913 review P1: no public link stays open when the owner never got it."""
+        from personal_agent import family_setup
+        closed, watched = [], []
+
+        def prepare(owner_store, name, display_name, **kwargs):
+            return {'display_name': display_name, 'link': 'https://abc.ngrok-free.app/family-setup?code=c'}
+
+        def refuse(text):
+            raise OSError('telegram down')
+        original = family_setup.close_family_setup
+        family_setup.close_family_setup = lambda handle, store: closed.append(handle['link'])
+        try:
+            self.run_setup(prepare, watch=lambda handle, store, on_state: watched.append(1), notify=refuse)
+        finally:
+            family_setup.close_family_setup = original
+        self.assertEqual(closed, ['https://abc.ngrok-free.app/family-setup?code=c'])
+        self.assertEqual(watched, [], 'no wait for a pairing that cannot come')
+
     def test_nothing_starts_when_the_link_could_reach_nobody(self):
         self.store.put('telegram', {'enabled': True, 'generation': GENERATION, 'cursor': 0})
         with self.assertRaisesRegex(ValueError, '보낼 곳이 없어요'):

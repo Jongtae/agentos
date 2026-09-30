@@ -510,6 +510,9 @@ def mediate_snapshot(raw, excluded=(), requested_url=None):
                 'redacted_values': redacted}
     if len(visible) > ELEMENT_LIMIT:
         snapshot['more_elements'] = len(visible) - ELEMENT_LIMIT
+    if len(elements) >= READ_ELEMENT_LIMIT or len(visible) >= READ_ELEMENT_LIMIT:
+        # #926 review: the worker reads at most 300 controls; later ones are not numbered.
+        snapshot['elements_capped'] = True
     snapshot['_rows'] = visible
     snapshot['_elements'] = internal
     # Internal only (never returned): the unmediated page reference the

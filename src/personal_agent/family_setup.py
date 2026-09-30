@@ -418,6 +418,37 @@ def _local_status(port, code, opener=_LOOPBACK.open):
         return json.loads(response.read() or b'{}')
 
 
+#: The owner's AI route a family instance runs on (#893: the owner shares the
+#: subscription).  Configuration rows, and only the secrets those routes use.
+SHARED_ROUTE_CONFIG = ('subscription_engine', 'model', 'decision_route')
+SHARED_ROUTE_SECRETS = ('claude_code_token', 'model_key', 'decision_model_key')
+
+
+def share_ai_route(owner_store, family_store):
+    """Give the family instance the owner's AI route; returns the copied names (never values).
+
+    Without a route a paired family member would only be told to connect a
+    model (review P1).  Only the route rows and their secrets are copied; the
+    owner's memory, folders, Telegram bot and every other secret stay behind.
+    """
+    engine = owner_store.config('subscription_engine', {})
+    model = owner_store.config('model', {})
+    if not ((isinstance(engine, dict) and engine.get('id')) or (isinstance(model, dict) and model.get('provider'))):
+        return None
+    copied = []
+    for key in SHARED_ROUTE_CONFIG:
+        value = owner_store.config(key, None)
+        if value:
+            family_store.put(key, value)
+            copied.append(key)
+    for key in SHARED_ROUTE_SECRETS:
+        value = owner_store.secret(key)
+        if value:
+            family_store.secret(key, value)
+            copied.append(key)
+    return copied
+
+
 def family_main(argv, *, service_action, owner_data=None, environ=None, opener=None,
                 popen=subprocess.Popen, out=print, sleep=time.sleep, clock=time.time, free=_port_free):
     """Create a family member's instance and run its one-page setup through a temporary link."""
@@ -457,6 +488,9 @@ def family_main(argv, *, service_action, owner_data=None, environ=None, opener=N
     port = args.port or existing.port or choose_port(taken, free=free)
     display_name = args.display_name or f'{args.name} 비서'
     family_store = QuickStore(ServiceController(instance=args.name, port=port, environ=environ).data_dir)
+    if share_ai_route(owner_store, family_store) is None:
+        out('내 AgentOS에 연결된 AI(구독 엔진이나 모델)가 없어 가족 비서를 만들지 않았습니다. 먼저 내 AI를 연결해 주세요.')
+        return 1
     record = write_setup(family_store, instance=args.name, display_name=display_name, owner_bot=cfg['username'])
     register_pending(owner_store, record, port)
     process = None

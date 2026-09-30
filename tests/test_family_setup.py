@@ -270,6 +270,10 @@ class OwnerCommand(unittest.TestCase):
         self.owner = QuickStore(self.root / 'owner')
         self.owner.secret('telegram_token', '6000000000:OwnerTokenValue_abcdefghijklmnopq')
         self.owner.put('telegram', {'enabled': True, 'username': 'owner_bot', 'user_id': 111, 'generation': 'g'})
+        self.owner.put('subscription_engine', {'id': 'claude-code', 'connected_at': 1, 'authentication': 'owner-confirmed-official-login'})
+        self.owner.secret('claude_code_token', 'sk-ant-oat01-owner-shared-subscription')
+        self.owner.secret('gmail_refresh', 'never-shared')
+        self.owner.put('file_roots', [{'id': 'r1', 'path': '/Users/owner/private'}])
         self.environ = {'HOME': str(self.root / 'home')}
         self.output, self.sent, self.actions = [], [], []
         self.states = iter(['waiting_bot', 'bot_connected', 'paired'])
@@ -325,6 +329,12 @@ class OwnerCommand(unittest.TestCase):
         family = QuickStore(self.root / 'home/.local/share/agentos-instances/spouse')
         self.assertIsNone(family_setup.read_setup(family), 'the setup is closed afterwards')
         self.assertNotIn('OwnerTokenValue', '\n'.join(map(str, self.output)))
+        # Review P1: the family member can talk to an AI - the owner's route, and nothing else of the owner's.
+        self.assertEqual(family.config('subscription_engine')['id'], 'claude-code')
+        self.assertEqual(family.secret('claude_code_token'), 'sk-ant-oat01-owner-shared-subscription')
+        self.assertEqual(family.secret('gmail_refresh'), '')
+        self.assertEqual(family.secret('telegram_token'), '', "the owner's bot token never moves")
+        self.assertEqual(family.config('file_roots', []), [])
 
     def test_without_bot_management_mode_nothing_is_created(self):
         self.can_manage = False
@@ -332,6 +342,12 @@ class OwnerCommand(unittest.TestCase):
         self.assertIn('Bot Management Mode', self.output[-1])
         self.assertEqual(self.actions, [])
         self.assertFalse((self.root / 'home/.local/share/agentos-instances/spouse').exists())
+
+    def test_without_an_owner_ai_route_nothing_is_installed(self):
+        self.owner.put('subscription_engine', {})
+        self.assertEqual(self.invoke('add', 'spouse'), 1)
+        self.assertIn('AI', self.output[-1])
+        self.assertEqual(self.actions, [])
 
     def test_an_invalid_name_is_refused(self):
         self.assertEqual(self.invoke('add', 'Not/Valid'), 2)

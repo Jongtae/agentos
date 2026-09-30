@@ -4407,7 +4407,7 @@ class AgentService:
         return self._presence_attempt(method,*args,**kwargs)[0]
 
     def _presence_attempt(self, method, *args, **kwargs):
-        """``(sent, refused)``: ``refused`` only when Telegram answered and refused it.
+        """``(sent, refused)``: ``refused`` only when Telegram answered ``ok: false`` (``TelegramRejected``).
 
         A timeout or a lost connection is not a refusal (#908).
         """
@@ -4421,7 +4421,9 @@ class AgentService:
             # status code are logged - never the description, text or token.
             LOG.info('telegram presence %s failed: %s status=%s',method,type(exc).__name__,getattr(exc,'status',None))
             from .conversation_handoff import TelegramRejected
-            return False,isinstance(exc,TelegramRejected) or getattr(exc,'status',None) is not None
+            # Only Telegram's own ok:false answer is a refusal; the transport's timeout
+            # (status='timeout') or a lost connection is not (#909 review).
+            return False,isinstance(exc,TelegramRejected)
 
     def present_turn(self, job):
         """React to the owner's message when its Work starts (#835, #858).

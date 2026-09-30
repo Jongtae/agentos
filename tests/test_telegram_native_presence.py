@@ -535,7 +535,7 @@ class PresentationFailureTests(NativePresenceTestCase):
             if failures['count']:
                 failures['count'] -= 1
                 self.calls.append(('sendRichMessageDraft', {'timed_out': True}))
-                raise ProviderError('Telegram request timed out')
+                raise ProviderError('Telegram request timed out', status='timeout')  # as telegram_request_json raises it
             return original(*args, **kwargs)
         self.service.telegram.send_rich_message_draft = flaky
         self.during_model = lambda job: [self.service.acknowledge_long_work(now=job['created'] + t) for t in (6, 8, 10)]

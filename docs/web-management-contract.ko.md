@@ -3,6 +3,8 @@
 2026-09-20 소유자 결정. 결정 기록 #379 / PR #380. 구현 이슈 #382 (WEB-ADMIN-01).
 영문 기준: [Local Web Management Contract](web-management-contract.en.md).
 
+> **후속 방향 (2026-09-30, #880).** 소유자는 웹을 더 이상 관리 유틸리티로 두지 않기로 했습니다. 관리는 대화로 하고, 페이지는 텍스트로 보여 주기 어려운 결과와 대화로 안전하게 받을 수 없는 입력(비밀값, OAuth, 폴더 선택, 결제 승인)에만 둡니다. 영문 기준의 [Presence Experience Contract](presence-experience-contract.en.md) *Pages* 절을 따릅니다. 아래 내용은 #880의 화면 분류 전까지 기존 화면 설명으로 남습니다.
+
 ## 확정한 방향
 
 **Telegram은 비서에게 일을 부탁하고 답을 받는 곳이고, 로컬 웹은 AgentOS를 관리하는 유틸리티입니다.** 웹에 별도의 일반 채팅창이나 Telegram 전체 대화를 기본 화면으로 복제하지 않습니다.

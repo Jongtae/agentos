@@ -4,6 +4,8 @@ Decision date: 2026-09-20. Design record: #379 / PR #380. Implementation: #382 (
 
 **Status: owner-selected product direction and implementation specification, not shipped behavior.** Recording this contract or merging its documentation does not start Codex, mark the implementation complete, or activate a scheduler. The implementation issue supplies the bounded work units, readiness alignment, validation and stop rule.
 
+> **Successor direction (2026-09-30, #880).** The owner no longer wants the web to be a management utility. Management happens in conversation. Pages exist for results that text cannot carry and for inputs that conversation cannot safely carry. See *Pages* in the [Presence Experience Contract](presence-experience-contract.en.md). This contract still describes the existing screens until the #880 census reassigns them.
+
 ## 1. Product role
 
 The owner uses Telegram to ask for work and receive useful answers. The local web is the utility used to manage AgentOS: inspect tasks and results, find retained records, and configure execution/data connections. It is not a second messenger and does not reproduce a global Telegram conversation by default.

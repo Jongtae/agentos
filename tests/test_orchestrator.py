@@ -1599,6 +1599,10 @@ class SecretaryStandard(Harness):
         self.assertIn('counts only when that source appears in the observations', GOAL_REACHED_PROPOSITION)
         self.assertIn('not whether it is perfect', GOAL_REACHED_PROPOSITION)
         self.assertNotIn('when it is unclear', GOAL_REACHED_PROPOSITION)
+        # #876: when the message asks, offering to look something up with no attempt observed is not an answer.
+        self.assertIn('when the message asks about something or asks for something to be done', GOAL_REACHED_PROPOSITION)
+        self.assertIn('offers to look it up, check it or do it', GOAL_REACHED_PROPOSITION)
+        self.assertIn('when the observations show no attempt to find it', GOAL_REACHED_PROPOSITION)
 
     def test_the_guidance_puts_the_source_next_to_a_looked_up_fact_and_proposes_a_watch_despite_a_missing_detail(self):
         """#854: a looked-up changing fact carries its link or is called unsourced; a missing detail never blocks a watch."""

@@ -403,8 +403,9 @@ class SettingsOrchestrator:
         if category == "current_context":
             self.service.set_current_context({"enabled": after == "on"} if setting == "enabled" else {"timezone": after})
         elif category == "family":
-            # #912: runs in the background; the owner gets the link, then the outcome, on Telegram.
-            self.service.start_family_setup(after)
+            # #912: runs in the background; the link, then the outcome, follow in the confirming conversation.
+            notify = self.__dict__.get("_family_notify", {}).pop(row["id"], None)
+            self.service.start_family_setup(after, notify=notify)
             return "requested"
         elif category == "owner_model":
             self.service.owner_model_request({"operation": "set", **({"enabled": after == "on"} if setting == "enabled"
@@ -560,6 +561,9 @@ class SettingsOrchestrator:
         """
         if notify is not None and (row.get("category"), row.get("setting")) in SLOW_SETTINGS:
             return self._enqueue(self._admit(row, digest), notify)
+        if row.get("category") == "family":
+            # #913 review P2-1: the family setup's link and outcome go to the conversation that confirmed it.
+            self.__dict__.setdefault("_family_notify", {})[row.get("id")] = notify
         category_lock = self._category_locks.get(row.get("category"))
         if category_lock is None or not category_lock.acquire(timeout=APPLY_WAIT_SECONDS):
             raise SettingsError(BUSY_MESSAGE)

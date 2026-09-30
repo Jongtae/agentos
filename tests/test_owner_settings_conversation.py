@@ -89,7 +89,7 @@ class FamilyAssistantConversation(_Case):
     def setUp(self):
         super().setUp()
         self.started = []
-        self.service.start_family_setup = lambda display_name, name=None: self.started.append(display_name) or {'state': 'requested'}
+        self.service.start_family_setup = lambda display_name, name=None, notify=None: self.started.append(display_name) or {'state': 'requested'}
 
     def test_a_family_assistant_is_drafted_then_started_only_after_confirmation(self):
         draft = self.draft('family', 'add', ' 아내   비서 ')
@@ -124,18 +124,18 @@ class FamilyAssistantConversation(_Case):
 class FamilySetupInTheService(_Case):
     """#912: after confirmation the service runs the setup and reports on Telegram."""
 
-    def run_setup(self, prepare, watch=None):
+    def run_setup(self, prepare, watch=None, notify=None):
         from personal_agent import family_setup
-        originals = (family_setup.prepare_family_setup, family_setup.watch_family_setup, family_setup.family_instances)
+        originals = (family_setup.prepare_family_setup, family_setup.watch_family_setup, family_setup.pick_instance_name)
         family_setup.prepare_family_setup = prepare
         family_setup.watch_family_setup = watch or (lambda handle, store, on_state: on_state('paired'))
-        family_setup.family_instances = lambda home=None: ['family-1']
+        family_setup.pick_instance_name = lambda home=None: 'family-2'
         try:
-            receipt = self.service.start_family_setup('아내 비서')
+            receipt = self.service.start_family_setup('아내 비서', notify=notify) if notify else self.service.start_family_setup('아내 비서')
             self.service._family_setup_thread.join(5)
             return receipt
         finally:
-            family_setup.prepare_family_setup, family_setup.watch_family_setup, family_setup.family_instances = originals
+            family_setup.prepare_family_setup, family_setup.watch_family_setup, family_setup.pick_instance_name = originals
 
     def sent(self):
         return [body['text'] for method, body in self.telegram if method == 'sendMessage']
@@ -160,6 +160,23 @@ class FamilySetupInTheService(_Case):
             raise SetupError("BotFather 미니앱에서 Bot Management Mode를 켜 주세요.")
         self.run_setup(prepare)
         self.assertEqual(self.sent(), ["BotFather 미니앱에서 Bot Management Mode를 켜 주세요."])
+
+    def test_the_link_and_outcome_go_to_the_confirming_conversation(self):
+        """#913 review P2-1."""
+        heard = []
+
+        def prepare(owner_store, name, display_name, **kwargs):
+            return {'display_name': display_name, 'link': 'https://abc.ngrok-free.app/family-setup?code=c'}
+        self.run_setup(prepare, notify=heard.append)
+        self.assertIn('https://abc.ngrok-free.app/family-setup?code=c', heard[0])
+        self.assertIn('연결이 끝났어요', heard[1])
+        self.assertEqual(self.sent(), [], 'not duplicated to another chat')
+
+    def test_nothing_starts_when_the_link_could_reach_nobody(self):
+        self.store.put('telegram', {'enabled': True, 'generation': GENERATION, 'cursor': 0})
+        with self.assertRaisesRegex(ValueError, '보낼 곳이 없어요'):
+            self.service.start_family_setup('아내 비서')
+        self.assertIsNone(self.service.__dict__.get('_family_setup_thread'))
 
     def test_one_setup_at_a_time(self):
         import threading

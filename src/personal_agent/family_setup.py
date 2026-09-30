@@ -486,6 +486,41 @@ def family_instances(home=None):
     return sorted(path.name[len(LABEL) + 1:-len('.plist')] for path in folder.glob(f'{LABEL}.*.plist'))
 
 
+def _paired(data_dir):
+    """Whether that instance's Telegram is paired; an instance with no store is never reused."""
+    from .quickstart_store import QuickStore
+    if not (Path(data_dir) / 'private' / 'quickstart.db').is_file():
+        return True
+    try:
+        return isinstance(QuickStore(data_dir).config('telegram', {}).get('user_id'), int)
+    except Exception:
+        return True
+
+
+def pick_instance_name(home=None):
+    """An installed family instance nobody has paired yet, else the first free ``family-N`` (#913 review P2-3).
+
+    A retried setup reuses the unpaired instance instead of adding another, and
+    a folder left by an uninstalled instance counts as taken, so a new member
+    never lands on someone else's data.
+    """
+    home = Path(home or Path.home())
+    installed = family_instances(home)
+    data_root = home / '.local/share/agentos-instances'
+    for name in installed:
+        if not _paired(data_root / name):
+            return name
+    folders = {path.name for path in data_root.iterdir() if path.is_dir()} if data_root.is_dir() else set()
+    return next_instance_name(set(installed) | folders)
+
+
+def reconcile_pending(owner_store, now=None):
+    """At start: a setup whose watcher died with the process is closed (#913 review P3-2)."""
+    for row in list(owner_store.config(PENDING_KEY, []) or []):
+        if isinstance(row, dict) and row.get('instance'):
+            clear_pending(owner_store, row['instance'])
+
+
 def next_instance_name(existing):
     """``family-1``, ``family-2``, ... the first one not taken."""
     index = 1
@@ -511,6 +546,10 @@ def prepare_family_setup(owner_store, name, display_name, *, service_action, env
     except ValueError as exc:
         raise SetupError(str(exc)) from None
     display_name = ' '.join(str(display_name or '').split())[:64] or f'{name} 비서'
+    import shutil
+    if popen is subprocess.Popen and not shutil.which('ngrok'):
+        # #913 review P2-2: checked before anything is created or copied.
+        raise SetupError('가족에게 보낼 임시 링크를 만들 ngrok이 이 Mac에 없어 가족 비서를 만들지 않았습니다.')
     cfg = owner_store.config('telegram', {})
     owner_token = owner_store.secret('telegram_token')
     if not (cfg.get('enabled') and cfg.get('username') and owner_token):
@@ -535,7 +574,10 @@ def prepare_family_setup(owner_store, name, display_name, *, service_action, env
             receipt = service_action('install', instance=name, port=port)
             if not receipt.get('ok'):
                 raise SetupError('가족 비서를 이 Mac에서 시작하지 못했습니다. ' + str(receipt.get('next_action') or receipt.get('error') or ''))
-        process, public = start_tunnel(port, popen=popen)
+        try:
+            process, public = start_tunnel(port, popen=popen)
+        except (OSError, RuntimeError) as exc:
+            raise SetupError('가족에게 보낼 임시 링크를 열지 못했습니다. ' + str(exc)) from None
         handle['process'] = process
         handle['link'] = f"{public}/family-setup?code={quote(record['code'])}"
         return handle

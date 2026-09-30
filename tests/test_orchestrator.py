@@ -1591,6 +1591,9 @@ class SecretaryStandard(Harness):
                       CORE_INSTRUCTIONS)
         self.assertIn('if it cannot be corrected, say the watch was not scheduled', CORE_INSTRUCTIONS)
         self.assertIn('never the request sentence itself', CORE_INSTRUCTIONS)
+        # #923: no invented title for the owner; no offer the assistant cannot carry out.
+        self.assertIn('never invent one', CORE_INSTRUCTIONS)
+        self.assertIn('only what you can actually carry out with the tools you have', CORE_INSTRUCTIONS)
         self.assertIn('capable personal secretary', GOAL_REACHED_PROPOSITION)
         self.assertIn('read in the light of the recent conversation', GOAL_REACHED_PROPOSITION)
         self.assertIn('the reply\'s own claims are not evidence', GOAL_REACHED_PROPOSITION)

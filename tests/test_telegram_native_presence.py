@@ -551,6 +551,88 @@ class FailedTurnTests(NativePresenceTestCase):
         self.assertEqual(self.methods()[0], 'setMessageReaction')
         self.assertEqual(self.emojis(), [RECEIVED_REACTION, CLEAR_REACTION])
 
+    def usage_limit_reply(self, *, alternate_signed_in=True):
+        job_id, _source = self.receive('이전 요청')
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='failed',response='',error=?,delivery='pending' WHERE id=?",
+                       ('Claude Code 구독의 사용량 한도에 도달했습니다.',job_id))
+        self.service.record_turn_provenance(job_id,route='subscription',engine='claude-code',
+                                            failure_class='usage-limit')
+        self.store.put('subscription_engine',{'id':'claude-code','authentication':'owner-confirmed-official-login'})
+        self.store.put('engine_login',{'claude-code':{'state':'signed-in'},
+                                       'codex':{'state':'signed-in' if alternate_signed_in else 'unchecked'}})
+        self.service.subscription_engines.finder=lambda _command:'/fake/cli'
+        self.service.deliver_one()
+        return self.store.job(job_id)
+
+    def test_usage_limit_reply_offers_only_an_existing_signed_in_alternate(self):
+        job=self.usage_limit_reply()
+        [reply]=self.sends()
+        self.assertIn('사용량 한도',reply['text'])
+        rows=reply['reply_markup']['inline_keyboard']
+        self.assertEqual(rows[1],[{'text':'Codex로 전환','callback_data':f"p7e:{job['id']}:codex"}])
+
+    def test_usage_limit_route_choice_changes_route_without_replaying_work_and_consumes_stale_choice(self):
+        job=self.usage_limit_reply()
+        reply_id=self.service.telegram_turns.get(job['id'])['reply_message_id']
+        self.tap(f"p7e:{job['id']}:codex",reply_id,sender=999,callback_id='foreign')
+        self.tap(f"p7e:{job['id']}:codex",reply_id+1,callback_id='wrong-message')
+        self.assertEqual(self.store.config('subscription_engine')['id'],'claude-code')
+        def login_without_service_lock(*args,**kwargs):
+            self.assertFalse(self.service.lock._is_owned(),'CLI login checks run outside the service lock')
+            return {'state':'signed-in'}
+        with mock.patch.object(self.service,'check_engine_login',side_effect=login_without_service_lock):
+            self.tap(f"p7e:{job['id']}:codex",reply_id,callback_id='choose')
+        self.assertEqual(self.store.config('subscription_engine')['id'],'codex')
+        self.assertEqual(len(self.store.jobs()),1,'route selection does not retry the failed Work')
+        self.assertEqual(self.store.job(job['id'])['status'],'failed')
+        self.assertEqual(self.store.turn_provenance(job['id'])['usage_limit_recovery_selected'],'codex')
+        answer=[body for method,body in self.calls if method=='answerCallbackQuery'][-1]
+        self.assertIn('자동으로 다시 실행하지 않았어요',answer['text'])
+        self.assertIn('다시 보내 주세요',answer['text'])
+        # Even if the owner later returns to Claude Code, the old reply's button is spent.
+        self.store.put('subscription_engine',{'id':'claude-code'})
+        with mock.patch.object(self.service,'check_engine_login',return_value={'state':'signed-in'}):
+            self.tap(f"p7e:{job['id']}:codex",reply_id,callback_id='stale')
+        self.assertEqual(self.store.config('subscription_engine')['id'],'claude-code')
+        self.assertEqual(len(self.store.jobs()),1)
+
+    def test_web_usage_limit_route_choice_is_bound_and_revalidated_by_the_server(self):
+        job=self.usage_limit_reply()
+        body={'engine':'codex','officially_authenticated':True,'recovery_work_id':job['id'],
+              'expected_current':'claude-code'}
+        with mock.patch.object(self.service,'check_engine_login',return_value={'state':'signed-in'}):
+            self.service.connect_subscription_engine(body)
+        self.assertEqual(self.store.config('subscription_engine')['id'],'codex')
+        self.assertEqual(self.store.turn_provenance(job['id'])['usage_limit_recovery_selected'],'codex')
+        self.assertEqual(len(self.store.jobs()),1,'route selection does not replay the failed Work')
+        with mock.patch.object(self.service,'check_engine_login',return_value={'state':'signed-in'}):
+            with self.assertRaisesRegex(ValueError,'이미 처리되었거나 더 이상 유효하지 않습니다'):
+                self.service.connect_subscription_engine(body)
+        self.store.put('subscription_engine',{'id':'claude-code'})
+        self.store.put_turn_provenance(job['id'],{**self.store.turn_provenance(job['id']),
+                                                   'usage_limit_recovery_selected':None})
+        stale={**body,'engine':'claude-code'}
+        with self.assertRaisesRegex(ValueError,'선택할 수 있는 로그인된 AI 연결이 아니거나 현재 선택이 바뀌었습니다'):
+            self.service.connect_subscription_engine(stale)
+
+    def test_usage_limit_without_an_alternate_points_to_ai_settings(self):
+        self.usage_limit_reply(alternate_signed_in=False)
+        [reply]=self.sends()
+        self.assertIn('AI 설정에서 선택할 수 있어요',reply['text'])
+        self.assertNotIn('p7e:',json.dumps(reply.get('reply_markup',{})))
+
+    def test_usage_limit_choice_is_refused_if_the_alternate_login_is_no_longer_verified(self):
+        job=self.usage_limit_reply()
+        reply_id=self.service.telegram_turns.get(job['id'])['reply_message_id']
+        with mock.patch.object(self.service,'check_engine_login',return_value={'state':'unknown'}):
+            self.tap(f"p7e:{job['id']}:codex",reply_id)
+        self.assertEqual(self.store.config('subscription_engine')['id'],'claude-code')
+        self.assertNotIn('usage_limit_recovery_selected',self.store.turn_provenance(job['id']))
+        answer=[body for method,body in self.calls if method=='answerCallbackQuery'][-1]
+        self.assertTrue(answer['show_alert'])
+        self.assertIn('로그인 상태를 확인하지 못해 전환하지 않았습니다',answer['text'])
+
     def test_retry_control_is_owner_bound_exact_message_and_idempotent(self):
         job, source = self.failed_turn()
         reply_id = self.service.telegram_turns.get(job['id'])['reply_message_id']

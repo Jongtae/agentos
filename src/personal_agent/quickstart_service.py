@@ -2518,7 +2518,10 @@ class AgentService:
             return job.get('status') if job.get('status') in ('failed','interrupted','cancelled') else 'unknown'
         engine=[event for event in events if event['tool']=='subscription_engine']
         if engine:
-            name=next((event['trace'].get('engine') for event in engine if isinstance(event['trace'].get('engine'),str)),None)
+            # The terminal outcome and its engine must come from the same
+            # (last) observed attempt. A Work can be delegated across CLIs.
+            name=next((event['trace'].get('engine') for event in reversed(engine)
+                       if isinstance(event['trace'].get('engine'),str)),None)
             return {'kind':'subscription','engine':name,'status':outcome(engine[-1]['status'])}
         attempt=model_events.get(job['id'])
         if attempt:
@@ -2898,9 +2901,42 @@ class AgentService:
             return self.connect_subscription_engine({'engine':route,'officially_authenticated':body.get('officially_authenticated')})
         raise ValueError('지원하는 AI 연결을 선택하세요.')
 
-    def connect_subscription_engine(self, body):
+    def usage_limit_route_options(self, job):
+        """Already signed-in subscription routes for one matching failed Work."""
+        if not isinstance(job, dict) or job.get('status') != 'failed':return []
+        provenance=self.store.turn_provenance(job.get('id')) or {}
+        engine_id=provenance.get('engine')
+        if (provenance.get('route')!='subscription' or provenance.get('failure_class')!='usage-limit'
+                or not isinstance(engine_id,str) or provenance.get('usage_limit_recovery_selected')):return []
+        status=self.subscription_engine_status()
+        if status.get('selected')!=engine_id:return []
+        return [{'id':item['id'],'name':item['name']} for item in status['engines']
+                if item['id']!=engine_id and item.get('installed') and item.get('login',{}).get('state')=='signed-in']
+
+    def _validate_usage_limit_recovery(self, work_id, target_engine, expected_current):
+        """Require a still-failed Work and its still-selected exhausted route."""
+        job=self.store.job(work_id)
+        provenance=self.store.turn_provenance(work_id) or {}
+        if (not job or job.get('status')!='failed' or provenance.get('route')!='subscription'
+                or provenance.get('failure_class')!='usage-limit'
+                or provenance.get('engine')!=expected_current
+                or provenance.get('usage_limit_recovery_selected')):
+            raise ValueError('이 사용량 한도 요청은 이미 처리되었거나 더 이상 유효하지 않습니다. AI 설정에서 다시 확인하세요.')
+        if not any(item['id']==target_engine for item in self.usage_limit_route_options(job)):
+            raise ValueError('선택할 수 있는 로그인된 AI 연결이 아니거나 현재 선택이 바뀌었습니다. AI 설정에서 다시 확인하세요.')
+        return job
+
+    def connect_subscription_engine(self, body, *, expected_current=None, require_signed_in=False):
         if not isinstance(body,dict):raise ValueError('연결 정보를 확인하세요.')
-        record=self.subscription_engines.connect(body.get('engine',''),body.get('officially_authenticated'))
+        engine_id=body.get('engine','')
+        recovery_work_id=body.get('recovery_work_id')
+        if expected_current is None:expected_current=body.get('expected_current')
+        if recovery_work_id is not None:
+            if not isinstance(recovery_work_id,str) or not isinstance(expected_current,str) or not expected_current:
+                raise ValueError('사용량 한도 요청의 현재 AI 정보를 확인할 수 없습니다. AI 설정에서 다시 선택하세요.')
+            require_signed_in=True
+            with self.lock:self._validate_usage_limit_recovery(recovery_work_id,engine_id,expected_current)
+        record=self.subscription_engines.connect(engine_id,body.get('officially_authenticated'))
         # #571: check the CLI's own login, in the environment AgentOS runs it
         # with, before switching. A known sign-out refuses the switch; an
         # unknown result is allowed only as this explicit owner action and is
@@ -2911,7 +2947,19 @@ class AgentService:
             login=self.check_engine_login(record['id'])
             if login['state']=='signed-out':
                 raise ValueError(f"{ {'codex':'Codex','claude-code':'Claude Code'}[record['id']] }에 로그인되어 있지 않아 전환하지 않았습니다. "+self.ENGINE_LOGIN_HELP[record['id']])
-        with self.lock:self.store.put('subscription_engine',record)
+            if require_signed_in and login['state']!='signed-in':
+                raise ValueError('로그인 상태를 확인하지 못해 전환하지 않았습니다. AI 설정에서 로그인 상태를 확인하세요.')
+        elif require_signed_in:
+            raise ValueError('로그인 상태를 확인할 수 없어 전환하지 않았습니다. AI 설정에서 상태를 확인하세요.')
+        with self.lock:
+            current=self.store.config('subscription_engine',{}).get('id','')
+            if expected_current is not None and current!=expected_current:
+                raise ValueError('현재 선택된 AI가 바뀌어 전환하지 않았습니다. AI 설정에서 다시 선택하세요.')
+            if recovery_work_id is not None:
+                job=self._validate_usage_limit_recovery(recovery_work_id,engine_id,expected_current)
+            self.store.put('subscription_engine',record)
+            if recovery_work_id is not None:
+                self.record_turn_provenance(recovery_work_id,usage_limit_recovery_selected=engine_id)
         return self.subscription_engine_status()
 
     def runtime_packages(self):
@@ -6465,8 +6513,61 @@ class AgentService:
         try:self.telegram.edit_message_text(sender,notification['message_id'],'\n'.join(lines),{'inline_keyboard':[]})
         except ProviderError:pass
 
+    def ingest_engine_recovery_callback(self, callback, generation):
+        """Select an existing alternate route from this exact usage-limit reply."""
+        message=callback.get('message',{}) if isinstance(callback.get('message'),dict) else {}
+        chat=message.get('chat',{}) if isinstance(message.get('chat'),dict) else {}
+        sender=callback.get('from',{}).get('id') if isinstance(callback.get('from'),dict) else None
+        callback_id=callback.get('id')
+        parts=str(callback.get('data') or '').split(':')
+        selected_name=None
+        selected_engine=None
+        reason='처리할 수 있는 요청이 아닙니다.'
+        job=None
+        with self.lock:
+            cfg=self.store.config('telegram',{})
+            authorized=self._callback_authorized(cfg,generation,sender,chat)
+            if authorized and len(parts)==3 and parts[0]=='p7e':
+                job=self.store.job(parts[1])
+                turn=self.telegram_turns.get(parts[1])
+                provenance=self.store.turn_provenance(parts[1]) or {}
+                engine_id=provenance.get('engine')
+                exact=(job and job.get('status')=='failed' and job.get('channel')==f'telegram:{generation}'
+                       and job.get('chat_id')==sender and provenance.get('route')=='subscription'
+                       and provenance.get('failure_class')=='usage-limit' and not provenance.get('usage_limit_recovery_selected')
+                       and turn and turn.get('chat_id')==sender and turn.get('reply_message_id')==message.get('message_id'))
+                options=self.usage_limit_route_options(job) if exact else []
+                option=next((item for item in options if item['id']==parts[2]),None)
+                if option and engine_id:
+                    selected_name=option['name']
+                    selected_engine=parts[2]
+        if selected_engine and job and engine_id:
+            try:
+                self.connect_subscription_engine({'engine':selected_engine,'officially_authenticated':True,
+                                                  'recovery_work_id':job['id'],'expected_current':engine_id})
+            except ValueError as exc:
+                reason=str(exc)
+                selected_name=None
+            except Exception as exc:
+                LOG.warning('usage-limit route change failed work=%s kind=%s',job['id'],type(exc).__name__)
+                reason='AI 연결을 확인하지 못했어요. AI 설정에서 상태를 확인하세요.'
+        if selected_name:
+            # Keep the existing retry/details controls, but consume every route
+            # choice on this one failed reply. The failed Work is never queued.
+            try:
+                controls=self.reply_controls(job,False)
+                self.telegram.edit_message_reply_markup(sender,message.get('message_id'),
+                                                        reply_controls_markup(job['id'],controls))
+            except ProviderError:pass
+            reason=f'{selected_name}로 전환했습니다. 실패한 요청은 자동으로 다시 실행하지 않았어요. 같은 요청을 다시 보내 주세요.'
+        if isinstance(callback_id,str):
+            try:self.telegram.answer_callback_query(callback_id,reason,show_alert=not bool(selected_name))
+            except ProviderError:pass
+
     def ingest_callback(self, callback, generation):
         """Accept only paired-owner, exact-message task and approval callbacks."""
+        if isinstance(callback.get('data'),str) and callback['data'].startswith('p7e:'):
+            return self.ingest_engine_recovery_callback(callback,generation)
         if isinstance(callback.get('data'),str) and callback['data'].startswith('p7s:'):
             return self.ingest_settings_callback(callback,generation)
         with self.lock:
@@ -8150,6 +8251,13 @@ class AgentService:
                                                       verified=job.get('owner_verified'),note=job.get('owner_note'))
             # #659: a prepared answer arrives without an owner turn; say what it is for.
             text=self.preparation_reply_prefix(job)+text
+            try:route_options=self.usage_limit_route_options(job)
+            except Exception as exc:
+                LOG.debug('usage-limit route recovery unavailable kind=%s',type(exc).__name__)
+                route_options=[]
+            provenance=self.store.turn_provenance(job['id']) or {}
+            if (not blocked and provenance.get('failure_class')=='usage-limit' and not route_options):
+                text+='\n다른 AI 연결은 AgentOS 웹의 AI 설정에서 선택할 수 있어요.'
             # #818: whether this Work left pending memory candidates; its one ask
             # follows the reply (#836: the ask is the ask, no line is appended).
             try:memory_pending=not blocked and bool(self.pending_memory_candidates(job['id'])[0])
@@ -8167,7 +8275,7 @@ class AgentService:
             except Exception as exc:  # presentation must never block the reply
                 LOG.debug('telegram reply presentation failed: %s',type(exc).__name__)
                 anchor,controls=None,()
-            markup=reply_controls_markup(job['id'],controls)
+            markup=reply_controls_markup(job['id'],controls,route_options=route_options)
             message_id=None
             try:
                 try:

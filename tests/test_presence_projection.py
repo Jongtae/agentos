@@ -123,6 +123,15 @@ class ProjectionTestCase(unittest.TestCase):
 class ShortWorkTests(ProjectionTestCase):
     """Matrix row A: a trivial request → one useful answer, no lifecycle bubbles."""
 
+    def test_observed_subscription_route_uses_the_engine_of_the_final_attempt(self):
+        job={'id':'work','status':'failed'}
+        events=[
+            {'tool':'subscription_engine','status':'succeeded','trace':{'engine':'claude-code'}},
+            {'tool':'subscription_engine','status':'failed','trace':{'engine':'codex'}},
+        ]
+        self.assertEqual(self.service._observed_route(job,events,{}),
+                         {'kind':'subscription','engine':'codex','status':'failed'})
+
     def test_a_short_request_is_one_bubble_and_still_one_inspectable_work(self):
         self.connect_model()
         self.text = '오늘 오후에는 비 소식이 없습니다.'

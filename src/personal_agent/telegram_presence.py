@@ -159,6 +159,10 @@ ATTENTION_RANK = {ATTENTION_PREPARED: 0, ATTENTION_REMINDER: 1, ATTENTION_ASK: 2
 ATTENTION_REMINDER_HORIZON = 12 * 3600
 #: The same item is not surfaced again within this cooldown.
 ATTENTION_COOLDOWN = 6 * 3600
+#: #888: an open memory ask is surfaced only while its conversation is live -
+#: sent within this window (as #876 bounds the ask itself).  Shorter than the
+#: cooldown, so it is surfaced at most once; afterwards it waits in 내 기록.
+ATTENTION_MEMORY_ASK_FRESH = 3600
 #: The natural lead-in of the one line.
 ATTENTION_PREFIX = '참, '
 ATTENTION_LINE_CHARS = 160

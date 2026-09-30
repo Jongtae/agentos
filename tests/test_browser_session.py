@@ -502,7 +502,7 @@ class MediationTests(unittest.TestCase):
         # #889 review P3: digits need the owner's exact words in the owner's order.
         self.assertEqual(page_exclusions(['333333-222-110'], '110-222-333333'), ['333333-222-110'])
         self.assertEqual(page_exclusions(['110-222-333333'], '110-222-333333 계좌'), [])
-        self.assertEqual(page_exclusions(['010-1234-5678'], '1234번'), ['010 5678'])
+        self.assertEqual(page_exclusions(['010-1234-5678'], '1234번'), ['010-1234-5678'], 'not the exact word: kept whole')
 
     def test_saved_private_values_are_redacted_from_page_text(self):
         sess, _ = session(excluded=lambda: [PASSPORT])

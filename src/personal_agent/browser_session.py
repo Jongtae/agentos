@@ -1081,7 +1081,7 @@ LOGIN_CLOSE_SECONDS = 20
 LOGIN_WINDOWS_KEPT = 16
 #: #709: the longest a ``browser_open``/``browser_read`` waits for a
 #: client-rendered page's content to settle (``browser_worker.op_settle``).
-RENDER_SETTLE_SECONDS = 4.0
+RENDER_SETTLE_SECONDS = 6.0
 LOGIN_SAVE_SECONDS = 15
 
 

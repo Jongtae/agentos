@@ -580,7 +580,8 @@ return JSON.stringify({ok: true});
 RENDER_PROBE_SCRIPT = r"""
 const body = document.body;
 return JSON.stringify({text: body ? (body.innerText || '').length : 0,
-  nodes: document.getElementsByTagName('*').length, ready: document.readyState});
+  nodes: document.getElementsByTagName('*').length, ready: document.readyState,
+  res: (performance.getEntriesByType ? performance.getEntriesByType('resource').length : 0)});
 """
 
 WIDTH, HEIGHT = 1280, 900
@@ -593,8 +594,11 @@ CLICK_SETTLE_SECONDS = 8.0
 #: #709: a client-rendered page is read once its visible content stops
 #: changing for ``RENDER_QUIET_SECONDS`` (and shows some text), or when
 #: ``RENDER_SETTLE_SECONDS`` have passed, whichever comes first.
-RENDER_QUIET_SECONDS = 0.5
-RENDER_SETTLE_SECONDS = 4.0
+# #899 (live, Work 4a2b6d1c): a search page whose results arrive by a request
+# after load stayed quiet for 0.5 s between its shell and its product list.  The
+# quiet window is longer, and finished requests count as change.
+RENDER_QUIET_SECONDS = 1.2
+RENDER_SETTLE_SECONDS = 6.0
 POLL_SECONDS = 0.05
 FOCUS_SECONDS = 0.1
 RESOLVE_SECONDS = 3.0
@@ -1130,7 +1134,7 @@ class Worker:
             if ident not in self.pending:
                 return
             now = time.monotonic()
-            measure = (value.get('text'), value.get('nodes'), value.get('ready')) \
+            measure = (value.get('text'), value.get('nodes'), value.get('ready'), value.get('res')) \
                 if error is None and isinstance(value, dict) else None
             if measure != last[0] or self.view.isLoading():
                 last[0], since[0] = measure, now

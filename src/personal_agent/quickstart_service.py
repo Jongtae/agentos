@@ -310,6 +310,9 @@ CONTINUATION_EFFECT_NOTE_HEAD=('AgentOS note (not from the owner): the request b
                                'earlier Work called tools that may have changed state:')
 #: #774 review: an answered location request whose continuation could not be queued.
 LOCATION_NOT_CONTINUED_TEXT='대기 중인 작업이 많아 보내 주신 위치로 요청을 이어서 처리하지 못했습니다. 잠시 후 위치를 다시 보내 주세요.'
+#: Owner direction 2026-09-30: approval prompts answer with the same pair as the
+#: memory ask (#881).  The message above the buttons names what is approved.
+APPROVE_BUTTON,DENY_BUTTON='👍','👎'
 BROWSER_APPROVAL_PROMPT='결제 단계는 승인이 필요합니다. 승인하면 이 요청을 한 번만 이어서 처리하고, 승인한 단계 하나만 실행합니다.'
 #: #709: owner-private config row of in-flow login requests, by Work id.  At
 #: most one per Work: a row stays (resumed/skipped/expired) until it is pruned.
@@ -4895,12 +4898,12 @@ class AgentService:
     def reply_controls(self, job, blocked):
         """Bounded recovery controls for a reply that did not simply succeed."""
         status=job.get('status')
+        # Owner direction 2026-09-30: no 상세 button.  It read an in-memory turn
+        # record, so after a restart it did nothing; the reply itself says what happened.
         if status in ('failed','interrupted') and not blocked:
             allowed,_reason=self.safe_retry(job)
-            return (CONTROL_RETRY,CONTROL_DETAILS) if allowed else (CONTROL_DETAILS,)
-        if status in ('partial','unknown'):
-            # Never a retry for an unknown effect: the owner checks first.
-            return (CONTROL_DETAILS,)
+            return (CONTROL_RETRY,) if allowed else ()
+        # Never a retry for an unknown effect: the owner checks first.
         return ()
 
     def _consume_control(self, chat_id, message_id, markup):
@@ -6271,19 +6274,19 @@ class AgentService:
                     self.store.update_notification(notification['id'],'cancelled')
                     return True
                 reply_markup={'inline_keyboard':[[
-                    {'text':'문서 공유 승인','callback_data':f"p7a:{notification['id']}:approve"},
-                    {'text':'허용 안 함','callback_data':f"p7a:{notification['id']}:deny"},
+                    {'text':APPROVE_BUTTON,'callback_data':f"p7a:{notification['id']}:approve"},
+                    {'text':DENY_BUTTON,'callback_data':f"p7a:{notification['id']}:deny"},
                 ]]}
             elif notification['kind']=='context_approval_needed':
                 reply_markup={'inline_keyboard':[[
-                    {'text':'이번 작업에 컨텍스트 공유 승인','callback_data':f"v1c:{notification['id']}:approve"},
-                    {'text':'허용 안 함','callback_data':f"v1c:{notification['id']}:deny"},
+                    {'text':APPROVE_BUTTON,'callback_data':f"v1c:{notification['id']}:approve"},
+                    {'text':DENY_BUTTON,'callback_data':f"v1c:{notification['id']}:deny"},
                 ]]}
             elif notification['kind']=='browser_approval_needed':
                 # #656: the same owner-only inline buttons; the step is named, never the page.
                 reply_markup={'inline_keyboard':[[
-                    {'text':'이 단계 승인','callback_data':f"p7w:{notification['id']}:approve"},
-                    {'text':'허용 안 함','callback_data':f"p7w:{notification['id']}:deny"},
+                    {'text':APPROVE_BUTTON,'callback_data':f"p7w:{notification['id']}:approve"},
+                    {'text':DENY_BUTTON,'callback_data':f"p7w:{notification['id']}:deny"},
                 ]]}
             elif notification['kind']=='browser_login_needed':
                 # #709: only while this Work's login is still offered with this nonce.
@@ -6607,7 +6610,7 @@ class AgentService:
                         alert=('다시 시도할게요.',False)
                         changed=True
                         self._consume_control(sender,message.get('message_id'),
-                                              reply_controls_markup(job_id,(CONTROL_RETRY,CONTROL_DETAILS),consumed=(CONTROL_RETRY,)))
+                                              reply_controls_markup(job_id,(CONTROL_RETRY,),consumed=(CONTROL_RETRY,)))
                     else:
                         alert=(reason,True)
             elif authorized and isinstance(data,str) and data.startswith('p7c:'):
@@ -6982,7 +6985,10 @@ class AgentService:
             private=chat.get('type')=='private' and isinstance(sender,int) and chat.get('id')==sender
             authorized=private and sender==cfg.get('user_id')
             paired=False
-            if private and isinstance(text,str) and text.startswith('/start ') and cfg.get('pair_code') and time.time()<cfg.get('pair_expires',0):
+            # #897: a family bot pairs only with the Telegram user who created it.
+            creator=cfg.get('pair_user_id')
+            if private and isinstance(text,str) and text.startswith('/start ') and cfg.get('pair_code') and time.time()<cfg.get('pair_expires',0) \
+                    and (not isinstance(creator,int) or sender==creator):
                 if hmac.compare_digest(text[7:].strip().encode(),cfg['pair_code'].encode()):
                     cfg.update(user_id=sender,pair_code='',pair_expires=0)
                     authorized=True
@@ -7111,6 +7117,9 @@ class AgentService:
             elif isinstance(update.get('stopped_message_generation'),dict):
                 # #581: the owner pressed Stop on a draft.
                 control=lambda:self.ingest_stop(update['stopped_message_generation'],cfg['generation'])
+            elif isinstance(update.get('managed_bot'),dict):
+                # #897: a family member created their bot through this bot's Managed Bots link.
+                control=lambda:self.ingest_managed_bot(update['managed_bot'])
             if control:
                 control()
                 # Callback updates must advance the durable cursor too, or
@@ -7121,7 +7130,28 @@ class AgentService:
                         current['cursor']=update['update_id']+1
                         self.store.put('telegram',current)
             else:self.ingest_update(update,cfg['generation'])
+        self.retry_family_handovers()
         self.settle_expired_telegram_photo_albums()
+
+    def ingest_managed_bot(self, update):
+        """Hand a family member's new bot to their instance (#897); content-free log only."""
+        from . import family_setup
+        try:
+            receipt=family_setup.accept_managed_bot(self.store,self.telegram.call,update,family_setup.deliver_token)
+        except Exception as exc:
+            LOG.warning('family setup: managed bot not handed over (%s)',type(exc).__name__)
+            return {'accepted':False,'reason':type(exc).__name__}
+        if receipt.get('accepted'):LOG.info('family setup: bot handed to instance %s',receipt['instance'])
+        return receipt
+
+    def retry_family_handovers(self):
+        """Retry a family bot hand-over that failed, while its setup is open (#897 review P2-3)."""
+        from . import family_setup
+        if not self.store.config(family_setup.PENDING_KEY,[]):return 0
+        try:return family_setup.retry_pending(self.store,self.telegram.call,family_setup.deliver_token)
+        except Exception as exc:
+            LOG.warning('family setup: retry failed (%s)',type(exc).__name__)
+            return 0
 
     def settle_expired_telegram_photo_albums(self, now=None):
         """Release persisted album Works after their short update-collection window."""

@@ -1881,6 +1881,8 @@ class AgentService:
         # same store (#605 R9), so an in-process lock alone would lose rows.
         with self.lock:
             self.store.append_config_list('decision_audit',record,100)
+            # #794: the Work keeps its own judgments for as long as it exists.
+            if record.get('work_id'):self.store.add_work_decision(record['work_id'],record)
 
     def use_decision_engine(self, engine):
         """Replace the engine behind both consumers (tests, later providers)."""
@@ -2593,10 +2595,11 @@ class AgentService:
                 task['provenance']=self.store.turn_provenance(job['id'])
                 # #826: which owner information this Work used and where it went.
                 task['information_use']=self.work_information_use(job['id'])
-                audit=self.store.config('decision_audit',[]);audit=audit if isinstance(audit,list) else []
-                task['decisions']=[{key:value for key,value in row.items() if key in ('kind','purpose','outcome','answer','provider','model','observed_model','elapsed_seconds','at',
-                                                                                        'route','engine','model_policy','requested_model','failure')}
-                                   for row in audit if isinstance(row,dict) and row.get('work_id')==job['id']][-10:]
+                # #794: every judgment of this Work, kept with the Work.  The
+                # confidence is the model's own report, shown as uncalibrated.
+                task['decisions']=[{key:value for key,value in row.items() if key in ('kind','purpose','outcome','answer','confidence','provider','model','observed_model',
+                                                                                        'elapsed_seconds','at','route','engine','model_policy','requested_model','failure')}
+                                   for row in self.store.work_decisions(job['id'])]
                 task['events']=[self._progress_event(event) for event in events]
                 task['source_references']=self.store.evidence_summary(job['id'])
                 task['error']=job.get('error') if job.get('status') in ('failed','partial','interrupted','unknown') else None

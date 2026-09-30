@@ -223,10 +223,62 @@ class ServiceProvenance(unittest.TestCase):
         # and #710's orchestration plan call (unavailable here) too.
         self.assertEqual([row['purpose'] for row in selected['decisions']], ['capability-need', 'work-orchestration', 'presence'])
         self.assertNotIn('raw', selected['decisions'][-1], 'only the summary fields are exposed')
-        # #559: the content-free declared answer is shown; the probability is not.
+        # #559: the content-free declared answer is shown.  #794: so is the
+        # model's reported confidence (rendered as uncalibrated).
         self.assertEqual(selected['decisions'][-1]['answer'], 'retry')
-        self.assertNotIn('confidence', selected['decisions'][-1])
+        self.assertEqual(selected['decisions'][-1]['confidence'], 0.9)
         self.assertIsNone(service.current_work_id, 'the link ends with the Work')
+
+    def test_a_work_keeps_its_judgments_after_the_global_list_rolls_over(self):
+        """#794: judgments live with their Work, not in a global newest-100 list."""
+        service = self._service(_Engine())
+        self.store.enqueue('hello', 'k1')
+        real_run = service.execution_adapter.execute
+
+        def execute(engine, prompt, tools, **kwargs):
+            for index in range(3):
+                service.record_decision({'kind': 'decision', 'purpose': 'presence', 'outcome': 'decided', 'answer': index})
+            return real_run(engine, prompt, tools, **kwargs)
+        service.execution_adapter.execute = execute
+        service.run_one()
+        work_id = self._selected(service)['id']
+        for index in range(150):
+            service.current_work_id = 'other-work'
+            service.record_decision({'kind': 'decision', 'purpose': 'presence', 'outcome': 'decided', 'answer': index})
+        service.current_work_id = None
+        self.assertFalse([row for row in self.store.config('decision_audit') if row.get('work_id') == work_id],
+                         'the global list has rolled over')
+        answers = [row.get('answer') for row in self._selected(service)['decisions'] if row.get('purpose') == 'presence']
+        self.assertEqual(answers, [0, 1, 2])
+
+    def test_a_work_recorded_before_the_journal_still_shows_its_judgments(self):
+        self._service(_Engine())
+        self.store.append_config_list('decision_audit', {'purpose': 'presence', 'outcome': 'decided', 'work_id': 'old'}, 100)
+        self.store.append_config_list('decision_audit', {'purpose': 'presence', 'outcome': 'decided', 'work_id': 'else'}, 100)
+        self.assertEqual([row['work_id'] for row in self.store.work_decisions('old')], ['old'])
+        # A later judgment of the same Work (e.g. delayed upkeep) keeps the older ones, listed once each.
+        later = {'purpose': 'owner-model-upkeep', 'outcome': 'decided', 'work_id': 'old'}
+        self.store.append_config_list('decision_audit', later, 100)
+        self.store.add_work_decision('old', later)
+        self.assertEqual([row['purpose'] for row in self.store.work_decisions('old')], ['presence', 'owner-model-upkeep'])
+
+    def test_a_runaway_work_keeps_only_its_newest_judgments(self):
+        self._service(_Engine())
+        self.store.WORK_DECISIONS_KEEP = 3
+        for index in range(5):
+            self.store.add_work_decision('w', {'answer': index})
+        self.store.add_work_decision('v', {'answer': 'other'})
+        self.assertEqual([row['answer'] for row in self.store.work_decisions('w')], [2, 3, 4])
+        self.assertEqual([row['answer'] for row in self.store.work_decisions('v')], ['other'])
+
+    def test_the_owner_state_export_carries_the_journal(self):
+        """#794: the per-Work journal is owner work evidence, so it survives export/restore."""
+        from personal_agent.portable_state import export_owner_state, restore_owner_state
+        self._service(_Engine())
+        self.store.add_work_decision('w', {'purpose': 'presence', 'outcome': 'decided', 'confidence': 0.5})
+        archive = export_owner_state(self.store.root, self.store.root.parent / 'owner.tar.gz')
+        restored = QuickStore(restore_owner_state(archive, self.store.root.parent / 'restored'))
+        self.assertEqual(restored.work_decisions('w'), [{'purpose': 'presence', 'outcome': 'decided', 'confidence': 0.5}])
 
     def test_direct_api_records_requested_and_reported_model(self):
         tmp = tempfile.TemporaryDirectory(); self.addCleanup(tmp.cleanup)

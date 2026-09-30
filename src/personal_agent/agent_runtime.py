@@ -363,6 +363,40 @@ def _digit_order_ok(words,owner_words):
   index+=1
  return True
 
+def page_exclusions(excluded,owner_request):
+ """The browser snapshot redaction set without the owner's own words of this request (#889).
+
+ ``excluded`` are the Work's private-store values (``_browser_excluded``).
+ The #605 lookup matcher over-blocks by design (any 2+ character contained
+ span), so a value the owner just stated - a service name, a list of sites -
+ masked those words on every public page the worker read for that very
+ request.  Those words already reach the same AI verbatim in the request, so
+ masking them in inbound page text protects nothing.  A value word is left
+ out only when the owner typed it or a longer word starting with it (Korean
+ particles: ``배민으로`` covers ``배민``) - never when a shorter owner word is
+ only its prefix (#889 review: ``john`` must not cover ``johnsmith``) - and it
+ has 2+ characters.  A word with digits needs the owner's exact word, and the
+ value's digit runs in the owner's order (``_digit_order_ok``).  A value with
+ no such word is kept verbatim; a value wholly said is dropped.  Outbound
+ redaction is not affected.
+ """
+ owner_words=memory_words(owner_request)
+ if not owner_words:return list(excluded)
+ owner_set=set(owner_words)
+ kept=[]
+ for value in excluded:
+  if not isinstance(value,str):continue
+  words=memory_words(value)
+  digits_ok=_digit_order_ok(words,owner_words)
+  def said(word):
+   if len(word)<2:return False
+   if _MEMORY_DIGITS.search(word):return digits_ok and word in owner_set
+   return any(owner.startswith(word) for owner in owner_words)
+  rest=[word for word in words if not said(word)]
+  if len(rest)==len(words):kept.append(value)  # nothing the owner said: the value exactly as before
+  elif rest:kept.append(' '.join(rest))
+ return kept
+
 def owner_covers(value,owner_words,whole=True):
  """Every word of ``value`` (or, with ``whole=False``, at least one) is the owner's."""
  words=memory_words(value)
@@ -1645,7 +1679,7 @@ class Capabilities:
   """This Work's browser session, created on first use (#656)."""
   if self._browser_session is None:
    from .browser_session import BrowserSession
-   self._browser_session=BrowserSession(self.browser,work_id=self.job_id,budget=self.budget,excluded=self._browser_excluded,
+   self._browser_session=BrowserSession(self.browser,work_id=self.job_id,budget=self.budget,excluded=self._page_excluded,
                                         approvals=self.browser_approvals)
   return self._browser_session
  def close_browser(self):
@@ -1663,6 +1697,17 @@ class Capabilities:
    try:excluded=[*self.lookup_sources()['excluded'],*excluded]
    except Exception:pass
   return excluded
+ def _page_excluded(self):
+  """The snapshot redaction set for pages this Work reads: ``_browser_excluded`` less the request's own words (#889)."""
+  excluded=self._browser_excluded()
+  # #889 review: only the owner's own typed request; a delegated specialist never sees it,
+  # and a preparation's message is a model-written goal.
+  if self.delegated:return excluded
+  try:
+   job=self.store.job(self.job_id) or {}
+   request=job.get('message') or '' if job.get('owner_typed')==1 else ''
+  except Exception:return excluded
+  return page_exclusions(excluded,request)
  def judgment_text(self,text,private=True):
   """Text as it may reach the completion judgment or a local record (#657, pilot boundary 1).
 

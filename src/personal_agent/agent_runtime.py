@@ -179,6 +179,13 @@ BROWSER_SESSION_NOTE=(' The owner cannot see this browser session: whatever it h
                       'device, and a link to it opens empty or different there. Links in your answer must work from the '
                       'owner\'s own browser, such as the item\'s public page or a share link the site itself offers; if the '
                       'result exists only in this session, say so plainly.')
+#: #910 (live, Work 6b3bf077): the cart page showed "signed out" as ordinary content,
+#: so no login_required state arose and the owner was only told in text.  The
+#: in-flow login (#709) starts when a page carries a sign-in form.
+BROWSER_SIGN_IN_NOTE=(' Whenever a page you open or reach shows a sign-in form, AgentOS asks the owner to sign in on this Mac '
+                      'and continues the request once they have. So when the owner\'s own account is needed and a page shows '
+                      'you are signed out, reach the site\'s sign-in form, by its address or its sign-in control. Never type '
+                      'a password yourself.')
 BROWSER_EFFECT_NOTE=' Declare effect: read (only looking), navigate (moving between pages), mutate (changes account state such as a cart or a form), payment (pays or enters card data; always needs owner approval). AgentOS refuses card/one-time-code/password fields and their form buttons without the owner\'s approval whatever the label says.'
 #: #655: actions whose one public search takes the model's provider/locale.
 SEARCH_BACKED_ACTIONS=frozenset({'web_search','bounded_public_research'})
@@ -240,7 +247,7 @@ DEFINITIONS=[
  schema('list_memory','Read a page of the owner\'s current saved memory items. The profile facts are in the owner profile section of the context; use search_memory to find a relevant fact outside that bounded section. Each item has saved_at, source and source_status: source.kind owner_request is what the owner typed (text, at); agentos_work is a Work AgentOS started, whose text is not the owner\'s words; source_status not_kept means no source is kept and unknown means it could not be checked, so you can say why you know something.'),
  schema('search_memory','Search the owner\'s current saved Memory for a fact relevant to this request. Use concise terms from the request and likely synonyms (for example, sushi and 초밥); results include saved_at and a source reference with source_status, as in list_memory, so you can say why you know something. Search only when prior saved information can help. It returns a bounded set and never reads another owner\'s data.',{'query':STRING},['query']),
  schema('list_agents','List available specialist agents and their roles.'),
- schema('browser_open','Open a URL in the owner\'s own logged-in browser profile and return the page state: bounded visible text and a numbered list of interactive elements. Use for sites where the owner is signed in (shopping carts, account pages); public_page_read is enough for anonymous pages. A login_required state means the owner must log in first; never enter credentials.'+BROWSER_SESSION_NOTE+BROWSER_EFFECT_NOTE,{'url':STRING,'effect':EFFECT},['url','effect']),
+ schema('browser_open','Open a URL in the owner\'s own logged-in browser profile and return the page state: bounded visible text and a numbered list of interactive elements. Use for sites where the owner is signed in (shopping carts, account pages); public_page_read is enough for anonymous pages. A login_required state means the owner must log in first; never enter credentials.'+BROWSER_SIGN_IN_NOTE+BROWSER_SESSION_NOTE+BROWSER_EFFECT_NOTE,{'url':STRING,'effect':EFFECT},['url','effect']),
  schema('browser_read','Return the current page state of the owner\'s browser session again (visible text and numbered interactive elements), for example after the page changed.'),
  schema('browser_find','Find visible text on the current browser page. Returns the matching lines and interactive elements. Use it to confirm the right item or price before acting.',{'text':STRING},['text']),
  schema('browser_click','Click one interactive element of the current browser page. target is the element number from the page state or its exact visible name. Returns the resulting page state.'+BROWSER_EFFECT_NOTE,{'target':STRING,'effect':EFFECT},['target','effect']),

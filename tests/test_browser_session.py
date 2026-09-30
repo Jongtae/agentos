@@ -1399,7 +1399,7 @@ class ServiceTests(unittest.TestCase):
         self.assertIn('카드번호', prompt['text'])
         self.assertNotIn('4111', prompt['text'])
         buttons = prompt['reply_markup']['inline_keyboard'][0]
-        self.assertEqual([b['text'] for b in buttons], ['이 단계 승인', '허용 안 함'])
+        self.assertEqual([b['text'] for b in buttons], ['👍', '👎'])
         notification_id = buttons[0]['callback_data'].split(':')[1]
         row = self.store.notification(notification_id)
         # A foreign sender or a different message cannot approve.

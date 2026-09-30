@@ -383,7 +383,7 @@ class B_FailedRuntime(PresenceEval):
         self.assertIn('모델 서버에 연결할 수 없습니다.', reply['text'])
         self.assertNotIn('완료했습니다', reply['text'])
         self.assertEqual(reply['reply_parameters']['message_id'], message_id)
-        self.assertEqual([b['text'] for b in reply['reply_markup']['inline_keyboard'][0]], ['다시 시도', '상세'])
+        self.assertEqual([b['text'] for b in reply['reply_markup']['inline_keyboard'][0]], ['다시 시도'])
         # Claim <-> Work/Evidence.
         self.assertEqual(job['status'], 'failed')
         self.assertEqual(self.store.turn_provenance(job['id'])['status'], 'failed')
@@ -534,7 +534,7 @@ class C_RetryContinuity(PresenceEval):
         failed, _ = self.turn('출장 준비 메모하고 목록도 만들어줘')
         self.assertEqual(failed['status'], 'failed')
         [reply] = self.bubbles()
-        self.assertEqual([b['text'] for b in reply['reply_markup']['inline_keyboard'][0]], ['상세'])
+        self.assertFalse((reply.get('reply_markup') or {}).get('inline_keyboard'), 'no retry after an effect, no 상세')
         notes = len(self.store.notes())
         self.relations = {'다시 해줘': FOLLOWUP_RETRY}
         job, _ = self.turn('다시 해줘')
@@ -1265,7 +1265,7 @@ class H_PartialResult(PresenceEval):
         self.assertTrue(text.endswith('\n\n한 단계는 확인하지 못했어요.'), text)
         self.assertNotIn(TERMINAL_PARTIAL_HEADER, text)
         self.assertIn('일부 자료는 읽지 못했습니다', self.store.job(job['id'])['owner_cause'], 'the failed portion is recorded')
-        self.assertEqual([b['text'] for b in bubble['reply_markup']['inline_keyboard'][0]], ['상세'])
+        self.assertFalse((bubble.get('reply_markup') or {}).get('inline_keyboard'), 'a partial answer carries no 상세 button')
         self.assertEqual(bubble['reply_parameters']['message_id'], message_id)
         # Claim <-> Evidence: the call ran; its evidence is qualified partial.
         research = [e for e in self.events(job['id']) if e['tool'] == 'bounded_public_research'][-1]
@@ -1297,7 +1297,7 @@ class H_PartialResult(PresenceEval):
         self.assertTrue(bubbles[2]['text'].endswith('한 단계는 확인하지 못했어요.'), bubbles[2]['text'])
         self.assertEqual(bubbles[0]['text'], '확인된 답입니다.')
         controls = [[b['text'] for b in body.get('reply_markup', {}).get('inline_keyboard', [[]])[0]] for body in bubbles]
-        self.assertEqual(controls, [[], ['다시 시도', '상세'], ['상세']])
+        self.assertEqual(controls, [[], ['다시 시도'], []])
 
     def test_finding_h1_a_partial_answer_is_labelled_after_the_failed_portion(self):
         """FINDING H1 (#598, re-scoped by #752): the partial bubble with an AI answer.

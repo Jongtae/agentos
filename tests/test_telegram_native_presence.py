@@ -546,7 +546,7 @@ class FailedTurnTests(NativePresenceTestCase):
         self.assertTrue(reply['text'].startswith(TERMINAL_FAILED_HEADER))
         self.assertEqual(reply['reply_parameters']['message_id'], message_id)
         labels = [button['text'] for button in reply['reply_markup']['inline_keyboard'][0]]
-        self.assertEqual(labels, ['다시 시도', '상세'])
+        self.assertEqual(labels, ['다시 시도'], 'no 상세 button (owner direction 2026-09-30)')
         # 👀 came first; a failed outcome removes it and never shows a done emoji (#835).
         self.assertEqual(self.methods()[0], 'setMessageReaction')
         self.assertEqual(self.emojis(), [RECEIVED_REACTION, CLEAR_REACTION])
@@ -640,7 +640,7 @@ class FailedTurnTests(NativePresenceTestCase):
         self.tap(f"p7r:{job['id']}", reply_id)
         edits = [body for method, body in self.calls if method == 'editMessageReplyMarkup']
         self.assertEqual(len(edits), 2)
-        self.assertEqual(edits[-1]['reply_markup'], {'inline_keyboard': [[{'text': '상세', 'callback_data': f"p7d:{job['id']}"}]]})
+        self.assertFalse(edits[-1]['reply_markup'].get('inline_keyboard'), 'the used control is removed and nothing else remains')
         self.assertEqual(len(self.store.jobs()), 2)
 
     def test_failed_work_that_attempted_an_effect_offers_no_retry(self):
@@ -653,8 +653,7 @@ class FailedTurnTests(NativePresenceTestCase):
                        (job_id, 'save_note', 'failed', '{}', time.time()))
         self.service.deliver_one()
         [reply] = self.sends()
-        labels = [button['text'] for button in reply['reply_markup']['inline_keyboard'][0]]
-        self.assertEqual(labels, ['상세'])
+        self.assertFalse((reply.get('reply_markup') or {}).get('inline_keyboard'), 'no retry and no 상세 button')
         reply_id = self.service.telegram_turns.get(job_id)['reply_message_id']
         self.tap(f'p7r:{job_id}', reply_id)
         self.assertEqual(len(self.store.jobs()), 1, 'a forged retry tap is refused by safe_retry')
@@ -810,7 +809,7 @@ class RestartRecoveryTests(NativePresenceTestCase):
         self.assertTrue(all(reply['text']==expected for reply in replies))
         for reply in replies:
             labels = [button['text'] for button in reply['reply_markup']['inline_keyboard'][0]]
-            self.assertEqual(labels, ['다시 시도', '상세'])
+            self.assertEqual(labels, ['다시 시도'])
         self.assertFalse(restarted.run_one(), 'nothing is re-run automatically')
 
     def test_uncertain_delivery_is_not_resent_by_restart_recovery(self):

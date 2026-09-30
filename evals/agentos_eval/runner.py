@@ -19,7 +19,8 @@ class StopOnUsageLimit:
     The workers run on the owner's own subscriptions, which the owner's live
     AgentOS shares (#887).  Past the limit every run fails the same way, so
     going on only burns the owner's quota and fills the report with outage
-    rows.  Samples already running finish; the rest are skipped, and the
+    rows.  The tripping run stops at that turn and is not judged; other
+    samples already running finish; the rest are skipped, and the
     skipped count lands in the log's early-stopping summary.  ``make_stop`` is
     Inspect's ``EarlyStop`` (injected so this module stays standard-library only).
     """
@@ -62,7 +63,14 @@ def run_turns(client, scenario, turn_timeout=900, poll_interval=2.0, clock=time.
                       'events': compact_events(detail), 'elapsed': round(clock() - started, 1)})
         if detail.get('timed_out'):
             break  # the sandbox is still busy with this turn; later turns would queue behind it
+        if detail.get('failure_class') == USAGE_LIMIT:
+            break  # #887: later turns would only spend more of the owner's exhausted subscription
     return turns
+
+
+def usage_limited(run):
+    """Whether a run record hit a subscription usage limit (#887): then it is neither continued nor judged."""
+    return any(turn.get('failure_class') == USAGE_LIMIT for turn in (run or {}).get('turns') or ())
 
 
 def prepare_judgment(client, pool, box, worker, timeout=300, clock=time.monotonic):

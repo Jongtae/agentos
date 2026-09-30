@@ -29,7 +29,7 @@ from agentos_eval import scenarios as scenario_module
 from agentos_eval.budget import JudgeBudget, estimate_tokens
 from agentos_eval.paths import eval_home
 from agentos_eval.redaction import Redactor
-from agentos_eval.runner import WORKERS, StopOnUsageLimit, run_scenario
+from agentos_eval.runner import WORKERS, StopOnUsageLimit, run_scenario, usage_limited
 from agentos_eval.sandbox import SandboxPool
 from agentos_eval.scoring import (JUDGE_MAX_TOKENS, JUDGE_SYSTEM, combine, deterministic_checks, judge_prompt,
                                   parse_judgment)
@@ -83,7 +83,7 @@ def secretary(judge='grader', budget_path=None, seed=None):
         scenario, run = state.metadata['scenario'], state.metadata.get('run') or {'error': 'solver did not run'}
         checks, failures = deterministic_checks(scenario, run)
         judgment, judge_status = None, 'skipped'
-        if judge != 'none' and not run.get('error'):
+        if judge != 'none' and not run.get('error') and not usage_limited(run):  # #887: no judge spend on an outage
             prompt = redact(judge_prompt(scenario, run))
             reserved = budget.reserve(estimate_tokens(JUDGE_SYSTEM + prompt), JUDGE_MAX_TOKENS)
             if reserved is None:

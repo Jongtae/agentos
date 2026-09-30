@@ -183,7 +183,7 @@ The `note` field is for the judge only. The sandbox runs on the real clock, so w
 
 A 21-scenario × 2-worker × 3-epoch sweep (126 runs) therefore takes roughly 1.5–4 hours. The real ceiling is the subscriptions' own usage limits, a separate budget from the judge.
 
-The workers run on the owner's own subscriptions, and the owner's live AgentOS shares them. On 2026-09-30 a 3-epoch Codex sweep exhausted the Codex limit part-way through (#842). The owner's live Codex route stayed blocked until the reset. So once any turn fails with `usage-limit`, the sweep starts no further runs. It uses Inspect's `EarlyStopping` hook (`runner.StopOnUsageLimit`). Runs already in progress finish. The skipped runs are listed in the log's early-stopping summary, and `sweep` prints `STOPPED: …` and exits with status 2. Do not retry until the limit resets.
+The workers run on the owner's own subscriptions, and the owner's live AgentOS shares them. On 2026-09-30 a 3-epoch Codex sweep exhausted the Codex limit part-way through (#842). The owner's live Codex route stayed blocked until the reset. So once any turn fails with `usage-limit`, the sweep starts no further runs. It uses Inspect's `EarlyStopping` hook (`runner.StopOnUsageLimit`). A run that hits the limit sends no further turns and gets no judge call. Other runs already in progress finish. The skipped runs are listed in the log's early-stopping summary. The report is marked as stopped and is never used as a later trend baseline. `sweep` prints `STOPPED: …` and exits with status 2. Do not retry until the limit resets.
 
 No schedule is installed or suggested (#887). The earlier 400–500 runs a day target is on hold.
 

@@ -448,6 +448,39 @@ class UsageLimitStopTest(unittest.TestCase):
         asyncio.run(stop.start_task(None, [], 1))
         self.assertIsNone(asyncio.run(stop.schedule_sample('a@codex', 1)))
 
+    def test_a_usage_limit_turn_ends_the_scenario_and_marks_the_run(self):
+        class Client:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, message, key):
+                self.sent.append(message)
+                return f't{len(self.sent)}'
+
+            def wait(self, task_id, timeout, interval):
+                return {'status': 'failed', 'failure_class': 'usage-limit'} if task_id == 't1' else {'status': 'succeeded'}
+
+            def answer(self, task_id):
+                return {'response': ''}
+
+        client = Client()
+        turns = runner.run_turns(client, scenario(), clock=lambda: 0.0)
+        self.assertEqual(len(client.sent), 1)  # the second turn is never sent
+        self.assertTrue(runner.usage_limited({'turns': turns}))
+        self.assertFalse(runner.usage_limited({'turns': [turn(status='failed', failure_class='engine-failed')]}))
+        self.assertFalse(runner.usage_limited({'error': 'sandbox failed'}))
+
+    def test_a_stopped_sweep_is_never_a_trend_baseline(self):
+        rows = [record('a', 'codex', True), record('b', 'codex', True)]
+        with tempfile.TemporaryDirectory() as folder:
+            report.write_report(rows, folder, {'id': '20261001T0700-aaaaaa'})
+            _, md_path, stopped = report.write_report(
+                rows, folder, {'id': '20261001T0800-bbbbbb', 'stopped': {'tripped_by': 'b@codex (epoch 1)', 'skipped': 4}})
+            self.assertIn('STOPPED on a usage limit in b@codex (epoch 1): 4 runs not started', md_path.read_text())
+            self.assertEqual(stopped['trend']['previous_run'], '20261001T0700-aaaaaa')
+            _, _, later = report.write_report(rows, folder, {'id': '20261001T0900-cccccc'})
+            self.assertEqual(later['trend']['previous_run'], '20261001T0700-aaaaaa')
+
     def test_sweep_reports_the_stop_and_exits_2_only_when_tripped(self):
         def log(metadata, stops=()):
             summary = type('Summary', (), {'metadata': metadata, 'early_stops': list(stops)})()

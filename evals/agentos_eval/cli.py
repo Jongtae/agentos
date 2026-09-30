@@ -99,10 +99,12 @@ def cmd_budget(args):
 
 def _write(log, run):
     records = records_from_samples(log.samples)
+    stopped = usage_limit_stops(log)
+    if stopped:
+        run = {**run, 'stopped': stopped}  # #887: an incomplete sweep is never a later trend baseline
     json_path, md_path, report = write_report(records, eval_home() / 'reports', run)
     print(md_path.read_text(encoding='utf-8'))
     print(f'report: {json_path}\nlog: {log.location}')
-    stopped = usage_limit_stops(log)
     if stopped:
         print(f"STOPPED: a subscription usage limit was hit ({stopped['tripped_by']}); "
               f"{stopped['skipped']} runs were not started. Results cover only the runs before it.")

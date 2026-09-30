@@ -1127,11 +1127,13 @@ class LiveWaitTests(NativePresenceTestCase):
 
 class DotsFrameTests(unittest.TestCase):
     def test_dots_cycle_follow_a_step_line_and_are_never_empty(self):
-        self.assertEqual([draft_frame('', frame) for frame in range(4)], ['·', '· ·', '· · ·', '·'])
-        self.assertEqual(draft_frame('웹 검색 중: 환율', 1), '웹 검색 중: 환율 · ·')
-        self.assertEqual(draft_frame('다시 해보는 중…', 2), '다시 해보는 중 · · ·', 'the dots replace an ellipsis')
-        self.assertEqual(draft_frame('찾는 중...', 0), '찾는 중 ·')
-        self.assertEqual(draft_frame(None, 0), '·')
+        # Owner direction 2026-09-30: always three dots, animated by the lit dot moving.
+        self.assertEqual([draft_frame('', frame) for frame in range(4)], ['● · ·', '· ● ·', '· · ●', '● · ·'])
+        self.assertTrue(all(frame.count('●') + frame.count('·') == 3 for frame in DOTS_FRAMES))
+        self.assertEqual(draft_frame('웹 검색 중: 환율', 1), '웹 검색 중: 환율 · ● ·')
+        self.assertEqual(draft_frame('다시 해보는 중…', 2), '다시 해보는 중 · · ●', 'the dots replace an ellipsis')
+        self.assertEqual(draft_frame('찾는 중...', 0), '찾는 중 ● · ·')
+        self.assertEqual(draft_frame(None, 0), '● · ·')
 
 
 class TimingTests(unittest.TestCase):

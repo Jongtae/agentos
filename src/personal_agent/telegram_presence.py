@@ -89,7 +89,9 @@ WAIT_DRAFT = 'draft'
 # (#581 live check, 2026-09-26).
 
 #: Frames of the waiting animation (U+00B7 MIDDLE DOT), in display order.
-DOTS_FRAMES = ('·', '· ·', '· · ·')
+# Owner direction 2026-09-30: always three dots, still animated - the lit dot moves
+# instead of one dot growing to three.
+DOTS_FRAMES = ('● · ·', '· ● ·', '· · ●')
 #: ``draft_step`` text while no observed step is in flight (before the first
 #: tool call, or between two): the draft then shows the dots alone.
 NO_STEP_LINE = ''

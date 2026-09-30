@@ -23,18 +23,18 @@ from inspect_ai.model import (ChatMessageAssistant, ChatMessageSystem, ChatMessa
                               ModelOutput, get_model)
 from inspect_ai.scorer import Score, Target, mean, scorer
 from inspect_ai.solver import Generate, TaskState, solver
+from inspect_ai.util import EarlyStop
 
 from agentos_eval import scenarios as scenario_module
 from agentos_eval.budget import JudgeBudget, estimate_tokens
 from agentos_eval.paths import eval_home
 from agentos_eval.redaction import Redactor
-from agentos_eval.runner import WORKERS, run_scenario
+from agentos_eval.runner import WORKERS, StopOnUsageLimit, run_scenario, usage_limited
 from agentos_eval.sandbox import SandboxPool
 from agentos_eval.scoring import (JUDGE_MAX_TOKENS, JUDGE_SYSTEM, combine, deterministic_checks, judge_prompt,
                                   parse_judgment)
 
 DEFAULT_JUDGE = 'openai/gpt-5.4-mini'
-
 
 def workers_for(worker):
     if worker in ('both', 'split'):
@@ -83,7 +83,7 @@ def secretary(judge='grader', budget_path=None, seed=None):
         scenario, run = state.metadata['scenario'], state.metadata.get('run') or {'error': 'solver did not run'}
         checks, failures = deterministic_checks(scenario, run)
         judgment, judge_status = None, 'skipped'
-        if judge != 'none' and not run.get('error'):
+        if judge != 'none' and not run.get('error') and not usage_limited(run):  # #887: no judge spend on an outage
             prompt = redact(judge_prompt(scenario, run))
             reserved = budget.reserve(estimate_tokens(JUDGE_SYSTEM + prompt), JUDGE_MAX_TOKENS)
             if reserved is None:
@@ -121,5 +121,6 @@ def agentos_secretary(scenarios='', split='', worker='codex', instances=3, seed=
                 solver=agentos_blackbox(pool, int(turn_timeout), int(judgment_timeout)),
                 scorer=secretary('none' if judge == 'none' else 'grader', seed=Path(seed).expanduser() if seed else None),
                 model='none/none',
+                early_stopping=StopOnUsageLimit(EarlyStop),
                 model_roles=None if judge == 'none' else {'grader': judge},
                 metadata={'worker': worker, 'instances': int(instances), 'seed': bool(seed), 'judge': judge})

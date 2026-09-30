@@ -10,6 +10,42 @@ from .sandbox import JUDGMENT_KEYS, SandboxError
 from .scenarios import owner_message
 
 WORKERS = ('codex', 'claude-code')
+USAGE_LIMIT = 'usage-limit'
+
+
+class StopOnUsageLimit:
+    """Inspect ``EarlyStopping`` manager: once a turn hits a subscription usage limit, start no more samples.
+
+    The workers run on the owner's own subscriptions, which the owner's live
+    AgentOS shares (#887).  Past the limit every run fails the same way, so
+    going on only burns the owner's quota and fills the report with outage
+    rows.  The tripping run stops at that turn and is not judged; other
+    samples already running finish; the rest are skipped, and the
+    skipped count lands in the log's early-stopping summary.  ``make_stop`` is
+    Inspect's ``EarlyStop`` (injected so this module stays standard-library only).
+    """
+
+    def __init__(self, make_stop):
+        self.make_stop = make_stop
+        self.tripped = None
+
+    async def start_task(self, task, samples, epochs):
+        self.tripped = None
+        return 'stop-on-usage-limit'
+
+    async def schedule_sample(self, id, epoch):  # noqa: A002 - Inspect's protocol names
+        if self.tripped:
+            return self.make_stop(id=id, epoch=epoch, reason=f'usage limit hit in {self.tripped}')
+        return None
+
+    async def complete_sample(self, id, epoch, scores):  # noqa: A002
+        for sample_score in (scores or {}).values():
+            metadata = getattr(getattr(sample_score, 'score', None), 'metadata', None) or {}
+            if USAGE_LIMIT in (metadata.get('failure_classes') or ()) and not self.tripped:
+                self.tripped = f'{id} (epoch {epoch})'
+
+    async def complete_task(self):
+        return {'tripped_by': self.tripped}
 
 
 def run_turns(client, scenario, turn_timeout=900, poll_interval=2.0, clock=time.monotonic):
@@ -27,7 +63,14 @@ def run_turns(client, scenario, turn_timeout=900, poll_interval=2.0, clock=time.
                       'events': compact_events(detail), 'elapsed': round(clock() - started, 1)})
         if detail.get('timed_out'):
             break  # the sandbox is still busy with this turn; later turns would queue behind it
+        if detail.get('failure_class') == USAGE_LIMIT:
+            break  # #887: later turns would only spend more of the owner's exhausted subscription
     return turns
+
+
+def usage_limited(run):
+    """Whether a run record hit a subscription usage limit (#887): then it is neither continued nor judged."""
+    return any(turn.get('failure_class') == USAGE_LIMIT for turn in (run or {}).get('turns') or ())
 
 
 def prepare_judgment(client, pool, box, worker, timeout=300, clock=time.monotonic):

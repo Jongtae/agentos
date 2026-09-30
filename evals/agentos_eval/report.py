@@ -146,6 +146,9 @@ def render_markdown(report):
              f"- judge: {', '.join(f'{k} {v}' for k, v in sorted(report['judge'].items()))}"]
     if run.get('git_head'):
         lines.append(f"- code: {run['git_head']}")
+    if run.get('stopped'):
+        lines.append(f"- STOPPED on a usage limit in {run['stopped'].get('tripped_by')}: "
+                     f"{run['stopped'].get('skipped')} runs not started; not used as a trend baseline")
     if trend.get('previous_run'):
         lines.append(f"- vs {trend['previous_run']}: pass rate delta {trend.get('pass_rate_delta')}")
     if trend.get('regressions'):
@@ -174,7 +177,7 @@ def render_markdown(report):
 
 
 def latest_report(folder, of_cohort=None):
-    """The newest report in ``folder``, of ``of_cohort`` when given."""
+    """The newest complete report in ``folder``, of ``of_cohort`` when given."""
     folder = Path(folder)
     reports = sorted(folder.glob('*.json')) if folder.is_dir() else []
     for path in reversed(reports):
@@ -182,6 +185,8 @@ def latest_report(folder, of_cohort=None):
             data = json.loads(path.read_text(encoding='utf-8'))
         except (OSError, ValueError):
             continue
+        if (data.get('run') or {}).get('stopped'):
+            continue  # #887: stopped on a usage limit, so incomplete; never a baseline
         if of_cohort is None or data.get('cohort') == of_cohort:
             return data
     return None

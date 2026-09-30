@@ -2,6 +2,8 @@
 
 > Owner decision 2026-09-28: sweeps run on Codex only by default, because the Claude subscription limit is shared with development work. Pass `--worker claude-code` or `--worker both` explicitly when Claude capacity allows.
 
+> Owner decision 2026-10-01 (#887): the eval is **on-demand triage**, not a scheduled loop and not a pass-rate target. The owner's real use is the primary signal. A sweep reproduces owner-reported failures and checks that a fix generalizes. Run it after a batch of merged fixes, normally only the affected `--scenarios` with `--epochs 1`. Use a full `--epochs 3` sweep only to support an improvement claim. A sweep stops at the first subscription usage limit (see *Capacity*).
+
 Machines, not the owner, should find the failures. This folder runs owner-realistic, multi-turn conversations against **isolated AgentOS sandboxes**. The sandboxes run on the owner's Codex and Claude Code subscriptions. Each run is scored with deterministic checks and a secretary-rubric judge, and every sweep produces a trend report that groups failures by root cause.
 
 This is development tooling. It is never imported by `src/personal_agent` and never installed into the AgentOS runtime. A sweep result is a **live local observation** of the exact code checkout, seed and subscription workers it ran with. It is not a calibrated quality score (see Limitations).
@@ -91,7 +93,7 @@ inspect view --log-dir ~/.local/share/agentos-evals/logs     # transcripts, scor
 
 A direct `inspect eval` run writes only the Inspect log. Build the trend report from it with `python3 -m agentos_eval report --log <file>.eval`.
 
-`sweep` exits with status 1 when the trend shows a regression, so a scheduler can alert on it.
+`sweep` exits with status 1 when the trend shows a regression. It exits with status 2 when it stopped on a usage limit (see *Capacity*).
 
 ## What one run does
 
@@ -170,7 +172,7 @@ The `note` field is for the judge only. The sandbox runs on the real clock, so w
 
 **Scenarios derived from the owner's real conversations live only in `~/.local/share/agentos-evals/scenarios/`** (or folders listed in `AGENTOS_EVAL_SCENARIOS`). They are never committed. The loader merges them with the bundled set and marks them `source: local`. `python3 -m agentos_eval scenarios` lists local scenarios by id only.
 
-## Capacity and schedule
+## Capacity
 
 | Measurement | Value |
 | --- | --- |
@@ -179,15 +181,11 @@ The `note` field is for the judge only. The sandbox runs on the real clock, so w
 | Per-run overhead | about 10 s start, plus a one-time Judgment AI qualification per slot, worker and seed (60–80 s observed) |
 | Throughput with 3 instances | about 30–90 scenario runs an hour |
 
-A 21-scenario × 2-worker × 3-epoch sweep (126 runs) therefore takes roughly 1.5–4 hours. The 400–500 runs a day target needs 4–6 instances running most of the day, or fewer epochs per sweep. The real ceiling is the subscriptions' own rate limits, and that is a separate budget from the judge. Measure the first full sweep and adjust `--instances`.
+A 21-scenario × 2-worker × 3-epoch sweep (126 runs) therefore takes roughly 1.5–4 hours. The real ceiling is the subscriptions' own usage limits, a separate budget from the judge.
 
-A suggested schedule (not installed by this change) is a morning and an evening sweep via `launchd` or `cron`:
+The workers run on the owner's own subscriptions, and the owner's live AgentOS shares them. On 2026-09-30 a 3-epoch Codex sweep exhausted the Codex limit part-way through (#842). The owner's live Codex route stayed blocked until the reset. So once any turn fails with `usage-limit`, the sweep starts no further runs. It uses Inspect's `EarlyStopping` hook (`runner.StopOnUsageLimit`). A run that hits the limit sends no further turns and gets no judge call. Other runs already in progress finish. The skipped runs are listed in the log's early-stopping summary. The report is marked as stopped and is never used as a later trend baseline. `sweep` prints `STOPPED: …` and exits with status 2. Do not retry until the limit resets.
 
-```cron
-30 6,19 * * *  cd "$HOME/Documents/new agentos 26.09/evals" && \
-  $HOME/.local/share/agentos-evals/venv/bin/python -m agentos_eval sweep --seed owner --worker codex --instances 3 --epochs 3 \
-  >> $HOME/.local/share/agentos-evals/sweep.log 2>&1
-```
+No schedule is installed or suggested (#887). The earlier 400–500 runs a day target is on hold.
 
 Refresh the seed (`snapshot --overwrite`) before a sweep when the owner's profile should be current.
 

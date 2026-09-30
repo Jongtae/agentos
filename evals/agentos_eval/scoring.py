@@ -192,5 +192,6 @@ def combine(scenario, run, checks, failures, judgment=None, judge_status='skippe
     metadata = {'scenario': scenario['id'], 'source': scenario.get('source', 'bundled'), 'split': scenario['split'],
                 'worker': run.get('worker'), 'checks': checks, 'failures': failures, 'judge_status': judge_status,
                 'judgment': judgment, 'judgment_ai': run.get('judgment'), 'statuses': [turn.get('status') for turn in run.get('turns') or []],
+                'failure_classes': [turn.get('failure_class') for turn in run.get('turns') or []],
                 'elapsed': [turn.get('elapsed') for turn in run.get('turns') or []]}
     return value, metadata

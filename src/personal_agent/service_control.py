@@ -184,8 +184,12 @@ class ServiceController:
         default_data = (self.home / DEFAULT_DATA_RELATIVE if instance is None
                         else self.home / DEFAULT_INSTANCES_RELATIVE / instance)
         self.data_dir = Path(configured_data or recovered_data or default_data).expanduser().resolve()
-        if instance is not None and self.data_dir == (self.home / DEFAULT_DATA_RELATIVE).resolve():
-            raise ValueError("An instance never uses the owner's default data directory.")
+        if instance is None and port not in (None, DEFAULT_PORT):
+            raise ValueError("--port selects a named instance's port; pass --instance too.")
+        if instance is not None and self.data_dir in {(self.home / DEFAULT_DATA_RELATIVE).resolve(),
+                                                      *(Path(value).expanduser().resolve() for value in
+                                                        (env.get("AGENTOS_DATA"),) if value)}:
+            raise ValueError("An instance never uses the owner's data directory.")
         try:
             recovered_port_number = int(recovered_port) if recovered_port else None
         except ValueError:
@@ -212,6 +216,44 @@ class ServiceController:
         self.uid = os.getuid() if uid is None else uid
         self.domain = f"gui/{self.uid}"
         self.service_target = f"{self.domain}/{self.label}"
+
+    def _other_definitions(self) -> list[tuple[Path, int]]:
+        """(data directory, port) of every other installed AgentOS job, owner's included (#893)."""
+        found = []
+        for plist in sorted((self.home / "Library/LaunchAgents").glob(f"{LABEL}*.plist")):
+            if plist == self.plist_path or not (plist.name == f"{LABEL}.plist" or plist.name.startswith(f"{LABEL}.")):
+                continue
+            try:
+                installed = plistlib.loads(plist.read_bytes())
+                arguments = installed.get("ProgramArguments") if isinstance(installed, dict) else None
+                data = _argument_after(arguments, "--data")
+                port = int(_argument_after(arguments, "--port") or DEFAULT_PORT)
+            except (OSError, plistlib.InvalidFileException, ValueError, TypeError):
+                continue
+            if data:
+                found.append((Path(data).expanduser().resolve(), port))
+        return found
+
+    def _refuse_shared_instance_resources(self) -> None:
+        """A named instance owns its data directory and its port pair (port, port + 1)."""
+        port = self.port
+        if port is None or port == DEFAULT_PORT or not 1024 <= port <= 65534:
+            raise ServiceControlError(
+                "An AgentOS instance needs its own port.",
+                "Retry with --port set to a free port from 1024 to 65534 other than 8787; the next port is used for its handoff.",
+            )
+        others = self._other_definitions()
+        if any(data == self.data_dir for data, _port in others):
+            raise ServiceControlError(
+                "Another AgentOS service already uses this data directory.",
+                "Choose a data directory of this instance's own; each person's agent keeps separate Memory and approvals.",
+            )
+        taken = {DEFAULT_PORT, DEFAULT_PORT + 1} | {value for _data, other in others for value in (other, other + 1)}
+        if {port, port + 1} & taken:
+            raise ServiceControlError(
+                "This port or the handoff port after it is used by another AgentOS service.",
+                "Retry with a port two or more away from every other AgentOS service's port.",
+            )
 
     def _reported_data_dir(self) -> Path:
         """Return the path owned by the installed definition for read/remove actions."""
@@ -378,12 +420,8 @@ class ServiceController:
 
     def install(self, *, upgrade: bool = False) -> dict[str, object]:
         """Install and start the service; upgrades preserve owner data and roll back."""
-        if self.instance is not None and (self.port is None or self.port == DEFAULT_PORT
-                                          or not 1024 <= self.port <= 65534):
-            raise ServiceControlError(
-                "An AgentOS instance needs its own port.",
-                "Retry with --port set to a free port from 1024 to 65534 other than 8787; the next port is used for its handoff.",
-            )
+        if self.instance is not None:
+            self._refuse_shared_instance_resources()
         cli_path = resolve_cli_path(self._cli_path, which=self._which, runner=self.runner)
         desired = render_plist(cli_path, self.data_dir, label=self.label, port=self.port or DEFAULT_PORT)
         previous = self.plist_path.read_bytes() if self.plist_path.exists() else None

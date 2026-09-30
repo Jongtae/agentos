@@ -1196,6 +1196,9 @@ def main():
     # The Gmail callback is served by this same HTTP listener, so the redirect
     # URI must name the port actually bound rather than a separately guessed one.
     env['AGENTOS_GMAIL_LOCAL_PORT']=str(args.port)
+    # The Calendar callback (/oauth/calendar/callback) is served here too, so a
+    # second instance on another port never sends its consent to 8787 (#893).
+    env['AGENTOS_CALENDAR_LOCAL_PORT']=str(args.port)
     service=configured_service(store,env)
     public_hosts=args.public_tunnel_host
     public_token=args.public_access_token

@@ -136,14 +136,43 @@ class ServiceControlTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ServiceController(home=self.home, cli_path=self.cli, runner=self.runner, uid=501, instance=bad, port=8797)
         env_data = ServiceController(home=self.home, cli_path=self.cli, runner=self.runner, uid=501, instance="kid",
-                                     port=8797, environ={"AGENTOS_DATA": str(self.home / ".local/share/agentos")})
+                                     port=8797, environ={"AGENTOS_DATA": str(self.root / "owner-elsewhere")})
         self.assertEqual(env_data.data_dir, (self.home / ".local/share/agentos-instances/kid").resolve(),
                          "AGENTOS_DATA names the owner's directory, never an instance's")
+        with self.assertRaises(ValueError):
+            ServiceController(home=self.home, cli_path=self.cli, runner=self.runner, uid=501, instance="kid", port=8797,
+                              data_dir=self.root / "owner-elsewhere", environ={"AGENTOS_DATA": str(self.root / "owner-elsewhere")})
         for port in (None, 8787, 80, 65535):
             instance = ServiceController(home=self.home, cli_path=self.cli, runner=self.runner, uid=501, instance="kid", port=port)
             with self.assertRaises(ServiceControlError):
                 instance.install()
         self.assertFalse((self.home / f"Library/LaunchAgents/{LABEL}.kid.plist").exists())
+
+    def test_an_instance_never_takes_another_services_data_or_port_pair(self):
+        """#893 review: data directories and (port, port + 1) pairs are never shared."""
+        custom_owner = self.root / "owner-data"
+        ServiceController(home=self.home, data_dir=custom_owner, cli_path=self.cli, runner=FakeLaunchctl(), uid=501).install()
+        first = ServiceController(home=self.home, cli_path=self.cli, runner=FakeLaunchctl(), uid=501, instance="spouse", port=8797)
+        first.install()
+        cases = {
+            "owner's custom data": dict(instance="kid", port=8801, data_dir=custom_owner),
+            "another instance's data": dict(instance="kid", port=8801, data_dir=first.data_dir),
+            "handoff of another instance": dict(instance="kid", port=8798),
+            "port whose handoff is taken": dict(instance="kid", port=8796),
+            "owner's handoff port": dict(instance="kid", port=8788),
+        }
+        for name, options in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(ServiceControlError):
+                    ServiceController(home=self.home, cli_path=self.cli, runner=FakeLaunchctl(), uid=501, **options).install()
+        self.assertFalse((self.home / f"Library/LaunchAgents/{LABEL}.kid.plist").exists())
+        self.assertEqual(ServiceController(home=self.home, cli_path=self.cli, runner=FakeLaunchctl(), uid=501,
+                                           instance="kid", port=8799).install()["status"], "running")
+
+    def test_a_port_without_an_instance_is_refused(self):
+        with self.assertRaises(ValueError):
+            ServiceController(home=self.home, cli_path=self.cli, runner=self.runner, uid=501, port=8797)
+        self.assertEqual(ServiceController(home=self.home, cli_path=self.cli, runner=self.runner, uid=501, port=8787).port, 8787)
 
     def test_resolve_cli_uses_path_then_actual_brew_prefix(self):
         self.assertEqual(resolve_cli_path(which=lambda name: str(self.cli) if name == "agentos" else None), self.cli.absolute())

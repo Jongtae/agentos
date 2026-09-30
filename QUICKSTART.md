@@ -133,7 +133,8 @@ agentos service uninstall --instance spouse             # data is retained
 - **Setup.** Open `http://127.0.0.1:8797/` and use the setup link in that instance's `private/setup-link.txt`.
   - Codex uses this Mac's Codex login. Claude Code needs its setup token entered once in that instance.
   - Pair the family member's own Telegram bot the same way as in [Telegram](#telegram).
-- **Not yet covered.** Google Calendar and Gmail for an instance need their own callback port. The same "not covered" notes as [Background service](#background-service-macos) apply: tests substitute `launchctl`, and a real login service is owner operating validation.
+- **Google Calendar and Gmail.** An instance's callbacks use its own port, for example `http://localhost:8797/oauth/calendar/callback` and `.../oauth/gmail/callback`. Add those as authorised redirect URIs in your Google OAuth client.
+- **Not yet covered.** The same "not covered" notes as [Background service](#background-service-macos) apply: tests substitute `launchctl`, and a real login service is owner operating validation.
 
 ## Google Calendar (source checkout)
 

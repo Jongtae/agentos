@@ -102,6 +102,10 @@ def _write(log, run):
     json_path, md_path, report = write_report(records, eval_home() / 'reports', run)
     print(md_path.read_text(encoding='utf-8'))
     print(f'report: {json_path}\nlog: {log.location}')
+    stopped = usage_limit_stops(log)
+    if stopped:
+        print(f"STOPPED: a subscription usage limit was hit ({stopped['tripped_by']}); "
+              f"{stopped['skipped']} runs were not started. Results cover only the runs before it.")
     return report
 
 
@@ -124,7 +128,17 @@ def cmd_sweep(args):
                         log_dir=str(eval_home() / 'logs'), display=args.display, fail_on_error=False,
                         tags=['agentos-eval', args.worker], metadata=run)
     report = _write(logs[0], run)
+    if usage_limit_stops(logs[0]):
+        return 2
     return 1 if report['trend']['regressions'] else 0
+
+
+def usage_limit_stops(log):
+    """``{'tripped_by', 'skipped'}`` when the sweep stopped on a usage limit (#887), else ``None``."""
+    summary = getattr(getattr(log, 'results', None), 'early_stopping', None)
+    if summary is None or not (summary.metadata or {}).get('tripped_by'):
+        return None
+    return {'tripped_by': summary.metadata['tripped_by'], 'skipped': len(summary.early_stops)}
 
 
 def cmd_report(args):

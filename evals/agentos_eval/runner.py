@@ -10,6 +10,41 @@ from .sandbox import JUDGMENT_KEYS, SandboxError
 from .scenarios import owner_message
 
 WORKERS = ('codex', 'claude-code')
+USAGE_LIMIT = 'usage-limit'
+
+
+class StopOnUsageLimit:
+    """Inspect ``EarlyStopping`` manager: once a turn hits a subscription usage limit, start no more samples.
+
+    The workers run on the owner's own subscriptions, which the owner's live
+    AgentOS shares (#887).  Past the limit every run fails the same way, so
+    going on only burns the owner's quota and fills the report with outage
+    rows.  Samples already running finish; the rest are skipped, and the
+    skipped count lands in the log's early-stopping summary.  ``make_stop`` is
+    Inspect's ``EarlyStop`` (injected so this module stays standard-library only).
+    """
+
+    def __init__(self, make_stop):
+        self.make_stop = make_stop
+        self.tripped = None
+
+    async def start_task(self, task, samples, epochs):
+        self.tripped = None
+        return 'stop-on-usage-limit'
+
+    async def schedule_sample(self, id, epoch):  # noqa: A002 - Inspect's protocol names
+        if self.tripped:
+            return self.make_stop(id=id, epoch=epoch, reason=f'usage limit hit in {self.tripped}')
+        return None
+
+    async def complete_sample(self, id, epoch, scores):  # noqa: A002
+        for sample_score in (scores or {}).values():
+            metadata = getattr(getattr(sample_score, 'score', None), 'metadata', None) or {}
+            if USAGE_LIMIT in (metadata.get('failure_classes') or ()) and not self.tripped:
+                self.tripped = f'{id} (epoch {epoch})'
+
+    async def complete_task(self):
+        return {'tripped_by': self.tripped}
 
 
 def run_turns(client, scenario, turn_timeout=900, poll_interval=2.0, clock=time.monotonic):

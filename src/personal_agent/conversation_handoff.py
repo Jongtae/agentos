@@ -662,8 +662,12 @@ GOAL_REACHED_PROPOSITION = ('The reply serves the owner\'s message, read in the 
                             'that source appears in the observations. It is '
                             'false when the reply does not address the owner\'s message or addresses a different or '
                             'earlier topic, serves only part of it, claims an action the observations do not show, states '
-                            'a changing fact as checked when nothing supports it, or asks for something the message, the '
-                            'conversation or the owner context already says.')
+                            'a changing fact as checked when nothing supports it, asks for something the message, the '
+                            'conversation or the owner context already says, or - when the message asks about something '
+                            'or asks for something to be done - says instead that it lacks the information, offers to '
+                            'look it up, check it or do it, or asks the owner what it is or why they ask, when the '
+                            'observations show no attempt to find it: the assistant can look things up, so an offer to '
+                            'is not an answer.')
 UNSUPPORTED_JUDGMENT_UNAVAILABLE = ('요청을 안전하게 구분할 판단 기능을 사용할 수 없어 메일을 검색하거나 다른 처리를 하지 않았습니다. '
                                    '메일을 찾으려는 요청이라면 검색할 내용을 다시 구체적으로 적어 주세요.')
 MIXED_MAIL_ACTION_CLARIFICATION = ('지원하지 않는 메일 발송 요청과 다른 작업이 함께 있어 아무 작업도 실행하지 않았습니다. '

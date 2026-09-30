@@ -134,12 +134,31 @@ class Tick(Upkeep):
         self.assertEqual(self.upkeep_rows()[job]['state'], om.STATE_DONE)
         self.assertFalse(self.service.run_owner_model_upkeep(), 'a done upkeep never runs again')
 
-    def test_one_upkeep_per_tick(self):
+    def test_one_upkeep_per_tick_the_newest_first(self):
+        """#876: the live conversation's upkeep runs before an older one still pending."""
         first, second = self.finished('나는 판교에서 일해'), self.finished('나는 매주 월요일 회의가 있어')
+        with self.store.db() as db:
+            db.execute('UPDATE owner_model_upkeep SET created=? WHERE job_id=?', (time.time() - 120, first))
         self.answers = [[], []]
         self.assertTrue(self.service.run_owner_model_upkeep())
         rows = self.upkeep_rows()
-        self.assertEqual((rows[first]['state'], rows[second]['state']), (om.STATE_DONE, om.STATE_PENDING))
+        self.assertEqual((rows[first]['state'], rows[second]['state']), (om.STATE_PENDING, om.STATE_DONE))
+        self.assertEqual(self.structured_calls()[0][1].work_id, second)
+
+    def test_a_backlog_older_than_the_conversation_expires_instead_of_asking_late(self):
+        """#876: a day-old Work never becomes a memory ask after the conversation moved on."""
+        self.assertLessEqual(om.MAX_PENDING_SECONDS, 3600)
+        stale, fresh = self.finished('괜찮았어'), self.finished('나는 판교에서 일해')
+        with self.store.db() as db:
+            db.execute('UPDATE owner_model_upkeep SET created=? WHERE job_id=?', (time.time() - 26 * 3600, stale))
+        self.answers = [[proposal('profile.place.work', '판교')]]
+        self.explicit = [False]
+        self.assertTrue(self.service.run_owner_model_upkeep())
+        self.assertTrue(self.service.run_owner_model_upkeep())
+        rows = self.upkeep_rows()
+        self.assertEqual((rows[fresh]['state'], rows[stale]['state']), (om.STATE_DONE, om.STATE_EXPIRED))
+        self.assertEqual([call[1].work_id for call in self.structured_calls()], [fresh])
+        self.assertEqual(self.evidence(stale), [(om.EVENT_EXPIRED, {'reason': 'expired'})])
 
     def test_the_facts_are_the_request_answer_profile_and_clock(self):
         self.store.save_memory('profile.place.home', '분당', work_id='w0')
@@ -344,7 +363,8 @@ class Apply(Upkeep):
 class Budget(Upkeep):
     def test_the_daily_cap_stops_calls(self):
         self.service.owner_model_request({'operation': 'set', 'daily_calls': 1})
-        first, second = self.finished('나는 판교에서 일해'), self.finished('나는 분당에 살아')
+        # Newest first (#876): the later Work runs, the earlier one waits.
+        second, first = self.finished('나는 판교에서 일해'), self.finished('나는 분당에 살아')
         self.answers = [[], []]
         self.assertTrue(self.service.run_owner_model_upkeep())
         self.assertFalse(self.service.run_owner_model_upkeep())
@@ -496,7 +516,8 @@ class Review(Upkeep):
             threads.append(thread)
             thread.start()
         self.service.owner_model_spawn = spawn
-        first, second = self.finished('나는 판교에서 일해'), self.finished('나는 분당에 살아')
+        # Newest first (#876): ``first`` is the one claimed first.
+        second, first = self.finished('나는 판교에서 일해'), self.finished('나는 분당에 살아')
         self.assertTrue(self.service.run_owner_model_upkeep())
         self.assertTrue(entered.wait(5))
         self.assertIsNot(threads[0], threading.current_thread())
@@ -660,6 +681,11 @@ class Unit(unittest.TestCase):
         kept, _dropped = om.validate([proposal('profile.a', '가격이 내려가면 알려줘.')], set(), set())
         self.assertEqual(len(kept), 1, 'without a request there is nothing to compare against')
         self.assertIn('never turn the request sentence into content', om.QUESTION)
+
+    def test_a_passing_reaction_is_not_proposed_as_a_lasting_preference(self):
+        """#876: the question keeps the strength of what the owner said."""
+        self.assertIn('a passing reaction to one occasion', om.QUESTION)
+        self.assertIn('not a durable preference, unless the owner says it lasts', om.QUESTION)
 
     def test_the_question_names_no_task(self):
         from test_no_scenario_code import scenario_tokens

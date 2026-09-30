@@ -23,8 +23,10 @@ Bounded by docs/secretary-agency-contract.en.md ("Amendment - #805 phase 1"):
   always for ``inferred``, it stays a pending MemoryCandidate (C5).  Both are
   attributed to the source Work.
 * **Minimisation.** An owner pause switch and a rolling 24-hour cap on
-  every model call (``CONFIG_KEY``), checked before each call; a pending row
-  older than ``MAX_PENDING_SECONDS`` expires without a call, and a claimed
+  every model call (``CONFIG_KEY``), checked before each call.  The newest
+  pending row runs first and one older than ``MAX_PENDING_SECONDS`` expires
+  without a call (#876: an ask must come while the conversation is live, not
+  a day later when a backlog drains under the cap), and a claimed
   row a crash left behind expires as ``interrupted``.  Each run is one
   ``owner_model`` tool event on the source Work: counts, applied keys, kinds,
   outcomes and the deciding route - never the input texts, and a dropped
@@ -46,8 +48,9 @@ DEFAULT_DAILY_CALLS = 20
 MAX_DAILY_CALLS = 200
 #: The cap is a rolling window, so it needs no time zone.
 WINDOW_SECONDS = 24 * 3600
-#: A pending upkeep this old is dropped without a model call.
-MAX_PENDING_SECONDS = 7 * 24 * 3600
+#: A pending upkeep this old is dropped without a model call (#876): its ask
+#: would reach the owner after the conversation it is about has moved on.
+MAX_PENDING_SECONDS = 3600
 #: No model call starts after a run has been going this long (each call is also
 #: bounded by its adapter's own timeout).
 RUN_SECONDS = 300
@@ -113,7 +116,10 @@ QUESTION = ('From this one finished request, propose durable facts about the own
             'said. already_noted lists what was already noted from this same request; never propose a fact it '
             'already covers, even in other words or under another key. Never propose health, finances, '
             'relationships, beliefs, credentials or anything about other '
-            'people unless the owner stated it about themselves for a purpose (then kind "stated"). Do not repeat '
+            'people unless the owner stated it about themselves for a purpose (then kind "stated"). Keep the strength '
+            'of what the owner said: a passing reaction to one occasion (it was fine, it was good) is about that '
+            'occasion, not a durable preference, unless the owner says it lasts or contrasts it with what they '
+            'usually think. Do not repeat '
             'what owner_profile already says. A fact is never the request: what the owner asked for, wished for or wanted watched in owner_request is the task of that request, not a durable fact about the owner, so never turn the request sentence into content. Use clock only to turn relative time into an absolute date, or to '
             'leave out what is only about today. Propose at most 5, and an empty list when nothing durable and '
             'new was said. This judgment writes nothing.')
@@ -301,7 +307,7 @@ class Upkeep:
         return len(rows)
 
     def claim_due(self, now):
-        """Claim the oldest pending row this tick may run, or None.
+        """Claim the newest pending row this tick may run, or None (#876: the live conversation first).
 
         One immediate transaction: the check that no Work is queued or
         running and the claim are atomic with ``run_one``'s own claim, so an
@@ -312,12 +318,12 @@ class Upkeep:
         later call (``allowance``).
         """
         with self.store.db() as db:
-            row = db.execute('SELECT job_id,created FROM owner_model_upkeep WHERE state=? ORDER BY created LIMIT 1',
+            row = db.execute('SELECT job_id,created FROM owner_model_upkeep WHERE state=? ORDER BY created DESC LIMIT 1',
                              (STATE_PENDING,)).fetchone()
             if row is None:
                 return None
             db.execute('BEGIN IMMEDIATE')
-            row = db.execute('SELECT job_id,created FROM owner_model_upkeep WHERE state=? ORDER BY created LIMIT 1',
+            row = db.execute('SELECT job_id,created FROM owner_model_upkeep WHERE state=? ORDER BY created DESC LIMIT 1',
                              (STATE_PENDING,)).fetchone()
             settings = self.settings(db)
             if row is None or not settings['enabled']:

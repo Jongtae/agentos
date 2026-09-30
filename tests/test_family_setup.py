@@ -124,6 +124,31 @@ class ManagerBot(unittest.TestCase):
         other = family_setup.accept_managed_bot(self.owner, self.call, self.update(bot_id=5151), self.deliver, now=200)
         self.assertFalse(other['accepted'], 'a setup bound to one bot never takes another')
 
+    def test_a_failed_restriction_is_retried_without_re_delivering_the_token(self):
+        """Re-review P2-6: only the missing step runs again."""
+        failures = {'setManagedBotAccessSettings': 1}
+
+        def call(method, body):
+            self.calls.append((method, body))
+            if failures.get(method):
+                failures[method] -= 1
+                raise OSError('telegram busy')
+            return FAMILY_TOKEN if method == 'getManagedBotToken' else True
+        first = family_setup.accept_managed_bot(self.owner, call, self.update(), self.deliver, now=100)
+        self.assertFalse(first['delivered'])
+        self.assertEqual(len(self.delivered), 1)
+        self.assertEqual(family_setup.retry_pending(self.owner, call, self.deliver, now=100 + family_setup.RETRY_SECONDS), 1)
+        self.assertEqual(len(self.delivered), 1, 'the token is not handed over twice')
+        self.assertEqual([method for method, _ in self.calls].count('getManagedBotToken'), 1)
+
+    def test_retries_stop_after_the_attempt_cap(self):
+        self.fail_deliveries = 10 ** 6
+        family_setup.accept_managed_bot(self.owner, self.call, self.update(), self.deliver, now=0)
+        for step in range(1, 40):
+            family_setup.retry_pending(self.owner, self.call, self.deliver, now=step * family_setup.RETRY_SECONDS)
+        row = self.owner.config(family_setup.PENDING_KEY)[0]
+        self.assertEqual(row['attempts'], family_setup.MAX_ATTEMPTS)
+
     def test_the_suggested_username_carries_32_random_bits(self):
         self.assertRegex(self.record['username'], r'_ag[0-9a-f]{8}_bot$')
 
@@ -230,6 +255,9 @@ class SetupSurface(unittest.TestCase):
         self.assertIsNone(self.store.config('telegram').get('user_id'), 'a stranger holding the code cannot pair')
         start(555, 2)
         self.assertEqual(self.store.config('telegram').get('user_id'), 555)
+        again = self.request('/api/family/telegram-token', 'POST', {'token': FAMILY_TOKEN, 'creator_id': 555}, headers=header)
+        self.assertEqual(json.loads(again[1]), {'ok': True, 'already_connected': True})
+        self.assertEqual(self.store.config('telegram').get('user_id'), 555, 'a repeated hand-over never un-pairs')
 
 
 class OwnerCommand(unittest.TestCase):

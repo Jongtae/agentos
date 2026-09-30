@@ -139,7 +139,7 @@ The family member opens the link on their phone:
 3. Your bot fetches the new bot's token, limits the bot to its owner, and hands the token to the instance on this Mac.
 4. They tap **비서와 대화 시작**.
 
-The link then closes by itself. Through the link, only the setup page and its status answer, and only with the link's one-time code. The page tells the family member that the agent runs on your Mac with your AI subscription.
+The link then closes by itself. Through the link, only the setup page and its status answer, and only with the link's one-time code. Once an instance was set up this way, no tunnel reaches anything else on it: a family instance is not meant to be served through `--public-tunnel-host`. The page tells the family member that the agent runs on your Mac with your AI subscription.
 
 The manual commands below remain available.
 

@@ -39,6 +39,7 @@ from urllib.parse import quote
 SETUP_FILE = 'family-setup.json'
 SETUP_SECONDS = 30 * 60
 RETRY_SECONDS = 10
+MAX_ATTEMPTS = 20
 # Loopback calls never go through an HTTP(S)_PROXY from the environment (review P3-1).
 _LOOPBACK = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 PUBLIC_PATHS = frozenset({'/family-setup', '/api/family/status', '/api/family/pair'})
@@ -159,6 +160,11 @@ def accept_token(service, record, token, creator_id=None):
     ``creator_id`` is the Telegram user who created the bot; only that user
     can pair (review P2-5).
     """
+    cfg = service.store.config('telegram', {})
+    if cfg.get('enabled') and isinstance(token, str) and token and hmac.compare_digest(
+            token.encode(), str(service.store.secret('telegram_token') or '').encode()):
+        # The same bot arriving again never resets a pairing (re-review P2-6).
+        return {'ok': True, 'already_connected': True}
     pairing = service.connect_telegram({'token': token})
     if isinstance(creator_id, int) and not isinstance(creator_id, bool):
         with service.lock:
@@ -203,14 +209,23 @@ def deliver_token(port, handoff, token, creator_id=None, timeout=20):
 
 
 def _hand_over(owner_store, telegram_call, row, deliver):
-    """Fetch the token, hand it over, then restrict the bot to its owner; True on success."""
-    handoff = owner_store.secret(handoff_secret_key(row['instance']))
-    if not handoff:
-        return False
-    token = telegram_call('getManagedBotToken', {'user_id': row['bot_id']})
-    deliver(row['port'], handoff, token, row.get('creator_id'))
-    # Only the family member who created the bot (its owner) can use it.
-    telegram_call('setManagedBotAccessSettings', {'user_id': row['bot_id'], 'is_access_restricted': True})
+    """Run whichever of the two steps is still missing; True once both are done.
+
+    Step one hands the token over; step two restricts the bot to its owner.
+    Each is recorded on its own, so a retry never re-delivers a token that
+    already arrived (re-review P2-6).
+    """
+    if not row.get('handed_over'):
+        handoff = owner_store.secret(handoff_secret_key(row['instance']))
+        if not handoff:
+            return False
+        token = telegram_call('getManagedBotToken', {'user_id': row['bot_id']})
+        deliver(row['port'], handoff, token, row.get('creator_id'))
+        row['handed_over'] = time.time()
+    if not row.get('restricted'):
+        # Only the family member who created the bot (its owner) can use it.
+        telegram_call('setManagedBotAccessSettings', {'user_id': row['bot_id'], 'is_access_restricted': True})
+        row['restricted'] = time.time()
     return True
 
 
@@ -264,7 +279,7 @@ def retry_pending(owner_store, telegram_call, deliver=deliver_token, now=None):
     succeeded = 0
     for row in rows:
         if (isinstance(row.get('bot_id'), int) and not row.get('delivered') and float(row.get('expires') or 0) > now
-                and float(row.get('next_attempt') or 0) <= now):
+                and float(row.get('next_attempt') or 0) <= now and int(row.get('attempts') or 0) < MAX_ATTEMPTS):
             succeeded += _attempt(owner_store, telegram_call, rows, row, deliver, now)
     return succeeded
 
@@ -286,9 +301,13 @@ def start_tunnel(port, popen=subprocess.Popen, timeout=30):
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     lines = queue.Queue()
 
+    found = threading.Event()
+
     def drain():
+        # After the address is found the output is only drained, never kept (re-review P3-5).
         for line in process.stdout:
-            lines.put(line)
+            if not found.is_set():
+                lines.put(line)
         lines.put(None)
     threading.Thread(target=drain, daemon=True).start()
     deadline = time.monotonic() + timeout
@@ -308,6 +327,7 @@ def start_tunnel(port, popen=subprocess.Popen, timeout=30):
             continue
         url = entry.get('url')
         if isinstance(url, str) and url.startswith('https://'):
+            found.set()
             return process, url
         if entry.get('lvl') in ('eror', 'error', 'crit') or entry.get('err'):
             last_error = str(entry.get('err') or entry.get('msg') or '')[:200]

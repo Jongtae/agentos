@@ -578,8 +578,13 @@ RETRY_CONSUMED_LABEL = '다시 시도 요청함'
 DETAILS_LABEL = '상세'
 
 
-def reply_controls_markup(work_id, controls, consumed=()):
-    """Inline keyboard for the durable reply; consumed controls are disabled."""
+def reply_controls_markup(work_id, controls, consumed=(), route_options=()):
+    """Inline keyboard for the durable reply; consumed controls are disabled.
+
+    ``route_options`` are existing signed-in subscription engines offered only
+    after a typed usage-limit failure. Their callbacks remain bound to this
+    exact reply and Work in the service.
+    """
     row = []
     for control in controls:
         if control == CONTROL_RETRY:
@@ -589,7 +594,13 @@ def reply_controls_markup(work_id, controls, consumed=()):
                 row.append({'text': RETRY_LABEL, 'callback_data': f'p7r:{work_id}'})
         elif control == CONTROL_DETAILS:
             row.append({'text': DETAILS_LABEL, 'callback_data': f'p7d:{work_id}'})
-    return {'inline_keyboard': [row]} if row else None
+    rows = [row] if row else []
+    for option in route_options:
+        engine_id, name = option.get('id'), option.get('name')
+        if not isinstance(engine_id, str) or not isinstance(name, str) or not engine_id or not name:
+            continue
+        rows.append([{'text': f'{name}로 전환', 'callback_data': f'p7e:{work_id}:{engine_id}'}])
+    return {'inline_keyboard': rows} if rows else None
 
 
 def without_consumed(markup):

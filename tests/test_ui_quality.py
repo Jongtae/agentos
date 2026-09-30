@@ -372,6 +372,16 @@ class EngineAuthUi(unittest.TestCase):
         self.assertIn("engine.login?.state!=='signed-in'", recovery, "only signed-in CLIs are offered")
         self.assertNotIn("setInterval", recovery)
 
+    def test_usage_limit_recovery_offers_only_signed_in_alternates_and_never_replays(self):
+        self.assertIn("if(task.failure_class==='usage-limit')body.append(usageLimitRecovery(task))", APP)
+        recovery=APP[APP.index("function usageLimitRecovery("):APP.index("function turnHead(")]
+        self.assertIn("current===engineId", recovery)
+        self.assertIn("engine.installed&&engine.login?.state==='signed-in'", recovery)
+        self.assertIn("'/api/subscription-engines/connect'", recovery)
+        self.assertIn("AI 설정 열기", recovery)
+        self.assertIn("실패한 요청은 자동으로 다시 실행하지 않았어요", recovery)
+        self.assertNotIn("retry_from_control", recovery)
+
     def test_token_form_is_write_only(self):
         form = APP[APP.index("function claudeTokenForm("):APP.index("// Routes are listed once in #active-ai")]
         self.assertIn("input.type='password'", form)

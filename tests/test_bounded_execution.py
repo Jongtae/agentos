@@ -204,9 +204,16 @@ class EngineFailureDiagnosticsTests(unittest.TestCase):
         self.assertEqual(error.failure_class, 'request-rejected')
         self.assertEqual(error.exit_code, 1)
         self.assertIn("'x-model' model is not supported", str(error))
-        self.assertIn('종료 코드 1', str(error))
+        self.assertNotIn('종료 코드 1', str(error))
         self.assertIn('모델·계정 설정', str(error))
         self.assertIn('class=request-rejected', logs)
+
+    def test_unclassified_cli_exit_uses_owner_words_and_keeps_exit_code_typed(self):
+        error, _logs = self._run('',stderr='process returned 1\n')
+        self.assertEqual(error.failure_class,'engine-failed')
+        self.assertEqual(error.exit_code,1)
+        self.assertTrue(str(error).startswith('Codex가 요청을 끝까지 처리하지 못했어요.'),str(error))
+        self.assertNotIn('종료 코드',str(error))
 
     def test_status_selects_auth_and_usage_hints(self):
         for status, expected in ((401, 'auth'), (429, 'usage-limit'), (503, 'provider-error')):
@@ -218,12 +225,12 @@ class EngineFailureDiagnosticsTests(unittest.TestCase):
 
     def test_codex_usage_limit_is_named_to_the_owner_with_its_reset_time(self):
         # #873 (owner observation 2026-09-30): the CLI states the limit without a
-        # status, so the status hints never fired and the owner read "종료 코드 1".
+        # status, so the status hints never fired and the owner read a process code.
         from personal_agent.conversation_projection import owner_cause
         error, logs = self._run(self.CODEX_USAGE_LIMIT)
         self.assertEqual(error.failure_class, 'usage-limit')
         self.assertTrue(str(error).startswith('Codex 구독의 사용량 한도에 도달했습니다(재개: Oct 4th, 2026 2:09 AM). '), str(error))
-        self.assertIn('종료 코드 1', str(error))
+        self.assertNotIn('종료 코드 1', str(error))
         self.assertIn('class=usage-limit', logs)
         # The bubble's cause is that one sentence, not the exit code.
         cause = owner_cause([('subscription_engine', str(error))])
@@ -253,9 +260,10 @@ class EngineFailureDiagnosticsTests(unittest.TestCase):
         error, _ = self._run('not json', stderr='warning\nfatal: login required\n')
         self.assertIn('fatal: login required', str(error))
 
-    def test_no_evidence_still_fails_with_exit_code(self):
+    def test_no_evidence_still_fails_without_showing_exit_code_in_owner_message(self):
         error, _ = self._run('', stderr='', returncode=2)
-        self.assertIn('종료 코드 2', str(error))
+        self.assertTrue(str(error).startswith('Codex가 요청을 끝까지 처리하지 못했어요.'),str(error))
+        self.assertNotIn('종료 코드 2',str(error))
         self.assertEqual(error.diagnostics(), {'failure_class': 'engine-failed', 'exit_code': 2})
 
     def test_secrets_and_prompt_text_never_reach_error_or_logs(self):

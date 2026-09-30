@@ -1872,12 +1872,11 @@ class BoundedExecutionAdapter:
                     failure_class, hint = 'usage-limit', usage_limit_hint(engine_id, evidence)
                 LOG.warning('engine turn failed engine=%s exit_code=%s class=%s status=%s duration=%.1fs reason=%s',
                             engine_id, completed.returncode, failure_class, status, elapsed, reason or '-')
-                message = f'{ENGINE_NAMES[engine_id]} 엔진이 작업을 완료하지 못했습니다(종료 코드 {completed.returncode}).'
-                if hint:
-                    # The hint is the owner sentence; it leads so the bubble's
-                    # first-sentence cause (#598 owner_cause) is the hint, not
-                    # the exit code (#873).
-                    message = hint + ' ' + message
+                # The conversation receives an owner sentence, not process
+                # diagnostics. Exit code and the bounded CLI reason remain in
+                # the Work's technical evidence/logs; a typed hint leads when
+                # the CLI gave one (#873).
+                message = hint or f'{ENGINE_NAMES[engine_id]}가 요청을 끝까지 처리하지 못했어요.'
                 if reason:
                     message += f' 엔진 응답: {reason}'
                 # #735: the CLI's own unsupported-model signal, for the requested model only.

@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 from personal_agent import isolated_engine_mcp_bridge
-from personal_agent.agent_runtime import (BROWSER_ACTIONS, BROWSER_SESSION_NOTE, DEFINITIONS, STATUS_ARGUMENT, STATUS_SCHEMA,
+from personal_agent.agent_runtime import (BROWSER_ACTIONS, BROWSER_SESSION_NOTE, BROWSER_SIGN_IN_NOTE, DEFINITIONS, STATUS_ARGUMENT, STATUS_SCHEMA,
                                           Capabilities,
                                           check_arguments)
 from personal_agent.bounded_execution import (
@@ -132,6 +132,10 @@ class OneActionSource(_Store):
         self.assertIn("work from the owner's own browser", BROWSER_SESSION_NOTE)
         self.assertIn('exists only in this session, say so plainly', BROWSER_SESSION_NOTE)
         self.assertIn(BROWSER_SESSION_NOTE, NATIVE['browser_open']['description'])
+        # #910: a signed-out page leads the AI to the site's own sign-in page, which starts the in-flow login.
+        self.assertIn(BROWSER_SIGN_IN_NOTE, NATIVE['browser_open']['description'])
+        self.assertIn("open the site's own sign-in page", BROWSER_SIGN_IN_NOTE)
+        self.assertIn('Never type a password', BROWSER_SIGN_IN_NOTE)
         wire = {tool['name']: tool for tool in AgentOSMcpTools(self.caps(browser=lambda: None)).definitions()}
         self.assertIn(BROWSER_SESSION_NOTE, wire['browser_open']['description'])
         static = {tool['name']: tool for tool in profile_mcp_tools(BOUNDED_PROFILE)}

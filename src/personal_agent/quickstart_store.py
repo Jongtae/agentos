@@ -536,6 +536,46 @@ class QuickStore:
         with self.db() as db:
             return [self._memory_row(r) for r in db.execute('SELECT * FROM memories WHERE '+where+' ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',(*parameters,limit,offset))]
 
+    def _work_digests(self, db):
+        """``{sha256(work id): work id}`` for every retained Work, kept incrementally.
+
+        Memory keeps its Work only as this digest.  Work rows are only ever
+        added, so each call digests just the rows after the last one seen
+        (by rowid) instead of rescanning the whole history (#794 review).
+        """
+        state=self.__dict__.setdefault('_work_digest_state',{'lock':threading.Lock(),'rowid':0,'index':{}})
+        with state['lock']:
+            for row in db.execute('SELECT rowid,id FROM jobs WHERE rowid>? ORDER BY rowid',(state['rowid'],)):
+                state['index'][hashlib.sha256(str(row['id']).encode()).hexdigest()]=row['id']
+                state['rowid']=row['rowid']
+            return state['index']
+
+    def memory_sources(self, memory_ids):
+        """The Work each Memory row came from, for "why do you know that?" (#794 phase 2).
+
+        Resolved at read time from the row's ``work_key`` digest; nothing new
+        is stored.  Returns ``{memory_id: {'work_id', 'requested_at', 'text',
+        'owner_typed'}}`` for rows whose Work is still retained.  ``text`` is
+        the Work's raw message (the owner's words only when ``owner_typed``),
+        to be redacted by the caller before it reaches a model.
+        """
+        ids=[value for value in memory_ids if isinstance(value,str) and value][:101]
+        if not ids:return {}
+        with self.db() as db:
+            keyed={row['id']:row['work_key'] for row in db.execute(
+                f"SELECT id,work_key FROM memories WHERE id IN ({','.join('?'*len(ids))})",ids) if row['work_key']}
+            index=self._work_digests(db) if keyed else {}
+            work_ids=sorted({index[key] for key in keyed.values() if key in index})
+            works={row['id']:row for row in db.execute(
+                f"SELECT id,message,created,source_at,owner_typed FROM jobs WHERE id IN ({','.join('?'*len(work_ids))})",work_ids)} if work_ids else {}
+        sources={}
+        for memory_id,key in keyed.items():
+            row=works.get(index.get(key))
+            if row is not None:
+                sources[memory_id]={'work_id':row['id'],'requested_at':row['source_at'] or row['created'],
+                                    'text':row['message'] or '','owner_typed':bool(row['owner_typed'])}
+        return sources
+
     def search_memories(self, owner_id, terms, *, limit=10, include_mode=False):
         """Search current owner Memory with a rebuildable FTS index or safe LIKE fallback.
 

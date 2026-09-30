@@ -128,5 +128,57 @@ class MemorySearchTests(unittest.TestCase):
         self.assertNotIn(secret, str(recorded))
 
 
+    def test_memory_tools_say_when_and_from_which_request_each_fact_came(self):
+        """#794 phase 2: the AI can answer "why do you know that?" from recorded sources."""
+        secret = 'MEMORYSECRET987654'
+        job = self.store.enqueue(f'내 직장은 판교야 기억해 {secret} sk-abcdefghijklmnop', 'k1', owner_typed=True)
+        generated = self.store.enqueue('준비 작업: 점심 후보를 찾아 둔다', 'prep-1')
+        sourced = self.store.save_memory('profile.place.work', '판교 카카오뱅크', owner_id='local-owner', work_id=job)
+        prepared = self.store.save_memory('profile.preference.lunch', '가벼운 점심', owner_id='local-owner', work_id=generated)
+        orphan = self.store.save_memory('profile.preference.food', '가벼운 식사', owner_id='local-owner', work_id='pruned-work')
+        capabilities = Capabilities(
+            self.store, None, {}, '', 'job', lambda *args: None,
+            allowed_tools=['list_memory', 'search_memory'], secret_redactor=lambda value: value.replace(secret, '[redacted]'),
+        )
+
+        listed = {row['id']: row for row in capabilities.execute('list_memory', {})['memories']}
+        searched = capabilities.execute('search_memory', {'query': '판교'})['memories']
+
+        source = listed[sourced['id']]['source']
+        self.assertEqual((source['kind'], source['work_id'], listed[sourced['id']]['source_status']), ('owner_request', job, 'found'))
+        self.assertTrue(source['at'] and listed[sourced['id']]['saved_at'])
+        self.assertIn('판교', source['text'])
+        self.assertEqual(listed[prepared['id']]['source']['kind'], 'agentos_work',
+                         'text AgentOS generated is never presented as what the owner said')
+        self.assertEqual((listed[orphan['id']]['source'], listed[orphan['id']]['source_status']), (None, 'not_kept'))
+        self.assertTrue(listed[orphan['id']]['saved_at'])
+        self.assertEqual(searched[0]['source']['work_id'], job)
+        serialized = str(listed) + str(searched) + str(capabilities.evidence)
+        self.assertNotIn(secret, serialized)
+        self.assertNotIn('sk-abcdefghijklmnop', serialized)
+
+    def test_a_failed_source_lookup_is_unknown_not_not_kept(self):
+        self.store.save_memory('profile.note', '값', owner_id='local-owner', work_id='w')
+        capabilities = Capabilities(self.store, None, {}, '', 'job', lambda *args: None, allowed_tools=['list_memory'])
+
+        def broken(_ids):
+            raise RuntimeError('database is locked')
+        self.store.memory_sources = broken
+        row = capabilities.execute('list_memory', {})['memories'][0]
+        self.assertEqual((row['source'], row['source_status']), (None, 'unknown'))
+
+    def test_sources_are_read_not_stored_and_the_index_follows_new_work(self):
+        job = self.store.enqueue('출처 요청', 'k2', owner_typed=True)
+        saved = self.store.save_memory('profile.note', '값', owner_id='local-owner', work_id=job)
+        self.assertEqual(self.store.memory_sources([saved['id'], 'unknown'])[saved['id']]['work_id'], job)
+        later = self.store.enqueue('나중 요청', 'k3', owner_typed=True)
+        newer = self.store.save_memory('profile.later', '나중 값', owner_id='local-owner', work_id=later)
+        self.assertEqual(self.store.memory_sources([newer['id']])[newer['id']]['work_id'], later,
+                         'a Work added after the first lookup is indexed incrementally')
+        self.assertEqual(self.store.memory_sources([]), {})
+        with self.store.db() as db:
+            self.assertNotIn(job, str([tuple(row) for row in db.execute('SELECT * FROM memories')]),
+                             'the raw Work id is never written to Memory')
+
 if __name__ == '__main__':
     unittest.main()

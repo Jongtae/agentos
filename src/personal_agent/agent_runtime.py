@@ -237,8 +237,8 @@ DEFINITIONS=[
  schema('list_notes','Read saved personal notes. Use when the user asks to recall a note.'),
  schema('save_note','Save a personal note ONLY when the user explicitly requests remembering or saving information.',{'content':STRING},['content']),
  schema('save_memory','Save or correct one owner memory item. When the owner states a durable fact about themselves (where they live or work, a preference, an allergy, a routine) or asks you to remember one, save it; unless the owner asked you to remember it, the owner is asked with one tap whether to remember it. Never save an inference as a fact, and never save a credential. Use a stable short key; correction supersedes the prior value. content is the value itself in the owner\'s own words (for example a place or product name as they said it), not a sentence about it; memory_key names the attribute. A value is a fact about the owner, never the request itself: a wish to be told when something changes is a watch (schedule_preparation), not a memory. '+PROFILE_KEY_GUIDANCE,{'memory_key':STRING,'content':STRING},['memory_key','content']),
- schema('list_memory','Read a page of the owner\'s current saved memory items. The profile facts are in the owner profile section of the context; use search_memory to find a relevant fact outside that bounded section.'),
- schema('search_memory','Search the owner\'s current saved Memory for a fact relevant to this request. Use concise terms from the request and likely synonyms (for example, sushi and 초밥); results include saved time and source reference. Search only when prior saved information can help. It returns a bounded set and never reads another owner\'s data.',{'query':STRING},['query']),
+ schema('list_memory','Read a page of the owner\'s current saved memory items. The profile facts are in the owner profile section of the context; use search_memory to find a relevant fact outside that bounded section. Each item has saved_at and source (the owner\'s request it came from and when, or null when that request is no longer kept), so you can say why you know something.'),
+ schema('search_memory','Search the owner\'s current saved Memory for a fact relevant to this request. Use concise terms from the request and likely synonyms (for example, sushi and 초밥); results include saved_at and a source reference (the owner\'s request it came from and when, or null when no longer kept), so you can say why you know something. Search only when prior saved information can help. It returns a bounded set and never reads another owner\'s data.',{'query':STRING},['query']),
  schema('list_agents','List available specialist agents and their roles.'),
  schema('browser_open','Open a URL in the owner\'s own logged-in browser profile and return the page state: bounded visible text and a numbered list of interactive elements. Use for sites where the owner is signed in (shopping carts, account pages); public_page_read is enough for anonymous pages. A login_required state means the owner must log in first; never enter credentials.'+BROWSER_SESSION_NOTE+BROWSER_EFFECT_NOTE,{'url':STRING,'effect':EFFECT},['url','effect']),
  schema('browser_read','Return the current page state of the owner\'s browser session again (visible text and numbered interactive elements), for example after the page changed.'),
@@ -2004,6 +2004,34 @@ class Capabilities:
                                                  'retry':retry,'effect':'none','error':TRANSIENT_READ_TEXT},ensure_ascii=False))
    self.budget.spend_attempt()
    return self.network.execute(plan,**extra)
+ def with_memory_sources(self,rows):
+  """Each Memory row with when it was saved and the request it came from (#794 phase 2).
+
+  ``source`` is None when that Work is no longer retained.  The request
+  excerpt passes the stored-secret redactor and the credential-shape filter
+  before it reaches the model; no new state is recorded.
+  """
+  from datetime import datetime, timezone
+  from .bounded_execution import SECRET_PATTERN
+  def iso(value):
+   try:return datetime.fromtimestamp(float(value),timezone.utc).isoformat(timespec='seconds') if value is not None else None
+   except (TypeError,ValueError,OverflowError,OSError):return None
+  rows=[dict(row) for row in rows if isinstance(row,dict)]
+  try:sources=self.store.memory_sources([row.get('id') for row in rows])
+  except Exception:sources={}
+  for row in rows:
+   row['saved_at']=iso(row.get('created'))
+   source=sources.get(row.get('id'))
+   if source:
+    text=' '.join(str(source.get('request') or '').split())
+    if self.secret_redactor is not None:
+     try:text=str(self.secret_redactor(text))
+     except Exception:text=''
+    text=SECRET_PATTERN.sub('[redacted]',text)
+    source={'work_id':source['work_id'],'requested_at':iso(source.get('requested_at')),'request':text[:79]+'…' if len(text)>80 else text}
+   row['source']=source or None
+  return rows
+
  def execute(self,name,args):
   tool=self.tools.get(name)
   if not tool or name not in self.allowed_tools:raise ValueError('활성 패키지에 선언되지 않은 도구입니다.')
@@ -2232,6 +2260,7 @@ class Capabilities:
    marker_sink=lambda item:self.evidence.append({'tool':name,'result':item.get('result',{})})
    memory=MemoryService(self.store,private_read_sink=marker_sink)
    result=dict(memory.search_memories(MEMORY_OWNER,args.get('query','')))
+   result['memories']=self.with_memory_sources(result.get('memories') or [])
    if callable(self.secret_redactor):
     # Redact the original spelling before the service's case-folded tokens
     # enter model output or Evidence; redacting tokens afterward can miss a
@@ -2249,7 +2278,7 @@ class Capabilities:
        except Exception:row[field]='[redacted]'
    self.evidence.append({'tool':name,'result':result}); return result
   if name=='list_memory':
-   result={'memories':self.store.memories()}; self.evidence.append({'tool':name,'result':result}); return result
+   result={'memories':self.with_memory_sources(self.store.memories())}; self.evidence.append({'tool':name,'result':result}); return result
   if name=='list_agents':return {'agents':[{'id':role_id,'name':role['name'],'permissions':role['permissions'],'package_id':role['package_id']} for role_id,role in self.roles.items()]}
   if name=='delegate_agent':
    agent=self.roles.get(args['agent_id'])

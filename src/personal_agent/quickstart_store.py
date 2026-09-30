@@ -536,6 +536,29 @@ class QuickStore:
         with self.db() as db:
             return [self._memory_row(r) for r in db.execute('SELECT * FROM memories WHERE '+where+' ORDER BY created DESC,id DESC LIMIT ? OFFSET ?',(*parameters,limit,offset))]
 
+    def memory_sources(self, memory_ids):
+        """The Work each Memory row came from, for "why do you know that?" (#794 phase 2).
+
+        Memory keeps its Work only as a digest (``work_key``).  The Work is
+        found at read time by digesting retained Work ids; nothing new is
+        stored.  Returns ``{memory_id: {'work_id', 'requested_at', 'request'}}``
+        for rows whose Work is still retained; ``request`` is the owner's raw
+        message, to be redacted by the caller before it reaches a model.
+        """
+        ids=[value for value in memory_ids if isinstance(value,str) and value][:101]
+        if not ids:return {}
+        with self.db() as db:
+            keyed={row['id']:row['work_key'] for row in db.execute(
+                f"SELECT id,work_key FROM memories WHERE id IN ({','.join('?'*len(ids))})",ids) if row['work_key']}
+            wanted=set(keyed.values());found={}
+            if wanted:
+                for row in db.execute('SELECT id,message,created,source_at FROM jobs ORDER BY created DESC'):
+                    digest=hashlib.sha256(str(row['id']).encode()).hexdigest()
+                    if digest in wanted:
+                        found[digest]={'work_id':row['id'],'requested_at':row['source_at'] or row['created'],'request':row['message'] or ''}
+                        if len(found)==len(wanted):break
+        return {memory_id:found[key] for memory_id,key in keyed.items() if key in found}
+
     def search_memories(self, owner_id, terms, *, limit=10, include_mode=False):
         """Search current owner Memory with a rebuildable FTS index or safe LIKE fallback.
 

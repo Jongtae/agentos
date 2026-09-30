@@ -415,6 +415,9 @@ const base=(active,extra={})=>({decision_route:{active,suite_version:'decision-q
  const legacy=Object.fromEntries(ctx.decisionFacts({purpose:'p',outcome:'decided',model:'gpt-4o-mini',observed_model:'gpt-4o-mini-2024-07-18'},{}));
  assert(legacy['요청 모델']==='gpt-4o-mini'&&legacy['관측 모델']==='gpt-4o-mini-2024-07-18'&&legacy['판단 경로']==='direct_api');
  assert(!('기록된 관계' in legacy),'only a follow-up judgment has a recorded relation');
+ // #794: the model's reported confidence is shown, labelled as uncalibrated; absent when not reported.
+ const confident=Object.fromEntries(ctx.decisionFacts({purpose:'p',outcome:'decided',confidence:0.874},{}));
+ assert.equal(confident['확신도'],'87% · 모델이 보고한 값, 보정되지 않음');assert(!('확신도' in legacy),'no confidence row without a reported value');
  console.log('decision route DOM checks passed');
 })().catch(error=>{console.error(error);process.exit(1);});
 """

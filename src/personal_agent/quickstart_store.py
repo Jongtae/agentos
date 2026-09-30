@@ -43,6 +43,8 @@ class QuickStore:
             CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, request_key TEXT UNIQUE, message TEXT, channel TEXT, chat_id INTEGER, status TEXT, response TEXT, error TEXT, delivery TEXT, provider TEXT, model TEXT, created REAL);
             CREATE TABLE IF NOT EXISTS tool_events(id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT, tool TEXT, status TEXT, detail TEXT, created REAL);
             CREATE TABLE IF NOT EXISTS turn_provenance(job_id TEXT PRIMARY KEY, record TEXT NOT NULL, created REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS work_decisions(id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, record TEXT NOT NULL, created REAL NOT NULL);
+            CREATE INDEX IF NOT EXISTS work_decisions_job ON work_decisions(job_id, id);
             CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY, content TEXT, created REAL);
             CREATE TABLE IF NOT EXISTS memories(id TEXT PRIMARY KEY, memory_key TEXT NOT NULL, content TEXT NOT NULL, created REAL NOT NULL, supersedes TEXT, state TEXT NOT NULL DEFAULT 'current');
             CREATE INDEX IF NOT EXISTS memories_key_state ON memories(memory_key, state, created DESC);
@@ -1175,6 +1177,39 @@ class QuickStore:
         with self.db() as db:
             row=db.execute('SELECT record FROM turn_provenance WHERE job_id=?',(job_id,)).fetchone()
         return json.loads(row['record']) if row else None
+
+    WORK_DECISIONS_KEEP=200
+
+    def add_work_decision(self, job_id, record):
+        """Keep one Judgment AI record under its Work for as long as the Work (#794).
+
+        One INSERT per call, so a second process sharing the store (an MCP
+        bridge, #605 R9) cannot lose rows.  A runaway Work keeps its newest 200.
+        """
+        with self.db() as db:
+            db.execute('INSERT INTO work_decisions(job_id,record,created) VALUES (?,?,?)',
+                       (job_id,json.dumps(record,ensure_ascii=False),time.time()))
+            db.execute('DELETE FROM work_decisions WHERE job_id=? AND id NOT IN '
+                       '(SELECT id FROM work_decisions WHERE job_id=? ORDER BY id DESC LIMIT ?)',
+                       (job_id,job_id,self.WORK_DECISIONS_KEEP))
+
+    def work_decisions(self, job_id):
+        """The Judgment AI records of one Work, oldest first (#794).
+
+        A Work recorded before #794 has no rows of its own; its records are
+        whatever the old global ``decision_audit`` list (newest 100) still holds.
+        """
+        with self.db() as db:
+            rows=db.execute('SELECT record FROM work_decisions WHERE job_id=? ORDER BY id',(job_id,)).fetchall()
+        records=[]
+        for row in rows:
+            try:value=json.loads(row['record'])
+            except (TypeError,ValueError):continue
+            if isinstance(value,dict):records.append(value)
+        if records:
+            return records
+        audit=self.config('decision_audit',[])
+        return [row for row in (audit if isinstance(audit,list) else ()) if isinstance(row,dict) and row.get('work_id')==job_id]
 
     def task_events(self, job_id):
         with self.db() as db:

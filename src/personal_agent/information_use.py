@@ -15,7 +15,7 @@ the Work.  It adds no store:
 * ``tool_events``: every tool call AgentOS executed or relayed, and every web
   search the CLI reported (``scope: cli-native``), with the redacted Evidence
   summaries ``agent_runtime.evidence_summary`` wrote;
-* ``decision_audit``: the Judgment AI calls linked to the Work.
+* ``work_decisions``: the Judgment AI calls linked to the Work (#794).
 
 Vocabulary follows W3C PROV loosely: ``used`` is the owner information the
 Work's activity used, ``sent_to`` the agents and destinations it went to,
@@ -28,7 +28,7 @@ import json
 from datetime import datetime, timezone
 
 #: Evidence class of every audit this module returns.
-EVIDENCE_CLASS = 'observed AgentOS records (turn_provenance, tool_events, decision_audit); not model claims'
+EVIDENCE_CLASS = 'observed AgentOS records (turn_provenance, tool_events, work_decisions); not model claims'
 #: Bounds of what one audit shows.
 MAX_ITEMS = 20
 LABEL_CHARS = 120
@@ -302,8 +302,7 @@ def work_information_use(store, job_id, redact=None):
     workers = [{key: (label(value, 80) if isinstance(value, str) else value) for key, value in row.items()} for row in workers]
     if workers and record.get('reported_model'):
         workers[-1]['reported_model'] = label(record['reported_model'], 80)
-    audit = store.config('decision_audit', [])
-    judgments = [row for row in (audit if isinstance(audit, list) else ()) if isinstance(row, dict) and row.get('work_id') == job_id]
+    judgments = store.work_decisions(job_id)
     judgment_models = sorted({label(row.get('observed_model') or row.get('model') or row.get('engine') or row.get('provider'), 80)
                               for row in judgments} - {''})
     photo_inputs=[{key: (label(value,80) if isinstance(value,str) else value)

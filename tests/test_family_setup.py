@@ -73,18 +73,21 @@ class ManagerBot(unittest.TestCase):
         self.calls.append((method, body))
         return FAMILY_TOKEN if method == 'getManagedBotToken' else True
 
-    def deliver(self, port, handoff, token):
-        self.delivered.append((port, handoff, token))
+    def deliver(self, port, handoff, token, creator_id=None):
+        if getattr(self, 'fail_deliveries', 0):
+            self.fail_deliveries -= 1
+            raise OSError('family instance not up yet')
+        self.delivered.append((port, handoff, token, creator_id))
 
     def update(self, username=None, bot_id=4242):
         return {'user': {'id': 99, 'is_bot': False}, 'bot': {'id': bot_id, 'is_bot': True, 'username': username or self.record['username']}}
 
     def test_a_pending_username_is_fetched_restricted_and_handed_over_once(self):
         receipt = family_setup.accept_managed_bot(self.owner, self.call, self.update(), self.deliver)
-        self.assertEqual(receipt, {'accepted': True, 'instance': 'spouse'})
+        self.assertEqual(receipt, {'accepted': True, 'instance': 'spouse', 'delivered': True})
         self.assertEqual(self.calls, [('getManagedBotToken', {'user_id': 4242}),
                                       ('setManagedBotAccessSettings', {'user_id': 4242, 'is_access_restricted': True})])
-        self.assertEqual(self.delivered, [(8797, self.record['handoff'], FAMILY_TOKEN)])
+        self.assertEqual(self.delivered, [(8797, self.record['handoff'], FAMILY_TOKEN, 99)])
         self.assertNotIn(FAMILY_TOKEN, json.dumps(receipt) + json.dumps(self.owner.config(family_setup.PENDING_KEY)))
         again = family_setup.accept_managed_bot(self.owner, self.call, self.update(), self.deliver)
         self.assertFalse(again['accepted'], 'a setup is handed over once')
@@ -102,11 +105,27 @@ class ManagerBot(unittest.TestCase):
         original = family_setup.deliver_token
         family_setup.deliver_token = self.deliver
         try:
-            self.assertEqual(service.ingest_managed_bot(self.update()), {'accepted': True, 'instance': 'spouse'})
+            self.assertEqual(service.ingest_managed_bot(self.update()), {'accepted': True, 'instance': 'spouse', 'delivered': True})
             self.assertEqual(len(self.delivered), 1)
             self.assertFalse(service.ingest_managed_bot({'bot': 'broken'})['accepted'])
         finally:
             family_setup.deliver_token = original
+
+    def test_a_failed_hand_over_is_retried_until_it_succeeds_and_never_rebinds(self):
+        """Review P2-3: a transient failure no longer strands the setup."""
+        self.fail_deliveries = 1
+        first = family_setup.accept_managed_bot(self.owner, self.call, self.update(), self.deliver, now=100)
+        self.assertEqual(first, {'accepted': True, 'instance': 'spouse', 'delivered': False})
+        self.assertNotIn(('setManagedBotAccessSettings', {'user_id': 4242, 'is_access_restricted': True}), self.calls,
+                         'the bot is restricted only after the hand-over succeeds')
+        self.assertEqual(family_setup.retry_pending(self.owner, self.call, self.deliver, now=105), 0, 'waits its retry interval')
+        self.assertEqual(family_setup.retry_pending(self.owner, self.call, self.deliver, now=100 + family_setup.RETRY_SECONDS), 1)
+        self.assertEqual(len(self.delivered), 1)
+        other = family_setup.accept_managed_bot(self.owner, self.call, self.update(bot_id=5151), self.deliver, now=200)
+        self.assertFalse(other['accepted'], 'a setup bound to one bot never takes another')
+
+    def test_the_suggested_username_carries_32_random_bits(self):
+        self.assertRegex(self.record['username'], r'_ag[0-9a-f]{8}_bot$')
 
     def test_clear_pending_removes_the_row_and_the_handoff_secret(self):
         family_setup.clear_pending(self.owner, 'spouse')
@@ -181,10 +200,36 @@ class SetupSurface(unittest.TestCase):
         self.assertIsNone(family_setup.read_setup(self.store))
         self.assertEqual(self.request('/family-setup' + self.code(), tunneled=True)[0], 404)
 
-    def test_an_expired_setup_answers_nothing_and_no_longer_gates(self):
+    def test_an_expired_setup_answers_nothing_and_the_gate_stays_closed(self):
+        """Review P2-2: a tunnel left up after expiry still reaches nothing."""
         family_setup._update_setup(self.store, expires=time.time() - 1)
         self.assertEqual(self.request('/family-setup' + self.code(), tunneled=True)[0], 404)
-        self.assertNotEqual(self.request('/healthz', tunneled=True)[0], 404, 'without a pending setup the instance behaves as before')
+        self.assertEqual(self.request('/healthz', tunneled=True)[0], 404)
+        self.assertNotEqual(self.request('/healthz')[0], 404, 'this Mac itself is unaffected')
+
+    def test_a_non_ascii_code_is_a_404_not_a_crash(self):
+        """Review P2-1."""
+        for path in ('/family-setup?code=%C3%A9', '/api/family/status?code=%ED%95%9C'):
+            self.assertEqual(self.request(path, tunneled=True)[0], 404)
+        self.assertEqual(self.request('/api/family/telegram-token', 'POST', {'token': FAMILY_TOKEN},
+                                      headers={family_setup.HANDOFF_HEADER: 'x'})[0], 404)
+
+    def test_only_the_bots_creator_can_pair(self):
+        """Review P2-5: the pairing code alone is not enough."""
+        header = {family_setup.HANDOFF_HEADER: self.record['handoff']}
+        self.assertEqual(self.request('/api/family/telegram-token', 'POST', {'token': FAMILY_TOKEN, 'creator_id': 555}, headers=header)[0], 200)
+        cfg = self.store.config('telegram')
+        self.assertEqual(cfg['pair_user_id'], 555)
+        generation, code = cfg['generation'], cfg['pair_code']
+
+        def start(sender, update_id):
+            self.service.ingest_update({'update_id': update_id, 'message': {'message_id': update_id, 'date': int(time.time()),
+                                        'chat': {'id': sender, 'type': 'private'}, 'from': {'id': sender, 'is_bot': False},
+                                        'text': '/start ' + code}}, generation)
+        start(777, 1)
+        self.assertIsNone(self.store.config('telegram').get('user_id'), 'a stranger holding the code cannot pair')
+        start(555, 2)
+        self.assertEqual(self.store.config('telegram').get('user_id'), 555)
 
 
 class OwnerCommand(unittest.TestCase):

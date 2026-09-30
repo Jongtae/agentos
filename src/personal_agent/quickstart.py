@@ -568,12 +568,14 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             return self.owner_local_surface() if self.loopback_server() else not self.public_host()
 
         def family_gate(self,path):
-            """#897: while a family setup is pending, a tunneled request reaches only its setup paths.
+            """#897: on a family instance a tunneled request reaches only the setup paths.
 
-            True when the request was answered here (refused).  Without a
-            pending setup nothing changes.
+            True when the request was answered here (refused).  The gate stays
+            closed after the setup finishes or expires, so a tunnel left up
+            reaches nothing (review P2-2).  An instance never set up this way
+            is unchanged.
             """
-            if self.tunneled() and family_setup.read_setup(store) and path not in family_setup.PUBLIC_PATHS:
+            if self.tunneled() and family_setup.setup_recorded(store) and path not in family_setup.PUBLIC_PATHS:
                 self.reply(404,{'error':'찾을 수 없습니다.'})
                 return True
             return False
@@ -591,7 +593,8 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     if not 0<length<=4096:raise ValueError('요청 크기가 올바르지 않습니다.')
                     body=json.loads(self.rfile.read(length))
                     token=body.get('token','') if isinstance(body,dict) else ''
-                    return self.reply(200,family_setup.accept_token(service,record,token))
+                    creator=body.get('creator_id') if isinstance(body,dict) else None
+                    return self.reply(200,family_setup.accept_token(service,record,token,creator))
                 except (ValueError,ProviderError) as exc:return self.reply(400,{'error':str(exc)})
             if path not in family_setup.PUBLIC_PATHS:return None
             record=family_setup.read_setup(store)

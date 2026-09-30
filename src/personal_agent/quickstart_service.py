@@ -6881,7 +6881,10 @@ class AgentService:
             private=chat.get('type')=='private' and isinstance(sender,int) and chat.get('id')==sender
             authorized=private and sender==cfg.get('user_id')
             paired=False
-            if private and isinstance(text,str) and text.startswith('/start ') and cfg.get('pair_code') and time.time()<cfg.get('pair_expires',0):
+            # #897: a family bot pairs only with the Telegram user who created it.
+            creator=cfg.get('pair_user_id')
+            if private and isinstance(text,str) and text.startswith('/start ') and cfg.get('pair_code') and time.time()<cfg.get('pair_expires',0) \
+                    and (not isinstance(creator,int) or sender==creator):
                 if hmac.compare_digest(text[7:].strip().encode(),cfg['pair_code'].encode()):
                     cfg.update(user_id=sender,pair_code='',pair_expires=0)
                     authorized=True
@@ -7023,6 +7026,7 @@ class AgentService:
                         current['cursor']=update['update_id']+1
                         self.store.put('telegram',current)
             else:self.ingest_update(update,cfg['generation'])
+        self.retry_family_handovers()
         self.settle_expired_telegram_photo_albums()
 
     def ingest_managed_bot(self, update):
@@ -7035,6 +7039,15 @@ class AgentService:
             return {'accepted':False,'reason':type(exc).__name__}
         if receipt.get('accepted'):LOG.info('family setup: bot handed to instance %s',receipt['instance'])
         return receipt
+
+    def retry_family_handovers(self):
+        """Retry a family bot hand-over that failed, while its setup is open (#897 review P2-3)."""
+        from . import family_setup
+        if not self.store.config(family_setup.PENDING_KEY,[]):return 0
+        try:return family_setup.retry_pending(self.store,self.telegram.call,family_setup.deliver_token)
+        except Exception as exc:
+            LOG.warning('family setup: retry failed (%s)',type(exc).__name__)
+            return 0
 
     def settle_expired_telegram_photo_albums(self, now=None):
         """Release persisted album Works after their short update-collection window."""

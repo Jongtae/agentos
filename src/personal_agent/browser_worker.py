@@ -1460,6 +1460,14 @@ _DELEGATE = []
 _POPUP_DELEGATE = []
 
 
+def _blank(url):
+    """``window.open('')`` / ``window.open('about:blank')``: a popup reserved before its address is set (#915 review)."""
+    if url is None:
+        return True
+    text = str(url.absoluteString() or '')
+    return text in ('', 'about:blank')
+
+
 def _popup_delegate_class():
     """#914: the delegate of a sign-in popup window: the same destination check, nothing else."""
     if _POPUP_DELEGATE:
@@ -1485,9 +1493,8 @@ def _popup_delegate_class():
         def webView_createWebViewWithConfiguration_forNavigationAction_windowFeatures_(self, view, config, action, features):
             request = action.request()
             url = request.URL() if request is not None else None
-            if url is None or str(url.scheme() or '').lower() not in ('http', 'https'):
-                return None
-            if self.worker.guard_off and self.worker.window.isVisible():
+            scheme = str(url.scheme() or '').lower() if url is not None else ''
+            if self.worker.guard_off and self.worker.window.isVisible() and (scheme in ('http', 'https') or _blank(url)):
                 return self.worker.open_popup(config)
             return None
 
@@ -1594,10 +1601,13 @@ def _delegate_class():
             # social sign-in can hand its result back to the page that opened it.
             request = action.request()
             url = request.URL() if request is not None else None
-            if url is None or str(url.scheme() or '').lower() not in ('http', 'https'):
-                return None
-            if self.worker.guard_off and self.worker.window.isVisible():
+            scheme = str(url.scheme() or '').lower() if url is not None else ''
+            if self.worker.guard_off and self.worker.window.isVisible() and (scheme in ('http', 'https') or _blank(url)):
+                # A blank popup (window.open('') / 'about:blank') is a sign-in flow reserving its
+                # window before it sets the address; that later navigation is checked like any other.
                 return self.worker.open_popup(config)
+            if scheme not in ('http', 'https'):
+                return None
             view.loadRequest_(request)
             return None
 

@@ -469,15 +469,123 @@ def share_ai_route(owner_store, family_store):
     return copied
 
 
+class SetupError(RuntimeError):
+    """A family setup that could not start; the message is for the owner."""
+
+
+STATE_TEXT = {'waiting_bot': '가족이 봇을 만들기를 기다리는 중이에요.',
+              'bot_connected': '가족의 봇이 연결됐어요. 대화 시작을 기다리는 중이에요.',
+              'paired': '가족 비서 연결이 끝났어요. 이제 가족이 텔레그램에서 비서와 대화할 수 있어요.'}
+EXPIRED_TEXT = '가족 비서 설정 링크가 만료됐어요. 다시 만들어 달라고 하시면 새 링크를 드릴게요.'
+
+
+def family_instances(home=None):
+    """Names of the named AgentOS instances installed on this Mac (#897)."""
+    from .service_control import LABEL
+    folder = Path(home or Path.home()) / 'Library/LaunchAgents'
+    return sorted(path.name[len(LABEL) + 1:-len('.plist')] for path in folder.glob(f'{LABEL}.*.plist'))
+
+
+def next_instance_name(existing):
+    """``family-1``, ``family-2``, ... the first one not taken."""
+    index = 1
+    while f'family-{index}' in set(existing):
+        index += 1
+    return f'family-{index}'
+
+
+def prepare_family_setup(owner_store, name, display_name, *, service_action, environ=None, opener=None,
+                         popen=subprocess.Popen, free=_port_free, port=None):
+    """Create (or reuse) the instance, open the temporary link; returns a handle, or raises ``SetupError``.
+
+    Shared by ``agentos family add`` and the owner's conversation (#912).  The
+    caller then runs ``watch_family_setup`` and closes everything.
+    """
+    import os
+    from .quickstart_store import QuickStore
+    from .service_control import DEFAULT_PORT, ServiceController, service_label
+    environ = os.environ if environ is None else environ
+    external = opener or urllib.request.urlopen
+    try:
+        service_label(name)
+    except ValueError as exc:
+        raise SetupError(str(exc)) from None
+    display_name = ' '.join(str(display_name or '').split())[:64] or f'{name} 비서'
+    cfg = owner_store.config('telegram', {})
+    owner_token = owner_store.secret('telegram_token')
+    if not (cfg.get('enabled') and cfg.get('username') and owner_token):
+        raise SetupError('먼저 내 AgentOS에 텔레그램 봇을 연결해 주세요. 가족 봇은 내 봇이 관리자로 만들어 줍니다.')
+    me = _telegram_get(owner_token, 'getMe', external)
+    if not me.get('can_manage_bots'):
+        raise SetupError(f"BotFather 미니앱에서 @{cfg['username']} 봇의 'Bot Management Mode'를 한 번 켜 주세요.")
+    # An instance already installed keeps the port recorded in its own definition.
+    existing = ServiceController(instance=name, environ=environ)
+    taken = {DEFAULT_PORT, DEFAULT_PORT + 1} | {value for _data, other in existing._other_definitions() for value in (other, other + 1)}
+    port = port or existing.port or choose_port(taken, free=free)
+    family_store = QuickStore(ServiceController(instance=name, port=port, environ=environ).data_dir)
+    if share_ai_route(owner_store, family_store) is None:
+        raise SetupError('내 AgentOS에 연결된 AI(구독 엔진이나 모델)가 없어 가족 비서를 만들지 않았습니다. 먼저 내 AI를 연결해 주세요.')
+    record = write_setup(family_store, instance=name, display_name=display_name, owner_bot=cfg['username'])
+    register_pending(owner_store, record, port)
+    handle = {'name': name, 'display_name': display_name, 'port': port, 'record': record,
+              'family_store': family_store, 'process': None, 'link': None}
+    try:
+        receipt = service_action('status', instance=name, port=port)
+        if not receipt.get('background_available'):
+            receipt = service_action('install', instance=name, port=port)
+            if not receipt.get('ok'):
+                raise SetupError('가족 비서를 이 Mac에서 시작하지 못했습니다. ' + str(receipt.get('next_action') or receipt.get('error') or ''))
+        process, public = start_tunnel(port, popen=popen)
+        handle['process'] = process
+        handle['link'] = f"{public}/family-setup?code={quote(record['code'])}"
+        return handle
+    except BaseException:
+        close_family_setup(handle, owner_store)
+        raise
+
+
+def close_family_setup(handle, owner_store):
+    """Stop the tunnel and close the setup; the instance keeps running."""
+    if handle.get('process') is not None:
+        try:
+            handle['process'].terminate()
+        except Exception:
+            pass
+    finish_setup(handle['family_store'])
+    clear_pending(owner_store, handle['name'])
+
+
+def watch_family_setup(handle, owner_store, *, on_state, opener=None, sleep=time.sleep, clock=time.time):
+    """Wait until the family member pairs or the setup expires, then close it; True when paired."""
+    loopback = opener or _LOOPBACK.open
+    record, last, paired = handle['record'], None, False
+    try:
+        # The tunnel ends a little before the setup does (review P2-2).
+        while clock() < record['expires'] - 5:
+            try:
+                state = _local_status(handle['port'], record['code'], loopback).get('state')
+            except Exception:
+                state = None
+            if state and state != last:
+                on_state(state)
+                last = state
+            if state == 'paired':
+                paired = True
+                break
+            sleep(3)
+        if not paired:
+            on_state('expired')
+        return paired
+    finally:
+        close_family_setup(handle, owner_store)
+
+
 def family_main(argv, *, service_action, owner_data=None, environ=None, opener=None,
                 popen=subprocess.Popen, out=print, sleep=time.sleep, clock=time.time, free=_port_free):
-    """Create a family member's instance and run its one-page setup through a temporary link."""
+    """``agentos family add NAME``: the same setup as asking the assistant, from a terminal."""
     import argparse
     import os
     from .quickstart_store import QuickStore
-    external = opener or urllib.request.urlopen
-    loopback = opener or _LOOPBACK.open
-    from .service_control import DEFAULT_PORT, ServiceController, service_label
     environ = os.environ if environ is None else environ
     parser = argparse.ArgumentParser(prog='agentos family', description="Create a family member's own agent on this Mac.")
     parser.add_argument('action', choices=('add',))
@@ -486,71 +594,22 @@ def family_main(argv, *, service_action, owner_data=None, environ=None, opener=N
     parser.add_argument('--port', type=int, default=None, help='Port for the instance (default: the next free pair from 8797).')
     parser.add_argument('--owner-data', default=None, help="The owner's data directory (default: AGENTOS_DATA or ~/.local/share/agentos).")
     args = parser.parse_args(argv)
-    try:
-        service_label(args.name)
-    except ValueError as exc:
-        out(str(exc))
-        return 2
     owner_root = Path(args.owner_data or owner_data or environ.get('AGENTOS_DATA') or Path.home() / '.local/share/agentos').expanduser()
     owner_store = QuickStore(owner_root)
-    cfg = owner_store.config('telegram', {})
-    owner_token = owner_store.secret('telegram_token')
-    if not (cfg.get('enabled') and cfg.get('username') and owner_token):
-        out('먼저 내 AgentOS에 텔레그램 봇을 연결해 주세요. 가족 봇은 내 봇이 관리자로 만들어 줍니다.')
-        return 1
-    me = _telegram_get(owner_token, 'getMe', external)
-    if not me.get('can_manage_bots'):
-        out(f"BotFather 미니앱에서 @{cfg['username']} 봇의 'Bot Management Mode'를 한 번 켜 주세요. 그다음 다시 실행하면 됩니다.")
-        return 1
-    # An instance already installed keeps the port recorded in its own definition.
-    existing = ServiceController(instance=args.name, environ=environ)
-    taken = {DEFAULT_PORT, DEFAULT_PORT + 1} | {value for _data, other in existing._other_definitions() for value in (other, other + 1)}
-    port = args.port or existing.port or choose_port(taken, free=free)
-    display_name = args.display_name or f'{args.name} 비서'
-    family_store = QuickStore(ServiceController(instance=args.name, port=port, environ=environ).data_dir)
-    if share_ai_route(owner_store, family_store) is None:
-        out('내 AgentOS에 연결된 AI(구독 엔진이나 모델)가 없어 가족 비서를 만들지 않았습니다. 먼저 내 AI를 연결해 주세요.')
-        return 1
-    record = write_setup(family_store, instance=args.name, display_name=display_name, owner_bot=cfg['username'])
-    register_pending(owner_store, record, port)
-    process = None
-    paired = False
     try:
-        receipt = service_action('status', instance=args.name, port=port)
-        if not receipt.get('background_available'):
-            receipt = service_action('install', instance=args.name, port=port)
-            if not receipt.get('ok'):
-                out(json.dumps(receipt, ensure_ascii=False))
-                return 1
-        process, public = start_tunnel(port, popen=popen)
-        link = f"{public}/family-setup?code={quote(record['code'])}"
-        out(f'{display_name} 설정 링크 (약 {SETUP_SECONDS // 60}분 동안 열려 있습니다):\n{link}')
-        if isinstance(cfg.get('user_id'), int):
-            try:
-                _telegram_get(owner_token, 'sendMessage', external,
-                              {'chat_id': cfg['user_id'], 'text': f'{display_name} 설정 링크입니다. 가족에게 보내 주세요.\n{link}'})
-            except Exception:
-                pass
-        last = None
-        # The tunnel ends a little before the setup does (review P2-2).
-        while clock() < record['expires'] - 5:
-            try:
-                state = _local_status(port, record['code'], loopback).get('state')
-            except Exception:
-                state = None
-            if state and state != last:
-                out({'waiting_bot': '가족이 봇을 만들기를 기다리는 중…', 'bot_connected': '봇이 연결되었습니다. 대화 시작을 기다리는 중…',
-                     'paired': '완료: 가족이 비서와 연결되었습니다.'}.get(state, state))
-                last = state
-            if state == 'paired':
-                paired = True
-                break
-            sleep(3)
-        if not paired:
-            out('설정 링크가 만료되었습니다. 같은 명령을 다시 실행하면 새 링크가 만들어집니다.')
-        return 0 if paired else 1
-    finally:
-        if process is not None:
-            process.terminate()
-        finish_setup(family_store)
-        clear_pending(owner_store, args.name)
+        handle = prepare_family_setup(owner_store, args.name, args.display_name, service_action=service_action,
+                                      environ=environ, opener=opener, popen=popen, free=free, port=args.port)
+    except SetupError as exc:
+        out(str(exc))
+        return 2 if 'lowercase' in str(exc) or '1-32' in str(exc) else 1
+    out(f"{handle['display_name']} 설정 링크 (약 {SETUP_SECONDS // 60}분 동안 열려 있습니다):\n{handle['link']}")
+    cfg = owner_store.config('telegram', {})
+    if isinstance(cfg.get('user_id'), int):
+        try:
+            _telegram_get(owner_store.secret('telegram_token'), 'sendMessage', opener or urllib.request.urlopen,
+                          {'chat_id': cfg['user_id'], 'text': f"{handle['display_name']} 설정 링크입니다. 가족에게 보내 주세요.\n{handle['link']}"})
+        except Exception:
+            pass
+    paired = watch_family_setup(handle, owner_store, on_state=lambda state: out(STATE_TEXT.get(state, EXPIRED_TEXT)),
+                                opener=opener, sleep=sleep, clock=clock)
+    return 0 if paired else 1

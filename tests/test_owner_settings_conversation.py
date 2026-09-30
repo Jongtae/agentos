@@ -83,6 +83,105 @@ class _Case(unittest.TestCase):
         return self.service.context_observations.settings()
 
 
+class FamilyAssistantConversation(_Case):
+    """#912: "아내 비서 만들어줘" is a confirmed draft, never a command the owner types."""
+
+    def setUp(self):
+        super().setUp()
+        self.started = []
+        self.service.start_family_setup = lambda display_name, name=None: self.started.append(display_name) or {'state': 'requested'}
+
+    def test_a_family_assistant_is_drafted_then_started_only_after_confirmation(self):
+        draft = self.draft('family', 'add', ' 아내   비서 ')
+        self.assertEqual((draft['state'], draft['applied'], draft['after']), ('awaiting-confirmation', False, '아내 비서'))
+        self.assertIn("가족 비서 '아내 비서'를 만듭니다", draft['response'])
+        self.assertIn('확인해야 적용됩니다', draft['response'])
+        self.assertEqual(self.started, [], 'a draft starts nothing')
+        result = self.settings.confirm('owner', 'http', draft['draft_id'], draft['digest'])
+        self.assertEqual(result['state'], 'requested')
+        self.assertIn('설정 링크', result['response'])
+        self.assertEqual(self.started, ['아내 비서'])
+        with self.assertRaisesRegex(SettingsError, '이미 적용'):
+            self.settings.confirm('owner', 'http', draft['draft_id'], draft['digest'])
+        self.assertEqual(self.started, ['아내 비서'], 'confirmed once, started once')
+
+    def test_bad_names_and_credential_shapes_create_nothing(self):
+        for value in ('', '   ', 'x' * 65, '아내\n비서'):
+            with self.assertRaises(SettingsError):
+                self.draft('family', 'add', value)
+        with self.assertRaises(SettingsError):
+            self.draft('family', 'add', TELEGRAM_SECRET)
+        self.assertEqual(self.started, [])
+
+    def test_the_tool_offers_family_add(self):
+        from personal_agent.agent_runtime import DEFINITIONS
+        change = next(row['function'] for row in DEFINITIONS if row['function']['name'] == 'settings_change')
+        self.assertIn('family', change['parameters']['properties']['category']['enum'])
+        self.assertIn('add', change['parameters']['properties']['setting']['enum'])
+        self.assertIn('family add', change['description'])
+
+
+class FamilySetupInTheService(_Case):
+    """#912: after confirmation the service runs the setup and reports on Telegram."""
+
+    def run_setup(self, prepare, watch=None):
+        from personal_agent import family_setup
+        originals = (family_setup.prepare_family_setup, family_setup.watch_family_setup, family_setup.family_instances)
+        family_setup.prepare_family_setup = prepare
+        family_setup.watch_family_setup = watch or (lambda handle, store, on_state: on_state('paired'))
+        family_setup.family_instances = lambda home=None: ['family-1']
+        try:
+            receipt = self.service.start_family_setup('아내 비서')
+            self.service._family_setup_thread.join(5)
+            return receipt
+        finally:
+            family_setup.prepare_family_setup, family_setup.watch_family_setup, family_setup.family_instances = originals
+
+    def sent(self):
+        return [body['text'] for method, body in self.telegram if method == 'sendMessage']
+
+    def test_the_link_then_the_outcome_reach_the_owner(self):
+        calls = []
+
+        def prepare(owner_store, name, display_name, **kwargs):
+            calls.append((name, display_name))
+            return {'display_name': display_name, 'link': 'https://abc.ngrok-free.app/family-setup?code=c'}
+        receipt = self.run_setup(prepare)
+        self.assertEqual(receipt, {'state': 'requested', 'instance': 'family-2'})
+        self.assertEqual(calls, [('family-2', '아내 비서')], 'the next free instance name')
+        texts = self.sent()
+        self.assertIn('https://abc.ngrok-free.app/family-setup?code=c', texts[0])
+        self.assertIn('연결이 끝났어요', texts[1])
+
+    def test_a_setup_that_cannot_start_tells_the_owner_why(self):
+        from personal_agent.family_setup import SetupError
+
+        def prepare(*args, **kwargs):
+            raise SetupError("BotFather 미니앱에서 Bot Management Mode를 켜 주세요.")
+        self.run_setup(prepare)
+        self.assertEqual(self.sent(), ["BotFather 미니앱에서 Bot Management Mode를 켜 주세요."])
+
+    def test_one_setup_at_a_time(self):
+        import threading
+        gate = threading.Event()
+
+        def prepare(owner_store, name, display_name, **kwargs):
+            gate.wait(5)
+            return {'display_name': display_name, 'link': 'https://x/family-setup?code=c'}
+        from personal_agent import family_setup
+        originals = (family_setup.prepare_family_setup, family_setup.watch_family_setup)
+        family_setup.prepare_family_setup = prepare
+        family_setup.watch_family_setup = lambda handle, store, on_state: None
+        try:
+            self.service.start_family_setup('아내 비서', name='spouse')
+            with self.assertRaisesRegex(ValueError, '이미 가족 비서를 만드는 중'):
+                self.service.start_family_setup('엄마 비서', name='mom')
+        finally:
+            gate.set()
+            self.service._family_setup_thread.join(5)
+            family_setup.prepare_family_setup, family_setup.watch_family_setup = originals
+
+
 class OrchestratorCategories(_Case):
     def test_read_is_redacted_and_names_the_allowed_values(self):
         self.connect_two_api_routes()
@@ -92,7 +191,7 @@ class OrchestratorCategories(_Case):
         for secret in (TELEGRAM_SECRET, OPENAI_KEY, OPENROUTER_KEY, 'decision-owner-key-value-0003'):
             self.assertNotIn(secret, text)
         self.assertNotIn('https://', text, 'no endpoint is reported')
-        self.assertEqual(set(read['settings']), {'current_context', 'judgment_ai', 'main_ai', 'owner_model'})
+        self.assertEqual(set(read['settings']), {'current_context', 'judgment_ai', 'main_ai', 'owner_model', 'family'})
         self.assertEqual([o['value'] for o in read['settings']['main_ai']['route']['options']], ['openai', 'openrouter'])
         self.assertEqual(read['settings']['current_context']['enabled']['value'], 'off')
         self.assertIn('기본 AI · 경로: OpenRouter', read['response'])

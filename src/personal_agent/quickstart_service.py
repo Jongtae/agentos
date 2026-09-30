@@ -7133,6 +7133,47 @@ class AgentService:
         self.retry_family_handovers()
         self.settle_expired_telegram_photo_albums()
 
+    def start_family_setup(self, display_name, name=None):
+        """Create a family member's agent after the owner confirmed it in conversation (#912).
+
+        Runs in the background: the instance, its temporary link (sent to the
+        owner's Telegram), the wait for pairing and the close - the same steps
+        as ``agentos family add``.  One setup at a time.
+        """
+        from . import family_setup
+        with self.lock:
+            running=self.__dict__.get('_family_setup_thread')
+            if running is not None and running.is_alive():
+                raise ValueError('이미 가족 비서를 만드는 중이에요. 그 설정이 끝난 뒤에 다시 요청해 주세요.')
+            name=name or family_setup.next_instance_name(family_setup.family_instances())
+            thread=threading.Thread(target=self._run_family_setup,args=(display_name,name),daemon=True,name='family-setup')
+            self._family_setup_thread=thread
+        thread.start()
+        return {'state':'requested','instance':name}
+
+    def _family_notify(self, text):
+        cfg=self.store.config('telegram',{})
+        if cfg.get('enabled') and isinstance(cfg.get('user_id'),int):
+            try:self.telegram.send_message(cfg['user_id'],text)
+            except Exception as exc:LOG.warning('family setup: owner notice not sent (%s)',type(exc).__name__)
+
+    def _run_family_setup(self, display_name, name):
+        from . import family_setup
+        from .service_control import service_action
+        try:
+            handle=family_setup.prepare_family_setup(self.store,name,display_name,service_action=service_action)
+        except family_setup.SetupError as exc:
+            return self._family_notify(str(exc))
+        except Exception as exc:
+            LOG.warning('family setup failed to start (%s)',type(exc).__name__)
+            return self._family_notify('가족 비서를 만들지 못했어요. 잠시 뒤에 다시 요청해 주세요.')
+        self._family_notify(f"{handle['display_name']} 설정 링크예요. 가족에게 보내 주세요. 약 {family_setup.SETUP_SECONDS//60}분 동안 열려 있어요.\n{handle['link']}")
+        try:
+            family_setup.watch_family_setup(handle,self.store,on_state=lambda state:state in ('paired','expired')
+                                            and self._family_notify(family_setup.STATE_TEXT.get(state,family_setup.EXPIRED_TEXT)))
+        except Exception as exc:
+            LOG.warning('family setup watch ended (%s)',type(exc).__name__)
+
     def ingest_managed_bot(self, update):
         """Hand a family member's new bot to their instance (#897); content-free log only."""
         from . import family_setup

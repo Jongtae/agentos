@@ -179,6 +179,10 @@ def accept_token(service, record, token, creator_id=None):
     return {'ok': True}
 
 
+#: #928 review P3-2: seconds each best-effort description call may take.
+DESCRIBE_TIMEOUT = 4
+
+
 def bot_descriptions(display_name):
     """What the new bot's empty chat and profile say (#927): Telegram shows ``</>`` otherwise."""
     name = ' '.join(str(display_name or '').split())[:64] or '가족 비서'
@@ -192,7 +196,8 @@ def describe_bot(call, display_name):
     texts = bot_descriptions(display_name)
     for method, key in (('setMyDescription', 'description'), ('setMyShortDescription', 'short_description')):
         try:
-            call(method, {key: texts[key]})
+            # #928 review P3-2: short, so the hand-over answers well inside the owner side's wait.
+            call(method, {key: texts[key]}, timeout=DESCRIBE_TIMEOUT)
         except Exception as exc:
             LOG.warning('family setup: %s failed (%s)', method, type(exc).__name__)
 

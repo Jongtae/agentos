@@ -7017,7 +7017,7 @@ class AgentService:
                     authorized=True
                     paired=True
                     text='/start'
-            if authorized and not paired and isinstance(text,str) and len(text)>MAX_OWNER_MESSAGE_CHARS:
+            if authorized and isinstance(text,str) and len(text)>MAX_OWNER_MESSAGE_CHARS:
                 # #832 (B14): an over-long message reaches the worker truncated,
                 # with a note that says so, instead of being dropped silently.
                 text=truncated_owner_message(text)

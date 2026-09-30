@@ -278,6 +278,32 @@ class SetupSurface(unittest.TestCase):
         self.assertEqual(cfg.get('user_id'), 555)
         self.assertEqual((cfg.get('pair_code'), cfg.get('pair_expires')), ('', 0), 'the code is spent')
 
+    def test_only_a_private_first_message_from_the_creator_pairs(self):
+        """#928 review P3-3: group, edited and already-paired cases."""
+        header = {family_setup.HANDOFF_HEADER: self.record['handoff']}
+        self.request('/api/family/telegram-token', 'POST', {'token': FAMILY_TOKEN, 'creator_id': 555}, headers=header)
+        generation = self.store.config('telegram')['generation']
+        self.service.ingest_update({'update_id': 1, 'message': {'message_id': 1, 'date': int(time.time()),
+                                    'chat': {'id': -100, 'type': 'group'}, 'from': {'id': 555, 'is_bot': False}, 'text': '/start'}},
+                                   generation)
+        self.service.ingest_update({'update_id': 2, 'edited_message': {'message_id': 2, 'date': int(time.time()),
+                                    'chat': {'id': 555, 'type': 'private'}, 'from': {'id': 555, 'is_bot': False}, 'text': '안녕'}},
+                                   generation)
+        self.assertIsNone(self.store.config('telegram').get('user_id'))
+        self.start_update(555, 3, '안녕')
+        self.start_update(777, 4, '안녕')
+        self.assertEqual(self.store.config('telegram').get('user_id'), 555, 'paired once; a stranger never switches it')
+
+    def test_without_a_creator_only_the_code_pairs(self):
+        cfg = self.store.config('telegram') or {}
+        self.service.connect_telegram({'token': FAMILY_TOKEN})
+        cfg = self.store.config('telegram')
+        self.assertNotIn('pair_user_id', cfg)
+        self.start_update(555, 1, '/start')
+        self.assertIsNone(self.store.config('telegram').get('user_id'))
+        self.start_update(555, 2, '/start ' + cfg['pair_code'])
+        self.assertEqual(self.store.config('telegram').get('user_id'), 555)
+
     def test_the_creators_first_message_pairs_even_after_the_code_expired(self):
         header = {family_setup.HANDOFF_HEADER: self.record['handoff']}
         self.request('/api/family/telegram-token', 'POST', {'token': FAMILY_TOKEN, 'creator_id': 555}, headers=header)
@@ -301,7 +327,7 @@ class SetupSurface(unittest.TestCase):
         self.assertLessEqual(len(described['setMyShortDescription']['short_description']), 120)
 
     def test_a_failed_description_never_blocks_the_hand_over(self):
-        def refuse(method, body):
+        def refuse(method, body, timeout=None):
             raise OSError('telegram down')
         family_setup.describe_bot(refuse, '아내 비서')
 

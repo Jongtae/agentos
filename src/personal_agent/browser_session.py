@@ -82,6 +82,11 @@ STATEFUL_ACTIONS = BROWSER_ACTIONS
 
 TEXT_LIMIT = 6000
 ELEMENT_LIMIT = 80
+#: #925: the most elements one snapshot numbers (the worker reads up to 300).  The page
+#: state lists the first ``ELEMENT_LIMIT``; ``browser_find`` and a click reach them all.
+READ_ELEMENT_LIMIT = 300
+#: #925: how much nearby text (e.g. its product card) a ``browser_find`` element match carries.
+NEAR_LIMIT = 120
 NAME_LIMIT = 120
 VALUE_LIMIT = 200
 FIND_LINES = 12
@@ -478,12 +483,16 @@ def mediate_snapshot(raw, excluded=(), requested_url=None):
             value, count = scrub(element['value'][:VALUE_LIMIT], excluded)
             redacted += count
             row['value'] = value
+        near, count = scrub(' '.join(str(element.get('context') or '').split())[:NEAR_LIMIT], excluded)
+        redacted += count
+        if near:
+            row['_near'] = near
         visible.append(row)
         internal.append({**{key: element.get(key) for key in ('index', 'role', 'name', 'tag', 'type', 'autocomplete', 'form',
                                                              'label_form')},
                          'n': row['n'], 'guarded': guarded_field(element), 'payment': payment_field(element),
                          'commit': commit_control(element), 'detail': commit_detail(element)})
-        if len(visible) >= ELEMENT_LIMIT:
+        if len(visible) >= READ_ELEMENT_LIMIT:
             break
     forms = payment_forms(elements)
     for row in internal:
@@ -493,9 +502,18 @@ def mediate_snapshot(raw, excluded=(), requested_url=None):
     redacted += count
     title, count = scrub(str(raw.get('title') or '')[:200], excluded)
     redacted += count
+    # #925: the page state lists the first ELEMENT_LIMIT rows; browser_find and a click
+    # reach every numbered row (a content-heavy page fills the first ones with menus).
+    listed = [{key: value for key, value in row.items() if not key.startswith('_')} for row in visible[:ELEMENT_LIMIT]]
     snapshot = {'url': url, 'title': title, 'text': text,
-                'elements': visible, 'login_required': login_required, 'truncated': truncated,
+                'elements': listed, 'login_required': login_required, 'truncated': truncated,
                 'redacted_values': redacted}
+    if len(visible) > ELEMENT_LIMIT:
+        snapshot['more_elements'] = len(visible) - ELEMENT_LIMIT
+    if len(elements) >= READ_ELEMENT_LIMIT or len(visible) >= READ_ELEMENT_LIMIT:
+        # #926 review: the worker reads at most 300 controls; later ones are not numbered.
+        snapshot['elements_capped'] = True
+    snapshot['_rows'] = visible
     snapshot['_elements'] = internal
     # Internal only (never returned): the unmediated page reference the
     # approval binds to, and the page state a guarded step is bound to.
@@ -597,7 +615,15 @@ def find_in_snapshot(snapshot, text):
     if not wanted:
         raise ValueError('찾을 텍스트를 입력하세요.')
     lines = [line.strip() for line in str(snapshot.get('text') or '').splitlines() if wanted in line.casefold()]
-    elements = [row for row in snapshot.get('elements') or [] if wanted in str(row.get('name') or '').casefold()]
+    # #925: every numbered element, not only the listed ones; each match names its nearby text.
+    rows = snapshot.get('_rows') or snapshot.get('elements') or []
+    elements = []
+    for row in rows:
+        if wanted in str(row.get('name') or '').casefold() or wanted in str(row.get('_near') or '').casefold():
+            match = {key: value for key, value in row.items() if not key.startswith('_')}
+            if row.get('_near'):
+                match['near'] = row['_near']
+            elements.append(match)
     return {'url': snapshot.get('url'), 'query': text, 'lines': lines[:FIND_LINES], 'elements': elements[:FIND_LINES],
             'found': bool(lines or elements)}
 

@@ -536,6 +536,27 @@ class MediationTests(unittest.TestCase):
         self.assertEqual([row['n'] for row in found['elements']], [1])
         self.assertFalse(sess.find({'text': '없는 텍스트'})['found'])
 
+    def test_find_and_click_reach_controls_beyond_the_listed_ones(self):
+        """#925: menus filled the first 80 controls; product buttons came after them."""
+        menus = [{'index': i, 'role': 'link', 'name': f'메뉴 {i}', 'tag': 'a', 'href': f'{ORIGIN}/m{i}'} for i in range(90)]
+        buttons = [{'index': 90 + i, 'role': 'button', 'name': '장바구니 담기', 'tag': 'button', 'type': 'button',
+                    'context': f'{item} 1L 2,000원 장바구니 담기'} for i, item in enumerate(('서울우유', '매일우유'))]
+        snapshot = bs.mediate_snapshot({'url': ORIGIN + '/', 'title': 't', 'text': '장바구니 담기', 'elements': menus + buttons})
+        self.assertEqual(len(snapshot['elements']), bs.ELEMENT_LIMIT)
+        self.assertEqual(snapshot['more_elements'], 92 - bs.ELEMENT_LIMIT)
+        self.assertNotIn('near', snapshot['elements'][0])
+        self.assertTrue(all(not key.startswith('_') for row in snapshot['elements'] for key in row))
+        found = bs.find_in_snapshot(snapshot, '매일우유')
+        self.assertEqual([(row['n'], row['name']) for row in found['elements']], [(92, '장바구니 담기')])
+        self.assertIn('매일우유', found['elements'][0]['near'])
+        self.assertEqual(len(bs.find_in_snapshot(snapshot, '장바구니 담기')['elements']), 2)
+        self.assertEqual(bs.resolve_target(snapshot, '92')['index'], 91)
+        self.assertEqual(set(bs.public_view(snapshot)), {'url', 'title', 'text', 'elements', 'login_required', 'truncated',
+                                                          'redacted_values', 'more_elements'})
+        many = [{'index': i, 'role': 'link', 'name': f'메뉴 {i}', 'tag': 'a', 'href': f'{ORIGIN}/m{i}'} for i in range(300)]
+        capped = bs.mediate_snapshot({'url': ORIGIN + '/', 'title': 't', 'text': '', 'elements': many})
+        self.assertTrue(capped['elements_capped'], 'the read cap is visible to the model')
+
     def test_open_requires_http_and_read_requires_a_page(self):
         sess, _ = session()
         with self.assertRaises(ToolError) as caught:

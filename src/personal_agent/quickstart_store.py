@@ -1196,8 +1196,9 @@ class QuickStore:
     def work_decisions(self, job_id):
         """The Judgment AI records of one Work, oldest first (#794).
 
-        A Work recorded before #794 has no rows of its own; its records are
-        whatever the old global ``decision_audit`` list (newest 100) still holds.
+        Judgments made before #794 exist only in the old global
+        ``decision_audit`` list (newest 100).  They come first, and a record
+        written to both places since #794 is listed once.
         """
         with self.db() as db:
             rows=db.execute('SELECT record FROM work_decisions WHERE job_id=? ORDER BY id',(job_id,)).fetchall()
@@ -1206,10 +1207,12 @@ class QuickStore:
             try:value=json.loads(row['record'])
             except (TypeError,ValueError):continue
             if isinstance(value,dict):records.append(value)
-        if records:
-            return records
+        journal={json.dumps(record,sort_keys=True,ensure_ascii=False) for record in records}
         audit=self.config('decision_audit',[])
-        return [row for row in (audit if isinstance(audit,list) else ()) if isinstance(row,dict) and row.get('work_id')==job_id]
+        legacy=[row for row in (audit if isinstance(audit,list) else ())
+                if isinstance(row,dict) and row.get('work_id')==job_id
+                and json.dumps(row,sort_keys=True,ensure_ascii=False) not in journal]
+        return legacy+records
 
     def task_events(self, job_id):
         with self.db() as db:

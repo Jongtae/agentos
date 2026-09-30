@@ -256,6 +256,11 @@ class ServiceProvenance(unittest.TestCase):
         self.store.append_config_list('decision_audit', {'purpose': 'presence', 'outcome': 'decided', 'work_id': 'old'}, 100)
         self.store.append_config_list('decision_audit', {'purpose': 'presence', 'outcome': 'decided', 'work_id': 'else'}, 100)
         self.assertEqual([row['work_id'] for row in self.store.work_decisions('old')], ['old'])
+        # A later judgment of the same Work (e.g. delayed upkeep) keeps the older ones, listed once each.
+        later = {'purpose': 'owner-model-upkeep', 'outcome': 'decided', 'work_id': 'old'}
+        self.store.append_config_list('decision_audit', later, 100)
+        self.store.add_work_decision('old', later)
+        self.assertEqual([row['purpose'] for row in self.store.work_decisions('old')], ['presence', 'owner-model-upkeep'])
 
     def test_a_runaway_work_keeps_only_its_newest_judgments(self):
         self._service(_Engine())

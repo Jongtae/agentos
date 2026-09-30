@@ -1,0 +1,397 @@
+"""One-page family setup: from installing Telegram to a working bot (FAMILY-02 #897).
+
+A family member's agent is a separate AgentOS instance on the owner's Mac
+(FAMILY-01 #893).  Its first setup happens before any agent exists to talk
+to, so it is a necessary input surface under the Presence *Pages* rule (#880).
+It is reached through a temporary HTTPS link and runs without stops:
+
+1. install Telegram (store buttons);
+2. create the bot with Telegram's official Managed Bots deep link
+   (Bot API 9.6): ``https://t.me/newbot/{owner_bot}/{username}?name={name}``.
+   The family member confirms a pre-filled screen and owns the new bot;
+3. the owner's instance - the manager bot - receives the ``managed_bot``
+   update.  It fetches the token with ``getManagedBotToken``, restricts the
+   bot to its owner with ``setManagedBotAccessSettings``, and hands the token
+   to the family instance over loopback only;
+4. the family member opens the pairing link, and the setup closes itself.
+
+Boundaries:
+- through the tunnel only ``PUBLIC_PATHS`` answer, and only with the one-time
+  setup code, while a setup is pending;
+- the token never enters a model prompt, log or Evidence, and never crosses
+  the tunnel;
+- the owner's bot accepts a ``managed_bot`` update only for a username it
+  issued for a pending, unexpired setup.
+"""
+import hmac
+import json
+import re
+import secrets
+import subprocess
+import time
+import urllib.request
+from html import escape
+from pathlib import Path
+from urllib.parse import quote
+
+SETUP_FILE = 'family-setup.json'
+SETUP_SECONDS = 30 * 60
+PUBLIC_PATHS = frozenset({'/family-setup', '/api/family/status', '/api/family/pair'})
+HANDOFF_HEADER = 'X-AgentOS-Family-Handoff'
+PENDING_KEY = 'family_setups'
+TELEGRAM_IOS = 'https://apps.apple.com/app/telegram-messenger/id686449807'
+TELEGRAM_ANDROID = 'https://play.google.com/store/apps/details?id=org.telegram.messenger'
+_BOT_USERNAME = re.compile(r'[A-Za-z][A-Za-z0-9_]{3,30}[Bb][Oo][Tt]\Z')
+
+
+def handoff_secret_key(instance):
+    return f'family_handoff.{instance}'
+
+
+def suggested_username(instance, nonce=None):
+    """A Telegram bot username for ``instance``: 5-32 characters ending in ``bot``."""
+    stem = re.sub(r'[^a-z0-9]', '_', instance.lower()).strip('_') or 'family'
+    nonce = nonce or secrets.token_hex(2)
+    return f'{stem[:18]}_ag{nonce}_bot'
+
+
+def create_link(owner_bot, username, display_name):
+    return f'https://t.me/newbot/{quote(owner_bot)}/{quote(username)}?name={quote(display_name)}'
+
+
+# -- the family instance's pending setup ----------------------------------
+
+def setup_path(store):
+    return Path(store.private) / SETUP_FILE
+
+
+def write_setup(store, *, instance, display_name, owner_bot, now=None):
+    """Create the family instance's one-time setup record; returns it."""
+    now = time.time() if now is None else now
+    record = {'instance': instance, 'display_name': display_name, 'owner_bot': owner_bot,
+              'username': suggested_username(instance), 'code': secrets.token_urlsafe(18),
+              'handoff': secrets.token_urlsafe(32), 'created': now, 'expires': now + SETUP_SECONDS}
+    store.write_private(setup_path(store), json.dumps(record))
+    return record
+
+
+def read_setup(store, now=None):
+    """The pending setup, or None when absent, finished or expired."""
+    try:
+        record = json.loads(setup_path(store).read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(record, dict) or record.get('finished'):
+        return None
+    try:
+        if (time.time() if now is None else now) >= float(record.get('expires', 0)):
+            return None
+    except (TypeError, ValueError):
+        return None
+    return record
+
+
+def _update_setup(store, **fields):
+    try:
+        record = json.loads(setup_path(store).read_text())
+    except (OSError, ValueError):
+        return None
+    record.update(fields)
+    store.write_private(setup_path(store), json.dumps(record))
+    return record
+
+
+def finish_setup(store):
+    """Close the setup: the tunnel paths stop answering at once."""
+    return _update_setup(store, finished=time.time())
+
+
+def code_ok(record, code):
+    return bool(record) and isinstance(code, str) and bool(code) and hmac.compare_digest(code, str(record.get('code', '')))
+
+
+def handoff_ok(record, value):
+    return bool(record) and isinstance(value, str) and bool(value) and hmac.compare_digest(value, str(record.get('handoff', '')))
+
+
+def status(service, record, now=None):
+    """What the wizard shows; closes the setup once the family member is paired."""
+    now = time.time() if now is None else now
+    cfg = service.store.config('telegram', {})
+    out = {'name': record['display_name'], 'create_url': create_link(record['owner_bot'], record['username'], record['display_name']),
+           'username': record['username'], 'ios': TELEGRAM_IOS, 'android': TELEGRAM_ANDROID,
+           'expires_in': max(0, int(record['expires'] - now)), 'state': 'waiting_bot'}
+    if cfg.get('enabled') and cfg.get('username'):
+        out['state'] = 'bot_connected'
+        out['bot_username'] = cfg['username']
+        if record.get('pair_url') and float(record.get('pair_expires') or 0) > now:
+            out['pair_url'] = record['pair_url']
+    if isinstance(cfg.get('user_id'), int):
+        out['state'] = 'paired'
+        out.pop('pair_url', None)
+        finish_setup(service.store)
+    return out
+
+
+def accept_token(service, record, token):
+    """Connect the handed-over bot token (loopback only) and keep its pairing link."""
+    pairing = service.connect_telegram({'token': token})
+    _update_setup(service.store, pair_url=pairing['url'], pair_expires=time.time() + int(pairing.get('expires_in') or 600))
+    return {'ok': True}
+
+
+def pair_again(service, record):
+    """A fresh pairing link when the first one expired before it was opened."""
+    pairing = service.pair_telegram()
+    _update_setup(service.store, pair_url=pairing['url'], pair_expires=time.time() + int(pairing.get('expires_in') or 600))
+    return {'pair_url': pairing['url']}
+
+
+# -- the owner's instance: the manager bot ---------------------------------
+
+def register_pending(owner_store, record, port):
+    """Tell the owner's instance which bot username belongs to which family instance."""
+    rows = [row for row in owner_store.config(PENDING_KEY, []) if isinstance(row, dict) and row.get('instance') != record['instance']]
+    rows.append({'instance': record['instance'], 'port': int(port), 'username': record['username'],
+                 'expires': record['expires'], 'delivered': None})
+    owner_store.secret(handoff_secret_key(record['instance']), record['handoff'])
+    owner_store.put(PENDING_KEY, rows)
+
+
+def clear_pending(owner_store, instance):
+    rows = [row for row in owner_store.config(PENDING_KEY, []) if isinstance(row, dict) and row.get('instance') != instance]
+    owner_store.put(PENDING_KEY, rows)
+    owner_store.remove_secret(handoff_secret_key(instance))
+
+
+def deliver_token(port, handoff, token, timeout=20):
+    """POST the token to the family instance on loopback; never through a tunnel."""
+    request = urllib.request.Request(f'http://127.0.0.1:{int(port)}/api/family/telegram-token',
+                                     data=json.dumps({'token': token}).encode(), method='POST',
+                                     headers={'Content-Type': 'application/json', HANDOFF_HEADER: handoff})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read() or b'{}')
+
+
+def accept_managed_bot(owner_store, telegram_call, update, deliver=deliver_token, now=None):
+    """Handle one ``managed_bot`` update on the owner's instance.
+
+    Accepted only when the new bot's username is one this instance issued for
+    a pending, unexpired family setup.  Returns a content-free receipt; the
+    token is never returned, logged or stored here.
+    """
+    now = time.time() if now is None else now
+    bot = update.get('bot') if isinstance(update, dict) else None
+    username = bot.get('username') if isinstance(bot, dict) else None
+    bot_id = bot.get('id') if isinstance(bot, dict) else None
+    if not isinstance(username, str) or not _BOT_USERNAME.match(username) or not isinstance(bot_id, int):
+        return {'accepted': False, 'reason': 'not a bot'}
+    rows = [row for row in owner_store.config(PENDING_KEY, []) if isinstance(row, dict)]
+    matches = [row for row in rows if str(row.get('username', '')).lower() == username.lower()
+               and not row.get('delivered') and float(row.get('expires') or 0) > now]
+    if len(matches) != 1:
+        return {'accepted': False, 'reason': 'no pending family setup for this bot'}
+    row = matches[0]
+    handoff = owner_store.secret(handoff_secret_key(row['instance']))
+    if not handoff:
+        return {'accepted': False, 'reason': 'setup secret missing'}
+    token = telegram_call('getManagedBotToken', {'user_id': bot_id})
+    # Only the family member who created the bot (its owner) can use it.
+    telegram_call('setManagedBotAccessSettings', {'user_id': bot_id, 'is_access_restricted': True})
+    deliver(row['port'], handoff, token)
+    for item in rows:
+        if item.get('instance') == row['instance']:
+            item['delivered'] = now
+    owner_store.put(PENDING_KEY, rows)
+    return {'accepted': True, 'instance': row['instance']}
+
+
+# -- the temporary HTTPS link (ngrok, already installed on the owner's Mac) --
+
+def start_tunnel(port, popen=subprocess.Popen, timeout=30, clock=time.monotonic):
+    """Start ``ngrok http`` for one loopback port; returns ``(process, https_url)``.
+
+    ``--host-header=rewrite`` makes the instance see ``localhost:<port>``.
+    ngrok still adds forwarding headers, so every tunneled request is
+    *relayed* and never local (#594).
+    """
+    process = popen(['ngrok', 'http', f'127.0.0.1:{int(port)}', '--host-header=rewrite',
+                     '--log', 'stdout', '--log-format', 'json'],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    deadline = clock() + timeout
+    for line in process.stdout:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            entry = {}
+        url = entry.get('url') if isinstance(entry, dict) else None
+        if isinstance(url, str) and url.startswith('https://'):
+            return process, url
+        if clock() > deadline:
+            break
+    process.terminate()
+    raise RuntimeError('ngrok did not report a public HTTPS address.')
+
+
+# -- the page --------------------------------------------------------------
+
+def page(record, nonce):
+    """The wizard: one mobile page, no external resources, polls its own status."""
+    name = escape(record['display_name'])
+    code = json.dumps(record['code'])
+    nonce = escape(nonce)
+    return f'''<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>{name} 설정</title>
+<style nonce="{nonce}">body{{font:17px/1.5 -apple-system,system-ui,sans-serif;margin:0;padding:20px;max-width:520px;margin:auto;color:#1c1c1e}}
+h1{{font-size:22px}}section{{border:1px solid #d1d1d6;border-radius:14px;padding:16px;margin:14px 0}}
+section.done{{opacity:.55}}a.button,button{{display:block;width:100%;box-sizing:border-box;text-align:center;padding:14px;margin:8px 0;
+border-radius:12px;border:0;background:#0a84ff;color:#fff;font-size:17px;text-decoration:none}}a.secondary{{background:#e5e5ea;color:#1c1c1e}}
+.note{{font-size:14px;color:#636366}}.hidden{{display:none}}</style></head><body>
+<h1>{name} 만들기</h1>
+<p class="note">이 비서는 가족의 Mac에서 동작하고, 그 Mac 주인의 AI 구독을 씁니다. Mac 주인은 기술적으로 이 비서의 대화와 봇에 접근할 수 있습니다.</p>
+<section id="s1"><h2>1. 텔레그램 설치</h2><p>텔레그램을 설치하고 전화번호로 가입해 주세요.</p>
+<a class="button secondary" href="{TELEGRAM_IOS}">iPhone에서 설치</a><a class="button secondary" href="{TELEGRAM_ANDROID}">Android에서 설치</a>
+<button id="installed">설치하고 가입했어요</button></section>
+<section id="s2" class="hidden"><h2>2. 내 비서 봇 만들기</h2><p>텔레그램에서 이름과 아이디가 채워진 화면이 열립니다. <b>아이디는 바꾸지 말고</b> 만들기를 눌러 주세요.</p>
+<a class="button" id="create">텔레그램에서 봇 만들기</a><p class="note" id="wait2"></p></section>
+<section id="s3" class="hidden"><h2>3. 비서와 대화 시작</h2><p>아래 버튼을 누르고 텔레그램에서 <b>시작</b>을 눌러 주세요.</p>
+<a class="button" id="pair">비서와 대화 시작</a><button class="secondary hidden" id="repair">연결 링크 다시 받기</button></section>
+<section id="s4" class="hidden"><h2>완료</h2><p>이제 텔레그램에서 비서에게 말을 걸면 됩니다. 이 페이지는 닫아도 됩니다.</p></section>
+<p class="note" id="expire"></p>
+<script nonce="{nonce}">
+const code={code};const q='?code='+encodeURIComponent(code);const $=id=>document.getElementById(id);
+function show(id){{$(id).classList.remove('hidden')}}
+$('installed').onclick=()=>{{$('s1').classList.add('done');show('s2')}};
+$('repair').onclick=async()=>{{const r=await fetch('/api/family/pair'+q,{{method:'POST'}});if(r.ok){{const d=await r.json();$('pair').href=d.pair_url;$('repair').classList.add('hidden')}}}};
+async function tick(){{let d;try{{const r=await fetch('/api/family/status'+q,{{cache:'no-store'}});if(!r.ok){{$('expire').textContent='설정 링크가 만료되었거나 이미 끝났습니다.';return}}d=await r.json()}}catch(e){{setTimeout(tick,4000);return}}
+$('create').href=d.create_url;$('expire').textContent='이 링크는 약 '+Math.ceil(d.expires_in/60)+'분 뒤에 닫힙니다.';
+if(d.state==='waiting_bot'){{$('wait2').textContent='봇을 만들면 이 화면이 자동으로 다음 단계로 넘어갑니다.'}}
+if(d.state==='bot_connected'){{['s1','s2'].forEach(i=>{{show(i);$(i).classList.add('done')}});show('s3');if(d.pair_url){{$('pair').href=d.pair_url}}else{{show('repair')}}}}
+if(d.state==='paired'){{['s1','s2','s3'].forEach(i=>{{show(i);$(i).classList.add('done')}});show('s4');return}}
+setTimeout(tick,3000)}}
+tick();
+</script></body></html>'''
+
+
+def page_csp(nonce):
+    return (f"default-src 'none'; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'; connect-src 'self'; "
+            "img-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+
+
+# -- the owner's one command: `agentos family add NAME` ---------------------
+
+def _telegram_get(token, method, opener=urllib.request.urlopen, body=None):
+    """One Bot API call with the owner's token; the token is never printed."""
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(f'https://api.telegram.org/bot{token}/{method}', data=data,
+                                     headers={'Content-Type': 'application/json'} if data else {})
+    with opener(request, timeout=20) as response:
+        payload = json.loads(response.read() or b'{}')
+    if not payload.get('ok'):
+        raise RuntimeError(f'Telegram refused {method}.')
+    return payload['result']
+
+
+def _port_free(port):
+    import socket
+    for candidate in (port, port + 1):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(('127.0.0.1', candidate))
+            except OSError:
+                return False
+    return True
+
+
+def choose_port(taken, first=8797, free=_port_free):
+    """The first port p (stepping by 2) whose pair (p, p + 1) is neither recorded nor bound."""
+    for port in range(first, 65534, 2):
+        if not {port, port + 1} & taken and free(port):
+            return port
+    raise RuntimeError('No free port pair was found.')
+
+
+def _local_status(port, code, opener=urllib.request.urlopen):
+    with opener(f'http://127.0.0.1:{int(port)}/api/family/status?code={quote(code)}', timeout=10) as response:
+        return json.loads(response.read() or b'{}')
+
+
+def family_main(argv, *, service_action, owner_data=None, environ=None, opener=urllib.request.urlopen,
+                popen=subprocess.Popen, out=print, sleep=time.sleep, clock=time.time, free=_port_free):
+    """Create a family member's instance and run its one-page setup through a temporary link."""
+    import argparse
+    import os
+    from .quickstart_store import QuickStore
+    from .service_control import DEFAULT_PORT, ServiceController, service_label
+    environ = os.environ if environ is None else environ
+    parser = argparse.ArgumentParser(prog='agentos family', description="Create a family member's own agent on this Mac.")
+    parser.add_argument('action', choices=('add',))
+    parser.add_argument('name', help='Instance name: lowercase letters, digits and hyphens (e.g. spouse).')
+    parser.add_argument('--display-name', default=None, help='The bot name shown in Telegram.')
+    parser.add_argument('--port', type=int, default=None, help='Port for the instance (default: the next free pair from 8797).')
+    parser.add_argument('--owner-data', default=None, help="The owner's data directory (default: AGENTOS_DATA or ~/.local/share/agentos).")
+    args = parser.parse_args(argv)
+    try:
+        service_label(args.name)
+    except ValueError as exc:
+        out(str(exc))
+        return 2
+    owner_root = Path(args.owner_data or owner_data or environ.get('AGENTOS_DATA') or Path.home() / '.local/share/agentos').expanduser()
+    owner_store = QuickStore(owner_root)
+    cfg = owner_store.config('telegram', {})
+    owner_token = owner_store.secret('telegram_token')
+    if not (cfg.get('enabled') and cfg.get('username') and owner_token):
+        out('먼저 내 AgentOS에 텔레그램 봇을 연결해 주세요. 가족 봇은 내 봇이 관리자로 만들어 줍니다.')
+        return 1
+    me = _telegram_get(owner_token, 'getMe', opener)
+    if not me.get('can_manage_bots'):
+        out(f"BotFather 미니앱에서 @{cfg['username']} 봇의 'Bot Management Mode'를 한 번 켜 주세요. 그다음 다시 실행하면 됩니다.")
+        return 1
+    # An instance already installed keeps the port recorded in its own definition.
+    existing = ServiceController(instance=args.name, environ=environ)
+    taken = {DEFAULT_PORT, DEFAULT_PORT + 1} | {value for _data, other in existing._other_definitions() for value in (other, other + 1)}
+    port = args.port or existing.port or choose_port(taken, free=free)
+    display_name = args.display_name or f'{args.name} 비서'
+    family_store = QuickStore(ServiceController(instance=args.name, port=port, environ=environ).data_dir)
+    record = write_setup(family_store, instance=args.name, display_name=display_name, owner_bot=cfg['username'])
+    register_pending(owner_store, record, port)
+    process = None
+    paired = False
+    try:
+        receipt = service_action('status', instance=args.name, port=port)
+        if not receipt.get('background_available'):
+            receipt = service_action('install', instance=args.name, port=port)
+            if not receipt.get('ok'):
+                out(json.dumps(receipt, ensure_ascii=False))
+                return 1
+        process, public = start_tunnel(port, popen=popen)
+        link = f"{public}/family-setup?code={quote(record['code'])}"
+        out(f'{display_name} 설정 링크 (약 {SETUP_SECONDS // 60}분 동안 열려 있습니다):\n{link}')
+        if isinstance(cfg.get('user_id'), int):
+            try:
+                _telegram_get(owner_token, 'sendMessage', opener,
+                              {'chat_id': cfg['user_id'], 'text': f'{display_name} 설정 링크입니다. 가족에게 보내 주세요.\n{link}'})
+            except Exception:
+                pass
+        last = None
+        while clock() < record['expires']:
+            try:
+                state = _local_status(port, record['code'], opener).get('state')
+            except Exception:
+                state = None
+            if state and state != last:
+                out({'waiting_bot': '가족이 봇을 만들기를 기다리는 중…', 'bot_connected': '봇이 연결되었습니다. 대화 시작을 기다리는 중…',
+                     'paired': '완료: 가족이 비서와 연결되었습니다.'}.get(state, state))
+                last = state
+            if state == 'paired':
+                paired = True
+                break
+            sleep(3)
+        if not paired:
+            out('설정 링크가 만료되었습니다. 같은 명령을 다시 실행하면 새 링크가 만들어집니다.')
+        return 0 if paired else 1
+    finally:
+        if process is not None:
+            process.terminate()
+        finish_setup(family_store)
+        clear_pending(owner_store, args.name)

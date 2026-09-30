@@ -35,6 +35,7 @@ from .providers import ProviderError
 from .isolated_engine_gateway import IsolatedEngineGateway
 from .drive_web_oauth import DriveWebOAuthHandoff, EncryptedDriveSecretStore, DriveWebOAuthError
 from .connector_contract import ConnectorRegistry
+from . import family_setup
 from .service_control import service_action
 from .connector_http import contained_opener
 from .gmail import (GMAIL_CONNECTOR, EncryptedGmailSecretStore, GmailConnector,
@@ -566,6 +567,45 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             """
             return self.owner_local_surface() if self.loopback_server() else not self.public_host()
 
+        def family_gate(self,path):
+            """#897: while a family setup is pending, a tunneled request reaches only its setup paths.
+
+            True when the request was answered here (refused).  Without a
+            pending setup nothing changes.
+            """
+            if self.tunneled() and family_setup.read_setup(store) and path not in family_setup.PUBLIC_PATHS:
+                self.reply(404,{'error':'찾을 수 없습니다.'})
+                return True
+            return False
+
+        def family_route(self,method,parts):
+            """The family setup page and its APIs (#897); None when the path is not one of them."""
+            path=parts.path
+            if path=='/api/family/telegram-token' and method=='POST':
+                record=family_setup.read_setup(store)
+                # Loopback from the owner's instance only: never through a tunnel.
+                if not (self.local_setup() and family_setup.handoff_ok(record,self.headers.get(family_setup.HANDOFF_HEADER,''))):
+                    return self.reply(404,{'error':'찾을 수 없습니다.'})
+                try:
+                    length=int(self.headers.get('Content-Length','0'))
+                    if not 0<length<=4096:raise ValueError('요청 크기가 올바르지 않습니다.')
+                    body=json.loads(self.rfile.read(length))
+                    token=body.get('token','') if isinstance(body,dict) else ''
+                    return self.reply(200,family_setup.accept_token(service,record,token))
+                except (ValueError,ProviderError) as exc:return self.reply(400,{'error':str(exc)})
+            if path not in family_setup.PUBLIC_PATHS:return None
+            record=family_setup.read_setup(store)
+            if not family_setup.code_ok(record,parse_qs(parts.query).get('code',[''])[0]):
+                return self.reply(404,{'error':'설정 링크가 만료되었거나 올바르지 않습니다.'})
+            if path=='/family-setup' and method=='GET':
+                nonce=secrets.token_urlsafe(16)
+                return self.reply(200,family_setup.page(record,nonce).encode(),'text/html; charset=utf-8',csp=family_setup.page_csp(nonce))
+            if path=='/api/family/status' and method=='GET':return self.reply(200,family_setup.status(service,record))
+            if path=='/api/family/pair' and method=='POST':
+                try:return self.reply(200,family_setup.pair_again(service,record))
+                except ValueError as exc:return self.reply(409,{'error':str(exc)})
+            return self.reply(405,{'error':'지원하지 않는 요청입니다.'})
+
         def cookie(self,token,max_age=86400):
             secure='; Secure' if os.environ.get('AGENTOS_SECURE_COOKIE')=='1' or public_hosts else ''
             return f'agentos_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}{secure}'
@@ -582,6 +622,8 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if not self.valid_host():return
             parts=urlsplit(self.path)
             path=parts.path
+            if self.family_gate(path):return
+            if path in family_setup.PUBLIC_PATHS:return self.family_route('GET',parts)
             if path=='/' and self.public_host() and public_access_token:
                 token=parse_qs(parts.query).get('access',[''])[0]
                 nonlocal pairing_available
@@ -763,6 +805,8 @@ def make_handler(service, public_hosts=(), public_access_token=''):
         def do_POST(self):
             if not self.valid_host():return
             parts=urlsplit(self.path)
+            if self.family_gate(parts.path):return
+            if parts.path in family_setup.PUBLIC_PATHS or parts.path=='/api/family/telegram-token':return self.family_route('POST',parts)
             if parts.path==ISOLATED_MCP_PATH:
                 # This is an internal engine callback, not a browser API.  A
                 # session cookie never authorizes it and public tunnel hosts
@@ -1166,6 +1210,9 @@ def main():
         return gmail_config_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='service':
         return service_main(sys.argv[2:])
+    if len(sys.argv)>1 and sys.argv[1]=='family':
+        # #897: a family member's own agent and its one-page setup link.
+        return family_setup.family_main(sys.argv[2:],service_action=service_action)
     if len(sys.argv)>1 and sys.argv[1]=='browser-login':
         return browser_login_main(sys.argv[2:])
     if len(sys.argv)>1 and sys.argv[1]=='guide':

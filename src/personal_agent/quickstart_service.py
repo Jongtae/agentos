@@ -7010,6 +7010,9 @@ class AgentService:
             elif isinstance(update.get('stopped_message_generation'),dict):
                 # #581: the owner pressed Stop on a draft.
                 control=lambda:self.ingest_stop(update['stopped_message_generation'],cfg['generation'])
+            elif isinstance(update.get('managed_bot'),dict):
+                # #897: a family member created their bot through this bot's Managed Bots link.
+                control=lambda:self.ingest_managed_bot(update['managed_bot'])
             if control:
                 control()
                 # Callback updates must advance the durable cursor too, or
@@ -7021,6 +7024,17 @@ class AgentService:
                         self.store.put('telegram',current)
             else:self.ingest_update(update,cfg['generation'])
         self.settle_expired_telegram_photo_albums()
+
+    def ingest_managed_bot(self, update):
+        """Hand a family member's new bot to their instance (#897); content-free log only."""
+        from . import family_setup
+        try:
+            receipt=family_setup.accept_managed_bot(self.store,self.telegram.call,update,family_setup.deliver_token)
+        except Exception as exc:
+            LOG.warning('family setup: managed bot not handed over (%s)',type(exc).__name__)
+            return {'accepted':False,'reason':type(exc).__name__}
+        if receipt.get('accepted'):LOG.info('family setup: bot handed to instance %s',receipt['instance'])
+        return receipt
 
     def settle_expired_telegram_photo_albums(self, now=None):
         """Release persisted album Works after their short update-collection window."""

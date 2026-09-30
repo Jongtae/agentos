@@ -169,7 +169,8 @@ COMMIT_PHRASES = tuple(re.compile(pattern, re.IGNORECASE) for pattern in (
     r"\b(?:pay|buy)\b\s*[$€£¥₩]?\s*\d",
     r"\btop\s*-?\s*up\b",
     r"(?:결제|구매|주문|구독|후원|충전|송금|이체)\s*(?:하기|진행|완료|확정|신청|시작)",
-    r"(?:바로|즉시)\s*(?:결제|구매|주문)|간편\s*결제|정기\s*결제",
+    r"(?:바로|즉시|지금)\s*(?:결제|구매|주문)|간편\s*결제|정기\s*결제",
+    r"\d+\s*개\s*(?:구매|주문)",
     r"\d[\d,.]*\s*원\s*(?:결제|구매|주문)",
     r"注文(?:する|を確定|確定)|購入(?:する|手続き|確定)",
     r"立即(?:购买|購買|订购|訂購|支付|付款)|提交(?:订单|訂單)|确认(?:支付|付款)|確認(?:支付|付款)",
@@ -234,9 +235,8 @@ def commit_control(element):
 
 def _is_link(element):
     """A link that goes somewhere; a styled ``href="#"``/``javascript:`` link is a button (#758)."""
-    if 'nav_link' in element:
-        return bool(element.get('nav_link'))
-    return element.get('role') == 'link' or element.get('tag') == 'a'
+    # #899 review P3-1: without the worker's measurement a link is judged as a button.
+    return bool(element.get('nav_link'))
 
 
 def _commit_match(element):
@@ -1312,7 +1312,11 @@ class WebKitWorkerDriver:
                                            'ancestor_text': str(element.get('ancestor_text') or ''),
                                            'in_form': element.get('form') is not None,
                                            'payment_form': (element.get('form') is not None and element.get('form') in guarded_forms)
-                                           or forwards_to_payment_form(element, guarded_forms)}
+                                           or forwards_to_payment_form(element, guarded_forms),
+                                           # #899 review P2-2: a link rewritten or given a handler after
+                                           # the snapshot no longer matches and is not pressed.
+                                           'nav_link': bool(element.get('nav_link')),
+                                           'pressable': bool(element.get('pressable', True))}
                         for element in elements if isinstance(element.get('index'), int) and not isinstance(element.get('index'), bool)}
         return page
 

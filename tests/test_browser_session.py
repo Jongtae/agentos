@@ -186,6 +186,12 @@ class _PageParser(HTMLParser):
                        'value': value if takes_value else None, 'form': self.form['id'] if self.form else None,
                        'disabled': 'disabled' in attrs, 'hidden': hidden or kind == 'hidden', 'action': dict(self.form) if self.form else None,
                        'html_id': attrs.get('id'), 'onclick': attrs.get('onclick') or '', 'label': self.label_info, 'sent': value}
+            # The worker's navLink (#899): a non-empty http(s) href, no on* attribute, no role=button.
+            raw = attrs.get('href') if tag == 'a' else None
+            element['nav_link'] = bool(raw is not None and not re.match(r'\s*(?:$|#|javascript:)', raw, re.I)
+                                       and re.match(r'https?:', element['href'] or '', re.I)
+                                       and not any(key.lower().startswith('on') for key in attrs)
+                                       and 'button' not in (attrs.get('role') or '').lower().split())
             if self.label_info is not None:
                 self.label_info['elements'].append(element)
             self.elements.append(element)
@@ -981,14 +987,17 @@ class CommitControlTests(unittest.TestCase):
         # ("자주구매" = frequently bought) opens a page; the noun alone, or with a price, still counts.
         for name in ('자주구매', '재구매', '정기주문', '해외결제'):
             self.assertFalse(bs.commit_name(name, link=True), name)
-            self.assertFalse(bs.commit_control({'role': 'link', 'tag': 'a', 'name': name}), name)
+            self.assertFalse(bs.commit_control({'role': 'link', 'tag': 'a', 'name': name, 'nav_link': True}), name)
+            self.assertTrue(bs.commit_control({'role': 'link', 'tag': 'a', 'name': name}),
+                            'without the worker measuring it navigates, a link is judged as a button')
             self.assertTrue(bs.commit_name(name), f'{name} on a control that is not a link still asks')
             self.assertTrue(bs.commit_control({'role': 'button', 'tag': 'button', 'name': name}), name)
         for name in ('자주구매', '재구매'):
             # A script link (href="#"/javascript:/onclick, nav_link False from the worker) is judged as a button.
             self.assertTrue(bs.commit_control({'role': 'link', 'tag': 'a', 'name': name, 'nav_link': False}), name)
             self.assertFalse(bs.commit_control({'role': 'link', 'tag': 'a', 'name': name, 'nav_link': True}), name)
-        for name in ('구매', '결제', '주문 ₩12,000', '결제 (12,000원)', '바로구매', '구매하기', '즉시구매', '즉시 결제'):
+        for name in ('구매', '결제', '주문 ₩12,000', '결제 (12,000원)', '바로구매', '구매하기', '즉시구매', '즉시 결제',
+                     '지금 구매', '지금결제', '2개 구매', '3 개 주문'):
             self.assertTrue(bs.commit_name(name, link=True), name)
             self.assertTrue(bs.commit_control({'role': 'link', 'tag': 'a', 'name': name}), name)
         self.assertFalse(bs.commit_control({'role': 'textbox', 'tag': 'input', 'name': 'Buy now', 'pressable': False}),

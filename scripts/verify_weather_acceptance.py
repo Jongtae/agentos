@@ -24,5 +24,5 @@ for label,prompt,prior in [('explicit','경기도 성남시 현재 날씨 알려
    passed=all(str(v) in row['response'] for v in [payload['forecast']['current']['temperature_2m'],payload['forecast']['current']['time'],payload['location']['name'],'https://open-meteo.com/'])
   result={'case':label,'passed':passed,'job_status':row['status'],'model':row['model'],'events':events,'response':row.get('response'),'error':row.get('error')}
   results.append(result);print(label,'PASS' if passed else 'FAIL',row['model'],flush=True)
-Path('WEATHER_ACCEPTANCE_RESULT.json').write_text(json.dumps({'tested_at':time.time(),'installed':'--installed' in sys.argv,'results':results},ensure_ascii=False,indent=2))
+(Path(__file__).resolve().parents[1]/'docs/archive/root-history/WEATHER_ACCEPTANCE_RESULT.json').write_text(json.dumps({'tested_at':time.time(),'installed':'--installed' in sys.argv,'results':results},ensure_ascii=False,indent=2))
 if not all(r['passed'] for r in results):raise SystemExit(1)

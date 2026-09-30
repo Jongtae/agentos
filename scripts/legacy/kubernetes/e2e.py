@@ -106,7 +106,7 @@ def main():
     pvcs = [json.loads(kube('-n', 'agent-'+o, 'get', 'pvc', 'data', '-o', 'json'))['spec']['volumeName'] for o in (alice, bob)]
     assert pvcs[0] != pvcs[1]
     report = {'result': 'passed', 'owners': [alice, bob], 'checks': ['identity', 'wrong-token-rejected', 'separate-memory', 'idempotent-request', 'disconnected-schedule', 'pause-resume-overdue-task', 'memory-survives-pod', 'files-survive-pod', 'separate-pvcs'], 'network_policy_enforcement': 'not_verified', 'llm': 'not_connected'}
-    (ROOT / 'E2E_RESULT.json').write_text(json.dumps(report, indent=2)+'\n')
+    (ROOT / 'docs' / 'archive' / 'root-history' / 'E2E_RESULT.json').write_text(json.dumps(report, indent=2)+'\n')
     print(json.dumps(report, indent=2))
 
 

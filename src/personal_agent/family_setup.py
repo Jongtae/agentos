@@ -25,6 +25,7 @@ Boundaries:
 """
 import hmac
 import json
+import logging
 import queue
 import re
 import secrets
@@ -35,6 +36,8 @@ import urllib.request
 from html import escape
 from pathlib import Path
 from urllib.parse import quote
+
+LOG = logging.getLogger('personal_agent.family_setup')
 
 SETUP_FILE = 'family-setup.json'
 SETUP_SECONDS = 30 * 60
@@ -172,7 +175,31 @@ def accept_token(service, record, token, creator_id=None):
             cfg['pair_user_id'] = creator_id
             service.store.put('telegram', cfg)
     _update_setup(service.store, pair_url=pairing['url'], pair_expires=time.time() + int(pairing.get('expires_in') or 600))
+    describe_bot(service.telegram.call, (record or {}).get('display_name') or '가족 비서')
     return {'ok': True}
+
+
+#: #928 review P3-2: seconds each best-effort description call may take.
+DESCRIBE_TIMEOUT = 4
+
+
+def bot_descriptions(display_name):
+    """What the new bot's empty chat and profile say (#927): Telegram shows ``</>`` otherwise."""
+    name = ' '.join(str(display_name or '').split())[:64] or '가족 비서'
+    return {'description': f'{name}예요. 필요한 일을 편하게 말로 부탁하세요. 찾아보고, 정리하고, 대신 처리해 드려요.\n\n'
+                           '아래 버튼을 누르면 바로 시작돼요.',
+            'short_description': f'{name} · 필요한 일을 말로 부탁하세요'}
+
+
+def describe_bot(call, display_name):
+    """Set the bot's description and short description; best-effort, never blocks the hand-over."""
+    texts = bot_descriptions(display_name)
+    for method, key in (('setMyDescription', 'description'), ('setMyShortDescription', 'short_description')):
+        try:
+            # #928 review P3-2: short, so the hand-over answers well inside the owner side's wait.
+            call(method, {key: texts[key]}, timeout=DESCRIBE_TIMEOUT)
+        except Exception as exc:
+            LOG.warning('family setup: %s failed (%s)', method, type(exc).__name__)
 
 
 def pair_again(service, record):

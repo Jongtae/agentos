@@ -7001,14 +7001,23 @@ class AgentService:
             paired=False
             # #897: a family bot pairs only with the Telegram user who created it.
             creator=cfg.get('pair_user_id')
-            if private and isinstance(text,str) and text.startswith('/start ') and cfg.get('pair_code') and time.time()<cfg.get('pair_expires',0) \
-                    and (not isinstance(creator,int) or sender==creator):
+            creator_bound=isinstance(creator,int) and not isinstance(creator,bool)
+            if private and creator_bound and sender==creator and not isinstance(cfg.get('user_id'),int) \
+                    and isinstance(text,str) and text:
+                # #927: Telegram attests the creator, so their first message pairs the
+                # bot; Telegram's own bot-creation screen sends a plain /start.
+                cfg.update(user_id=sender,pair_code='',pair_expires=0)
+                authorized=True
+                paired=True
+                if text.split(' ',1)[0]=='/start':text='/start'
+            elif private and isinstance(text,str) and text.startswith('/start ') and cfg.get('pair_code') and time.time()<cfg.get('pair_expires',0) \
+                    and (not creator_bound or sender==creator):
                 if hmac.compare_digest(text[7:].strip().encode(),cfg['pair_code'].encode()):
                     cfg.update(user_id=sender,pair_code='',pair_expires=0)
                     authorized=True
                     paired=True
                     text='/start'
-            if authorized and not paired and isinstance(text,str) and len(text)>MAX_OWNER_MESSAGE_CHARS:
+            if authorized and isinstance(text,str) and len(text)>MAX_OWNER_MESSAGE_CHARS:
                 # #832 (B14): an over-long message reaches the worker truncated,
                 # with a note that says so, instead of being dropped silently.
                 text=truncated_owner_message(text)

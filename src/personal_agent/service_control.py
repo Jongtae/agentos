@@ -21,6 +21,32 @@ from urllib.request import urlopen
 
 LABEL = "com.personal-agentos"
 DEFAULT_DATA_RELATIVE = Path(".local/share/agentos")
+DEFAULT_PORT = 8787
+# #893: a named instance (for example a family member's agent) is a separate
+# launchd job with its own data directory and port; the owner's default
+# service keeps LABEL, its data directory and port 8787.
+DEFAULT_INSTANCES_RELATIVE = Path(".local/share/agentos-instances")
+_INSTANCE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,31}\Z")
+
+
+def service_label(instance: str | None = None) -> str:
+    """The launchd label of the default service, or of one named instance."""
+    if instance is None:
+        return LABEL
+    if not isinstance(instance, str) or not _INSTANCE_NAME.match(instance):
+        raise ValueError("An instance name is 1-32 lowercase letters, digits or hyphens.")
+    return f"{LABEL}.{instance}"
+
+
+def _argument_after(arguments: object, flag: str) -> str | None:
+    """The single value following ``flag`` in a plist ``ProgramArguments`` list."""
+    if not isinstance(arguments, list):
+        return None
+    positions = [index for index, value in enumerate(arguments) if value == flag]
+    if len(positions) == 1 and positions[0] + 1 < len(arguments):
+        value = arguments[positions[0] + 1]
+        return value if isinstance(value, str) and value else None
+    return None
 
 
 @dataclass(frozen=True)
@@ -56,9 +82,9 @@ def _clean_error(result: CommandResult) -> str:
     return " ".join((result.stderr or result.stdout).strip().split())[:300]
 
 
-def _probe_healthz(timeout: float = 2) -> bool:
+def _probe_healthz(timeout: float = 2, port: int = DEFAULT_PORT) -> bool:
     try:
-        with urlopen("http://127.0.0.1:8787/healthz", timeout=timeout) as response:
+        with urlopen(f"http://127.0.0.1:{int(port)}/healthz", timeout=timeout) as response:
             return response.status == 200
     except Exception:
         return False
@@ -102,11 +128,18 @@ def resolve_cli_path(
     )
 
 
-def render_plist(cli_path: Path, data_dir: Path) -> bytes:
-    """Return a launchd definition pinned to loopback and the durable data path."""
+def render_plist(cli_path: Path, data_dir: Path, *, label: str = LABEL, port: int = DEFAULT_PORT) -> bytes:
+    """Return a launchd definition pinned to loopback and the durable data path.
+
+    The default service's definition is unchanged; a named instance adds its
+    own label and ``--port``.
+    """
+    arguments = [str(cli_path), "start", "--no-browser", "--host", "127.0.0.1", "--data", str(data_dir)]
+    if port != DEFAULT_PORT:
+        arguments += ["--port", str(port)]
     payload = {
-        "Label": LABEL,
-        "ProgramArguments": [str(cli_path), "start", "--no-browser", "--host", "127.0.0.1", "--data", str(data_dir)],
+        "Label": label,
+        "ProgramArguments": arguments,
         "RunAtLoad": True,
         "KeepAlive": True,
         "ProcessType": "Background",
@@ -129,28 +162,40 @@ class ServiceController:
         uid: int | None = None,
         health_probe: HealthProbe | None = None,
         listener_owner: ListenerOwner | None = None,
+        instance: str | None = None,
+        port: int | None = None,
     ):
         env = os.environ if environ is None else environ
         self.home = Path(home if home is not None else Path.home()).expanduser().resolve()
-        self.plist_path = self.home / "Library/LaunchAgents" / f"{LABEL}.plist"
-        configured_data = data_dir if data_dir is not None else env.get("AGENTOS_DATA")
-        recovered_data = None
-        if configured_data is None and self.plist_path.is_file():
+        self.instance = instance
+        self.label = service_label(instance)
+        self.plist_path = self.home / "Library/LaunchAgents" / f"{self.label}.plist"
+        # AGENTOS_DATA names the owner's own directory; it never selects an instance's.
+        configured_data = data_dir if data_dir is not None else (env.get("AGENTOS_DATA") if instance is None else None)
+        recovered_data = recovered_port = None
+        if self.plist_path.is_file():
             try:
                 installed = plistlib.loads(self.plist_path.read_bytes())
                 arguments = installed.get("ProgramArguments") if isinstance(installed, dict) else None
-                positions = [index for index, value in enumerate(arguments or ()) if value == "--data"]
-                if (
-                    isinstance(arguments, list)
-                    and len(positions) == 1
-                    and positions[0] + 1 < len(arguments)
-                    and isinstance(arguments[positions[0] + 1], str)
-                    and arguments[positions[0] + 1]
-                ):
-                    recovered_data = arguments[positions[0] + 1]
+                recovered_data = _argument_after(arguments, "--data") if configured_data is None else None
+                recovered_port = _argument_after(arguments, "--port")
             except (OSError, plistlib.InvalidFileException, ValueError, TypeError):
-                recovered_data = None
-        self.data_dir = Path(configured_data or recovered_data or self.home / DEFAULT_DATA_RELATIVE).expanduser().resolve()
+                recovered_data = recovered_port = None
+        default_data = (self.home / DEFAULT_DATA_RELATIVE if instance is None
+                        else self.home / DEFAULT_INSTANCES_RELATIVE / instance)
+        self.data_dir = Path(configured_data or recovered_data or default_data).expanduser().resolve()
+        if instance is None and port not in (None, DEFAULT_PORT):
+            raise ValueError("--port selects a named instance's port; pass --instance too.")
+        if instance is not None and self.data_dir in {(self.home / DEFAULT_DATA_RELATIVE).resolve(),
+                                                      *(Path(value).expanduser().resolve() for value in
+                                                        (env.get("AGENTOS_DATA"),) if value)}:
+            raise ValueError("An instance never uses the owner's data directory.")
+        try:
+            recovered_port_number = int(recovered_port) if recovered_port else None
+        except ValueError:
+            recovered_port_number = None
+        #: None only for an instance with no port given or installed yet; install refuses it.
+        self.port = port or recovered_port_number or (DEFAULT_PORT if instance is None else None)
         self._recovered_data_dir = Path(recovered_data).expanduser().resolve() if recovered_data else None
         # Resolution is intentionally lazy: status/stop/uninstall must remain
         # usable after a package manager has already removed the executable.
@@ -160,7 +205,8 @@ class ServiceController:
         # An injected command runner is a test boundary and must inject its own
         # negative health behavior when needed. The real launchctl path always
         # confirms the loopback application endpoint before claiming success.
-        self.health_probe = health_probe or (_probe_healthz if runner is _run else lambda: True)
+        self.health_probe = health_probe or (
+            (lambda timeout=2: _probe_healthz(timeout, self.port or DEFAULT_PORT)) if runner is _run else lambda: True)
         self._production_health_probe = health_probe is None and runner is _run
         self.health_wait = time.sleep if health_probe is None and runner is _run else lambda _seconds: None
         self.monotonic = time.monotonic
@@ -169,7 +215,45 @@ class ServiceController:
         )
         self.uid = os.getuid() if uid is None else uid
         self.domain = f"gui/{self.uid}"
-        self.service_target = f"{self.domain}/{LABEL}"
+        self.service_target = f"{self.domain}/{self.label}"
+
+    def _other_definitions(self) -> list[tuple[Path, int]]:
+        """(data directory, port) of every other installed AgentOS job, owner's included (#893)."""
+        found = []
+        for plist in sorted((self.home / "Library/LaunchAgents").glob(f"{LABEL}*.plist")):
+            if plist == self.plist_path or not (plist.name == f"{LABEL}.plist" or plist.name.startswith(f"{LABEL}.")):
+                continue
+            try:
+                installed = plistlib.loads(plist.read_bytes())
+                arguments = installed.get("ProgramArguments") if isinstance(installed, dict) else None
+                data = _argument_after(arguments, "--data")
+                port = int(_argument_after(arguments, "--port") or DEFAULT_PORT)
+            except (OSError, plistlib.InvalidFileException, ValueError, TypeError):
+                continue
+            if data:
+                found.append((Path(data).expanduser().resolve(), port))
+        return found
+
+    def _refuse_shared_instance_resources(self) -> None:
+        """A named instance owns its data directory and its port pair (port, port + 1)."""
+        port = self.port
+        if port is None or port == DEFAULT_PORT or not 1024 <= port <= 65534:
+            raise ServiceControlError(
+                "An AgentOS instance needs its own port.",
+                "Retry with --port set to a free port from 1024 to 65534 other than 8787; the next port is used for its handoff.",
+            )
+        others = self._other_definitions()
+        if any(data == self.data_dir for data, _port in others):
+            raise ServiceControlError(
+                "Another AgentOS service already uses this data directory.",
+                "Choose a data directory of this instance's own; each person's agent keeps separate Memory and approvals.",
+            )
+        taken = {DEFAULT_PORT, DEFAULT_PORT + 1} | {value for _data, other in others for value in (other, other + 1)}
+        if {port, port + 1} & taken:
+            raise ServiceControlError(
+                "This port or the handoff port after it is used by another AgentOS service.",
+                "Retry with a port two or more away from every other AgentOS service's port.",
+            )
 
     def _reported_data_dir(self) -> Path:
         """Return the path owned by the installed definition for read/remove actions."""
@@ -229,7 +313,7 @@ class ServiceController:
             lsof = str(fallback) if fallback.is_file() and os.access(fallback, os.X_OK) else None
         if not lsof:
             return False
-        result = self.runner([lsof, "-nP", "-a", "-p", str(pid), "-iTCP:8787", "-sTCP:LISTEN", "-t"])
+        result = self.runner([lsof, "-nP", "-a", "-p", str(pid), f"-iTCP:{self.port or DEFAULT_PORT}", "-sTCP:LISTEN", "-t"])
         return result.returncode == 0 and str(pid) in result.stdout.split()
 
     def _application_healthy(self, observed: Mapping[str, object], timeout: float = 2.0) -> bool:
@@ -284,7 +368,7 @@ class ServiceController:
         parent = self.plist_path.parent
         parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.data_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        descriptor, temporary = tempfile.mkstemp(prefix=f".{LABEL}.", suffix=".plist", dir=parent)
+        descriptor, temporary = tempfile.mkstemp(prefix=f".{self.label}.", suffix=".plist", dir=parent)
         try:
             with os.fdopen(descriptor, "wb") as stream:
                 stream.write(contents)
@@ -336,8 +420,10 @@ class ServiceController:
 
     def install(self, *, upgrade: bool = False) -> dict[str, object]:
         """Install and start the service; upgrades preserve owner data and roll back."""
+        if self.instance is not None:
+            self._refuse_shared_instance_resources()
         cli_path = resolve_cli_path(self._cli_path, which=self._which, runner=self.runner)
-        desired = render_plist(cli_path, self.data_dir)
+        desired = render_plist(cli_path, self.data_dir, label=self.label, port=self.port or DEFAULT_PORT)
         previous = self.plist_path.read_bytes() if self.plist_path.exists() else None
         if previous is None:
             orphan = self._observed_status()

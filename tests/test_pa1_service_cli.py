@@ -186,6 +186,23 @@ class ServiceCliTests(unittest.TestCase):
         self.invoke("service", "status", "--data", str(chosen), "--cli-path", str(self.cli))
         self.assertEqual(self.seam_calls[-1][1], {"data_dir": str(chosen), "cli_path": str(self.cli)})
 
+    def test_a_named_instance_and_its_port_are_forwarded_and_installed(self):
+        """#893: `agentos service install --instance spouse --port 8797`."""
+        code, receipt, _ = self.invoke("service", "install", "--instance", "spouse", "--port", "8797")
+        self.assertEqual(self.seam_calls[-1][1], {"instance": "spouse", "port": 8797})
+        self.assertEqual((code, receipt["status"]), (0, "running"))
+        self.assertTrue((self.home / "Library/LaunchAgents/com.personal-agentos.spouse.plist").is_file())
+
+    def test_an_invalid_instance_name_is_a_refusal_receipt_not_a_traceback(self):
+        code, receipt, _ = self.invoke("service", "status", "--instance", "Not/Valid")
+        self.assertEqual(code, 1)
+        self.assertEqual((receipt["ok"], receipt["status"], receipt["operation"]), (False, "invalid", "status"))
+
+    def test_a_port_without_an_instance_is_a_refusal_not_an_owner_move(self):
+        code, receipt, _ = self.invoke("service", "install", "--port", "8797")
+        self.assertEqual((code, receipt["ok"], receipt["status"]), (1, False, "invalid"))
+        self.assertFalse((self.home / "Library/LaunchAgents/com.personal-agentos.plist").exists())
+
     def test_status_reports_the_data_directory_the_service_was_installed_with(self):
         # Note: this pins --data forwarding at install time. The CLI's refusal to
         # invent a default is pinned separately above, because _reported_data_dir
@@ -300,8 +317,10 @@ class ForegroundRecoveryAddressTests(unittest.TestCase):
                     quickstart.main()
 
             self.assertEqual(len(services),1)
+            # #893: the Calendar callback is served by this listener, so its
+            # redirect names the port started with, like Gmail's.
             self.assertEqual(services[0].calendar_oauth.redirect_uri,
-                             'http://localhost:8787/oauth/calendar/callback')
+                             'http://localhost:9800/oauth/calendar/callback')
             self.assertEqual(services[0].local_settings_url(),'http://127.0.0.1:9143/')
 
 

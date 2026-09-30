@@ -1123,9 +1123,14 @@ def service_main(argv):
     # service does not actually use.
     parser.add_argument('--data',default=None,help='Override the data directory (default: AGENTOS_DATA, else the installed service definition).')
     parser.add_argument('--cli-path',default=None,help='Override the agentos executable recorded in the service definition.')
+    # #893: a named instance (e.g. a family member's agent) is its own launchd
+    # job with its own data directory (default ~/.local/share/agentos-instances/<name>) and port.
+    parser.add_argument('--instance',default=None,help='Manage a named instance instead of the owner service (lowercase letters, digits, hyphens).')
+    parser.add_argument('--port',type=int,default=None,help='Port of a named instance (required on install; not 8787).')
     args=parser.parse_args(argv)
-    options={name:value for name,value in (('data_dir',args.data),('cli_path',args.cli_path)) if value is not None}
-    receipt=service_action(args.action,**options)
+    options={name:value for name,value in (('data_dir',args.data),('cli_path',args.cli_path),('instance',args.instance),('port',args.port)) if value is not None}
+    try:receipt=service_action(args.action,**options)
+    except ValueError as exc:receipt={'ok':False,'status':'invalid','operation':args.action,'error':str(exc)}
     print(json.dumps(receipt,ensure_ascii=False,sort_keys=True))
     return 0 if receipt.get('ok') else 1
 
@@ -1191,6 +1196,9 @@ def main():
     # The Gmail callback is served by this same HTTP listener, so the redirect
     # URI must name the port actually bound rather than a separately guessed one.
     env['AGENTOS_GMAIL_LOCAL_PORT']=str(args.port)
+    # The Calendar callback (/oauth/calendar/callback) is served here too, so a
+    # second instance on another port never sends its consent to 8787 (#893).
+    env['AGENTOS_CALENDAR_LOCAL_PORT']=str(args.port)
     service=configured_service(store,env)
     public_hosts=args.public_tunnel_host
     public_token=args.public_access_token

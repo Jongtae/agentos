@@ -118,6 +118,24 @@ What this does **not** yet cover, stated exactly:
   restart, and an end-to-end Telegram result with no terminal open are owner operating
   validation that this repository has not performed.
 
+## An agent for a family member (macOS)
+
+Each family member gets their own AgentOS instance on your Mac. An instance has its own memory, folders, approvals and work history, and its own Telegram bot paired to that person. Nothing is shared with your own instance.
+
+```sh
+agentos service install --instance spouse --port 8797   # data: ~/.local/share/agentos-instances/spouse
+agentos service status  --instance spouse
+agentos service uninstall --instance spouse             # data is retained
+```
+
+- **Name and port.** The instance name uses lowercase letters, digits and hyphens. The port must be free and must not be 8787. The next port (8798 here) is used for its local handoff.
+- **Data directory.** An instance never uses your own data directory or `AGENTOS_DATA`.
+- **Setup.** Open `http://127.0.0.1:8797/` and use the setup link in that instance's `private/setup-link.txt`.
+  - Codex uses this Mac's Codex login. Claude Code needs its setup token entered once in that instance.
+  - Pair the family member's own Telegram bot the same way as in [Telegram](#telegram).
+- **Google Calendar and Gmail.** An instance's callbacks use its own port, for example `http://localhost:8797/oauth/calendar/callback` and `.../oauth/gmail/callback`. Add those as authorised redirect URIs in your Google OAuth client.
+- **Not yet covered.** The same "not covered" notes as [Background service](#background-service-macos) apply: tests substitute `launchctl`, and a real login service is owner operating validation.
+
 ## Google Calendar (source checkout)
 
 AgentOS can read your calendar and draft changes to it, so `내일 일정 뭐 있어?` is

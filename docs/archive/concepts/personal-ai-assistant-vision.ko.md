@@ -4,7 +4,7 @@
 
 ## 목적과 상태
 
-이 문서는 AgentOS의 장기 북극성이다. 현재 출시되었거나 실제 검증된 기능 목록이 아니며, 지원 여부는 [현재 로드맵](roadmap.md)과 이름이 지정된 acceptance evidence로만 판단한다.
+이 문서는 AgentOS의 장기 북극성이다. 현재 출시되었거나 실제 검증된 기능 목록이 아니며, 지원 여부는 [현재 로드맵](../../roadmap.md)과 이름이 지정된 acceptance evidence로만 판단한다.
 
 ## 정체성
 
@@ -58,4 +58,4 @@ Google Drive 같은 서비스 connector는 선택한 자료를 가져오거나 �
 
 MP1은 공개 marketplace, 임의 코드 실행, 무제한 자동 위임, 개인 데이터를 복제하는 중앙 control plane을 범위에 넣지 않는다. 향후 capability acquisition도 검토된 카탈로그와 소유자 승인·격리·검증을 우회하지 않는다. AgentOS는 ChatGPT나 기업 Agent 플랫폼보다 보안적 우위를 일반적으로 주장하지 않는다. 대신 개인 상태와 신뢰 경계가 어디에 있는지를 투명하게 만든다.
 
-Master Plan 개발에서 capability는 선언된 contract와 자동 테스트가 통과하기 전에는 지원된다고 주장하지 않는다. 외부 credential, OAuth client, endpoint, 활성화는 Master Plan 완료 뒤 소유자 제어 운영 모드 배포에서만 설정하며, mock 검증은 외부 연결이 live라는 주장이 아니다. 장기 실행 계획은 [Master Plan 1](master-plan-01-personal-assistant-core.ko.md)에서, 그 다음 선택 절차는 [Master Plan 2](master-plan-02-proposal.ko.md)에서 관리한다.
+Master Plan 개발에서 capability는 선언된 contract와 자동 테스트가 통과하기 전에는 지원된다고 주장하지 않는다. 외부 credential, OAuth client, endpoint, 활성화는 Master Plan 완료 뒤 소유자 제어 운영 모드 배포에서만 설정하며, mock 검증은 외부 연결이 live라는 주장이 아니다. 장기 실행 계획은 [Master Plan 1](../../master-plan-01-personal-assistant-core.ko.md)에서, 그 다음 선택 절차는 [Master Plan 2](../../master-plan-02-proposal.ko.md)에서 관리한다.

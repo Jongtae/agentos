@@ -14,10 +14,6 @@ Owner decision 2026-09-26 activated **SECRETARY-01 [#662](https://github.com/Jon
 
 **No scenario-specific code.** Probes (book → cart, calendar reminder, lunch with allergies, one held-out) are observation windows, not completion criteria. Decision/runtime code must not branch on a named site, provider or question category; every PR states whether it generalizes the loop or only makes a probe pass.
 
-## Current-context adoption — #625 (2026-09-26)
-
-For the selected single-owner current-state scope, read [Current context contract](current-context-contract.en.md) and [Implementer playbook](current-context-implementation.en.md). This selectively adopts #383 observation/time/current-state principles, not background Attention or multi-person collaboration. The plan is existing #605 → #606 → #607 → #626 input/time → #627 current-state consumption → #608/#512/#513; #625 is the immediate documentation adoption. Existing #616 and other independently directed work are preserved. Current-context claims remain unimplemented until those children deliver. Earlier blanket #383 deferrals do not exclude these two explicitly selected slices. #612 unit-test-first verification and concrete reuse still govern; no extra evaluator, graph platform or per-tick model calls. The new source-time, retention, inference/disclosure defaults and migration/test details are canonical in the two linked documents rather than duplicated here.
-
 ## Owner-selected execution integration — 2026-09-25
 
 [AGENCY #600](https://github.com/Jongtae/agentos/issues/600) refines the active Presence program with actual supported goal execution. Follow the [execution contract](assistant-execution-contract.en.md) and [finite delivery/ownership](assistant-execution-delivery.en.md), reusing #597/#598. Baseline, broker parity, reviewed context composition, goal loop, recovery and real-model/installed-build qualification precede final claims. Older useful-default/platform order below is historical direction, not reactivation authority. No mandatory new framework or automatic acquisition is selected.

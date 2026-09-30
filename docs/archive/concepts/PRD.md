@@ -2,15 +2,15 @@
 
 ## Current-context adoption — #625 (2026-09-26)
 
-For the selected single-owner current-state scope, read [Current context contract](docs/current-context-contract.en.md) and [Implementer playbook](docs/current-context-implementation.en.md). This selectively adopts #383 observation/time/current-state principles, not background Attention or multi-person collaboration. The plan is existing #605 → #606 → #607 → #626 input/time → #627 current-state consumption → #608/#512/#513; #625 is the immediate documentation adoption. Existing #616 and other independently directed work are preserved. Current-context claims remain unimplemented until those children deliver. Earlier blanket #383 deferrals do not exclude these two explicitly selected slices. #612 unit-test-first verification and concrete reuse still govern; no extra evaluator, graph platform or per-tick model calls. The new source-time, retention, inference/disclosure defaults and migration/test details are canonical in the two linked documents rather than duplicated here.
+For the selected single-owner current-state scope, read [Current context contract](../../current-context-contract.en.md) and [Implementer playbook](../../current-context-implementation.en.md). This selectively adopts #383 observation/time/current-state principles, not background Attention or multi-person collaboration. The plan is existing #605 → #606 → #607 → #626 input/time → #627 current-state consumption → #608/#512/#513; #625 is the immediate documentation adoption. Existing #616 and other independently directed work are preserved. Current-context claims remain unimplemented until those children deliver. Earlier blanket #383 deferrals do not exclude these two explicitly selected slices. #612 unit-test-first verification and concrete reuse still govern; no extra evaluator, graph platform or per-tick model calls. The new source-time, retention, inference/disclosure defaults and migration/test details are canonical in the two linked documents rather than duplicated here.
 
 ## Goal-directed execution refinement — 2026-09-25
 
-The [Assistant execution contract](docs/assistant-execution-contract.en.md) makes actual useful action, not avoidance of negative wording, a product requirement under #600. Existing allowed capabilities must be discovered/invoked, observed and safely repaired across qualified routes. A declaration, semantic seam, mock transcript or zero CLI exit is not proof. [Delivery ownership](docs/assistant-execution-delivery.en.md) separates specification, implementation, integration and exact installed-build qualification. No product-ready claim follows from this specification; historical scope below remains historical.
+The [Assistant execution contract](../../assistant-execution-contract.en.md) makes actual useful action, not avoidance of negative wording, a product requirement under #600. Existing allowed capabilities must be discovered/invoked, observed and safely repaired across qualified routes. A declaration, semantic seam, mock transcript or zero CLI exit is not proof. [Delivery ownership](../../assistant-execution-delivery.en.md) separates specification, implementation, integration and exact installed-build qualification. No product-ready claim follows from this specification; historical scope below remains historical.
 
 ## Canonical owner-facing experience refinement
 
-For conversation, recovery, Settings, contextual capability handoff and model/runtime continuity, follow the [Presence Experience Contract](docs/presence-experience-contract.en.md). Its evidence and reasoning are preserved in the [2026-09-23 Presence and Settings UX research](docs/research/presence-and-settings-ux.ko.md).
+For conversation, recovery, Settings, contextual capability handoff and model/runtime continuity, follow the [Presence Experience Contract](../../presence-experience-contract.en.md). Its evidence and reasoning are preserved in the [2026-09-23 Presence and Settings UX research](../../research/presence-and-settings-ux.ko.md).
 
 The contract refines how existing kernel truth and authority are **projected** to the owner; it does not create a second state store, weaken approval/Evidence rules, or claim that all target behaviors are currently shipped.
 
@@ -30,7 +30,7 @@ The owner can entrust approved material to a durable AI environment, ask for out
 
 This is not a coding harness, swarm framework, host kernel, hypervisor or replacement for macOS/Linux. Repository issues, branches, CI, delivery heartbeat and Goal mode build the product; they are not an end-user capability or proof of live operation.
 
-Canonical references: [architecture](docs/personal-agentos-architecture.en.md), [owner-control contract](docs/owner-control-contract.en.md), [default-agent usefulness](docs/default-agent-usefulness.en.md), [v0.1 contracts](docs/core-primitives-agentpackage-v0.1.en.md) and [platform foundation](docs/agent-distribution-platform-foundation.en.md). Current implementation status is in [TASKS](TASKS.md), [roadmap](docs/roadmap.md) and named evidence, not implied by this product vision.
+Canonical references: [architecture](../../personal-agentos-architecture.en.md), [owner-control contract](../../owner-control-contract.en.md), [default-agent usefulness](../../default-agent-usefulness.en.md), [v0.1 contracts](../../core-primitives-agentpackage-v0.1.en.md) and [platform foundation](../../agent-distribution-platform-foundation.en.md). Current implementation status is in [TASKS](../../../TASKS.md), [roadmap](../../roadmap.md) and named evidence, not implied by this product vision.
 
 ## Product principle: utility and control are both required
 
@@ -60,7 +60,7 @@ Read approved material, reconcile key facts and conflicting sources, and create 
 
 A correction changes the active constraints without replaying stale work. Find/reuse earlier results after restart, explain old versus current evidence and preserve owner state when a supported provider or agent changes. Do not silently make every conversation permanent Memory or reuse grants across an unapproved provider change.
 
-The detailed rubrics and synthetic case seed are in [default-agent usefulness](docs/default-agent-usefulness.en.md). Files, CI success and schema counts are necessary engineering evidence but do not replace task-result quality.
+The detailed rubrics and synthetic case seed are in [default-agent usefulness](../../default-agent-usefulness.en.md). Files, CI success and schema counts are necessary engineering evidence but do not replace task-result quality.
 
 ## Owner rights and observable behavior
 

@@ -8,7 +8,6 @@ import json
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 TRANSLATION_REFERENCES = (
-    ("personal-ai-assistant-vision.ko.md", "personal-ai-assistant-vision.en.md"),
     ("master-plan-01-personal-assistant-core.ko.md", "master-plan-01-personal-assistant-core.en.md"),
     ("master-plan-02-proposal.ko.md", "master-plan-02-proposal.en.md"),
     ("d-mp2-01-conversation-settings-contract.ko.md", "d-mp2-01-conversation-settings-contract.en.md"),
@@ -34,7 +33,6 @@ TRANSLATION_REFERENCES = (
     ("web-management-contract.ko.md", "web-management-contract.en.md"),
 )
 KOREAN_REFERENCE_EXCLUSIONS = {
-    "agentos-hub-v2.ko.md", "b3os-design-reference.ko.md", "context-capture-idea.ko.md",
     "first-milestone-report.ko.md", "ux-06-telegram-conversation.ko.md",
     "ux-v1.1-personal-agent-dm.ko.md",
     "product-status.ko.md",
@@ -59,7 +57,6 @@ REUSE_POLICY_REQUIREMENTS = {
     ),
 }
 REUSE_COMPATIBILITY_ENTRYPOINTS = (
-    ROOT / "CODEX.md",
     ROOT / "GEMINI.md",
     ROOT / ".github" / "copilot-instructions.md",
     ROOT / ".cursor" / "rules" / "agentos-governance.mdc",
@@ -191,9 +188,9 @@ def main():
     verify_reference_registry()
     verify_reuse_policy_contract()
     verify_document_references()
-    mp1_en = (DOCS / TRANSLATION_REFERENCES[1][1]).read_text(encoding="utf-8")
+    mp1_en = (DOCS / TRANSLATION_REFERENCES[0][1]).read_text(encoding="utf-8")
     if phase_table_ids(mp1_en) != PHASE_IDS:
-        raise SystemExit(f"MP1 phase table sequence failure: {TRANSLATION_REFERENCES[1][1]}")
+        raise SystemExit(f"MP1 phase table sequence failure: {TRANSLATION_REFERENCES[0][1]}")
     plan=json.loads((ROOT / "delivery-plan.yaml").read_text(encoding="utf-8"))
     verify_traceability(plan)
     workspace_contract = (DOCS / "file-workspace-first-experience-contract.en.md").read_text(encoding="utf-8")

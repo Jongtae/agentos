@@ -6,7 +6,7 @@ U1/U2/U3 usefulness and evidence principles below remain requirements. The histo
 
 ## Status
 
-Product/evaluation specification from GOV-USE-01 (#357). Not a runtime implementation, executed model benchmark, live operation or automatic activation. See the [owner-control contract](owner-control-contract.en.md), [architecture](personal-agentos-architecture.en.md), [PRD](../PRD.md), [roadmap](roadmap.md) and [USE-01 readiness](use-01-goal-readiness.en.md).
+Product/evaluation specification from GOV-USE-01 (#357). Not a runtime implementation, executed model benchmark, live operation or automatic activation. See the [owner-control contract](owner-control-contract.en.md), [architecture](personal-agentos-architecture.en.md), [PRD](archive/concepts/PRD.md), [roadmap](roadmap.md) and [USE-01 readiness](use-01-goal-readiness.en.md).
 
 **Personal AgentOS must be useful before its marketplace is large. Few bundled agents is acceptable; intentionally low-quality bundles are not.** The platform supplies reliable shared tools/state/authority so outside developers can improve agents without rebuilding those foundations. The first useful default assistant is the bootstrap, not a permanent privileged owner of the environment.
 

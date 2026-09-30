@@ -63,6 +63,9 @@ from personal_agent.subscription_engines import SubscriptionEngines
 from personal_agent.telegram_presence import (CLEAR_REACTION, DONE_REACTION, DOTS_FRAMES, RECEIVED_REACTION, WROTE_REACTION,
                                               draft_id_for)
 
+#: The dots of the first four drafts, whatever the frame count (#921).
+DOTS = tuple(DOTS_FRAMES[index % len(DOTS_FRAMES)] for index in range(4))
+
 CHAT = 5120
 GENERATION = 'eval-g1'
 OWNER = f'telegram:{CHAT}'
@@ -578,7 +581,7 @@ class G_LongResearch(PresenceEval):
         # 27s; #858: as Telegram's animated thinking block, no label.
         self.assertEqual(drafts, [{'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'can_stop': True,
                                    'rich_message': {'blocks': [{'type': 'thinking', 'text': frame}]}}
-                                  for frame in DOTS_FRAMES + DOTS_FRAMES[:1]])
+                                  for frame in DOTS])
         self.assertNotIn('sendMessageDraft', methods)
         self.assertEqual(self.bubbles()[0]['reply_parameters']['message_id'], message_id)
         self.assertIsNone(self.store.task_card(job['id']))

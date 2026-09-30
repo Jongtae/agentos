@@ -41,6 +41,9 @@ from personal_agent.telegram_presence import (CLEAR_REACTION, CLOSING_CANDIDATES
                                               WAIT_NONE, PresenceTiming, draft_body_text, draft_frame, draft_id_for,
                                               outcome_reaction, render_telegram_html, rich_draft_blocks)
 
+#: The dots of the first three drafts, whatever the frame count (#921).
+DOTS = tuple(DOTS_FRAMES[index % len(DOTS_FRAMES)] for index in range(3))
+
 CHAT = 4242
 GENERATION = 'g1'
 PRESENCE_METHODS = ('setMessageReaction', 'sendChatAction', 'sendMessageDraft', 'sendRichMessageDraft')
@@ -437,7 +440,7 @@ class WaitSurfaceTests(NativePresenceTestCase):
         # "생각" label; the plain draft is only the fallback.
         self.assertEqual(drafts, [{'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'can_stop': True,
                                    'rich_message': {'blocks': [{'type': 'thinking', 'text': frame}]}}
-                                  for frame in DOTS_FRAMES])
+                                  for frame in DOTS])
         self.assertNotIn('sendMessageDraft', self.methods())
         self.assertFalse(any('생각' in draft_body_text(body) for body in drafts))
         # 7s: no draft edit due yet, so typing… (never sent before) is refreshed.
@@ -521,7 +524,7 @@ class PresentationFailureTests(NativePresenceTestCase):
                                                 'sendMessageDraft'])
         plain = [body for method, body in self.calls if method == 'sendMessageDraft']
         self.assertEqual(plain, [{'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'text': frame, 'can_stop': True}
-                                 for frame in DOTS_FRAMES[:3]])
+                                 for frame in DOTS])
         self.assertEqual(len(self.sends()), 1)
 
     def test_a_timed_out_thinking_block_is_tried_again_on_the_next_edit(self):
@@ -1103,7 +1106,7 @@ class LiveWaitTests(NativePresenceTestCase):
         self.assertLessEqual(max(gaps), 4.25, typing)
         # One draft edit per dots_refresh at most, each the next frame, never empty.
         self.assertTrue(all(later - earlier >= 1.5 for earlier, later in zip(drafted, drafted[1:])), drafted)
-        self.assertEqual(self.drafts()[:4], [DOTS_FRAMES[0], DOTS_FRAMES[1], DOTS_FRAMES[2], DOTS_FRAMES[0]])
+        self.assertEqual(self.drafts()[:4], [*DOTS, DOTS[0]])
         self.assertTrue(all(self.drafts()))
         # At most one presence call per Work per tick.
         self.assertTrue(all(len(methods) <= 1 for _offset, methods in ticks))
@@ -1126,14 +1129,13 @@ class LiveWaitTests(NativePresenceTestCase):
 
 
 class DotsFrameTests(unittest.TestCase):
-    def test_dots_cycle_follow_a_step_line_and_are_never_empty(self):
-        # Owner direction 2026-09-30: always three dots, animated by the lit dot moving.
-        self.assertEqual([draft_frame('', frame) for frame in range(4)], ['• · ·', '· • ·', '· · •', '• · ·'])
-        self.assertTrue(all(frame.count('•') + frame.count('·') == 3 for frame in DOTS_FRAMES))
-        self.assertEqual(draft_frame('웹 검색 중: 환율', 1), '웹 검색 중: 환율 · • ·')
-        self.assertEqual(draft_frame('다시 해보는 중…', 2), '다시 해보는 중 · · •', 'the dots replace an ellipsis')
-        self.assertEqual(draft_frame('찾는 중...', 0), '찾는 중 • · ·')
-        self.assertEqual(draft_frame(None, 0), '• · ·')
+    def test_three_still_dots_follow_a_step_line_and_are_never_empty(self):
+        # Owner direction 2026-10-01 (#921): no moving dot; only the thinking block blinks.
+        self.assertEqual(DOTS_FRAMES, ('· · ·',))
+        self.assertEqual({draft_frame('', frame) for frame in range(4)}, {'· · ·'})
+        self.assertEqual(draft_frame('웹 검색 중: 환율', 1), '웹 검색 중: 환율 · · ·')
+        self.assertEqual(draft_frame('다시 해보는 중…', 2), '다시 해보는 중 · · ·', 'the dots replace an ellipsis')
+        self.assertEqual(draft_frame(None, 0), '· · ·')
 
 
 class TimingTests(unittest.TestCase):

@@ -372,6 +372,50 @@ class OwnerCommand(unittest.TestCase):
         self.assertIn('AI', self.output[-1])
         self.assertEqual(self.actions, [])
 
+    def test_a_missing_ngrok_stops_before_anything_is_created(self):
+        """#913 review P2-2: checked before the route is copied or the instance installed."""
+        from unittest.mock import patch
+        with patch('shutil.which', return_value=None), patch('pathlib.Path.home', return_value=self.root / 'home'):
+            code = family_setup.family_main(['add', 'spouse'], service_action=self.service_action, owner_data=self.root / 'owner',
+                                            environ=self.environ, opener=self.opener, out=self.output.append,
+                                            sleep=lambda _s: None, free=lambda port: True)
+        self.assertEqual(code, 1)
+        self.assertIn('ngrok', self.output[-1])
+        self.assertEqual(self.actions, [])
+        self.assertEqual(self.owner.config(family_setup.PENDING_KEY, []), [])
+
+    def test_a_tunnel_that_does_not_open_is_reported_and_closed(self):
+        def broken_popen(argv, **kwargs):
+            raise FileNotFoundError('ngrok')
+        from unittest.mock import patch
+        with patch('pathlib.Path.home', return_value=self.root / 'home'):
+            code = family_setup.family_main(['add', 'spouse'], service_action=self.service_action, owner_data=self.root / 'owner',
+                                            environ=self.environ, opener=self.opener, popen=broken_popen,
+                                            out=self.output.append, sleep=lambda _s: None, free=lambda port: True)
+        self.assertEqual(code, 1)
+        self.assertIn('임시 링크를 열지 못했습니다', self.output[-1])
+        self.assertEqual(self.owner.config(family_setup.PENDING_KEY, []), [], 'the pending row and secret are cleared')
+
+    def test_a_retry_reuses_an_unpaired_instance_and_skips_leftover_folders(self):
+        """#913 review P2-3."""
+        home = self.root / 'home'
+        agents = home / 'Library/LaunchAgents'
+        agents.mkdir(parents=True)
+        data = home / '.local/share/agentos-instances'
+        (agents / 'com.personal-agentos.family-1.plist').write_text('x')
+        QuickStore(data / 'family-1')                      # installed, not paired
+        self.assertEqual(family_setup.pick_instance_name(home), 'family-1')
+        QuickStore(data / 'family-1').put('telegram', {'enabled': True, 'user_id': 5})
+        (data / 'family-2').mkdir(parents=True)            # left by an uninstalled instance
+        self.assertEqual(family_setup.pick_instance_name(home), 'family-3')
+
+    def test_reconcile_closes_setups_left_by_a_restart(self):
+        record = {'instance': 'spouse', 'username': 'x_bot', 'expires': time.time() + 60, 'handoff': 'h'}
+        family_setup.register_pending(self.owner, record, 8797)
+        family_setup.reconcile_pending(self.owner)
+        self.assertEqual(self.owner.config(family_setup.PENDING_KEY), [])
+        self.assertEqual(self.owner.secret(family_setup.handoff_secret_key('spouse')), '')
+
     def test_an_invalid_name_is_refused(self):
         self.assertEqual(self.invoke('add', 'Not/Valid'), 2)
         self.assertEqual(self.actions, [])

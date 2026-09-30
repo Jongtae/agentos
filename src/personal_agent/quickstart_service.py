@@ -7147,6 +7147,69 @@ class AgentService:
         self.retry_family_handovers()
         self.settle_expired_telegram_photo_albums()
 
+    def start_family_setup(self, display_name, name=None, notify=None):
+        """Create a family member's agent after the owner confirmed it in conversation (#912).
+
+        Runs in the background: the instance, its temporary link (sent to the
+        owner's Telegram), the wait for pairing and the close - the same steps
+        as ``agentos family add``.  One setup at a time.
+        """
+        from . import family_setup
+        cfg=self.store.config('telegram',{})
+        if notify is None and not (cfg.get('enabled') and isinstance(cfg.get('user_id'),int)):
+            # #913 review P2-1: never open a link that can be sent nowhere.
+            raise ValueError('설정 링크를 보낼 곳이 없어요. 텔레그램을 연결한 뒤 대화에서 다시 요청해 주세요.')
+        with self.lock:
+            running=self.__dict__.get('_family_setup_thread')
+            if running is not None and running.is_alive():
+                raise ValueError('이미 가족 비서를 만드는 중이에요. 그 설정이 끝난 뒤에 다시 요청해 주세요.')
+            name=name or family_setup.pick_instance_name()
+            thread=threading.Thread(target=self._run_family_setup,args=(display_name,name,notify),daemon=True,name='family-setup')
+            self._family_setup_thread=thread
+            # #913 review P3-1: started under the lock, so a second call always sees it alive.
+            thread.start()
+        return {'state':'requested','instance':name}
+
+    def _family_notify(self, text):
+        cfg=self.store.config('telegram',{})
+        if not (cfg.get('enabled') and isinstance(cfg.get('user_id'),int)):return False
+        try:self.telegram.send_message(cfg['user_id'],text)
+        except Exception as exc:
+            LOG.warning('family setup: owner notice not sent (%s)',type(exc).__name__)
+            return False
+        return True
+
+    def _run_family_setup(self, display_name, name, notify=None):
+        from . import family_setup
+        from .service_control import service_action
+
+        def say(text):
+            if notify is None:return self._family_notify(text)
+            try:notify(text)
+            except Exception as exc:
+                LOG.warning('family setup: notice not sent (%s)',type(exc).__name__)
+                return False
+            return True
+        try:
+            handle=family_setup.prepare_family_setup(self.store,name,display_name,service_action=service_action)
+        except family_setup.SetupError as exc:
+            return say(str(exc))
+        except Exception as exc:
+            LOG.warning('family setup failed to start (%s)',type(exc).__name__)
+            return say('가족 비서를 만들지 못했어요. 잠시 뒤에 다시 요청해 주세요.')
+        if not say(f"{handle['display_name']} 설정 링크예요. 가족에게 보내 주세요. 약 {family_setup.SETUP_SECONDS//60}분 동안 열려 있어요.\n{handle['link']}"):
+            # #913 review: a link nobody received must not keep a public tunnel open; close now so
+            # the owner can simply ask again (the unpaired instance is reused).
+            LOG.warning('family setup: link not delivered; closing the setup')
+            try:family_setup.close_family_setup(handle,self.store)
+            except Exception as exc:LOG.warning('family setup close failed (%s)',type(exc).__name__)
+            return
+        try:
+            family_setup.watch_family_setup(handle,self.store,on_state=lambda state:state in ('paired','expired')
+                                            and say(family_setup.STATE_TEXT.get(state,family_setup.EXPIRED_TEXT)))
+        except Exception as exc:
+            LOG.warning('family setup watch ended (%s)',type(exc).__name__)
+
     def ingest_managed_bot(self, update):
         """Hand a family member's new bot to their instance (#897); content-free log only."""
         from . import family_setup
@@ -8353,6 +8416,12 @@ class AgentService:
         return running
 
     def start(self):
+        # #913 review P3-2: a family setup whose watcher died with the last process is closed.
+        try:
+            from . import family_setup
+            family_setup.reconcile_pending(self.store)
+        except Exception as exc:
+            LOG.warning('family setup reconcile failed (%s)',type(exc).__name__)
         self.recover_interrupted_work()
         # #685: a Judgment AI qualification cut off by the restart is requeued once or fails as interrupted.
         self.decision_routes.recover_qualification()

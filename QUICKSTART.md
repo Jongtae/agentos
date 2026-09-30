@@ -122,13 +122,13 @@ What this does **not** yet cover, stated exactly:
 
 Each family member gets their own AgentOS instance on your Mac. An instance has its own memory, folders, approvals and work history, and its own Telegram bot paired to that person. Nothing is shared with your own instance.
 
-**The simplest way is one command.** It needs your own AgentOS Telegram bot to be connected, and its **Bot Management Mode** switched on once in the BotFather Mini App.
+**The simplest way is to ask your assistant**, for example "아내 비서 만들어줘". It shows what it will create; tap 👍 (or 적용), and the setup link arrives in the same chat for you to forward. It needs your own AgentOS Telegram bot to be connected, and its **Bot Management Mode** switched on once in the BotFather Mini App. The same setup is also one command:
 
 ```sh
 agentos family add spouse --display-name "아내 비서"
 ```
 
-The command:
+Either way:
 - creates and starts the instance;
 - opens a temporary HTTPS link through your installed `ngrok` (about 30 minutes);
 - sends the link to you on Telegram so you can forward it.

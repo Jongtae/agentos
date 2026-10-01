@@ -66,6 +66,7 @@ engine; ``WKWebsiteDataRecord.displayName`` is WebKit's own per-site
 (registrable domain) grouping.  No site, provider or category is named here.
 """
 import argparse
+import base64
 import hashlib
 import ipaddress
 import json
@@ -600,6 +601,26 @@ return JSON.stringify({text: body ? (body.innerText || '').length : 0,
   nodes: document.getElementsByTagName('*').length, ready: document.readyState});
 """
 
+#: #939: typing from the phone goes into whatever element the page has focused;
+#: ``execCommand`` fires the real ``beforeinput``/``input`` events a framework
+#: listens for.  ``not_focused`` when nothing editable in the main frame has
+#: focus (the worker then tries the native text input path).
+REMOTE_INSERT_SCRIPT = r"""
+const el = document.activeElement;
+if (!el || el === document.body || el === document.documentElement || el.tagName === 'IFRAME') {
+  return JSON.stringify({error: 'not_focused'});
+}
+const done = document.execCommand('insertText', false, text);
+return JSON.stringify(done ? {ok: true} : {error: 'not_typable'});
+"""
+
+#: #939: the phone's view of the login window: a JPEG no wider than this, at this quality.
+FRAME_MAX_WIDTH = 900
+FRAME_JPEG_QUALITY = 0.6
+#: #939: the keys the phone page offers, as macOS virtual key codes with their characters.
+REMOTE_KEYS = {'Enter': ('\r', 36), 'Backspace': ('\x7f', 51), 'Tab': ('\t', 48)}
+REMOTE_NAV_ACTIONS = ('back', 'reload')
+
 WIDTH, HEIGHT = 1280, 900
 SETTLE_QUIET_SECONDS = 0.4
 #: #736: after a click, how long a navigation it may start (a script handler, a
@@ -934,8 +955,11 @@ class Worker:
         self.pending[ident] = True
         self.AppHelper.callLater(max(0.5, float(seconds)), expire)
 
-    def run(self, body, arguments, done, world=None):
-        """Run ``body`` (returns a JSON string) in the client world (or ``world``); ``done(value_or_None, error_or_None)``."""
+    def run(self, body, arguments, done, world=None, view=None):
+        """Run ``body`` (returns a JSON string) in the client world (or ``world``); ``done(value_or_None, error_or_None)``.
+
+        ``view``: another web view than the main one (a sign-in popup, #939).
+        """
         def handler(result, error):
             if error is not None:
                 done(None, 'script_failed')
@@ -944,7 +968,7 @@ class Worker:
                 done(json.loads(str(result)) if result is not None else None, None)
             except (TypeError, ValueError, UnicodeError):
                 done(None, 'script_failed')
-        self.view.callAsyncJavaScript_arguments_inFrame_inContentWorld_completionHandler_(
+        (view or self.view).callAsyncJavaScript_arguments_inFrame_inContentWorld_completionHandler_(
             body, arguments or {}, None, world or self.world, handler)
 
     def settle_click(self, ident, finish, baseline=None):
@@ -1159,15 +1183,32 @@ class Worker:
                 self.fail(ident, 'blocked_destination')
 
     # -- native input --------------------------------------------------------
-    def press(self, x, y):
-        """A native left click at viewport point (x, y): trusted, never needs the window shown."""
+    def press(self, x, y, view=None):
+        """A native left click at viewport point (x, y): trusted, never needs the window shown.
+
+        ``view``: the web view to press in (a sign-in popup, #939); the main one by default.
+        """
         AppKit, Foundation = self.AppKit, self.Foundation
-        height = self.view.frame().size.height
+        view = view if view is not None else self.view
+        window = view.window() if view is not self.view and view.window() is not None else self.window
+        height = view.frame().size.height
         point = Foundation.NSMakePoint(float(x), float(height) - float(y))
-        for kind, send in ((AppKit.NSEventTypeLeftMouseDown, self.view.mouseDown_),
-                           (AppKit.NSEventTypeLeftMouseUp, self.view.mouseUp_)):
+        for kind, send in ((AppKit.NSEventTypeLeftMouseDown, view.mouseDown_),
+                           (AppKit.NSEventTypeLeftMouseUp, view.mouseUp_)):
             event = AppKit.NSEvent.mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure_(
-                kind, point, 0, AppKit.NSProcessInfo.processInfo().systemUptime(), self.window.windowNumber(), None, 0, 1, 1.0)
+                kind, point, 0, AppKit.NSProcessInfo.processInfo().systemUptime(), window.windowNumber(), None, 0, 1, 1.0)
+            send(event)
+
+    def key(self, name, view=None):
+        """A native key press (down and up) of one of ``REMOTE_KEYS`` in ``view`` (#939)."""
+        AppKit, Foundation = self.AppKit, self.Foundation
+        view = view if view is not None else self.view
+        window = view.window() if view is not self.view and view.window() is not None else self.window
+        characters, code = REMOTE_KEYS[name]
+        for kind, send in ((AppKit.NSEventTypeKeyDown, view.keyDown_), (AppKit.NSEventTypeKeyUp, view.keyUp_)):
+            event = AppKit.NSEvent.keyEventWithType_location_modifierFlags_timestamp_windowNumber_context_characters_charactersIgnoringModifiers_isARepeat_keyCode_(
+                kind, Foundation.NSMakePoint(0, 0), 0, AppKit.NSProcessInfo.processInfo().systemUptime(),
+                window.windowNumber(), None, characters, characters, False, code)
             send(event)
 
     # -- ops -----------------------------------------------------------------
@@ -1433,6 +1474,103 @@ class Worker:
         self.set_guard_off(False)
         self.emit({'event': 'hidden'})
 
+    # -- the phone's view of the login window (#939) ------------------------------
+    # Allowed only while the owner's login window shows (``op_show``); a parked
+    # window answers ``not_shown``.  Nothing here reads the page: a tap, a key
+    # or text goes in, an image comes out.  The frontmost view is a sign-in
+    # popup when one is open (#914), else the main view.
+
+    def front_view(self):
+        return self.popups[-1][0] if self.popups else self.view
+
+    def _remote_allowed(self, ident):
+        if not self.owner_visible:
+            self.fail(ident, 'not_shown')
+            return False
+        return True
+
+    def op_frame(self, ident, command, timeout):
+        """A JPEG of the frontmost login view (base64) and that view's size in points."""
+        if not self._remote_allowed(ident):
+            return
+        view = self.front_view()
+        size = view.frame().size
+        width, height = float(size.width), float(size.height)
+        config = self.WebKit.WKSnapshotConfiguration.alloc().init()
+        config.setSnapshotWidth_(min(FRAME_MAX_WIDTH, width))
+        config.setAfterScreenUpdates_(True)
+        self.deadline(ident, timeout)
+
+        def done(image, error):
+            if ident not in self.pending:
+                return
+            data = _jpeg_bytes(self.AppKit, image) if error is None and image is not None else None
+            if data is None:
+                return self.fail(ident, 'frame_failed')
+            self.reply(ident, jpeg=base64.b64encode(data).decode('ascii'), width=width, height=height)
+        view.takeSnapshotWithConfiguration_completionHandler_(config, done)
+
+    def op_remote_tap(self, ident, command, timeout):
+        """A native press at ``(x, y)`` in view points of the frontmost view."""
+        if not self._remote_allowed(ident):
+            return
+        view = self.front_view()
+        size = view.frame().size
+        try:
+            x, y = float(command.get('x')), float(command.get('y'))
+        except (TypeError, ValueError):
+            return self.fail(ident, 'bad_point')
+        if not (0 <= x <= float(size.width) and 0 <= y <= float(size.height)):
+            return self.fail(ident, 'bad_point')
+        self.press(x, y, view)
+        self.reply(ident)
+
+    def op_remote_text(self, ident, command, timeout):
+        """Insert ``text`` into the element the page has focused: the ``insertText`` path
+        ``op_type`` uses, then the native text-input path when nothing in the main frame
+        has focus (a field inside a frame).  The text is never kept or echoed."""
+        if not self._remote_allowed(ident):
+            return
+        text = command.get('text')
+        if not isinstance(text, str) or not text:
+            return self.fail(ident, 'bad_text')
+        view = self.front_view()
+        self.deadline(ident, timeout)
+
+        def inserted(value, error):
+            if ident not in self.pending:
+                return
+            if error is None and isinstance(value, dict) and value.get('ok'):
+                return self.reply(ident)
+            try:
+                view.insertText_replacementRange_(text, self.Foundation.NSMakeRange(self.Foundation.NSNotFound, 0))
+            except Exception:
+                return self.fail(ident, (value or {}).get('error') if error is None and isinstance(value, dict) else 'not_typable')
+            self.reply(ident)
+        self.run(REMOTE_INSERT_SCRIPT, {'text': text}, inserted, view=view)
+
+    def op_remote_key(self, ident, command, timeout):
+        if not self._remote_allowed(ident):
+            return
+        name = command.get('key')
+        if name not in REMOTE_KEYS:
+            return self.fail(ident, 'bad_key')
+        self.key(name, self.front_view())
+        self.reply(ident)
+
+    def op_remote_nav(self, ident, command, timeout):
+        if not self._remote_allowed(ident):
+            return
+        action = command.get('action')
+        if action not in REMOTE_NAV_ACTIONS:
+            return self.fail(ident, 'bad_action')
+        view = self.front_view()
+        if action == 'back':
+            view.goBack()
+        else:
+            view.reload()
+        self.reply(ident)
+
     def op_state(self, ident, command, timeout):
         # #765: ``navigations`` is a count of main-frame navigations (never a URL).
         self.reply(ident, visible=bool(self.owner_visible), navigations=self.landed)
@@ -1516,6 +1654,18 @@ class Worker:
     def op_quit(self, ident, command, timeout):
         self.reply(ident)
         self.AppHelper.stopEventLoop()
+
+
+def _jpeg_bytes(AppKit, image, quality=FRAME_JPEG_QUALITY):
+    """JPEG bytes of an ``NSImage`` snapshot, or None.  The bytes leave the worker once and are never kept (#939)."""
+    try:
+        tiff = image.TIFFRepresentation()
+        rep = AppKit.NSBitmapImageRep.imageRepWithData_(tiff) if tiff is not None else None
+        data = rep.representationUsingType_properties_(AppKit.NSBitmapImageFileTypeJPEG,
+                                                       {AppKit.NSImageCompressionFactor: float(quality)}) if rep is not None else None
+        return bytes(data) if data is not None and len(data) else None
+    except Exception:
+        return None
 
 
 def _form_record(value):

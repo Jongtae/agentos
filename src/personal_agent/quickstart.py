@@ -37,6 +37,7 @@ from .drive_web_oauth import DriveWebOAuthHandoff, EncryptedDriveSecretStore, Dr
 from .connector_contract import ConnectorRegistry
 from . import family_setup
 from . import family_share
+from . import remote_login
 from .service_control import service_action
 from .connector_http import contained_opener
 from .gmail import (GMAIL_CONNECTOR, EncryptedGmailSecretStore, GmailConnector,
@@ -620,6 +621,60 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 except ValueError as exc:return self.reply(409,{'error':str(exc)})
             return self.reply(405,{'error':'지원하지 않는 요청입니다.'})
 
+        def remote_login_gate(self,path):
+            """#939: once a remote login was started in this process, a tunneled request (other than
+            one on a configured public tunnel host) reaches only the remote-login routes.
+
+            True when the request was answered here (refused).  The gate stays closed
+            after the session ended, so a tunnel left up reaches nothing.
+            """
+            if (self.tunneled() and not self.public_host() and service.remote_login_started()
+                    and path not in remote_login.PUBLIC_PATHS):
+                self.reply(404,{'error':'찾을 수 없습니다.'})
+                return True
+            return False
+
+        def remote_login_cookie(self):
+            cookie=SimpleCookie()
+            try:cookie.load(self.headers.get('Cookie',''))
+            except Exception:return ''
+            return cookie[remote_login.COOKIE_NAME].value if remote_login.COOKIE_NAME in cookie else ''
+
+        def remote_login_route(self,method,parts):
+            """The phone's login page and its APIs (#939); None when the path is not one of them.
+
+            Exact code or 404; the page binds its client through a cookie and every
+            API call must carry it.  Nothing a request carries is logged.
+            """
+            path=parts.path
+            if path not in remote_login.PUBLIC_PATHS:return None
+            session=service.remote_login_session()
+            if session is None or not session.code_ok(parse_qs(parts.query).get('code',[''])[0]):
+                return self.reply(404,{'error':'로그인 링크가 만료되었거나 올바르지 않습니다.'})
+            cookie=self.remote_login_cookie()
+            if path==remote_login.PAGE_PATH and method=='GET':
+                issued=session.open_page(cookie)
+                if issued is False:return self.reply(404,{'error':'로그인 링크가 만료되었거나 올바르지 않습니다.'})
+                nonce=secrets.token_urlsafe(16)
+                return self.reply(200,remote_login.page(session,nonce).encode(),'text/html; charset=utf-8',
+                                  cookie=remote_login.cookie_header(issued) if issued else None,csp=remote_login.page_csp(nonce))
+            if not session.client_ok(cookie):return self.reply(404,{'error':'로그인 링크가 만료되었거나 올바르지 않습니다.'})
+            if path==remote_login.FRAME_PATH and method=='GET':
+                frame=session.frame()
+                if frame is None:return self.reply(404,{'error':'로그인 창이 닫혔습니다.'})
+                return self.reply(200,frame)
+            if path==remote_login.INPUT_PATH and method=='POST':
+                try:
+                    length=int(self.headers.get('Content-Length','0'))
+                    if not 0<length<=4096:raise ValueError
+                    body=json.loads(self.rfile.read(length))
+                except (TypeError,ValueError):
+                    return self.reply(400,{'error':'요청이 올바르지 않습니다.'})
+                return self.reply(200,{'ok':bool(session.input(body))})
+            if path==remote_login.DONE_PATH and method=='POST':
+                return self.reply(200,{'ok':bool(session.finish('done'))})
+            return self.reply(405,{'error':'지원하지 않는 요청입니다.'})
+
         def cookie(self,token,max_age=86400):
             secure='; Secure' if os.environ.get('AGENTOS_SECURE_COOKIE')=='1' or public_hosts else ''
             return f'agentos_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}{secure}'
@@ -636,8 +691,9 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if not self.valid_host():return
             parts=urlsplit(self.path)
             path=parts.path
-            if self.family_gate(path):return
+            if self.family_gate(path) or self.remote_login_gate(path):return
             if path in family_setup.PUBLIC_PATHS:return self.family_route('GET',parts)
+            if path in remote_login.PUBLIC_PATHS:return self.remote_login_route('GET',parts)
             if path=='/' and self.public_host() and public_access_token:
                 token=parse_qs(parts.query).get('access',[''])[0]
                 nonlocal pairing_available
@@ -809,8 +865,9 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             self.reply(404,{'error':'경로를 찾을 수 없습니다.'})
 
         def do_DELETE(self):
-            if not self.valid_host() or not self.auth():return
+            if not self.valid_host():return
             path=urlsplit(self.path).path
+            if self.remote_login_gate(path) or not self.auth():return
             parts=path.split('/')
             if len(parts)==5 and parts[:3]==['','api','personal-space'] and parts[3] in ('memories','results'):
                 return self.reply(200,store.delete_personal_space_item(parts[3],parts[4]))
@@ -819,8 +876,9 @@ def make_handler(service, public_hosts=(), public_access_token=''):
         def do_POST(self):
             if not self.valid_host():return
             parts=urlsplit(self.path)
-            if self.family_gate(parts.path):return
+            if self.family_gate(parts.path) or self.remote_login_gate(parts.path):return
             if parts.path in family_setup.PUBLIC_PATHS or parts.path in ('/api/family/telegram-token',family_share.SHARE_PATH):return self.family_route('POST',parts)
+            if parts.path in remote_login.PUBLIC_PATHS:return self.remote_login_route('POST',parts)
             if parts.path==ISOLATED_MCP_PATH:
                 # This is an internal engine callback, not a browser API.  A
                 # session cookie never authorizes it and public tunnel hosts

@@ -1,0 +1,537 @@
+"""BROWSE-07 (#939): sign in from the phone through a one-time link that drives the Mac's login window.
+
+Evidence classes, named separately:
+
+* unit (any platform): the worker's remote ops refuse ``not_shown`` while the
+  window is parked (the ``Worker`` methods over a bare instance, no PyObjC);
+  input validation; the session's code, binding and expiry rules;
+* model-free local HTTP integration (fake login-window driver, fake ngrok
+  process, temporary stores): the routes through a tunnel (forwarding
+  headers), the cookie binding, 완료 saving the jar and closing, expiry
+  closing, every other route refused through the tunnel, typed text reaching
+  the driver and no log, and the Telegram button sending the link to the
+  paired owner's chat only;
+* not here: the real WebKit snapshot, native press/key and ``insertText``
+  paths (macOS + PyObjC, opt-in real-browser tests), and a live ngrok tunnel.
+"""
+import io
+import json
+import logging
+import tempfile
+import threading
+import time
+import unittest
+from http.cookies import SimpleCookie
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+from personal_agent import browser_session as bs
+from personal_agent import browser_worker
+from personal_agent import remote_login
+from personal_agent.browser_jar import JAR_NAME, CookieJar, MemoryKey
+from personal_agent.providers import ModelAdapter
+from personal_agent.quickstart import make_handler
+from personal_agent.quickstart_service import AgentService, BROWSER_LOGIN_PHONE_LABEL
+from personal_agent.quickstart_store import QuickStore
+
+CHAT, GENERATION = 42, 'gen-939'
+SECRET_TEXT = 'hunter2-never-logged'
+
+
+def wait_until(condition, seconds=5.0):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.02)
+    return condition()
+
+
+class WindowDriver:
+    """A fake login-window driver: shows, answers frames, records remote inputs, exports a cookie once 'signed in'."""
+
+    def __init__(self, log):
+        self.log = log
+        self.open = False
+        self.sites = {}
+        self.navigated = 0
+        self.frames = 0
+
+    def alive(self):
+        return True
+
+    def show(self, url, timeout):
+        self.open = True
+        self.log.append(('show', url))
+        return url
+
+    def is_open(self):
+        return self.open
+
+    def navigations(self):
+        return self.navigated
+
+    def frame(self):
+        if not self.open:
+            raise bs.WorkerError('not_shown')
+        self.frames += 1
+        return {'jpeg': 'AAAA', 'width': 1280.0, 'height': 900.0}
+
+    def remote_input(self, kind, **fields):
+        if not self.open:
+            raise bs.WorkerError('not_shown')
+        self.log.append(('remote_' + kind, fields))
+        if kind == 'key' and fields.get('key') == 'Enter':
+            # The sign-in: the site now holds a session cookie.
+            self.navigated += 1
+            self.sites = {'fixture.test': [{'name': 'sid', 'value': 'session-' + str(time.time_ns()), 'domain': 'fixture.test',
+                                            'path': '/', 'expires': None, 'secure': True, 'http_only': True, 'same_site': None}]}
+
+    def cookies_export(self):
+        return dict(self.sites), []
+
+    def close(self):
+        self.open = False
+        self.log.append(('close',))
+
+
+class FakeTunnel:
+    """``subprocess.Popen`` for ngrok: reports one public address, records ``terminate``."""
+
+    def __init__(self):
+        self.processes = []
+
+    def __call__(self, argv, **kwargs):
+        tunnel = self
+
+        class Process:
+            stdout = iter([json.dumps({'msg': 'started tunnel', 'url': 'https://abc123.ngrok-free.app'}) + '\n'])
+            terminated = False
+
+            def terminate(inner):
+                inner.terminated = True
+        process = Process()
+        process.argv = argv
+        tunnel.processes.append(process)
+        return process
+
+
+def telegram_transport(calls):
+    def transport(url, body=None, headers=None, timeout=60):
+        method = url.rsplit('/', 1)[-1]
+        calls.append((method, body))
+        if method == 'sendMessage':
+            return {'ok': True, 'result': {'message_id': 9000 + len(calls)}}
+        if method == 'getMe':
+            return {'ok': True, 'result': {'username': 'owner_test_bot'}}
+        return {'ok': True, 'result': True}
+    return transport
+
+
+# ---------------------------------------------------------------- unit: the worker refuses while parked
+
+class WorkerOpsWhileParked(unittest.TestCase):
+    """The remote ops never touch WebKit while the window is parked: ``not_shown`` before anything else."""
+
+    def worker(self):
+        worker = browser_worker.Worker.__new__(browser_worker.Worker)
+        worker.owner_visible = False
+        worker.pending = {}
+        worker.popups = []
+        worker.replies = []
+        worker.emit = worker.replies.append
+        return worker
+
+    def test_every_remote_op_answers_not_shown_while_the_window_is_parked(self):
+        worker = self.worker()
+        for op, command in (('frame', {}), ('remote_tap', {'x': 1, 'y': 1}), ('remote_text', {'text': 'x'}),
+                            ('remote_key', {'key': 'Enter'}), ('remote_nav', {'action': 'back'})):
+            with self.subTest(op=op):
+                worker.handle({'id': 7, 'op': op, **command})
+                self.assertEqual(worker.replies[-1], {'id': 7, 'ok': False, 'error': 'not_shown'})
+
+    def test_the_keys_and_actions_the_phone_offers_are_the_ones_the_worker_knows(self):
+        self.assertEqual(set(remote_login.KEYS), set(browser_worker.REMOTE_KEYS))
+        self.assertEqual(set(remote_login.NAV_ACTIONS), set(browser_worker.REMOTE_NAV_ACTIONS))
+        self.assertEqual(set(remote_login.INPUT_KINDS), set(bs.REMOTE_INPUT_KINDS))
+
+
+class InputValidation(unittest.TestCase):
+    def test_only_the_four_shapes_pass_and_bounded(self):
+        self.assertEqual(remote_login.validate_input({'type': 'tap', 'x': 10, 'y': 20.5}), ('tap', {'x': 10.0, 'y': 20.5}))
+        self.assertEqual(remote_login.validate_input({'type': 'text', 'text': 'abc'}), ('text', {'text': 'abc'}))
+        self.assertEqual(remote_login.validate_input({'type': 'key', 'key': 'Backspace'}), ('key', {'key': 'Backspace'}))
+        self.assertEqual(remote_login.validate_input({'type': 'nav', 'action': 'reload'}), ('nav', {'action': 'reload'}))
+        for bad in ({'type': 'tap', 'x': -1, 'y': 0}, {'type': 'tap', 'x': True, 'y': 1}, {'type': 'text', 'text': ''},
+                    {'type': 'text', 'text': 'a\nb'}, {'type': 'text', 'text': 'x' * (remote_login.TEXT_LIMIT + 1)},
+                    {'type': 'key', 'key': 'F5'}, {'type': 'nav', 'action': 'forward'}, {'type': 'script'}, [], None):
+            with self.subTest(bad=bad):
+                self.assertIsNone(remote_login.validate_input(bad))
+
+
+# ---------------------------------------------------------------- the routes over a local server
+
+class RemoteLoginSurface(unittest.TestCase):
+    """The owner's instance with an explicit login window open and a remote session for it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.store = QuickStore(Path(self.tmp.name) / 'data')
+        self.calls, self.driver_log, self.drivers = [], [], []
+
+        def launcher(profile_dir, headless):
+            driver = WindowDriver(self.driver_log)
+            self.drivers.append(driver)
+            return driver
+        profile_dir = Path(self.tmp.name) / 'profile'
+        self.jar = CookieJar(profile_dir / JAR_NAME, MemoryKey())
+        self.profile = bs.BrowserProfile(profile_dir, launcher=launcher, jar=self.jar)
+        self.service = AgentService(self.store, ModelAdapter(lambda *a, **k: {}), telegram_transport(self.calls),
+                                    browser_profile=self.profile)
+        self.store.put('telegram', {'enabled': True, 'user_id': CHAT, 'generation': GENERATION, 'cursor': 0})
+        self.tunnel = FakeTunnel()
+        self.service.remote_login_popen = self.tunnel
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(self.service))
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        self.addCleanup(self.close_windows)
+        self.service.local_server_port = self.server.server_port
+        self.base = f'http://127.0.0.1:{self.server.server_port}'
+
+    def close_windows(self):
+        session = self.service.remote_login_session()
+        if session is not None:
+            session.finish('closed')
+        for driver in self.drivers:
+            driver.open = False
+
+    def request(self, path, method='GET', body=None, tunneled=True, cookie=None):
+        headers = {}
+        if tunneled:
+            headers.update({'X-Forwarded-For': '203.0.113.9', 'X-Forwarded-Proto': 'https'})
+        if cookie:
+            headers['Cookie'] = f'{remote_login.COOKIE_NAME}={cookie}'
+        data = json.dumps(body).encode() if body is not None else (b'' if method == 'POST' else None)
+        if body is not None:
+            headers['Content-Type'] = 'application/json'
+        try:
+            with urlopen(Request(self.base + path, data=data, method=method, headers=headers), timeout=10) as response:
+                return response.status, response.read(), dict(response.headers)
+        except HTTPError as error:
+            return error.code, error.read(), dict(error.headers)
+
+    def open_window(self, phone=True):
+        """An explicit login request (the Settings path) with ``phone``: the window shows, the link is sent."""
+        receipt = self.service.open_browser_for_login({'url': 'https://fixture.test/login', 'phone': phone})
+        self.assertEqual(receipt['state'], 'opening')
+        self.assertTrue(wait_until(lambda: self.service.remote_login_session() is not None and
+                                   self.service.remote_login_session().link is not None), 'the session started')
+        return self.service.remote_login_session()
+
+    def code(self, session):
+        return '?code=' + session.code
+
+    def bound_cookie(self, session):
+        """Open the page as the phone and make its first API call: the cookie the page set is now bound."""
+        status, body, headers = self.request(remote_login.PAGE_PATH + self.code(session))
+        self.assertEqual(status, 200)
+        jar = SimpleCookie()
+        jar.load(headers['Set-Cookie'])
+        morsel = jar[remote_login.COOKIE_NAME]
+        self.assertTrue(morsel['httponly'])
+        self.assertTrue(morsel['secure'])
+        self.assertEqual(morsel['samesite'], 'Strict')
+        cookie = morsel.value
+        self.assertEqual(self.request(remote_login.FRAME_PATH + self.code(session), cookie=cookie)[0], 200)
+        return cookie
+
+    # -- the link ---------------------------------------------------------------
+    def test_the_link_goes_to_the_owner_chat_only_without_a_preview_and_carries_the_code(self):
+        session = self.open_window()
+        sends = [body for method, body in self.calls if method == 'sendMessage']
+        self.assertEqual(len(sends), 1)
+        self.assertEqual(sends[0]['chat_id'], CHAT)
+        self.assertIn(session.link, sends[0]['text'])
+        self.assertEqual(sends[0]['link_preview_options'], {'is_disabled': True})
+        self.assertTrue(session.link.startswith('https://abc123.ngrok-free.app/remote-login?code='))
+        self.assertGreaterEqual(len(session.code), 43, 'a 32-byte urlsafe code')
+        self.assertIn('--host-header=rewrite', self.tunnel.processes[0].argv)
+        self.assertIn('--inspect=false', self.tunnel.processes[0].argv)
+        self.assertLessEqual(session.expires - session.created, remote_login.SESSION_SECONDS)
+
+    def test_a_wrong_or_missing_code_is_404_on_every_route(self):
+        session = self.open_window()
+        cookie = self.bound_cookie(session)
+        for path, method in ((remote_login.PAGE_PATH, 'GET'), (remote_login.FRAME_PATH, 'GET'),
+                             (remote_login.INPUT_PATH, 'POST'), (remote_login.DONE_PATH, 'POST')):
+            for query in ('', '?code=', '?code=wrong', '?code=' + session.code[:-1] + 'x', '?code=%C3%A9'):
+                with self.subTest(path=path, query=query):
+                    body = {'type': 'key', 'key': 'Enter'} if method == 'POST' else None
+                    self.assertEqual(self.request(path + query, method, body, cookie=cookie)[0], 404)
+        self.assertTrue(session.alive(), 'guessing never closes the session')
+        self.assertFalse([entry for entry in self.driver_log if entry[0].startswith('remote_')], 'nothing reached the window')
+
+    def test_a_second_client_without_the_bound_cookie_is_404(self):
+        session = self.open_window()
+        cookie = self.bound_cookie(session)
+        for path, method in ((remote_login.PAGE_PATH, 'GET'), (remote_login.FRAME_PATH, 'GET'),
+                             (remote_login.INPUT_PATH, 'POST'), (remote_login.DONE_PATH, 'POST')):
+            with self.subTest(path=path, who='no cookie'):
+                self.assertEqual(self.request(path + self.code(session), method, {} if method == 'POST' else None)[0], 404)
+            with self.subTest(path=path, who='another cookie'):
+                self.assertEqual(self.request(path + self.code(session), method, {} if method == 'POST' else None, cookie='x' * 43)[0], 404)
+        # The bound phone still works, and reloading its page sets no new cookie.
+        status, _body, headers = self.request(remote_login.PAGE_PATH + self.code(session), cookie=cookie)
+        self.assertEqual(status, 200)
+        self.assertNotIn('Set-Cookie', headers)
+        self.assertEqual(self.request(remote_login.FRAME_PATH + self.code(session), cookie=cookie)[0], 200)
+        self.assertTrue(session.alive())
+
+    def test_a_link_preview_fetch_before_the_owner_opens_the_page_does_not_bind(self):
+        """Telegram's preview fetcher (or any GET that never runs the page) must not lock the owner out."""
+        session = self.open_window()
+        status, _body, headers = self.request(remote_login.PAGE_PATH + self.code(session))
+        self.assertEqual(status, 200)
+        preview = SimpleCookie()
+        preview.load(headers['Set-Cookie'])
+        preview_cookie = preview[remote_login.COOKIE_NAME].value
+        cookie = self.bound_cookie(session)   # the owner's page, opened later, binds on its first API call
+        self.assertNotEqual(cookie, preview_cookie)
+        self.assertEqual(self.request(remote_login.FRAME_PATH + self.code(session), cookie=preview_cookie)[0], 404)
+        self.assertEqual(self.request(remote_login.PAGE_PATH + self.code(session), cookie=preview_cookie)[0], 404)
+
+    # -- the page -----------------------------------------------------------------
+    def test_the_page_is_self_contained_korean_and_talks_only_to_its_own_api(self):
+        session = self.open_window()
+        status, body, headers = self.request(remote_login.PAGE_PATH + self.code(session))
+        self.assertEqual(status, 200)
+        page = body.decode()
+        csp = headers['Content-Security-Policy']
+        self.assertIn("default-src 'none'", csp)
+        self.assertIn("connect-src 'self'", csp)
+        self.assertIn("form-action 'none'", csp)
+        self.assertIn('nonce-', csp)
+        for label in ('입력', '엔터', '←지우기', '뒤로', '새로고침', '완료'):
+            self.assertIn(label, page)
+        self.assertIn('fixture.test', page)
+        self.assertNotIn('http://', page.split('<script')[1], 'no external resource')
+        self.assertNotIn('https://', page.split('<script')[1])
+        self.assertIn(remote_login.INPUT_PATH, page)
+        self.assertIn('setInterval(frame,500)', page)
+        self.assertNotIn('<link', page)
+
+    # -- driving the window ----------------------------------------------------------
+    def test_frames_come_from_the_window_each_time_and_inputs_reach_it_with_no_log(self):
+        session = self.open_window()
+        cookie = self.bound_cookie(session)
+        driver = self.drivers[-1]
+        frames_before = driver.frames
+        with self.assertLogs('personal_agent', level='DEBUG') as logs:
+            status, body, _ = self.request(remote_login.FRAME_PATH + self.code(session), cookie=cookie)
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(body), {'jpeg': 'AAAA', 'width': 1280.0, 'height': 900.0})
+            self.assertEqual(driver.frames, frames_before + 1, 'read from the window now, never cached')
+            for body in ({'type': 'tap', 'x': 640, 'y': 300}, {'type': 'text', 'text': SECRET_TEXT},
+                         {'type': 'key', 'key': 'Backspace'}, {'type': 'nav', 'action': 'reload'}):
+                status, answer, _ = self.request(remote_login.INPUT_PATH + self.code(session), 'POST', body, cookie=cookie)
+                self.assertEqual((status, json.loads(answer)), (200, {'ok': True}))
+            self.assertEqual(self.request(remote_login.INPUT_PATH + self.code(session), 'POST', {'type': 'key', 'key': 'F5'}, cookie=cookie)[1],
+                             b'{"ok": false}')
+            self.assertEqual(self.request(remote_login.INPUT_PATH + self.code(session), 'POST', {'type': 'text', 'text': ''}, cookie=cookie)[1],
+                             b'{"ok": false}')
+            # A log line exists (content-free), so assertLogs has something to inspect.
+            logging.getLogger('personal_agent.remote_login').info('remote login probe site=%s', session.site)
+        remote = [entry for entry in self.driver_log if entry[0].startswith('remote_')]
+        self.assertEqual(remote, [('remote_tap', {'x': 640.0, 'y': 300.0}), ('remote_text', {'text': SECRET_TEXT}),
+                                  ('remote_key', {'key': 'Backspace'}), ('remote_nav', {'action': 'reload'})])
+        self.assertNotIn(SECRET_TEXT, '\n'.join(logs.output))
+        self.assertNotIn('640', '\n'.join(logs.output))
+        self.assertFalse([line for line in logs.output if 'AAAA' in line], 'no frame in a log')
+        for line in logs.output:
+            if 'remote login' in line:
+                self.assertRegex(line, r'remote login \w+ site=fixture\.test$')
+        # Nothing of the input is in the store either.
+        with self.store.db() as db:
+            tables = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+            for table in tables:
+                for row in db.execute(f'SELECT * FROM {table}'):
+                    self.assertNotIn(SECRET_TEXT, json.dumps([str(value) for value in row]))
+        self.assertFalse(hasattr(session, 'frames') or hasattr(session, 'last_frame'), 'a session keeps no frame')
+
+    def test_done_closes_the_window_saves_the_jar_and_stops_the_tunnel(self):
+        session = self.open_window()
+        cookie = self.bound_cookie(session)
+        driver = self.drivers[-1]
+        self.request(remote_login.INPUT_PATH + self.code(session), 'POST', {'type': 'key', 'key': 'Enter'}, cookie=cookie)
+        self.assertTrue(driver.sites, 'the fake sign-in set a session cookie')
+        status, body, _ = self.request(remote_login.DONE_PATH + self.code(session), 'POST', {}, cookie=cookie)
+        self.assertEqual((status, json.loads(body)), (200, {'ok': True}))
+        self.assertTrue(wait_until(lambda: self.profile.login_window_outcome(session.window) is not None), 'the window closed')
+        self.assertEqual(self.profile.login_window_outcome(session.window), ('closed', True), 'closed by request and saved')
+        self.assertIn('fixture.test', {site for site in self.jar.import_rows()[0]}, 'the session is in the jar')
+        self.assertTrue(self.tunnel.processes[0].terminated, 'the tunnel stopped')
+        self.assertFalse(session.alive())
+        self.assertEqual(session.reason, 'done')
+        self.assertIsNone(self.service.remote_login_session())
+        # Afterwards the link is dead on every route, and a second 완료 does nothing.
+        for path, method in ((remote_login.PAGE_PATH, 'GET'), (remote_login.FRAME_PATH, 'GET'),
+                             (remote_login.INPUT_PATH, 'POST'), (remote_login.DONE_PATH, 'POST')):
+            self.assertEqual(self.request(path + self.code(session), method, {} if method == 'POST' else None, cookie=cookie)[0], 404)
+        self.assertFalse(session.finish('done'))
+
+    def test_expiry_closes_the_window_and_the_tunnel(self):
+        session = self.open_window()
+        cookie = self.bound_cookie(session)
+        session.expires = session.clock() - 1   # the fake clock moves: the watcher sees it within half a second
+        self.assertTrue(wait_until(lambda: not session.alive()), 'the session ended')
+        self.assertEqual(session.reason, 'expired')
+        self.assertTrue(self.tunnel.processes[0].terminated)
+        self.assertTrue(wait_until(lambda: self.profile.login_window_outcome(session.window) is not None), 'the window closed')
+        self.assertEqual(self.profile.login_window_outcome(session.window)[0], 'closed')
+        self.assertEqual(self.request(remote_login.FRAME_PATH + self.code(session), cookie=cookie)[0], 404)
+        self.assertEqual(self.request(remote_login.PAGE_PATH + self.code(session), cookie=cookie)[0], 404)
+
+    def test_a_mac_close_ends_the_session_and_stops_the_tunnel(self):
+        session = self.open_window()
+        cookie = self.bound_cookie(session)
+        self.drivers[-1].open = False   # the owner closed the window on the Mac
+        self.assertTrue(wait_until(lambda: not session.alive()))
+        self.assertEqual(session.reason, 'closed')
+        self.assertTrue(self.tunnel.processes[0].terminated)
+        self.assertEqual(self.request(remote_login.FRAME_PATH + self.code(session), cookie=cookie)[0], 404)
+
+    def test_one_session_at_a_time(self):
+        self.open_window()
+        with self.assertRaises(ValueError) as caught:
+            self.service.open_browser_for_login({'url': 'https://fixture.test/login', 'phone': True})
+        self.assertEqual(str(caught.exception), remote_login.BUSY_TEXT)
+        self.assertEqual(len(self.tunnel.processes), 1)
+
+    # -- the tunnel gate ---------------------------------------------------------------
+    def test_through_the_tunnel_every_other_route_is_refused_while_and_after_the_session(self):
+        session = self.open_window()
+        others = ('/', '/api/status', '/api/settings', '/healthz', '/api/claim', '/family-setup', '/api/browser/login')
+        for path in others:
+            with self.subTest(path=path, when='open'):
+                self.assertEqual(self.request(path)[0], 404)
+                self.assertEqual(self.request(path, 'POST', {})[0], 404)
+                self.assertEqual(self.request(path, 'DELETE')[0], 404)
+        self.assertEqual(self.request(remote_login.PAGE_PATH + self.code(session))[0], 200)
+        session.finish('done')
+        for path in others:
+            with self.subTest(path=path, when='after'):
+                self.assertEqual(self.request(path)[0], 404, 'a tunnel left up reaches nothing')
+        self.assertNotEqual(self.request('/healthz', tunneled=False)[0], 404, 'this Mac itself is unaffected')
+
+    def test_before_any_session_the_tunnel_gate_is_open_as_today(self):
+        self.assertFalse(self.service.remote_login_started())
+        self.assertNotEqual(self.request('/healthz')[0], 404)
+        self.assertEqual(self.request(remote_login.PAGE_PATH + '?code=x')[0], 404)
+
+    # -- the explicit request's preconditions ------------------------------------------
+    def test_phone_needs_a_paired_telegram(self):
+        self.store.put('telegram', {})
+        with self.assertRaises(ValueError):
+            self.service.open_browser_for_login({'url': 'https://fixture.test/login', 'phone': True})
+        self.assertEqual(self.drivers, [], 'no window was opened')
+
+    def test_a_link_that_cannot_be_sent_closes_the_tunnel_and_the_window(self):
+        self.calls.clear()
+        failing = []
+
+        def transport(url, body=None, headers=None, timeout=60):
+            if url.endswith('/sendMessage'):
+                failing.append(body)
+                raise OSError('telegram down')
+            return {'ok': True, 'result': True}
+        self.service.telegram_transport = transport
+        receipt = self.service.open_browser_for_login({'url': 'https://fixture.test/login', 'phone': True})
+        self.assertEqual(receipt['state'], 'opening')
+        self.assertTrue(wait_until(lambda: failing and self.tunnel.processes and self.tunnel.processes[0].terminated), 'closed')
+        self.assertIsNone(self.service.remote_login_session())
+        self.assertTrue(wait_until(lambda: not self.profile.status()['login_window_open']), 'the window closed too')
+
+
+# ---------------------------------------------------------------- the in-flow prompt's button (#709 + #939)
+
+def _flow_harness():
+    from test_flow_login import LoginHarness
+    return LoginHarness
+
+
+class PhoneButton(_flow_harness()):
+    """The Telegram login prompt's 휴대폰에서 로그인 starts the session for that Work's window."""
+
+    def setUp(self):
+        super().setUp()
+        self.tunnel = FakeTunnel()
+        self.service.remote_login_popen = self.tunnel
+        self.service.local_server_port = 8787
+        self.addCleanup(self.end_session)
+
+    def end_session(self):
+        session = self.service.remote_login_session()
+        if session is not None:
+            session.finish('closed')
+
+    def link_messages(self):
+        return [body for method, body in self.calls if method == 'sendMessage' and 'remote-login?code=' in str(body.get('text'))]
+
+    def test_the_prompt_offers_the_phone_and_the_link_goes_to_the_owner_chat_only(self):
+        from test_flow_login import CHAT as FLOW_CHAT
+        job_id, prompt, buttons, notification = self.login_work()
+        rows = prompt['reply_markup']['inline_keyboard']
+        self.assertEqual(rows[1], [{'text': BROWSER_LOGIN_PHONE_LABEL, 'callback_data': f"p7l:{notification['id']}:phone"}])
+        # A stranger's tap, and a tap on another message: nothing starts, nothing is sent.
+        self.tap(f"p7l:{notification['id']}:phone", notification['message_id'], sender=777)
+        self.tap(f"p7l:{notification['id']}:phone", notification['message_id'] + 1)
+        self.assertEqual(self.link_messages(), [])
+        self.assertIsNone(self.service.remote_login_session())
+        self.assertEqual(self.tunnel.processes, [])
+        # The owner's tap on the prompt itself.
+        self.tap(f"p7l:{notification['id']}:phone", notification['message_id'])
+        self.assertTrue(wait_until(lambda: self.link_messages()), 'the link was sent')
+        links = self.link_messages()
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0]['chat_id'], FLOW_CHAT)
+        self.assertEqual({body['chat_id'] for method, body in self.calls if method == 'sendMessage'}, {FLOW_CHAT},
+                         'every message of this flow went to the paired owner chat')
+        session = self.service.remote_login_session()
+        self.assertIsNotNone(session)
+        self.assertEqual(session.window, (self.service._browser_login(job_id) or {}).get('window'))
+        self.assertEqual(session.site, 'fixture.test')
+        self.assertEqual(self.state(job_id), 'offered', 'the login is still offered; the phone drives its window')
+        # A second tap while the session runs: refused, no second tunnel.
+        self.tap(f"p7l:{notification['id']}:phone", notification['message_id'])
+        self.assertEqual(len(self.tunnel.processes), 1)
+        self.assertEqual(len(self.link_messages()), 1)
+
+    def test_done_from_the_phone_settles_the_login_as_login_complete(self):
+        job_id, prompt, buttons, notification = self.login_work()
+        self.tap(f"p7l:{notification['id']}:phone", notification['message_id'])
+        self.assertTrue(wait_until(lambda: self.service.remote_login_session() is not None and self.service.remote_login_session().link))
+        session = self.service.remote_login_session()
+        self.window().login()   # the owner signed in through the phone
+        self.assertTrue(session.finish('done'))
+        self.assertEqual(self.settle(job_id), 'resumed')
+        self.assertTrue(self.tunnel.processes[0].terminated)
+        self.assertEqual(self.store.job(job_id)['status'], 'queued', 'the Work continues once')
+
+    def test_a_skip_on_telegram_ends_the_phone_session(self):
+        job_id, prompt, buttons, notification = self.login_work()
+        self.tap(f"p7l:{notification['id']}:phone", notification['message_id'])
+        self.assertTrue(wait_until(lambda: self.service.remote_login_session() is not None and self.service.remote_login_session().link))
+        session = self.service.remote_login_session()
+        self.tap(f"p7l:{notification['id']}:skip", notification['message_id'])
+        self.assertEqual(self.settle(job_id), 'skipped')
+        self.assertTrue(wait_until(lambda: not session.alive()))
+        self.assertEqual(session.reason, 'closed')
+        self.assertTrue(self.tunnel.processes[0].terminated)
+
+
+if __name__ == '__main__':
+    unittest.main()

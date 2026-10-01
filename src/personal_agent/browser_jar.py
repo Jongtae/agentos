@@ -238,6 +238,20 @@ class CookieJar:
                     if isinstance(row, dict) and not (isinstance(row.get('expires'), (int, float)) and row['expires'] <= now)]
             return set(sites), rows
 
+    def site_rows(self, site):
+        """One site's unexpired cookie rows, values included (#934: a family push or a worker import; never a log).
+
+        Raises ``JarError`` when the jar exists but cannot be read; an absent
+        jar or an unknown site is ``[]``.
+        """
+        with self._lock:
+            entry = self._read()['sites'].get(str(site or ''))
+            now = self.clock()
+        if not isinstance(entry, dict):
+            return []
+        return [row for row in entry.get('cookies') or [] if isinstance(row, dict)
+                and not (isinstance(row.get('expires'), (int, float)) and row['expires'] <= now)]
+
     def save_export(self, grouped, hosts=(), imported=None):
         """Merge a worker export ``{site: [cookie rows]}`` into the jar.
 

@@ -93,13 +93,17 @@ SETTINGS = {"current_context": ("enabled", "timezone"), "judgment_ai": ("mode", 
             # #805 owner-model upkeep: its pause switch and rolling 24-hour call cap.
             "owner_model": ("enabled", "daily_calls"),
             # #912: a family member's own agent, created by asking the assistant (FAMILY-02 #897).
-            "family": ("add",)}
+            # #934: the owner shares (and stops sharing) one signed-in site with one of them.
+            "family": ("add", "share_site", "unshare_site")}
 SETTING_LABELS = {"enabled": "사용", "timezone": "시간대", "mode": "방식", "model": "모델", "route": "경로",
-                  "daily_calls": "하루 판단 횟수", "add": "새로 만들기"}
+                  "daily_calls": "하루 판단 횟수", "add": "새로 만들기", "share_site": "로그인 공유", "unshare_site": "공유 그만"}
+#: #934: the value of a share is "<family assistant>|<site>"; a stop may name the site alone.
+FAMILY_SHARE_SETTINGS = frozenset({("family", "share_site"), ("family", "unshare_site")})
+FAMILY_SHARE_NOTE = "비밀번호는 넘기지 않고 지금 로그인된 세션만 전달해요. 내 세션이 갱신되면 따라가고, 결제는 계정 주인만 할 수 있어요."
 VALUE_LABELS = {"on": "켜짐", "off": "꺼짐", "follow_main": "기본 AI 따라가기", "explicit": "따로 지정"}
 JUDGMENT_MODE_LABELS = {"off": "사용 안 함"}
 UNKNOWN_SETTING_MESSAGE = ("대화로 바꿀 수 있는 설정이 아닙니다. 현재 맥락(enabled, timezone), 판단 AI(mode, model), "
-                           "기본 AI(route, model), 알아 두기(enabled, daily_calls), 가족 비서(add)만 바꿀 수 있습니다. API 키, 토큰, 로그인, 엔드포인트는 설정 화면에서 직접 입력하세요.")
+                           "기본 AI(route, model), 알아 두기(enabled, daily_calls), 가족 비서(add, share_site, unshare_site)만 바꿀 수 있습니다. API 키, 토큰, 로그인, 엔드포인트는 설정 화면에서 직접 입력하세요.")
 CREDENTIAL_VALUE_MESSAGE = ("자격 증명처럼 보이는 값은 대화로 설정하지 않습니다. API 키, 토큰, 로그인은 설정 화면에서 직접 입력하세요. "
                             "아무것도 바꾸지 않았습니다.")
 UNAVAILABLE_MESSAGE = "이 설정의 현재 상태를 확인하지 못해 바꾸지 않았습니다. 설정 화면에서 확인하세요."
@@ -246,12 +250,71 @@ class SettingsOrchestrator:
                                          format=f"0~{MAX_DAILY_CALLS} 사이의 정수(24시간 동안 판단 AI 호출 수)")}
 
     def _family(self):
-        """#912: the family members' agents on this Mac; ``add`` takes the new one's display name."""
-        from .family_setup import family_instances
-        names = family_instances()
-        return {"add": self._row("add", "", ", ".join(names) or "없음", None,
+        """#912: the family members' agents on this Mac; ``add`` takes the new one's display name.
+
+        #934: ``share_site`` / ``unshare_site`` carry the current shares (names
+        only) and, for the model to match the owner's words against, the
+        sites the owner is signed in to and the family assistants' names.
+        """
+        from . import family_share
+        names = family_share.instances()
+        shares = family_share.listing(self.store, names)
+        shared = ", ".join(f"{row['label']}: {row['site']}" + ("" if row["delivered"] else " (전달 대기)") for row in shares) or "없음"
+        signed_in = self._signed_in_sites()
+        return {"add": self._row("add", "", ", ".join(names.values()) or "없음", None,
                                  format="새 가족 비서의 텔레그램 이름(예: 아내 비서)",
-                                 note="내 AI 구독을 함께 쓰는 가족 전용 비서를 만들고, 가족에게 보낼 설정 링크를 텔레그램으로 드립니다.")}
+                                 note="내 AI 구독을 함께 쓰는 가족 전용 비서를 만들고, 가족에게 보낼 설정 링크를 텔레그램으로 드립니다."),
+                "share_site": self._row("share_site", "", shared, None, format="가족 비서 이름|사이트 주소(예: 아내 비서|example.com)",
+                                        note=FAMILY_SHARE_NOTE, assistants=names, signed_in_sites=signed_in,
+                                        shared=[{"instance": row["instance"], "site": row["site"]} for row in shares],
+                                        received_sites=sorted(family_share.received(self.store))),
+                "unshare_site": self._row("unshare_site", "", shared, None,
+                                          format="사이트 주소, 또는 가족 비서 이름|사이트 주소(예: example.com)",
+                                          shared=[{"instance": row["instance"], "site": row["site"]} for row in shares])}
+
+    def _signed_in_sites(self):
+        """The sites the owner's browser is signed in to, names only, from the profile's non-blocking view."""
+        profile = getattr(self.service, "browser_profile", None)
+        view = getattr(profile, "_jar_view", None)
+        if not callable(view):
+            return []
+        try:
+            _state, sessions = view()
+        except Exception:
+            return []
+        return [row["site"] for row in sessions if isinstance(row, dict) and row.get("site")]
+
+    @staticmethod
+    def _share_value(setting, value, row):
+        """``"<instance>|<site>"`` for a share or a stop (#934), resolved and normalized, or ``SettingsError``."""
+        from . import family_share
+        # Without a "|" the value is the site: a stop may name it alone; a share still needs the assistant.
+        who, _sep, where = value.rpartition("|")
+        try:
+            site = family_share.normalize_site(where)
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from None
+        shared = row[setting].get("shared") or []
+        if setting == "unshare_site" and not who.strip():
+            holders = [item["instance"] for item in shared if item["site"] == site]
+            if not holders:
+                raise SettingsError(f"{site} 로그인 세션은 공유하고 있지 않아요. 바꿀 것이 없어요.")
+            if len(holders) > 1:
+                raise SettingsError(f"{site}은(는) 여러 가족 비서({', '.join(holders)})와 공유 중이에요. 어느 비서인지 이름을 주세요.")
+            return f"{holders[0]}|{site}"
+        if setting == "share_site" and site in (row["share_site"].get("received_sites") or ()):
+            # Review P1-1: a session received from the owner is not this instance's to pass on.
+            raise SettingsError(family_share.NOT_YOURS_TEXT.format(site=site))
+        try:
+            instance = family_share.resolve_instance(who, row["share_site"].get("assistants") or {})
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from None
+        already = any(item["instance"] == instance and item["site"] == site for item in shared)
+        if setting == "share_site" and already:
+            raise SettingsError(f"{instance} 비서와 {site} 로그인 세션을 이미 공유하고 있어요. 바꿀 것이 없어요.")
+        if setting == "unshare_site" and not already:
+            raise SettingsError(f"{instance} 비서와 {site} 로그인 세션을 공유하고 있지 않아요. 바꿀 것이 없어요.")
+        return f"{instance}|{site}"
 
     def _model_lists(self):
         rows = self.store.config("decision_model_lists", {})
@@ -338,6 +401,8 @@ class SettingsOrchestrator:
             if not name or len(name) > 64 or any(ord(char) < 32 for char in value):
                 raise SettingsError("가족 비서 이름을 1~64자로 주세요. 아무것도 만들지 않았습니다.")
             return name, row
+        if (category, setting) in FAMILY_SHARE_SETTINGS:
+            return self._share_value(setting, value, row), row
         if setting == "daily_calls":
             from .owner_model import MAX_DAILY_CALLS
             if not value.isascii() or not value.isdigit() or not 0 <= int(value) <= MAX_DAILY_CALLS:
@@ -372,9 +437,16 @@ class SettingsOrchestrator:
         if after == before:
             raise SettingsError(f"{CATEGORY_LABELS[category]} {SETTING_LABELS[setting]}은(는) 이미 "
                                 f"{self._describe(category, setting, after, row)}입니다. 바꿀 것이 없습니다.")
-        summary = (f"가족 비서 '{after}'를 만듭니다" if (category, setting) == ("family", "add") else
-                   f"{CATEGORY_LABELS[category]} {SETTING_LABELS[setting]}: {self._describe(category, setting, before, row)}"
-                   f" → {self._describe(category, setting, after, row)}")
+        if (category, setting) == ("family", "add"):
+            summary = f"가족 비서 '{after}'를 만듭니다"
+        elif (category, setting) in FAMILY_SHARE_SETTINGS:
+            instance, _sep, site = after.partition("|")
+            label = (row["share_site"].get("assistants") or {}).get(instance, instance)
+            summary = (f"가족 비서 '{label}'에 {site} 로그인 세션을 공유합니다" if setting == "share_site"
+                       else f"가족 비서 '{label}'의 {site} 로그인 공유를 그만둡니다")
+        else:
+            summary = (f"{CATEGORY_LABELS[category]} {SETTING_LABELS[setting]}: {self._describe(category, setting, before, row)}"
+                       f" → {self._describe(category, setting, after, row)}")
         note = row[setting].get("note") or ""
         if (category, setting) == ("main_ai", "route"):
             destination = next((option.get("destination") for option in row["route"]["options"] if option["value"] == after), "")
@@ -402,6 +474,12 @@ class SettingsOrchestrator:
         category, setting, after = row["category"], row["setting"], row["after"]
         if category == "current_context":
             self.service.set_current_context({"enabled": after == "on"} if setting == "enabled" else {"timezone": after})
+        elif (category, setting) in FAMILY_SHARE_SETTINGS:
+            # #934: the push (or the revocation) runs now over loopback; the receipt's text is the answer.
+            instance, _sep, site = after.partition("|")
+            receipt = (self.service.share_site(instance, site) if setting == "share_site"
+                       else self.service.unshare_site(instance, site))
+            self.__dict__.setdefault("_apply_text", {})[row["id"]] = (receipt or {}).get("response")
         elif category == "family":
             # #912: runs in the background; the link, then the outcome, follow in the confirming conversation.
             notify = self.__dict__.get("_family_notify", {}).pop(row["id"], None)
@@ -472,6 +550,8 @@ class SettingsOrchestrator:
         self._settle(row["id"], outcome, outcome)
         response = ((FAMILY_REQUESTED_MESSAGE if row.get("category") == "family" else FOLLOW_REQUESTED_MESSAGE)
                     if outcome == "requested" else f"{row['effect']}(으)로 바꿨습니다.")
+        # #934: a share's receipt says what was delivered (names and counts); it replaces the generic line.
+        response = self.__dict__.get("_apply_text", {}).pop(row["id"], None) or response
         return {"state": outcome, "draft_id": row["id"], "target": row["target"], "before": row["before"],
                 "after": row["after"], "response": response}
 

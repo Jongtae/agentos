@@ -321,7 +321,7 @@ class FakeDriver:
             if target is not None:
                 self.values.setdefault(self.url, {})[target['index']] = value
 
-    def click(self, index, timeout, approved=False):
+    def click(self, index, timeout, approved=False, confirm_ok=False):
         """As the worker: a submit of a payment form is cancelled and held unless an approved
         step's allowance names that form (its own or its label's payment form, else any, #700)."""
         self.log.append(('click', index, timeout))
@@ -368,7 +368,7 @@ class FakeDriver:
         self._post(form, timeout)
         return {'navigated': True}
 
-    def type(self, index, text, timeout, approved=False):
+    def type(self, index, text, timeout, approved=False, confirm_ok=False):
         self.log.append(('type', index, text, timeout))
         self.approved.append(approved)
         self.values.setdefault(self.url, {})[index] = text

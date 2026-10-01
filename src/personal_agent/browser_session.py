@@ -254,6 +254,11 @@ DIALOG_OUTCOMES = {
 DIALOG_TEXT_LIMIT = 200
 
 
+def page_shows_payment(snapshot):
+    """#937 review: the page shows a payment field, so a confirmation there may commit a charge."""
+    return any(row.get('payment') for row in snapshot.get('_elements') or ())
+
+
 def step_dialogs(message):
     """The bounded ``[{kind, message, outcome}]`` a worker step reported (#936)."""
     rows = message.get('dialogs') if isinstance(message, dict) else None
@@ -989,7 +994,9 @@ class BrowserSession:
         # is in (a stored payment method or a fetch charge leaves no card field to see).
         approved = self._guard(binding, description, element['submit_guarded'] or element['commit'] or effect == 'payment')
         before = page_reference(snapshot.get('url'))
-        answer = self._input(lambda timeout: self._driver().click(element['index'], timeout, approved=approved),
+        confirm_ok = not page_shows_payment(snapshot)
+        answer = self._input(lambda timeout: self._driver().click(element['index'], timeout, approved=approved,
+                                                                  confirm_ok=confirm_ok),
                              description)
         if isinstance(answer, dict) and answer.get('navigated'):
             self._last_input = None   # #700: the page it was sent to is gone
@@ -1026,7 +1033,9 @@ class BrowserSession:
         # Typing presses the field first, so a label forwarding that press is guarded too.
         required = element['payment'] or element.get('forwards_payment') or effect == 'payment'
         approved = self._guard(binding, description, required)
-        answer = self._input(lambda timeout: self._driver().type(element['index'], text, timeout, approved=approved),
+        confirm_ok = not page_shows_payment(snapshot)
+        answer = self._input(lambda timeout: self._driver().type(element['index'], text, timeout, approved=approved,
+                                                                 confirm_ok=confirm_ok),
                     description)
         return self._with_dialogs(self._page_state(), answer)
 
@@ -1409,7 +1418,7 @@ class WebKitWorkerDriver:
             raise ToolError(TARGET_TEXT, 'target_unavailable')   # never an element nobody classified
         return {'index': index, 'expect': expect, 'tokens': sorted(PAYMENT_AUTOCOMPLETE)}
 
-    def click(self, index, timeout, approved=False):
+    def click(self, index, timeout, approved=False, confirm_ok=False):
         """``approved``: the session consumed an owner approval for this step.
 
         Only then does the worker let a submit of the target's payment form
@@ -1419,11 +1428,16 @@ class WebKitWorkerDriver:
         navigation (a same-view new-window load included) that the worker
         waited for (#736).  No URL crosses here; the next snapshot is mediated.
         """
-        message = self._request('click', timeout, approved=approved is True, **self._target(index))
+        # #937 review: a page's confirmation counts as approved only when the approval was for
+        # this press; ``confirm_ok`` is False on a page that shows a payment field.
+        message = self._request('click', timeout, approved=approved is True, dialog_approved=approved is True,
+                                confirm_ok=confirm_ok is True, **self._target(index))
         return {'navigated': bool(message.get('navigated')), 'dialogs': step_dialogs(message)}
 
-    def type(self, index, text, timeout, approved=False):
-        message = self._request('type', timeout, text=text, approved=approved is True, **self._target(index))
+    def type(self, index, text, timeout, approved=False, confirm_ok=False):
+        # #937 review: an approval to type into a field never confirms a payment question.
+        message = self._request('type', timeout, text=text, approved=approved is True, dialog_approved=False,
+                                confirm_ok=confirm_ok is True, **self._target(index))
         return {'dialogs': step_dialogs(message)}
 
     def release_submit(self, record, timeout):

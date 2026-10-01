@@ -865,7 +865,11 @@ class Worker:
             from .browser_session import commit_question
             if step is None:
                 answer, outcome = False, 'declined'
-            elif commit_question(text) and not step['approved']:
+            elif step['approved']:
+                # The owner approved this very press (a purchase control); its confirmation is part of it.
+                answer, outcome = True, 'accepted'
+            elif commit_question(text) or not step.get('confirm_ok'):
+                # #937 review: a payment question, or any question on a page that shows a payment field.
                 answer, outcome = False, 'declined_payment'
             else:
                 answer, outcome = True, 'accepted'
@@ -1269,7 +1273,8 @@ class Worker:
         nonce = uuid.uuid4().hex
         self.step_refused = self.refused_submits
         # #936: a page's own alert/confirm/prompt during this step is answered by its rule.
-        self.dialog_step = {'approved': command.get('approved') is True, 'dialogs': []}
+        self.dialog_step = {'approved': command.get('dialog_approved') is True,
+                            'confirm_ok': command.get('confirm_ok') is True, 'dialogs': []}
         # Only a step the parent consumed an owner approval for may let a
         # payment-form submit through (#698); its allowance ends by itself even
         # if the step's end never reaches the page (#700 review).
@@ -1350,7 +1355,7 @@ class Worker:
         self.held = None   # released at most once
         self.step_refused = self.refused_submits
         # #937 review P2: the owner approved exactly this submit, so its own confirmation may be answered.
-        self.dialog_step = {'approved': True, 'dialogs': []}
+        self.dialog_step = {'approved': True, 'confirm_ok': True, 'dialogs': []}
         self.deadline(ident, timeout, on_timeout=self.end_step)
         blocked_before, baseline = self.blocked, (self.main_navigations, self.landed)
 

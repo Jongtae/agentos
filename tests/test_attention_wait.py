@@ -134,14 +134,11 @@ class AttentionWaitTests(NativePresenceTestCase):
 
     # --- (c) a pending ask -----------------------------------------------------------
 
-    def test_pending_memory_ask_is_surfaced(self):
+    def test_a_pending_ask_is_never_surfaced_on_the_wait(self):
+        """#951 (owner 2026-10-01): an unrelated question typed into the animated wait read as fragments."""
         self.memory_ask()
         self.turn('질문')
-        lines = self.attention_lines()
-        self.assertTrue(lines)
-        self.assertIn('저녁은 매운 음식 선호', lines[0])
-        self.assertIn('기억해 둘까요', lines[0])
-        self.assertNotIn('food_preference', lines[0], 'the value, never the memory key')
+        self.assertEqual(self.attention_lines(), [])
 
     def test_a_memory_ask_older_than_its_conversation_is_not_repeated(self):
         """#888: an ask sent more than an hour ago stays in 내 기록, never on an unrelated turn's draft."""
@@ -208,8 +205,7 @@ class AttentionWaitTests(NativePresenceTestCase):
                  {'ref': 'p', 'kind': ATTENTION_PREPARED, 'text': 'prep', 'at': 3}]
         self.assertEqual(pick_attention(items, 1000, {})['ref'], 'p')
         self.assertEqual(pick_attention(items, 1000, {'p': 999})['ref'], 'r')
-        self.assertEqual(pick_attention(items, 1000, {'p': 999, 'r': 998})['ref'], 'a')
-        self.assertIsNone(pick_attention(items, 1000, {'p': 999, 'r': 998, 'a': 997}))
+        self.assertIsNone(pick_attention(items, 1000, {'p': 999, 'r': 998}), '#951: an ask is never surfaced')
         self.assertEqual(pick_attention(items, 1000, {'p': 1000 - 7 * 3600})['ref'], 'p', 'after the cooldown it may return')
         self.assertIsNone(pick_attention([{'ref': 'x', 'kind': 'other', 'text': 't'}], 1000))
         self.assertIsNone(attention_line(ATTENTION_ASK, '   '))

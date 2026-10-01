@@ -156,7 +156,10 @@ def draft_body_text(body):
 ATTENTION_PREPARED = 'prepared'
 ATTENTION_REMINDER = 'reminder'
 ATTENTION_ASK = 'ask'
-ATTENTION_RANK = {ATTENTION_PREPARED: 0, ATTENTION_REMINDER: 1, ATTENTION_ASK: 2}
+#: #951 (owner 2026-10-01): an unanswered ask is no longer surfaced on the waiting draft - an
+#: unrelated question typed into the animated wait read as stray fragments, and re-asking is the
+#: friction #918 removes.  Only the kinds ranked here are surfaced.
+ATTENTION_RANK = {ATTENTION_PREPARED: 0, ATTENTION_REMINDER: 1}
 #: A reminder is "soon" within this horizon.
 ATTENTION_REMINDER_HORIZON = 12 * 3600
 #: The same item is not surfaced again within this cooldown.

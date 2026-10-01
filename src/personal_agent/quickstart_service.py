@@ -5617,6 +5617,10 @@ class AgentService:
         if parts.scheme not in ('http','https') or not host or not self.browser_profile.available():
             return None
         target=url if '[가림]' not in url else f'{parts.scheme}://{parts.netloc}/'
+        # #954 review: a refused site (a share received from the owner, #940) says so to the model
+        # now, instead of a request that ``offer_browser_login`` would then silently refuse.
+        refused=self.login_refusal(host)
+        if refused:return refused
         with self.lock:
             existing=self._browser_login(job['id'])
             if existing is not None and existing.get('state') not in BROWSER_LOGIN_REASK_STATES:return None

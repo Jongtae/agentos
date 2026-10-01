@@ -780,8 +780,7 @@ class PhoneButton(_flow_harness()):
         self.scripts = self.login_script()
         job_id = self.receive('계정 페이지 확인해줘')
         self.assertTrue(self.service.run_one())
-        self.assertTrue(wait_until(lambda: self.state(job_id) == 'unavailable'), self.state(job_id))
-        self.assertEqual((self.service._browser_login(job_id) or {}).get('cause'), 'refused')
+        self.assertTrue(wait_until(lambda: self.state(job_id) in (None, 'unavailable')), self.state(job_id))  # #954 review: refused before any row
         self.assertEqual(len(self.drivers), 1, 'only the Work\'s own driver; no login window')
         self.service.deliver_one()
         self.assertEqual(self.prompts(), [])
@@ -793,8 +792,7 @@ class PhoneButton(_flow_harness()):
         self.scripts = self.login_script()
         job_id = self.receive('계정 페이지 확인해줘')
         self.assertTrue(self.service.run_one())
-        self.assertTrue(wait_until(lambda: self.state(job_id) == 'unavailable'), self.state(job_id))
-        self.assertEqual((self.service._browser_login(job_id) or {}).get('cause'), 'refused')
+        self.assertTrue(wait_until(lambda: self.state(job_id) in (None, 'unavailable')), self.state(job_id))  # #954 review: refused before any row
         self.service.deliver_one()
         self.assertEqual(self.prompts(), [])
 

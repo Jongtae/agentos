@@ -139,7 +139,7 @@ class OneActionSource(_Store):
         # #910: a signed-out page starts the in-flow login; #953: by asking for it directly (browser_sign_in).
         self.assertIn(BROWSER_SIGN_IN_NOTE, NATIVE['browser_open']['description'])
         self.assertIn("call browser_sign_in with the site's address", BROWSER_SIGN_IN_NOTE)
-        self.assertIn('on this Mac or from their phone', BROWSER_SIGN_IN_DESCRIPTION)
+        self.assertIn('from their phone where that is set up', BROWSER_SIGN_IN_DESCRIPTION)
         self.assertIn('Never tell the person to sign in in a browser yourself', BROWSER_SIGN_IN_DESCRIPTION)
         for text in (BROWSER_SIGN_IN_NOTE, BROWSER_SIGN_IN_DESCRIPTION):
             for scripted in ('cart', 'order', 'saved item', 'mall', 'shop'):

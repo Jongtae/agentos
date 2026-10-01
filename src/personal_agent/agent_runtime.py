@@ -194,8 +194,8 @@ BROWSER_SESSION_NOTE=(' The owner cannot see this browser session: whatever it h
 #: #953 (BROWSE-09, live 2026-10-01): a worker on a site's main page, shown signed out, never reached a
 #: sign-in form and told the owner to sign in in a browser instead.  The model now asks for the sign-in
 #: directly (``browser_sign_in``); AgentOS runs the same in-flow login.
-BROWSER_SIGN_IN_NOTE=(' Whenever a page you open or reach shows a sign-in form, AgentOS asks the owner to sign in (on this Mac '
-                      'or from their phone) and continues the request once they have. When the owner\'s own account is needed '
+BROWSER_SIGN_IN_NOTE=(' Whenever a page you open or reach shows a sign-in form, AgentOS asks the owner to sign in (on this Mac, '
+                      'and from their phone where that is set up) and continues the request once they have. When the owner\'s own account is needed '
                       'and a page shows you are signed out or asks you to sign in, call browser_sign_in with the site\'s '
                       'address instead of looking for its sign-in page or telling the owner to sign in somewhere. Never type '
                       'a password yourself.')
@@ -203,8 +203,9 @@ BROWSER_SIGN_IN_NOTE=(' Whenever a page you open or reach shows a sign-in form, 
 BROWSER_SIGN_IN_DESCRIPTION=('When the request needs the owner\'s own account on a site and you are not signed in there (a page shows '
                              'you are signed out or asks you to sign in), call this with the site\'s address (its home page or '
                              'the page you need) instead of telling the person to sign in somewhere: AgentOS asks them to sign '
-                             'in, on this Mac or from their phone, and continues the request afterwards, so end your turn '
-                             'after calling it and say the sign-in was requested. It changes nothing on the site and never '
+                             'in (on this Mac, and from their phone where that is set up) and continues the request '
+                             'afterwards, so end your turn after calling it and say the sign-in was requested, unless the '
+                             'result says signing in there is not possible; then say that. It changes nothing on the site and never '
                              'types a password. Never tell the person to sign in in a browser yourself, and never call it for a '
                              'site where you are already signed in.')
 BROWSER_EFFECT_NOTE=' Declare effect: read (only looking), navigate (moving between pages), mutate (changes account state such as a cart or a form), payment (pays or enters card data; always needs owner approval). AgentOS refuses card/one-time-code/password fields and their form buttons without the owner\'s approval whatever the label says.'

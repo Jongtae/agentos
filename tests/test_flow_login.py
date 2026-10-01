@@ -540,8 +540,7 @@ class InFlowLogin(LoginHarness):
         self.scripts = self.sign_in_script()
         job_id = self.receive('계정 페이지 확인해줘')
         self.assertTrue(self.service.run_one())
-        self.assertTrue(wait_until(lambda: self.state(job_id) == 'unavailable'), self.state(job_id))
-        self.assertEqual((self.service._browser_login(job_id) or {}).get('cause'), 'refused')
+        self.assertTrue(wait_until(lambda: self.state(job_id) in (None, 'unavailable')), self.state(job_id))  # #954 review: refused before any row
         self.assertEqual([entry for entry in self.driver_log if entry[0] == 'goto'], [], 'no login window')
         self.assertFalse(self.service.browser_status()['login_window_open'])
         self.service.deliver_one()

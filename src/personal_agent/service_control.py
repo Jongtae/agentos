@@ -27,8 +27,6 @@ DEFAULT_PORT = 8787
 # service keeps LABEL, its data directory and port 8787.
 DEFAULT_INSTANCES_RELATIVE = Path(".local/share/agentos-instances")
 _INSTANCE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,31}\Z")
-#: #957: the default service's id where an instance id is expected (``family_share.MAIN_INSTANCE``).
-RESERVED_MAIN_NAME = "main"
 
 
 def service_label(instance: str | None = None) -> str:
@@ -37,9 +35,6 @@ def service_label(instance: str | None = None) -> str:
         return LABEL
     if not isinstance(instance, str) or not _INSTANCE_NAME.match(instance):
         raise ValueError("An instance name is 1-32 lowercase letters, digits or hyphens.")
-    if instance == RESERVED_MAIN_NAME:
-        # #957: ``main`` is how the default service is addressed as a share target; it is never a named instance.
-        raise ValueError("'main' is the owner's default service, not an instance name.")
     return f"{LABEL}.{instance}"
 
 

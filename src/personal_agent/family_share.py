@@ -53,8 +53,9 @@ or the link secret: site names and counts only.
 
 **Any instance to any other (FAMILY-SHARE-03 #957).** The giver is whichever
 instance holds the session, and a target is any *other* AgentOS instance on
-this Mac: the owner's default service (``MAIN_INSTANCE``, located the way
-``service_control`` does) and the launchd-named instances, never the
+this Mac: the owner's default service (``MAIN_INSTANCE``, ``@main``, an id no
+named instance can have, located the way ``service_control`` does) and the
+launchd-named instances, never the
 instance itself.  A family member thus shares a site with the owner's own
 assistant too, and the machinery above runs unchanged in direction: the
 giver writes the link secret into the receiver's data directory, the
@@ -126,9 +127,10 @@ RECEIVER_SIGNED_IN_RECEIPT = ("'{label}' 비서는 {site}에 이미 자기 계�
                               '그 비서가 그 사이트에서 로그아웃하면 다시 공유할 수 있어요.')
 #: Refusals the receiver decided; retried only when the giver's rows change or at start, not every tick.
 REFUSALS = frozenset({RECEIVER_SIGNED_IN})
-#: #957: the owner's default service as a share target.  ``service_control`` refuses it as a named
-#: instance's name, so the id can never collide with one read from a plist.
-MAIN_INSTANCE = 'main'
+#: #957: the owner's default service as a share target.  ``@`` has never been allowed in an instance name
+#: (``service_control._INSTANCE_NAME``), so this id can never collide with one read from a plist, and a legacy
+#: instance that was named ``main`` keeps its own id, grants and data directory (#966 review).
+MAIN_INSTANCE = '@main'
 #: #957: what each target's own store says about its Telegram (never the one-time setup link's expiry).
 STATE_LABELS = {'paired': '연결됨', 'setting_up': '설정 중', 'not_connected': '연결 안 됨'}
 

@@ -117,13 +117,13 @@ class Names(unittest.TestCase):
         rows = {'family-1': {'name': 'family-2', 'state': 'paired'}, 'family-2': {'name': '아들 비서', 'state': 'paired'}}
         self.assertEqual(family_share.resolve_instance('family-2', rows), 'family-2', 'the id, not the bot named like it')
         self.assertEqual(family_share.resolve_instance('아들 비서', rows), 'family-2')
-        twins = {'family-1': {'name': '비서', 'state': 'paired'}, 'family-2': {'name': '비서', 'state': 'setting_up'}, 'main': {'name': '김비서'}}
+        twins = {'family-1': {'name': '비서', 'state': 'paired'}, 'family-2': {'name': '비서', 'state': 'setting_up'}, '@main': {'name': '김비서'}}
         with self.assertRaises(ValueError) as caught:
             family_share.resolve_instance('비서', twins)
         self.assertIn('여럿이에요: 비서(family-1, 연결됨), 비서(family-2, 설정 중)', str(caught.exception))
         self.assertIn('id로', str(caught.exception))
         self.assertEqual(family_share.resolve_instance('family-2', twins), 'family-2')
-        self.assertEqual(family_share.resolve_instance('김비서', twins), 'main')
+        self.assertEqual(family_share.resolve_instance('김비서', twins), '@main')
 
     def test_the_link_secret_is_owner_only_and_reused(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -890,29 +890,29 @@ class AnyInstanceOnThisMac(unittest.TestCase):
         family_setup.write_setup(QuickStore(child), instance='family-1', display_name='아들 비서', owner_bot='owner_bot')
         # Seen from the spouse's instance: the owner's main instance and the other family instance, not itself.
         self.assertEqual(self.instances(own=spouse),
-                         {'main': {'name': '김비서', 'state': 'paired', 'main': True},
+                         {'@main': {'name': '김비서', 'state': 'paired', 'main': True},
                           'family-1': {'name': '아들 비서', 'state': 'setting_up', 'main': False}})
         # Seen from the owner's: both family instances, the paired one reported paired whatever its old link says.
         self.assertEqual(self.instances(own=owner),
                          {'family-2': {'name': '이비서', 'state': 'paired', 'main': False},
                           'family-1': {'name': '아들 비서', 'state': 'setting_up', 'main': False}})
-        self.assertEqual(self.locate('main'), (8787, owner.resolve()))
+        self.assertEqual(self.locate(family_share.MAIN_INSTANCE), (8787, owner.resolve()))
         self.assertEqual(self.locate('family-2')[0], 8797)
         # The display name resolves, case and spacing aside; so does the id.
         rows = self.instances(own=spouse)
-        self.assertEqual(family_share.resolve_instance('김비서', rows), 'main')
-        self.assertEqual(family_share.resolve_instance(' MAIN ', rows), 'main')
+        self.assertEqual(family_share.resolve_instance('김비서', rows), '@main')
+        self.assertEqual(family_share.resolve_instance(' @MAIN ', rows), '@main')
         self.assertEqual(family_share.resolve_instance('아들  비서', rows), 'family-1')
         with self.assertRaises(ValueError) as caught:
             family_share.resolve_instance('이비서', rows)
-        self.assertIn('이 Mac의 다른 비서: 김비서(main, 연결됨), 아들 비서(family-1, 설정 중)', str(caught.exception))
+        self.assertIn('이 Mac의 다른 비서: 김비서(@main, 연결됨), 아들 비서(family-1, 설정 중)', str(caught.exception))
         self.assertNotIn('가족', str(caught.exception))
         # An instance never set up at all, and a main service never set up: not connected / not listed.
         self.install('family-3', 8817)
         self.assertEqual(self.instances(own=owner)['family-3'], {'name': 'family-3', 'state': 'not_connected', 'main': False})
         import shutil
         shutil.rmtree(owner)
-        self.assertNotIn('main', self.instances(own=spouse))
+        self.assertNotIn(family_share.MAIN_INSTANCE, self.instances(own=spouse))
 
     def test_the_state_comes_from_the_instances_own_store_read_only(self):
         from personal_agent import family_setup
@@ -933,11 +933,40 @@ class AnyInstanceOnThisMac(unittest.TestCase):
         family_share.instance_state(folder)
         self.assertEqual(store.path.stat().st_mtime_ns, before, 'a peek never writes the other store')
 
-    def test_main_is_never_a_named_instances_name(self):
+    def test_a_legacy_instance_named_main_keeps_its_own_id_grants_and_data_dir(self):
+        # #966 review: on older installs ``main`` was a valid named-instance id.  The default service's id is
+        # ``@main``, which the name rule never allowed, so the two never collide.
         from personal_agent.service_control import service_label
+        self.assertEqual(service_label('main'), 'com.personal-agentos.main', 'still a valid named instance')
         with self.assertRaises(ValueError):
-            service_label('main')
-        self.assertEqual(service_label('family-1'), 'com.personal-agentos.family-1')
+            service_label(family_share.MAIN_INSTANCE)
+        owner = self.install(None)
+        QuickStore(owner).put('telegram', {'enabled': True, 'username': 'owner_bot', 'bot_name': '김비서', 'user_id': 42})
+        legacy = self.install('main', 8827)
+        QuickStore(legacy).put('telegram', {'enabled': True, 'username': 'legacy_bot', 'bot_name': '옛 비서', 'user_id': 9})
+        spouse = self.install('family-2', 8797)
+        # Two separate targets, each with its own data directory and port.
+        self.assertEqual(self.instances(own=spouse),
+                         {'@main': {'name': '김비서', 'state': 'paired', 'main': True},
+                          'main': {'name': '옛 비서', 'state': 'paired', 'main': False}})
+        self.assertEqual(self.locate(family_share.MAIN_INSTANCE), (8787, owner.resolve()))
+        self.assertEqual(self.locate('main'), (8827, legacy.resolve()))
+        rows = self.instances(own=spouse)
+        self.assertEqual(family_share.resolve_instance('main', rows), 'main')
+        self.assertEqual(family_share.resolve_instance('@main', rows), '@main')
+        self.assertEqual(family_share.resolve_instance('김비서', rows), '@main')
+        # An existing grant to the named instance still goes to that plist's data dir and port, never the default.
+        store, jar = QuickStore(spouse), jar_at(spouse)
+        jar.save_export({'shop.test': [cookie('.shop.test')]})
+        store.put(family_share.GRANTS_KEY, [{'instance': 'main', 'site': 'shop.test', 'since': 1.0, 'synced': None}])
+        opener = Opener()
+        self.assertEqual(family_share.sync(store, jar, None, locate=self.locate, opener=opener), 1)
+        url, header, body = opener.requests[-1]
+        self.assertEqual(url, f'http://127.0.0.1:8827{family_share.SHARE_PATH}')
+        self.assertEqual(header, family_share.read_link_secret(legacy))
+        self.assertFalse(family_share.link_secret_path(owner).exists(), 'nothing written into the default service')
+        self.assertEqual(family_share.unshare(store, 'main', 'shop.test', locate=self.locate, opener=opener)['instances'], ['main'])
+        self.assertEqual(opener.requests[-1][0], f'http://127.0.0.1:8827{family_share.SHARE_PATH}')
 
 
 class MainInstanceReceives(unittest.TestCase):
@@ -976,9 +1005,9 @@ class MainInstanceReceives(unittest.TestCase):
     def test_a_family_instance_shares_with_the_main_instance_which_marks_refuses_payment_and_never_passes_it_on(self):
         from personal_agent import family_setup
         self.assertFalse(family_setup.setup_recorded(self.store), 'the receiver is the main instance: no family setup here')
-        receipt = family_share.share(self.giver_store, self.giver_jar, 'main', 'https://www.shop.test/cart', locate=self.locate,
-                                     label='김비서')
-        self.assertEqual((receipt['instance'], receipt['site'], receipt['cookies'], receipt['delivered']), ('main', 'shop.test', 2, True))
+        receipt = family_share.share(self.giver_store, self.giver_jar, family_share.MAIN_INSTANCE, 'https://www.shop.test/cart',
+                                     locate=self.locate, label='김비서')
+        self.assertEqual((receipt['instance'], receipt['site'], receipt['cookies'], receipt['delivered']), ('@main', 'shop.test', 2, True))
         self.assertIn('김비서 비서에 shop.test', receipt['response'])
         self.assertTrue(family_share.link_secret_path(self.store.root).exists(), "written into the receiver's data dir")
         # Only that site's rows arrived; the main instance marks it, refuses payment and keeps it out of login windows.
@@ -996,8 +1025,8 @@ class MainInstanceReceives(unittest.TestCase):
         self.assertEqual(self.service.settings_orchestrator.read('owner', 'family')['settings']['family']['share_site']['received_sites'],
                          ['shop.test'])
         # Unshare revokes at once: the main instance's copy and mark are gone, the giver's own session stays.
-        receipt = family_share.unshare(self.giver_store, 'main', 'shop.test', locate=self.locate, labels={'main': '김비서'})
-        self.assertEqual((receipt['instances'], receipt['removed']), (['main'], True))
+        receipt = family_share.unshare(self.giver_store, '@main', 'shop.test', locate=self.locate, labels={'@main': '김비서'})
+        self.assertEqual((receipt['instances'], receipt['removed']), (['@main'], True))
         self.assertIn('김비서 비서에서 shop.test', receipt['response'])
         self.assertEqual((self.jar.site_rows('shop.test'), family_share.received(self.store), family_share.grants(self.giver_store)),
                          ([], {}, []))
@@ -1010,7 +1039,7 @@ class MainInstanceReceives(unittest.TestCase):
         self.jar.save_export({'shop.test': [cookie('.shop.test', value='OWNER-OWN-SESSION')]})
         other = Opener()
         with self.assertLogs('personal_agent.family_share', level='INFO') as logs:
-            receipt = family_share.share(self.giver_store, self.giver_jar, 'main', 'shop.test', locate=self.locate, label='김비서', now=2000.0)
+            receipt = family_share.share(self.giver_store, self.giver_jar, '@main', 'shop.test', locate=self.locate, label='김비서', now=2000.0)
         self.assertEqual((receipt['delivered'], receipt['refused']), (False, 'receiver_signed_in'))
         self.assertEqual(receipt['response'], family_share.RECEIVER_SIGNED_IN_RECEIPT.format(label='김비서', site='shop.test'))
         self.assertNotIn(SECRET_VALUE, '\n'.join(logs.output))
@@ -1035,13 +1064,13 @@ class MainInstanceReceives(unittest.TestCase):
                          ('receiver_signed_in', 2200.0), 'asked again after a change, refused again')
         self.assertEqual([row['value'] for row in self.jar.site_rows('shop.test')], ['OWNER-OWN-SESSION'])
         # A later unshare deletes nothing on the owner's instance.
-        receipt = family_share.unshare(self.giver_store, 'main', 'shop.test', locate=self.locate, labels={'main': '김비서'})
-        self.assertEqual((receipt['instances'], receipt['removed'], family_share.grants(self.giver_store)), (['main'], True, []))
+        receipt = family_share.unshare(self.giver_store, '@main', 'shop.test', locate=self.locate, labels={'@main': '김비서'})
+        self.assertEqual((receipt['instances'], receipt['removed'], family_share.grants(self.giver_store)), (['@main'], True, []))
         self.assertEqual([row['value'] for row in self.jar.site_rows('shop.test')], ['OWNER-OWN-SESSION'])
         self.assertEqual(family_share.received(self.store), {})
         # Once the owner signs out there, the same share lands (the giver's own session is its to give).
         self.jar.remove('shop.test')
-        receipt = family_share.share(self.giver_store, self.giver_jar, 'main', 'shop.test', locate=self.locate, label='김비서')
+        receipt = family_share.share(self.giver_store, self.giver_jar, '@main', 'shop.test', locate=self.locate, label='김비서')
         self.assertEqual((receipt['delivered'], receipt['refused'], set(family_share.received(self.store))), (True, None, {'shop.test'}))
         self.assertEqual([row['value'] for row in self.jar.site_rows('shop.test')], [SECRET_VALUE, 'p'])
 
@@ -1062,13 +1091,13 @@ class MainInstanceReceives(unittest.TestCase):
         # a link secret is written or a grant recorded; a ``main`` with no store there is not installed.
         self.giver_jar.save_export({'shop.test': [cookie('.shop.test')]})
         with self.assertRaises(ValueError) as caught:
-            family_share.share(self.giver_store, self.giver_jar, 'main', 'shop.test', locate=lambda name: (8787, self.giver_store.root))
+            family_share.share(self.giver_store, self.giver_jar, '@main', 'shop.test', locate=lambda name: (8787, self.giver_store.root))
         self.assertEqual(str(caught.exception), family_share.SELF_TEXT)
         self.assertFalse(family_share.link_secret_path(self.giver_store.root).exists())
         self.assertEqual(family_share.grants(self.giver_store), [])
         empty = Path(self.tmp.name) / 'nothing-here'
         with self.assertRaises(ValueError) as caught:
-            family_share.share(self.giver_store, self.giver_jar, 'main', 'shop.test', locate=lambda name: (8787, empty), label='김비서')
+            family_share.share(self.giver_store, self.giver_jar, '@main', 'shop.test', locate=lambda name: (8787, empty), label='김비서')
         self.assertEqual(str(caught.exception), family_share.NOT_INSTALLED_TEXT.format(instance='김비서'))
         self.assertFalse(family_share.link_secret_path(empty).exists())
         self.assertEqual(family_share.instances(home=Path(self.tmp.name), locate=lambda name: (8787, self.giver_store.root),

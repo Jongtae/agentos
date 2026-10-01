@@ -841,6 +841,12 @@ class Worker:
         self.window.setCollectionBehavior_(AppKit.NSWindowCollectionBehaviorTransient |
                                            AppKit.NSWindowCollectionBehaviorIgnoresCycle)
         self.window.setExcludedFromWindowsMenu_(True)
+        # #931 review P1: drop keyboard focus first (ordering out resigns key status;
+        # ordering back alone would not), so nothing the owner types reaches the page.
+        self.window.makeFirstResponder_(None)
+        self.window.orderOut_(None)
+        if self.app.isActive():
+            self.app.deactivate()
         self.window.setFrameOrigin_(Foundation.NSMakePoint(PARK_ORIGIN, PARK_ORIGIN))
         self.window.orderBack_(None)
 

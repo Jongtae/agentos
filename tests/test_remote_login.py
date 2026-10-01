@@ -825,3 +825,15 @@ class PhoneButton(_flow_harness()):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class MobileUserAgent(unittest.TestCase):
+    """#955: the phone session's user agent is a phone browser's and keeps AgentOS's embedded marker."""
+
+    def test_the_mobile_agent_is_a_phone_browser_with_the_marker(self):
+        from personal_agent.browser_worker import EMBEDDED_UA_TOKEN, MOBILE_SIZE, mobile_user_agent
+        agent = mobile_user_agent()
+        self.assertIn('iPhone', agent)
+        self.assertIn('Mobile/', agent)
+        self.assertTrue(agent.endswith(EMBEDDED_UA_TOKEN), 'AgentOS still refuses its own pages to this browser (#680)')
+        self.assertEqual(MOBILE_SIZE, (390.0, 844.0))

@@ -662,6 +662,19 @@ def safari_application_name():
     return f'Version/{version} Safari/605.1.15 {EMBEDDED_UA_TOKEN}'
 
 
+#: #955: while a phone drives the login window it is phone-sized and says it is a phone browser,
+#: so a site serves its own mobile sign-in page, which fits the phone (points).
+MOBILE_SIZE = (390.0, 844.0)
+
+
+def mobile_user_agent():
+    """A mobile Safari user agent of this Safari's version, still carrying the embedded marker (#680)."""
+    version = safari_application_name().split()[0].split('/', 1)[-1]
+    major = version.split('.')[0] if version.split('.')[0].isdigit() else '18'
+    return (f'Mozilla/5.0 (iPhone; CPU iPhone OS {major}_0 like Mac OS X) AppleWebKit/605.1.15 '
+            f'(KHTML, like Gecko) Version/{version} Mobile/15E148 Safari/604.1 {EMBEDDED_UA_TOKEN}')
+
+
 def _host(url):
     try:
         return (urlsplit(str(url or '')).hostname or '').lower()
@@ -978,6 +991,10 @@ class Worker:
         self.remote = False
         self.last_frame = None   # never shown to a later session
         self.answer_dialog(False)
+        try:
+            self.leave_mobile()
+        except Exception:
+            pass
 
     def park(self):
         """Keep the window ordered in but off every screen and out of the owner's way (#930).
@@ -1508,6 +1525,11 @@ class Worker:
         delegate.worker = self
         view.setNavigationDelegate_(delegate)
         view.setUIDelegate_(delegate)
+        if self.remote:
+            try:
+                view.setCustomUserAgent_(mobile_user_agent())   # #955: a sign-in popup is phone-shaped too
+            except Exception:
+                pass
         style = (AppKit.NSWindowStyleMaskTitled | AppKit.NSWindowStyleMaskClosable | AppKit.NSWindowStyleMaskResizable)
         window = AppKit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(rect, style, AppKit.NSBackingStoreBuffered, False)
         window.setContentView_(view)
@@ -1655,7 +1677,38 @@ class Worker:
         if not self._remote_allowed(ident):
             return
         self.remote = True
+        try:
+            self.enter_mobile()
+        except Exception:
+            pass   # the desktop page still works from the phone, only smaller
         self.reply(ident)
+
+    def enter_mobile(self):
+        """#955: phone-sized, a phone browser to the site, reloaded so the site serves its mobile page."""
+        if getattr(self, 'mobile_restore', None) is not None:
+            return
+        frame = self.window.frame()
+        self.mobile_restore = (frame.size.width, frame.size.height)
+        agent = mobile_user_agent()
+        self.view.setCustomUserAgent_(agent)
+        for entry in getattr(self, 'popups', []) or []:
+            try:
+                entry[0].setCustomUserAgent_(agent)
+            except Exception:
+                pass
+        self.window.setContentSize_(self.Foundation.NSMakeSize(*MOBILE_SIZE))
+        if self.owner_visible:
+            self.window.center()
+        self.view.reload()
+
+    def leave_mobile(self):
+        """Back to the desktop window after the phone session (no reload: the sign-in is kept)."""
+        restore = getattr(self, 'mobile_restore', None)
+        if restore is None:
+            return
+        self.mobile_restore = None
+        self.view.setCustomUserAgent_(None)
+        self.window.setContentSize_(self.Foundation.NSMakeSize(*restore))
 
     def op_remote_end(self, ident, command, timeout):
         self.end_remote()

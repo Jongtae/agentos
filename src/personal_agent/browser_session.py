@@ -900,6 +900,9 @@ class BrowserSession:
         """
         if required:
             self._refuse_unapprovable()
+        if self._refusal:
+            # #935 re-review P3-a: on a shared site no approval is consumed, guarded or not.
+            return False
         if self.approvals.consume(binding):
             return True
         if required:

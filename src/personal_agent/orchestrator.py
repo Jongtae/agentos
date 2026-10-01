@@ -463,7 +463,9 @@ def plan_shape(data):
     """Types only; meaning is ``Orchestration.validate``'s."""
     brief = data.get('brief')
     return (isinstance(data.get('worker'), str) and isinstance(data.get('model'), str)
-            and isinstance(brief, dict) and isinstance(brief.get('notes'), str) and isinstance(data.get('reason'), str))
+            and isinstance(brief, dict) and isinstance(brief.get('notes'), str) and isinstance(data.get('reason'), str)
+            # #948 review: "true" or 1 is a malformed plan, never a silent false.
+            and isinstance(data.get('account_change', False), bool))
 
 
 # --- one attempt -------------------------------------------------------------
@@ -529,6 +531,8 @@ class Orchestration:
         self.history = []  # (attempt, evaluation, answer excerpt, factual summary)
         #: Signatures (worker, model, tools) of attempts that fell short (#729).
         self.failed = set()
+        #: #948 review: whether any plan of this Work judged it account-changing (sticky).
+        self.account_change = False
         self.notice = ''
         self.orchestrated = False
         #: The evaluation of the last attempt when no further attempt followed
@@ -637,6 +641,10 @@ class Orchestration:
 
     def validate(self, data, candidates, number):
         """``(Attempt, '')`` for a plan that passes every deterministic check, else ``(None, what)``."""
+        if isinstance(data, dict) and data.get('account_change') is True:
+            # #948 review: once any plan of this Work judged it account-changing, the floor
+            # holds for every later attempt, a fallback included, whatever a replan says.
+            self.account_change = True
         if not isinstance(data, dict) or not plan_shape(data):
             return None, 'shape'
         worker = next((row for row in candidates if row['id'] == data['worker']), None)
@@ -649,7 +657,7 @@ class Orchestration:
             # #735 review: the worker's default was refused for this account;
             # this attempt runs the substitute the catalogue chose, explicitly.
             model = worker['default_model']
-        account_change = data.get('account_change') is True
+        account_change = getattr(self, 'account_change', False)
         lifted_from = None
         if account_change:
             # #947 (owner decision 2026-10-01): account-changing work never runs on the
@@ -729,6 +737,13 @@ class Orchestration:
             return attempt
         failure = failure or FALLBACK_INVALID
         attempt = Attempt(1, self.catalogue.default, fallback=failure)
+        if getattr(self, 'account_change', False):
+            # #948 review: an invalid plan that still said account_change keeps the floor.
+            lifted = lift_model(self.catalogue.worker(self.catalogue.default) or {}, '')
+            if lifted is not None:
+                default = self.catalogue.worker(self.catalogue.default) or {}
+                attempt.model, attempt.lifted_from = lifted, default.get('default_model') or ''
+            attempt.account_change = True
         self.attempts.append(attempt)
         previous = self._set_state('fallback') if failure == FALLBACK_UNAVAILABLE else {}
         if failure == FALLBACK_UNAVAILABLE and previous.get('state') == 'active':

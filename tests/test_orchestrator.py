@@ -2089,7 +2089,40 @@ class AccountChangeFloor(unittest.TestCase):
         plan = {'worker': 'claude-code', 'model': 'haiku', 'brief': {'notes': ''}, 'reason': 'r'}
         attempt, why = orchestration.validate({**plan, 'account_change': True}, [worker], 1)
         self.assertEqual((attempt.model, attempt.lifted_from, attempt.account_change, why), ('sonnet', 'haiku', True, ''))
-        attempt, _ = orchestration.validate({**plan, 'account_change': False}, [worker], 1)
-        self.assertEqual((attempt.model, attempt.lifted_from), ('haiku', None))
-        attempt, _ = orchestration.validate(plan, [worker], 1)
-        self.assertEqual(attempt.model, 'haiku', 'a plan without the field is not lifted')
+        for other in ({**plan, 'account_change': False}, plan):
+            fresh = Orchestration.__new__(Orchestration)
+            fresh.failed, fresh.budget_allows = set(), (lambda: True)
+            attempt, _ = fresh.validate(other, [worker], 1)
+            self.assertEqual((attempt.model, attempt.lifted_from), ('haiku', None), 'false or missing: not lifted')
+
+    def test_the_floor_is_sticky_across_replans_and_a_non_boolean_is_malformed(self):
+        """#948 review P1/P2."""
+        from personal_agent.orchestrator import Orchestration
+        worker = {**self.worker(), 'id': 'claude-code', 'available': True}
+        orchestration = Orchestration.__new__(Orchestration)
+        orchestration.failed, orchestration.budget_allows = set(), (lambda: True)
+        plan = {'worker': 'claude-code', 'model': 'haiku', 'brief': {'notes': ''}, 'reason': 'r'}
+        orchestration.validate({**plan, 'account_change': True}, [worker], 1)
+        attempt, _ = orchestration.validate({**plan, 'account_change': False}, [worker], 2)
+        self.assertEqual((attempt.model, attempt.account_change), ('sonnet', True), 'a replan saying false keeps the floor')
+        fresh = Orchestration.__new__(Orchestration)
+        fresh.failed, fresh.budget_allows = set(), (lambda: True)
+        for value in ('true', 1, None):
+            with self.subTest(value=value):
+                self.assertEqual(fresh.validate({**plan, 'account_change': value}, [worker], 1), (None, 'shape'))
+
+    def test_a_fallback_after_an_account_change_plan_is_lifted(self):
+        """#948 review P1: an invalid plan that said account_change still keeps the floor."""
+        from personal_agent.orchestrator import Orchestration
+        worker = {**self.worker(default_model='haiku'), 'id': 'claude-code', 'available': True}
+        catalogue = type('Catalogue', (), {'default': 'claude-code', 'available': lambda self: [worker],
+                                           'worker': lambda self, wid: worker if wid == 'claude-code' else None})()
+        orchestration = Orchestration.__new__(Orchestration)
+        orchestration.failed, orchestration.budget_allows, orchestration.attempts = set(), (lambda: True), []
+        orchestration.catalogue, orchestration.notice, orchestration.account_change = catalogue, None, False
+        orchestration._ask = lambda candidates: ({'worker': 'nope', 'model': 'haiku', 'brief': {'notes': ''},
+                                                  'reason': 'r', 'account_change': True}, '')
+        orchestration._set_state = lambda value: {}
+        orchestration.record = lambda *args, **kwargs: None
+        attempt = orchestration.first()
+        self.assertEqual((attempt.fallback != '', attempt.model, attempt.lifted_from), (True, 'sonnet', 'haiku'))

@@ -131,6 +131,7 @@ class OneActionSource(_Store):
         self.assertIn('The owner cannot see this browser session', BROWSER_SESSION_NOTE)
         self.assertIn("work from the owner's own browser", BROWSER_SESSION_NOTE)
         self.assertIn('exists only in this session, say so plainly', BROWSER_SESSION_NOTE)
+        self.assertIn('gets no link to the account page', BROWSER_SESSION_NOTE)
         self.assertIn(BROWSER_SESSION_NOTE, NATIVE['browser_open']['description'])
         # #910: a signed-out page leads the AI to the site's own sign-in page, which starts the in-flow login.
         self.assertIn(BROWSER_SIGN_IN_NOTE, NATIVE['browser_open']['description'])

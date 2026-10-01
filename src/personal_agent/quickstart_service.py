@@ -5448,21 +5448,27 @@ class AgentService:
                 return payment_refusal(service.store,host)
         return Approvals()
 
-    # -- #934: one signed-in site shared with a family instance -------------------------
-    def share_site(self, instance, site):
-        """Grant a family instance the owner's session for one site and push it; names and counts only."""
+    # -- #934/#957: one signed-in site shared with another instance on this Mac ----------
+    def other_instances(self):
+        """The other AgentOS instances on this Mac (``family_share.instances``), never this one; names and states only."""
         from . import family_share
-        return family_share.share(self.store,self.browser_profile.jar,instance,site)
+        return family_share.instances(own=self.store.root)
+
+    def share_site(self, instance, site):
+        """Grant another instance this instance's session for one site and push it; names and counts only."""
+        from . import family_share
+        label=family_share.names(self.other_instances()).get(instance)
+        return family_share.share(self.store,self.browser_profile.jar,instance,site,label=label)
 
     def unshare_site(self, instance, site):
-        """End a share: the family jar, its running worker and its mark are cleared; the owner's session stays."""
+        """End a share: the receiver's jar, its running worker and its mark are cleared; this instance's session stays."""
         from . import family_share
-        return family_share.unshare(self.store,instance,site)
+        return family_share.unshare(self.store,instance,site,labels=family_share.names(self.other_instances()))
 
     def shared_sites(self):
-        """The owner's shares, names only, with each instance's display name."""
+        """This instance's shares, names only, with each target's display name."""
         from . import family_share
-        return family_share.listing(self.store,family_share.instances())
+        return family_share.listing(self.store,self.other_instances())
 
     def _shared_sites_saved(self, touched):
         """``BrowserProfile.on_saved``: push the touched sites the owner shares (never a received one)."""
@@ -6399,11 +6405,39 @@ class AgentService:
             raise ProviderError('Telegram webhook 설정을 확인하지 못했습니다.')
         if webhook.get('url'):
             raise ValueError('이 봇은 webhook을 사용 중입니다. 새 전용 봇을 연결하거나 기존 webhook을 먼저 해제하세요.')
+        # #957: the bot's display name is how another instance on this Mac names this one as a share target.
+        bot_name=self._bot_name_of(me)
         with self.lock:
             self.store.secret('telegram_token',token)
-            self.store.put('telegram',{'enabled':True,'mode':'owner-token','username':username,'generation':secrets.token_hex(12),'cursor':0,'user_id':None})
+            self.store.put('telegram',{'enabled':True,'mode':'owner-token','username':username,'bot_name':bot_name,'generation':secrets.token_hex(12),'cursor':0,'user_id':None})
             self.store.put('telegram_status',{'state':'pairing','message':'개인 Telegram 계정을 연결하세요.'})
         return self.pair_telegram()
+
+    @staticmethod
+    def _bot_name_of(me):
+        name=me.get('first_name') if isinstance(me,dict) else None
+        return ' '.join(name.split())[:64] if isinstance(name,str) and name.strip() else None
+
+    def backfill_bot_name(self):
+        """#957: an instance connected before bot names were kept learns its own from one ``getMe``.
+
+        Best-effort: a failed or empty answer changes nothing and is tried
+        again at the next start.  Runs off the start path (the poll thread).
+        """
+        cfg=self.store.config('telegram',{})
+        if not cfg.get('enabled') or cfg.get('bot_name'):return False
+        try:
+            name=self._bot_name_of(self.telegram.call('getMe',{}))
+        except Exception as exc:
+            LOG.warning('telegram: bot name not read (%s)',type(exc).__name__)
+            return False
+        if not name:return False
+        with self.lock:
+            cfg=self.store.config('telegram',{})
+            if not cfg.get('enabled') or cfg.get('bot_name'):return False
+            cfg['bot_name']=name
+            self.store.put('telegram',cfg)
+        return True
 
     def pair_telegram(self):
         with self.lock:
@@ -8705,6 +8739,9 @@ class AgentService:
                 self.run_owner_model_upkeep()
                 self.stop.wait(.3)
         def poll():
+            # #957: one best-effort getMe when this instance's bot name is still unknown; never blocks start.
+            try:self.backfill_bot_name()
+            except Exception as exc:LOG.warning('telegram: bot name not read (%s)',type(exc).__name__)
             while not self.stop.is_set():
                 try:
                     self.poll_telegram()

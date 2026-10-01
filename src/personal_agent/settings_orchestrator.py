@@ -257,19 +257,24 @@ class SettingsOrchestrator:
         sites the owner is signed in to and the family assistants' names.
         """
         from . import family_share
-        names = family_share.instances()
-        shares = family_share.listing(self.store, names)
+        # #957: every other instance on this Mac (the owner's main one included), never this one, each with
+        # its bot's display name and the state its own store reports.
+        others = family_share.instances(own=self.store.root)
+        assistants = {name: {**row, "state_label": family_share.STATE_LABELS.get(row.get("state"), "")}
+                      for name, row in others.items()}
+        shares = family_share.listing(self.store, others)
         shared = ", ".join(f"{row['label']}: {row['site']}" + ("" if row["delivered"] else " (전달 대기)") for row in shares) or "없음"
         signed_in = self._signed_in_sites()
-        return {"add": self._row("add", "", ", ".join(names.values()) or "없음", None,
+        family = ", ".join(family_share.describe(name, row) for name, row in others.items() if not row.get("main")) or "없음"
+        return {"add": self._row("add", "", family, None,
                                  format="새 가족 비서의 텔레그램 이름(예: 아내 비서)",
                                  note="내 AI 구독을 함께 쓰는 가족 전용 비서를 만들고, 가족에게 보낼 설정 링크를 텔레그램으로 드립니다."),
-                "share_site": self._row("share_site", "", shared, None, format="가족 비서 이름|사이트 주소(예: 아내 비서|example.com)",
-                                        note=FAMILY_SHARE_NOTE, assistants=names, signed_in_sites=signed_in,
+                "share_site": self._row("share_site", "", shared, None, format="비서 이름|사이트 주소(예: <비서 이름>|example.com)",
+                                        note=FAMILY_SHARE_NOTE, assistants=assistants, signed_in_sites=signed_in,
                                         shared=[{"instance": row["instance"], "site": row["site"]} for row in shares],
                                         received_sites=sorted(family_share.received(self.store))),
                 "unshare_site": self._row("unshare_site", "", shared, None,
-                                          format="사이트 주소, 또는 가족 비서 이름|사이트 주소(예: example.com)",
+                                          format="사이트 주소, 또는 비서 이름|사이트 주소(예: example.com)",
                                           shared=[{"instance": row["instance"], "site": row["site"]} for row in shares])}
 
     def _signed_in_sites(self):
@@ -300,7 +305,7 @@ class SettingsOrchestrator:
             if not holders:
                 raise SettingsError(f"{site} 로그인 세션은 공유하고 있지 않아요. 바꿀 것이 없어요.")
             if len(holders) > 1:
-                raise SettingsError(f"{site}은(는) 여러 가족 비서({', '.join(holders)})와 공유 중이에요. 어느 비서인지 이름을 주세요.")
+                raise SettingsError(f"{site}은(는) 여러 비서({', '.join(holders)})와 공유 중이에요. 어느 비서인지 이름을 주세요.")
             return f"{holders[0]}|{site}"
         if setting == "share_site" and site in (row["share_site"].get("received_sites") or ()):
             # Review P1-1: a session received from the owner is not this instance's to pass on.
@@ -440,10 +445,11 @@ class SettingsOrchestrator:
         if (category, setting) == ("family", "add"):
             summary = f"가족 비서 '{after}'를 만듭니다"
         elif (category, setting) in FAMILY_SHARE_SETTINGS:
+            from . import family_share
             instance, _sep, site = after.partition("|")
-            label = (row["share_site"].get("assistants") or {}).get(instance, instance)
-            summary = (f"가족 비서 '{label}'에 {site} 로그인 세션을 공유합니다" if setting == "share_site"
-                       else f"가족 비서 '{label}'의 {site} 로그인 공유를 그만둡니다")
+            label = family_share.names(row["share_site"].get("assistants") or {}).get(instance, instance)
+            summary = (f"'{label}' 비서에 {site} 로그인 세션을 공유합니다" if setting == "share_site"
+                       else f"'{label}' 비서의 {site} 로그인 공유를 그만둡니다")
         else:
             summary = (f"{CATEGORY_LABELS[category]} {SETTING_LABELS[setting]}: {self._describe(category, setting, before, row)}"
                        f" → {self._describe(category, setting, after, row)}")

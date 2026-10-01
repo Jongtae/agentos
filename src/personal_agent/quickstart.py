@@ -589,8 +589,9 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             """The family setup page and its APIs (#897); None when the path is not one of them."""
             path=parts.path
             if path==family_share.SHARE_PATH and method=='POST':
-                # #934: the owner's instance on loopback only, with the link secret it wrote into this
-                # instance's private folder (same macOS user); never through a tunnel or a forwarded request.
+                # #934/#957: the giving instance (the owner's or a family member's) on loopback only, with the link
+                # secret it wrote into this instance's private folder (same macOS user); never through a tunnel or
+                # a forwarded request.  Routed on every instance, the owner's main one included.
                 if not (self.local_setup() and family_share.link_ok(store.root,self.headers.get(family_share.LINK_HEADER,''))):
                     return self.reply(404,{'error':'찾을 수 없습니다.'})
                 try:

@@ -388,6 +388,10 @@ BROWSER_LOGIN_RESULT_TEXT={'resumed':'로그인 창을 닫고 요청을 한 번 
 #: #709: a Work whose last login ended this way may be asked again at the next login page.
 BROWSER_LOGIN_REASK_STATES=('expired','unavailable','not_logged_in')
 
+#: #942: at most this many signed-in sites are named in a Work's context.
+BROWSER_SESSION_SITES = 20
+
+
 class AgentService:
     def __init__(self, store, adapter=None, telegram_transport=None, subscription_engines=None, execution_adapter=None,
                  isolated_engine_adapter=None, isolated_mcp_registry=None,
@@ -733,10 +737,35 @@ class AgentService:
         blocks the turn (context is an aid, not a precondition).
         """
         try:
-            return self.current_state.render(job['id'])
+            text=self.current_state.render(job['id'])
         except Exception:
             LOG.warning('current context snapshot unavailable job=%s',job.get('id'))
+            text=None
+        # #942: which sites the browser is signed in to (names only), so the AI knows it can act there.
+        sessions=self.browser_sessions_text()
+        if sessions:
+            text=f'{text}\n{sessions}' if text else sessions
+        return text
+
+    def browser_sessions_text(self):
+        """One line naming the sites the embedded browser holds a sign-in for, or None (#942).
+
+        Names only, from the profile's non-blocking view.  A site the owner
+        shared with this (family) instance says so, and that payment there is the
+        owner's.  Without it the AI did not know it could act on a shared site.
+        """
+        from . import family_share
+        view=getattr(self.browser_profile,'_jar_view',None)
+        try:
+            _state,rows=view() if callable(view) else (None,[])
+        except Exception:
             return None
+        sites=[row['site'] for row in rows if isinstance(row,dict) and row.get('site')][:BROWSER_SESSION_SITES]
+        if not sites:return None
+        shared=family_share.received(self.store)
+        names=[f"{site} (the owner's sign-in shared with you: you act in the owner's account; reading and cart changes only, "
+               'payment is the owner\'s)' if site in shared else site for site in sites]
+        return 'Browser sign-ins (browser_open uses them; no password needed): '+', '.join(names)
 
     # -- SEC-ATTN-01 (#659): owner-accepted preparations ------------------------
 

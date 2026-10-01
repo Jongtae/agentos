@@ -45,7 +45,10 @@ class NavigationErrorCode(unittest.TestCase):
 
     def test_a_missing_dns_name_is_its_own_code(self):
         self.assertEqual(navigation_error_code(self.Error('NSURLErrorDomain', -1003)), 'host_not_found')
-        self.assertEqual(navigation_error_code(self.Error('NSURLErrorDomain', -1001)), 'navigation_failed')
+        self.assertEqual(navigation_error_code(self.Error('NSURLErrorDomain', -1001)), 'host_unreachable')
+        self.assertEqual(navigation_error_code(self.Error('NSURLErrorDomain', -1004)), 'host_unreachable')
+        self.assertEqual(navigation_error_code(self.Error('NSURLErrorDomain', -1202)), 'host_unreachable')
+        self.assertEqual(navigation_error_code(self.Error('NSURLErrorDomain', -999)), 'navigation_failed')
         self.assertEqual(navigation_error_code(self.Error('WebKitErrorDomain', -1003)), 'navigation_failed')
         self.assertEqual(navigation_error_code(object()), 'navigation_failed')
 

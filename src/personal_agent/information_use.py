@@ -73,7 +73,8 @@ def _json_after_legend(text):
     if len(body) < 2:
         return {}
     try:
-        data = json.loads(body[1])
+        # #942: a line may follow the JSON (the browser sign-ins); only the JSON is read.
+        data, _end = json.JSONDecoder().raw_decode(body[1].lstrip())
     except (TypeError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}

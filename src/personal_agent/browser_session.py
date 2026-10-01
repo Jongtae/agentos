@@ -104,6 +104,9 @@ FAILED_TEXT = '브라우저 동작을 실행하지 못했습니다.'
 #: #932: the address's name has no DNS record (a typo or a guessed subdomain such as www.).
 HOST_NOT_FOUND_TEXT = ('이 주소의 도메인을 찾을 수 없습니다(DNS에 없는 이름). 오타나 없는 하위 도메인(예: www.)일 수 있으니, '
                        '주소를 고치거나 검색으로 정확한 주소를 확인한 뒤 다시 여세요.')
+#: #942: the name exists but no site answers at that address (often a guessed domain).
+HOST_UNREACHABLE_TEXT = ('이 주소의 사이트에 연결할 수 없습니다(연결 거부·보안 연결 실패·시간 초과). 주소가 맞는지 확인하거나, '
+                         '로그인된 사이트 목록이나 검색으로 정확한 주소를 찾은 뒤 다시 여세요.')
 BUSY_TEXT = '브라우저 프로필을 다른 작업 또는 로그인 창이 사용하고 있어 지금은 실행하지 않았습니다.'
 NO_PAGE_TEXT = '열린 페이지가 없습니다. 먼저 browser_open으로 페이지를 여세요.'
 WORKER_DELETE_FAILED_TEXT = ('저장된 로그인 세션은 지웠지만 실행 중인 브라우저에서 지우지 못했습니다. 그 브라우저를 멈췄고 '
@@ -1432,6 +1435,8 @@ class WebKitWorkerDriver:
                 raise ToolError(BLOCKED_TEXT, 'blocked_destination')
             if code == 'host_not_found':
                 raise ToolError(HOST_NOT_FOUND_TEXT, 'host_not_found')
+            if code == 'host_unreachable':
+                raise ToolError(HOST_UNREACHABLE_TEXT, 'host_unreachable')
             if code == 'submit_refused':
                 # #700: a form post the guard refused with no page form to hold (a
                 # resubmitted POST, or the page did not answer which form it was).

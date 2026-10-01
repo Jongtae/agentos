@@ -692,6 +692,9 @@ def local_url(url, allowed_origins=()):
 
 #: #932: NSURLErrorCannotFindHost - the name has no DNS record.
 URL_ERROR_CANNOT_FIND_HOST = -1003
+#: #942: the name resolves but no site answers there: timed out, cannot connect,
+#: connection lost, or the secure connection failed (TLS errors -1200..-1206).
+URL_ERRORS_UNREACHABLE = frozenset({-1001, -1004, -1005, -1200, -1201, -1202, -1203, -1204, -1205, -1206})
 
 
 def navigation_error_code(error):
@@ -699,6 +702,8 @@ def navigation_error_code(error):
     try:
         if str(error.domain()) == 'NSURLErrorDomain' and int(error.code()) == URL_ERROR_CANNOT_FIND_HOST:
             return 'host_not_found'
+        if str(error.domain()) == 'NSURLErrorDomain' and int(error.code()) in URL_ERRORS_UNREACHABLE:
+            return 'host_unreachable'
     except Exception:
         pass
     return 'navigation_failed'

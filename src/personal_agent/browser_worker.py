@@ -83,6 +83,8 @@ from urllib.parse import urlsplit
 #: request that carries it, so a page in the embedded browser can never use
 #: the owner's AgentOS UI or API (#680 review P1-2).
 EMBEDDED_UA_TOKEN = 'AgentOS-Embedded/1'
+#: #930: where the worker window waits, ordered in but off every screen.
+PARK_ORIGIN = -30000
 
 #: ``index`` is an element's position in ``document.querySelectorAll(SELECTOR)``.
 SELECTOR = ('a[href], button, input, select, textarea, summary, [role="button"], [role="link"], [role="textbox"], '
@@ -783,6 +785,9 @@ class Worker:
         self.store = WebKit.WKWebsiteDataStore.nonPersistentDataStore()
         config.setWebsiteDataStore_(self.store)
         config.setApplicationNameForUserAgent_(safari_application_name())
+        # #930: the parked window counts as shown, so no page plays sound or video on
+        # the owner's Mac on its own; a press in the page can still start it.
+        config.setMediaTypesRequiringUserActionForPlayback_(WebKit.WKAudiovisualMediaTypeAll)
         # The client world: shares the DOM, not the page's JavaScript globals, so a
         # page cannot replace the functions these scripts call.  (A named world
         # stopped answering after repeated password-form pages on macOS 26.)
@@ -812,6 +817,32 @@ class Worker:
         self.window.setReleasedWhenClosed_(False)
         self.window.setDelegate_(self.delegate)
         self.window.setTitle_('AgentOS')
+        #: Whether the owner can see the window (the login window, #709); the
+        #: window itself is always ordered in, parked off-screen (#930).
+        self.owner_visible = False
+        try:
+            # #930: WebKit treats a covered or off-screen window as hidden and stops
+            # requestAnimationFrame there, so pages that render with it (React lists
+            # and the like) never draw.  WKWebView SPI, used only when present.
+            self.view._setWindowOcclusionDetectionEnabled_(False)
+        except Exception:
+            pass
+        self.park()
+
+    def park(self):
+        """Keep the window ordered in but off every screen and out of the owner's way (#930).
+
+        An ordered-out window is a hidden page to WebKit: no animation frames,
+        so client-rendered content never appears.  Parked, the page renders as
+        if shown while nothing reaches the owner's screen or input.
+        """
+        AppKit, Foundation = self.AppKit, self.Foundation
+        self.window.setIgnoresMouseEvents_(True)
+        self.window.setCollectionBehavior_(AppKit.NSWindowCollectionBehaviorTransient |
+                                           AppKit.NSWindowCollectionBehaviorIgnoresCycle)
+        self.window.setExcludedFromWindowsMenu_(True)
+        self.window.setFrameOrigin_(Foundation.NSMakePoint(PARK_ORIGIN, PARK_ORIGIN))
+        self.window.orderBack_(None)
 
     # -- plumbing ------------------------------------------------------------
     def reply(self, ident, ok=True, **fields):
@@ -1264,6 +1295,10 @@ class Worker:
         url = command.get('url')
         # The owner signs in by hand: the guard is off while the window shows (#698).
         self.set_guard_off(True)
+        self.owner_visible = True
+        self.window.setIgnoresMouseEvents_(False)
+        self.window.setCollectionBehavior_(self.AppKit.NSWindowCollectionBehaviorDefault)
+        self.window.setExcludedFromWindowsMenu_(False)
         self.window.center()
         self.window.makeKeyAndOrderFront_(None)
         self.app.activateIgnoringOtherApps_(True)
@@ -1308,19 +1343,21 @@ class Worker:
 
     def op_hide(self, ident, command, timeout):
         self.close_popup()
-        self.window.orderOut_(None)
+        self.owner_visible = False
+        self.park()
         self.set_guard_off(False)
         self.reply(ident)
 
     def window_closed_by_owner(self):
         self.close_popup()
-        self.window.orderOut_(None)
+        self.owner_visible = False
+        self.park()
         self.set_guard_off(False)
         self.emit({'event': 'hidden'})
 
     def op_state(self, ident, command, timeout):
         # #765: ``navigations`` is a count of main-frame navigations (never a URL).
-        self.reply(ident, visible=bool(self.window.isVisible()), navigations=self.landed)
+        self.reply(ident, visible=bool(self.owner_visible), navigations=self.landed)
 
     def _all_types(self):
         return self.WebKit.WKWebsiteDataStore.allWebsiteDataTypes()
@@ -1494,7 +1531,7 @@ def _popup_delegate_class():
             request = action.request()
             url = request.URL() if request is not None else None
             scheme = str(url.scheme() or '').lower() if url is not None else ''
-            if self.worker.guard_off and self.worker.window.isVisible() and (scheme in ('http', 'https') or _blank(url)):
+            if self.worker.guard_off and self.worker.owner_visible and (scheme in ('http', 'https') or _blank(url)):
                 return self.worker.open_popup(config)
             return None
 
@@ -1602,7 +1639,7 @@ def _delegate_class():
             request = action.request()
             url = request.URL() if request is not None else None
             scheme = str(url.scheme() or '').lower() if url is not None else ''
-            if self.worker.guard_off and self.worker.window.isVisible() and (scheme in ('http', 'https') or _blank(url)):
+            if self.worker.guard_off and self.worker.owner_visible and (scheme in ('http', 'https') or _blank(url)):
                 # A blank popup (window.open('') / 'about:blank') is a sign-in flow reserving its
                 # window before it sets the address; that later navigation is checked like any other.
                 return self.worker.open_popup(config)

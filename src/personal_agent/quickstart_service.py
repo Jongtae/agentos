@@ -85,7 +85,7 @@ from .browser_session import BrowserProfile, ascii_host, binding_digest, registr
 from .browser_jar import unexpired
 from .cli_browser_relay import BrowserRelay
 from .telegram_presence import (ATTENTION_ACTION, ATTENTION_ASK, ATTENTION_COOLDOWN, ATTENTION_MEMORY_ASK_FRESH, ATTENTION_PREPARED, ATTENTION_REMINDER,
-                                ATTENTION_REMINDER_HORIZON, ATTENTION_TOOL, CONTROL_DETAILS, CONTROL_RETRY, NO_STEP_LINE,
+                                ATTENTION_REMINDER_HORIZON, ATTENTION_TOOL, CLEAR_REACTION, CONTROL_DETAILS, CONTROL_RETRY, NO_STEP_LINE,
                                 CLOSING_CANDIDATES, DONE_REACTIONS, PROGRESS_CANDIDATES, RECEIVED_CANDIDATES,
                                 RECEIVED_REACTION, WAIT_CHAT_ACTION, WAIT_DRAFT, WROTE_REACTION, PresenceTiming, TelegramTurnAddressing,
                                 WaitState, draft_frame, draft_id_for, draft_step, outcome_reaction, pick_attention,
@@ -2293,6 +2293,7 @@ class AgentService:
             if changed:
                 if self.context_observations.cancel_work_requests(work_id):self.store.remove_telegram_photo(work_id)
                 self.update_task_card(self.store.job(work_id),'cancelled')
+                self._clear_queued_presence(self.store.job(work_id))
                 return True,'이전 요청을 취소했습니다.'
         if previous.get('status') not in ('queued','running') and self.context_observations.cancel_work_requests(work_id):
             # #774: a finished Work that asked for a location continues only on its
@@ -4531,6 +4532,21 @@ class AgentService:
         if self._presence_call('set_message_reaction',job['chat_id'],source,RECEIVED_REACTION):
             state.reaction=RECEIVED_REACTION
         return True
+
+    def _clear_queued_presence(self, job):
+        """A queued Work was cancelled: take its 👀 off the owner's message and forget its state (#958).
+
+        Queued Work has no delivery turn, so the outcome path that clears the
+        reaction for a cancelled Work (`_present_outcome`) never runs for it.
+        Best-effort like every presence call; the cancellation is already
+        durable.
+        """
+        if not job:return
+        state=self.presence.pop(job['id'],None)
+        if state is None or state.reaction is None:return
+        source=self.telegram_turns.source(job['id'])
+        if isinstance(source,int):
+            self._presence_call('set_message_reaction',job['chat_id'],source,CLEAR_REACTION)
 
     def _pending_progress_reaction(self, job, state):
         """Claim one new observed running step for an optional reaction judgment.
@@ -6852,6 +6868,7 @@ class AgentService:
                 if changed:
                     if self.context_observations.cancel_work_requests(job_id):self.store.remove_telegram_photo(job_id)
                     self.update_task_card(job,'cancelled')
+                    self._clear_queued_presence(job)
             elif authorized and isinstance(data,str) and data.startswith('p7x:'):
                 choice=self.store.telegram_context_choice(data[4:])
                 exact=(choice and choice['state']=='offered' and choice['generation']==generation

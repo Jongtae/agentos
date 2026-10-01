@@ -487,7 +487,30 @@ class WaitSurfaceTests(NativePresenceTestCase):
         self.assertTrue(cancelled)
         self.assertEqual(self.store.job(job_id)['status'], 'cancelled')
         self.assertFalse(self.service.run_one(), 'cancelled Work never runs')
-        self.assertEqual(self.methods(), ['setMessageReaction'], 'nothing else was sent for it')
+        # Review P2: the 👀 does not stay on a withdrawn request, and its presence state is dropped.
+        self.assertEqual(self.methods(), ['setMessageReaction', 'setMessageReaction'], 'nothing else was sent for it')
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, CLEAR_REACTION])
+        self.assertNotIn(job_id, self.service.presence)
+        self.assertEqual(self.service.acknowledge_long_work(now=time.time() + 20), [], 'a cancelled Work is not reacted to again')
+
+    def test_stop_on_a_queued_work_that_has_its_reaction_clears_it(self):
+        self.connect_model()
+        job_id, _ = self.receive('아직 시작 전인 요청')
+        self.assertEqual(self.service.acknowledge_long_work(now=time.time() + 10), [job_id])
+        self.assertEqual(self.stop(job_id), 'cancelled')
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, CLEAR_REACTION])
+        self.assertNotIn(job_id, self.service.presence)
+        [notice] = self.sends()
+        self.assertEqual(notice['text'], AgentService.STOP_CANCELLED_TEXT)
+
+    def test_a_legacy_card_s_cancel_button_clears_the_queued_reaction(self):
+        job_id, message_id = self.receive('카드가 남아 있던 요청')
+        self.store.save_task_card(job_id, CHAT, 909, 'queued')
+        self.assertEqual(self.service.acknowledge_long_work(now=time.time() + 10), [job_id])
+        self.tap(f'p7c:{job_id}', 909)
+        self.assertEqual(self.store.job(job_id)['status'], 'cancelled')
+        self.assertEqual(self.reactions()[-1], {'chat_id': CHAT, 'message_id': message_id, 'reaction': []})
+        self.assertNotIn(job_id, self.service.presence)
 
 
 class PresentationFailureTests(NativePresenceTestCase):

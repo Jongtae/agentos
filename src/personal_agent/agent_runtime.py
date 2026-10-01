@@ -174,11 +174,19 @@ CONTEXT_WITHDRAWN_TEXT='이 조회에 들어 있던 현재 맥락 위치·장소
 #: #709, #739: the one generic statement about results that live in the embedded
 #: browser session.  The owner never sees that session, so a link to state kept
 #: only in its cookies opens empty on the owner's own browser or phone.
+#: #944 (owner 2026-10-01): an account result gets words, not a link - a cart link opened signed out in Telegram's browser.
 BROWSER_SESSION_NOTE=(' The owner cannot see this browser session: whatever it holds only through its own sign-in or cookies '
                       '(items added, a form in progress, a signed-in page) is not visible from the owner\'s own browser or '
                       'device, and a link to it opens empty or different there. Links in your answer must work from the '
                       'owner\'s own browser, such as the item\'s public page or a share link the site itself offers; if the '
-                      'result exists only in this session, say so plainly.')
+                      'result exists only in this session, say so plainly. A result kept in the owner\'s account there (a '
+                      'cart, an order, a reservation, a saved item) gets no link to the account page, which opens signed out '
+                      'in a chat app\'s browser: say in words where to check it, in the site\'s own app or website signed in '
+                      'to the same account. On a site whose sign-in the owner shared with you, that account is the owner\'s: '
+                      'say the account owner can see it there, never that the person you serve should sign in to it. After '
+                      'changing a cart or other account state, report what it holds now as you observed it, including what '
+                      'was already there. On a shared sign-in the order and payment are the account owner\'s: never suggest '
+                      'the person you serve can order or pay now.')
 #: #910 (live, Work 6b3bf077): the cart page showed "signed out" as ordinary content,
 #: so no login_required state arose and the owner was only told in text.  The
 #: in-flow login (#709) starts when a page carries a sign-in form.

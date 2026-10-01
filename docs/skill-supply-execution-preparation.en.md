@@ -6,6 +6,8 @@
 **Inspected baseline:** `4e518550b13e13c3cd06cdf05987948ac8169fca`  
 **Owner companion:** [Korean discussion and decisions](research/skill-supply-and-execution-2026-10-01.ko.md)
 
+**Owner follow-up:** [Section 18](#18-owner-follow-up-interface-first-change-and-bounded-verification) makes interface-first design, preservation of existing behavior and bounded verification explicit. It governs migration and verification sequencing throughout this preparation; it does not activate runtime work.
+
 ## 1. Purpose and authority
 
 The owner requested that the discussion about reusable agents, system-management skills and externally supplied skills become documentation and implementation-preparation issues. This document is the canonical English preparation specification for that request, not an amendment to the active runtime contract.
@@ -84,9 +86,8 @@ Public market, provider-authored package, compatible package and behaviorally ve
 ```text
 Owner request, preserved verbatim
   -> existing assistant/orchestration
-  -> installed/bundled skill metadata
-  -> selected skill + needed resources
-       agentos-management | shopping + site know-how
+       <- optional skill knowledge through the supply/loading boundary
+          agentos-management | shopping + site know-how
   -> existing AgentOS capabilities and service setters
   -> observed results + existing Work outcome contract
   -> one assistant response
@@ -95,7 +96,7 @@ Only on an actual capability gap:
   bounded supply discovery -> compatibility -> pinned acquisition -> permitted use
 ```
 
-This is a responsibility diagram, not a mandate for new classes, stores or model calls. Shopping and site knowledge can load into the same existing execution. A domain skill plus a site skill must not automatically become two nested LLMs. General exploration remains available when a compatible recipe is absent or stale.
+This is a responsibility diagram, not a mandate for new classes, stores or model calls. Shopping and site knowledge can load into the same existing execution. A domain skill plus a site skill must not automatically become two nested LLMs. General exploration remains available when a compatible recipe is absent or stale. The optional knowledge branch is not a mandatory execution gateway; section 18 specifies the no-skill path.
 
 ## 6. C16 reconciliation — proposed, not yet amended
 
@@ -230,6 +231,8 @@ A second site fixture must use the same common contract without core edits. It s
 
 [#964](https://github.com/Jongtae/agentos/issues/964) adapts the current evaluation harness. Freeze A/B conditions before tuning: A is existing AgentOS; B uses supplied skill knowledge with the same supported model/tools; optional future C adds validated learned/replay behavior. A does not receive hidden warm-up knowledge. Reset fixture state so an already-added item is not counted as another completed mutation.
 
+The matrix below is a coverage inventory, not a mandatory live-model sweep for every child or content revision. Section 18 assigns preservation checks from #961 onward and limits verification to changed contracts. #964 consolidates reusable evidence and fills concrete gaps; it is not the first regression gate.
+
 | ID | Acceptance case | Evidence required |
 | --- | --- | --- |
 | A01 | Fresh user uses supplied expertise without prior failures | Clean-store fixture; supplied package identity and observed result |
@@ -258,11 +261,11 @@ Normal development uses focused tests, fake source/service transports, temporary
 | Order | Issue | Scope | Gate |
 | --- | --- | --- | --- |
 | 0 | [#959](https://github.com/Jongtae/agentos/issues/959) | This proposal, owner companion and bounded issue preparation | Documentation review; no runtime activation |
-| 1 | [#960](https://github.com/Jongtae/agentos/issues/960) | C16 reconciliation and pinned reuse/compatibility spike | Exact selected APIs, source, licence and scope recorded |
-| 2 | [#961](https://github.com/Jongtae/agentos/issues/961) | Supplied instruction/resources, existing lifecycle and API/CLI loading | One real external source; attributable common runtime contract |
-| 3a | [#962](https://github.com/Jongtae/agentos/issues/962) | Built-in management skill | #961; current #918 behavior reconciled |
-| 3b | [#963](https://github.com/Jongtae/agentos/issues/963) | Common shopping and site packages | #961; no parallel common-runtime rewrite |
-| 4 | [#964](https://github.com/Jongtae/agentos/issues/964) | Integrated first-use/repeat/recovery/portability evidence | Stable integrated content and runtime; live opt-in separate |
+| 1 | [#960](https://github.com/Jongtae/agentos/issues/960) | Interface/pattern decision, C16 reconciliation and pinned reuse/compatibility spike | Stable behavioral contracts, bounded change surface and selected APIs/source/licence |
+| 2 | [#961](https://github.com/Jongtae/agentos/issues/961) | Optional supplied knowledge, existing lifecycle and API/CLI loading | No-skill/off/miss path preserved; one real external source; focused boundary evidence |
+| 3a | [#962](https://github.com/Jongtae/agentos/issues/962) | Built-in management skill | #961; existing setters and #918 behavior preserved |
+| 3b | [#963](https://github.com/Jongtae/agentos/issues/963) | Common shopping and site packages | #961; existing browser contract preserved; no common-runtime rewrite |
+| 4 | [#964](https://github.com/Jongtae/agentos/issues/964) | Consolidate first-use/repeat/recovery/portability evidence | Reuse child evidence; fill changed-contract gaps; bounded live opt-in separate |
 
 All children are proposed and unassigned, not autonomous queues. Evaluation design may start after #960; results depend on implemented slices. #962/#963 may run in parallel only with separate content/test ownership after shared seams stabilize. Do not add these to an active delivery sequence without explicit bounded activation.
 
@@ -295,3 +298,72 @@ Other markets discussed with the owner (Microsoft/Google enterprise agent stores
 ## 17. Preparation completion rule
 
 This preparation is complete when the English specification and Korean companion are reviewable in a docs-only PR, the bounded issues are linked, source/claim distinctions and activation gates are explicit, and documentation validation is reported accurately. Runtime children remain open until separately activated and completed. No runtime behavior, dependency, credential, deployment or active goal is changed by these documents.
+
+## 18. Owner follow-up: interface-first change and bounded verification
+
+**Owner direction, 2026-10-01:** preserve previously working cart and other behavior; do not compensate for a broad redesign with excessive token-consuming tests. Review design patterns to establish stable interfacing first. This section records that direction and the proposed implementation obligations. It refines sections 5, 8 and 13–15 without weakening authority, required CI or truthful evidence requirements. No additional issue or architecture programme is needed.
+
+**Success means existing useful behavior is retained and repeated reasoning is reduced, not merely that a skill system exists.** A skill is optional know-how, not a prerequisite or licence for an existing capability.
+
+### 18.1 Compact design decision inside #960
+
+Produce one short ADR (an in-document decision record is sufficient) and one behavioral interface table before loader implementation. Map selected patterns to existing symbols and record what will not change. Do not redesign the whole repository to fit a pattern catalogue.
+
+| Pattern / principle | Proposed use in AgentOS | Avoid |
+| --- | --- | --- |
+| Ports & Adapters | Separate the skill-supply port from existing action ports; reuse `PluginRegistry`, `runtime_packages`, `action_definitions` and `Capabilities` as seams | A new service/class for every conceptual box or a second execution framework |
+| Adapter / Anti-Corruption Layer | Normalize foreign metadata/resources and explicitly map supported tool semantics at acquisition/binding time | Importing foreign account authority, guessing semantic equivalence or a translator LLM on every call |
+| Design by Contract | Define preconditions, postconditions, invariants, side effects and failure/retry semantics at each boundary | Treating matching JSON shapes or a model's success flag as behavioral compatibility |
+| Branch by Abstraction | Add optional knowledge behind a narrow seam; keep the original executor and a reversible rollout switch | Two complete runtimes, a big-bang replacement or running two mutations in parallel |
+
+Pattern references from the discussion: [Cockburn — Hexagonal Architecture](https://alistair.cockburn.us/hexagonal-architecture), [Microsoft — Anti-Corruption Layer](https://learn.microsoft.com/en-us/azure/architecture/patterns/anti-corruption-layer), [Eiffel — Design by Contract](https://www.eiffel.com/values/design-by-contract/introduction/), [Fowler — Branch by Abstraction](https://martinfowler.com/bliki/BranchByAbstraction.html). Their AgentOS mapping above is a proposal, not implemented framework adoption. Design by Contract is a principle, not a GoF pattern. A skill document is not automatically an executable Strategy; do not introduce site inheritance trees or specialist chains just for naming consistency.
+
+### 18.2 Behavioral interface contract
+
+For each boundary, #960 names the existing owner/symbol, input meaning, output meaning, permitted side effects, error class, retry/continuation rule, version compatibility and allowed change surface. Reuse existing types and error vocabulary where possible; conceptual names here do not mandate new APIs.
+
+| Boundary | Required promise |
+| --- | --- |
+| Supply / resource loading | Return bounded descriptors or pinned instructions/resources. Listing/loading never launches a browser, changes settings, installs hooks or mutates an account. Separate missing/incompatible/unavailable knowledge from denied account authority. |
+| Knowledge / existing worker | Add only selected, attributable knowledge. Preserve the original request, constraints, account/session binding, current route policy and independently available tools. A content miss is not a capability denial. |
+| Worker / host action | Keep argument meanings, current session ownership, authorization, side effects, observations, failure states and cancellation semantics. Additive optional skill provenance cannot require old callers to invent a skill ID or silently reclassify a successful old call. |
+| Observation / outcome / resume | Tool transport success is not goal success. Preserve underlying observation references and existing partial/unknown states. Changing methods does not reset effect history or authorize replay. |
+
+A foreign tool binding must preserve semantics, not only its name; incompatible element IDs, browser profiles or quantity meanings are not interchangeable. Exact source/adapter selection remains #960's compatibility output. No new AI call is required merely to translate a supported interface or validate its schema.
+
+### 18.3 R13 — additive adoption and existing-function preservation
+
+- With skill support off, retain the pre-skill request/tool path without skill selection, loader, catalogue or extra model calls as mandatory dependencies. With support on but zero compatible skills, the independently permitted general path remains usable. Existing users need not reinstall skills, re-login, recreate family assistants or reset model settings merely to upgrade.
+- A missing/broken/incompatible skill or unavailable supplier must not remove previously available browser/settings/calendar/file capabilities. Handle knowledge failure at its boundary. Do not turn a revoked account grant into a fallback; R6/R7 still apply. If a revoked or untrusted skill was already loaded, stop or rebuild the affected context through existing recovery, preserving the original authorized goal, effect ledger and current authority. A new permitted method is a distinct selection, not stale-skill continuation or a forced repetition of the user's request.
+- Do not reimplement `BrowserSession`, settings setters, login, payment, family setup/share/revoke or Work recovery inside skill prompts. Package metadata/provenance integration may touch shared seams, but changes to the behavioral contracts require a separately bounded justification. Adding a supplier should normally change its adapter; adding a site should normally change content/binding and its focused cases, not unrelated services.
+- Keep knowledge selection/loading bounded within the existing Work budget so catalogue exploration cannot consume the whole useful-action allowance; choose the concrete limit in #960 rather than adding a second budget service. Do not promise zero total token overhead: loading content can add context and a normal tool round-trip. The design target is no compulsory new planner/specialist/verifier calls and no discovery on every turn.
+- Stage rollout with support off first, then explicitly enable selected packages. Keep a rollback switch for knowledge enrichment that preserves sessions, settings, Memory and existing Work/evidence. Do not run old/new account mutations concurrently as a shadow comparison. After any possible mutation, reconcile current state before changing method or retrying; disabling the feature cannot undo a cart change.
+- Start from existing fixtures and already available, redacted records of the owner's successful behavior. Record their actual code/model/environment and observation class; the inspected `main` SHA is not automatically a known-good live baseline. Missing live evidence is stated, not manufactured through a mandatory new sweep. Preservation is a #961 gate onward, not deferred to #964; known unresolved regressions prevent promotion of the affected default path, not every unrelated change.
+
+### 18.4 R14 — verification follows the changed contract
+
+Use this plan together with the existing AGENTS.md verification budget. The section-13 matrix remains required coverage for the implemented scope, but it is not an instruction to rerun every case with every live model/site on every patch.
+
+| Change | Smallest appropriate evidence |
+| --- | --- |
+| Documents / ADR only | Changed-text, link/consistency and diff-scope checks plus required CI; no model or real-account execution |
+| New supplier / format adapter | Relevant parser/resource and compatibility contract tests with fake transports; not a whole shopping regression sweep |
+| Skill instructions / site hints | Existing content/binding checks and affected representative behavior; a small real-model sample only for a justified, authorized quality question |
+| Shared runtime / authority / serializer / resume boundary | Related contract regressions and an actual model-free boundary integration/counterexample; broaden and independently review when the changed risk requires it |
+
+Each implementation PR states changed boundary, reused evidence/tests, the concrete uncovered risk, selected additional check and live-call budget if any. Reuse prior results only when relevant code/content/bindings remain applicable; required exact-head CI still runs. No separate evaluator, self-created full-suite cadence, default all-provider/all-site matrix, duplicate judges, automatic retries until green or repeated reviews of an unchanged head.
+
+Normal development defaults to no paid model calls or real account mutations. Any necessary live sample first declares affected route/cases, call/token-or-cost and time cap, stop condition and allowed effects/cleanup; no automatic expansion after an inconclusive result. Return the uncertainty and a bounded next decision instead. Existing risk-triggered review and mandatory checks are not waived to save tokens.
+
+Model-free tests spend no inference tokens during execution, but AI-authored tests, repeated implementation/review and full log reading still cost tokens. Keep one focused contract suite at existing seams, batch fixes into a stable head, read summaries on success and relevant failing excerpts only. Follow the existing stable-head broad-validation budget rather than adding another round in each child. #964 consolidates child evidence and runs only justified gaps/integration checks; it does not repeat completed work wholesale.
+
+Behavioral compatibility does not prove identical LLM choices. New instructions can still change product selection or response quality; distinguish structural preservation from model-quality evidence. Do not claim unchanged real Emart success or quantified savings solely from schema tests.
+
+### 18.5 Issue-level obligations
+
+- #960: interface/pattern ADR and change-surface table first; then the already scoped dependency/source compatibility spike, with bounded evidence. No additional design-pattern project.
+- #961: implement the optional knowledge seam; check off, empty/missing, source-failure and stale-loaded-skill recovery paths while keeping action semantics. Preservation precedes default activation.
+- #962/#963: content and binding changes over stable settings/browser ports; targeted representative checks. Do not rescript the service or retest every unrelated feature because a skill changed.
+- #964: own the coverage/evidence map from #960 onward; reuse applicable child results and separate any explicitly budgeted live promotion. It is not the first time existing functions are checked.
+
+This follow-up adds no runtime activation, deployment, live test permission, new public marketplace or new issue. The current C16 amendment remains proposed until its existing bounded activation/review path is followed.

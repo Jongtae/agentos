@@ -182,7 +182,8 @@ BROWSER_SESSION_NOTE=(' The owner cannot see this browser session: whatever it h
                       'result exists only in this session, say so plainly. A result kept in the owner\'s account there (a '
                       'cart, an order, a reservation, a saved item) gets no link to the account page, which opens signed out '
                       'in a chat app\'s browser: say in words where to check it, in the site\'s own app or website signed in '
-                      'to the same account.')
+                      'to the same account. On a site whose sign-in the owner shared with you, that account is the owner\'s: '
+                      'say the account owner can see it there, never that the person you serve should sign in to it.')
 #: #910 (live, Work 6b3bf077): the cart page showed "signed out" as ordinary content,
 #: so no login_required state arose and the owner was only told in text.  The
 #: in-flow login (#709) starts when a page carries a sign-in form.

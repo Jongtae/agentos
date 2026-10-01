@@ -5333,6 +5333,7 @@ class AgentService:
             cfg=self.store.config('telegram',{})
             if not (cfg.get('enabled') and isinstance(cfg.get('user_id'),int)):
                 raise ValueError('휴대폰 로그인 링크를 보낼 곳이 없어요. 먼저 텔레그램을 연결해 주세요.')
+            if self.family_instance():raise ValueError(remote_login.FAMILY_INSTANCE_TEXT)
             if self.remote_login_session() is not None:raise ValueError(remote_login.BUSY_TEXT)
         row={'host':host,'cookies_before':self._login_cookie_marks({'host':host}) if host else None}
         # What Settings shows after answering ``opening``: the window's observed outcome (in memory only).
@@ -5350,8 +5351,8 @@ class AgentService:
                 chat=self.store.config('telegram',{}).get('user_id')
                 try:self.start_remote_login(window,site,lambda reason:self.browser_profile.close_login_window(window,timeout=0),chat_id=chat)
                 except remote_login.RemoteLoginError as exc:
+                    # Review P2-1: the window stays open for the owner at the Mac; the owner is told why.
                     self._notify_owner(f'telegram:{chat}',str(exc))
-                    self.browser_profile.close_login_window(window,timeout=0)
         def closed(window,reason,saved):
             mark('failed' if reason=='failed' and (self._settings_login or {}).get('state')=='opening' else 'closed')
             if saved:self._record_owner_signins(self._signed_in_sites({**row,'window':window}))
@@ -5921,9 +5922,13 @@ class AgentService:
                                ('assistant',BROWSER_LOGIN_RESULT_TEXT[shown],job['channel'],time.time(),job.get('workspace_id'),work_id))
 
     def login_refusal(self, host_or_site):
-        """Why no login window may open for this site (``refuse_login``, #940), or None."""
-        hook=self.refuse_login
-        if not callable(hook):return None
+        """Why no login window may open for this site, or None (#940).
+
+        By default a site this instance *received* from the owner (family share,
+        #935) is refused; ``refuse_login`` replaces that rule when set.
+        """
+        from . import family_share
+        hook=self.refuse_login if callable(self.refuse_login) else (lambda site:family_share.login_refusal(self.store,site))
         site=registrable_domain(host_or_site) if host_or_site else None
         if not site:return None
         try:reason=hook(site)
@@ -5933,6 +5938,12 @@ class AgentService:
         return str(reason) if reason else None
 
     # -- the phone's one-time link to the login window (#939) -------------------------------
+    def family_instance(self):
+        """Whether this instance is a family member's (paired through a family setup, #897): no phone link here (review P3-6)."""
+        from . import family_setup
+        cfg=self.store.config('telegram',{})
+        return bool((isinstance(cfg,dict) and cfg.get('pair_user_id') is not None) or family_setup.setup_recorded(self.store))
+
     def remote_login_session(self):
         """The current remote login session while it is alive, else None."""
         session=self._remote_login
@@ -5955,6 +5966,7 @@ class AgentService:
         popen=self.remote_login_popen or subprocess.Popen
         refused=self.login_refusal(site)
         if refused:raise remote_login.RemoteLoginError(refused)
+        if self.family_instance():raise remote_login.RemoteLoginError(remote_login.FAMILY_INSTANCE_TEXT)
         with self.lock:
             if self.remote_login_session() is not None:raise remote_login.RemoteLoginError(remote_login.BUSY_TEXT)
             if popen is subprocess.Popen and not find_cli('ngrok'):raise remote_login.RemoteLoginError(remote_login.NO_NGROK_TEXT)
@@ -5966,12 +5978,13 @@ class AgentService:
         try:
             link=session.start(port)
         except remote_login.RemoteLoginError:
+            # Review P2-1: the window and its prompt stay for the owner at the Mac; only the session ends.
             session.finish('failed')
             raise
         if chat_id is not None and not self._send_remote_login_link(session,chat_id):
-            # A link nobody received must not keep a public tunnel open.
+            # A link nobody received must not keep a public tunnel open; the window stays (review P2-1).
             LOG.warning('remote login: link not delivered; closing site=%s',session.site)
-            session.finish('expired')
+            session.finish('failed')
             raise remote_login.RemoteLoginError(remote_login.TUNNEL_FAILED_TEXT)
         return link
 

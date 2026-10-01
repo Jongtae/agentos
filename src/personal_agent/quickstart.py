@@ -660,8 +660,10 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                                   cookie=remote_login.cookie_header(issued) if issued else None,csp=remote_login.page_csp(nonce))
             if not session.client_ok(cookie):return self.reply(404,{'error':'로그인 링크가 만료되었거나 올바르지 않습니다.'})
             if path==remote_login.FRAME_PATH and method=='GET':
-                frame=session.frame()
-                if frame is None:return self.reply(404,{'error':'로그인 창이 닫혔습니다.'})
+                frame=session.frame(full=parse_qs(parts.query).get('full',[''])[0]=='1')
+                # Review P3-2: a frame the window could not answer now is retried; only a dead session is 404 (above).
+                if frame is None:return self.reply(503,{'retry':True})
+                if frame.get('unchanged'):return self.reply(204,b'','text/plain; charset=utf-8')
                 return self.reply(200,frame)
             if path==remote_login.INPUT_PATH and method=='POST':
                 try:
@@ -672,7 +674,8 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     return self.reply(400,{'error':'요청이 올바르지 않습니다.'})
                 return self.reply(200,{'ok':bool(session.input(body))})
             if path==remote_login.DONE_PATH and method=='POST':
-                return self.reply(200,{'ok':bool(session.finish('done'))})
+                # Review P3-3: the answer leaves before the tunnel it travels through is stopped.
+                return self.reply(200,{'ok':bool(session.finish_later('done'))})
             return self.reply(405,{'error':'지원하지 않는 요청입니다.'})
 
         def cookie(self,token,max_age=86400):

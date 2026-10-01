@@ -25,6 +25,7 @@ Boundaries:
 - one session at a time; done, expiry, a Telegram skip and a Mac close each
   stop the tunnel and the window.
 """
+import hashlib
 import hmac
 import json
 import logging
@@ -58,10 +59,17 @@ REFRESH_MS = 500
 LINK_TEXT = ('휴대폰에서 로그인하는 링크예요 ({site}). 이 링크를 연 휴대폰 한 대만 쓸 수 있고, 약 {minutes}분 뒤에 닫혀요.\n'
              '화면을 누르면 Mac의 로그인 창에서 같은 자리가 눌리고, 입력한 글자는 선택한 칸에 들어가요. '
              '다 되면 [완료]를 눌러 주세요.\n{link}')
-NO_NGROK_TEXT = '휴대폰에서 로그인할 임시 링크를 만들 ngrok이 이 Mac에 없어요.'
-NO_PORT_TEXT = '이 Mac의 AgentOS 주소를 아직 알 수 없어 휴대폰 로그인 링크를 만들지 못했어요.'
+NO_NGROK_TEXT = '휴대폰에서 로그인할 임시 링크를 만들 ngrok이 이 Mac에 없어요. Mac의 로그인 창에서 로그인해 주세요.'
+NO_PORT_TEXT = '이 Mac의 AgentOS 주소를 아직 알 수 없어 휴대폰 로그인 링크를 만들지 못했어요. Mac의 로그인 창에서 로그인해 주세요.'
 BUSY_TEXT = '이미 휴대폰 로그인 링크가 열려 있어요. 그 링크가 닫힌 뒤에 다시 요청해 주세요.'
-TUNNEL_FAILED_TEXT = '휴대폰 로그인 링크를 열지 못했어요.'
+#: A link that could not open or be delivered leaves the Mac window and its prompt as they are (review P2-1).
+TUNNEL_FAILED_TEXT = '휴대폰 링크를 열지 못했어요. Mac의 로그인 창에서 로그인해 주세요.'
+#: Review P3-6: a family instance (one paired through a family setup) never opens a phone link to a window.
+FAMILY_INSTANCE_TEXT = '가족 비서에서는 휴대폰 로그인 링크를 만들 수 없어요.'
+#: How many unbound page cookies are kept at once (review P3-1): a later page open never invalidates an earlier one.
+ISSUED_KEPT = 8
+#: Review P3-3: how long after 완료's reply the tunnel is stopped, so the phone gets the answer first.
+DONE_DELAY_SECONDS = 0.3
 
 
 class RemoteLoginError(RuntimeError):
@@ -126,8 +134,10 @@ class RemoteLogin:
         self.expires = self.created + max(1.0, min(float(seconds), SESSION_SECONDS))
         #: The cookie value the bound client carries; None until a page's first API call binds it.
         self.bound_client = None
-        #: The cookie value the latest page open was given, before binding.
-        self._issued = None
+        #: The cookie values pages were given while unbound (newest last, at most ``ISSUED_KEPT``).
+        self._issued = []
+        #: The digest of the last frame sent (review P3-4); never the frame itself.
+        self._last_frame = None
         self.process = None
         self.link = None
         self.reason = None
@@ -165,7 +175,13 @@ class RemoteLogin:
         return (self.clock() if now is None else now) >= self.expires
 
     def finish(self, reason):
-        """End the session once: stop the tunnel, close the window its way, tell the owner's side."""
+        """End the session once: stop the tunnel, close the window its way, tell the owner's side.
+
+        ``closed``: the window already closed on its own, nothing more to close.
+        ``failed``: the link never opened or was never delivered (review P2-1):
+        the tunnel stops but the window and its prompt stay exactly as they
+        were, for the owner to use on the Mac.
+        """
         with self._lock:
             if self._ended.is_set():
                 return False
@@ -180,6 +196,7 @@ class RemoteLogin:
         LOG.info('remote login %s site=%s', reason, self.site)
         if reason != 'closed':
             self.profile.login_window_remote(self.window, False)
+        if reason not in ('closed', 'failed'):
             try:
                 self._close(reason)
             except Exception as exc:
@@ -191,37 +208,63 @@ class RemoteLogin:
                 LOG.warning('remote login: end hook failed (%s)', type(exc).__name__)
         return True
 
+    def finish_later(self, reason, delay=DONE_DELAY_SECONDS):
+        """``finish`` after ``delay`` seconds, so a reply already written reaches the phone before the tunnel stops (review P3-3)."""
+        timer = threading.Timer(delay, self.finish, args=(reason,))
+        timer.daemon = True
+        timer.start()
+        return self.alive()
+
     # -- the link and its client -----------------------------------------------
     def code_ok(self, code):
         return self.alive() and not self.expired() and _same(code, self.code)
 
+    def _issued_match(self, cookie):
+        return next((issued for issued in self._issued if _same(cookie, issued)), None)
+
     def open_page(self, cookie):
-        """The page was requested: the cookie to set (a fresh value while unbound), None when the
-        bound client reloads, or False when another client asked."""
+        """The page was requested: the cookie to set (a fresh value while unbound, unless the request already
+        carries one issued here, review P3-1), None when a known client reloads, or False when another
+        client asked after binding."""
         with self._lock:
             if self.bound_client is None:
-                self._issued = secrets.token_urlsafe(32)
-                return self._issued
+                if self._issued_match(cookie) is not None:
+                    return None
+                issued = secrets.token_urlsafe(32)
+                self._issued = (self._issued + [issued])[-ISSUED_KEPT:]
+                return issued
             return None if _same(cookie, self.bound_client) else False
 
     def client_ok(self, cookie):
-        """Whether an API request's cookie is the bound client's; the first one carrying the latest
-        page's cookie binds it (a link preview fetcher never calls the API, so it never binds)."""
+        """Whether an API request's cookie is the bound client's; the first API call carrying any cookie a
+        page was issued binds that client (a link preview fetcher never calls the API, so it never binds,
+        and a later page open never invalidates an earlier one, review P3-1)."""
         with self._lock:
             if self.bound_client is None:
-                if self._issued is None or not _same(cookie, self._issued):
+                issued = self._issued_match(cookie)
+                if issued is None:
                     return False
-                self.bound_client, self._issued = self._issued, None
+                self.bound_client, self._issued = issued, []
                 LOG.info('remote login bound site=%s', self.site)
                 return True
             return _same(cookie, self.bound_client)
 
     # -- the window ----------------------------------------------------------------
-    def frame(self):
-        """The window's current image (``{'jpeg', 'width', 'height'}``) or None when it is not open."""
+    def frame(self, full=False):
+        """The window's current image (``{'jpeg', 'width', 'height', 'dialog'}``), ``{'unchanged': True}``
+        when nothing changed since the last one sent (review P3-4; ``full`` sends it anyway), or None when
+        the window could not answer now."""
         if not self.alive():
             return None
-        return self.profile.login_window_frame(self.window)
+        frame = self.profile.login_window_frame(self.window)
+        if not isinstance(frame, dict):
+            return None
+        digest = hashlib.sha256(json.dumps([frame.get('jpeg'), frame.get('width'), frame.get('height'), frame.get('dialog')],
+                                           sort_keys=True).encode()).hexdigest()
+        if not full and digest == self._last_frame:
+            return {'unchanged': True}
+        self._last_frame = digest
+        return frame
 
     def input(self, body):
         """One phone input (``validate_input``) into the window; True when the worker accepted it."""
@@ -267,13 +310,14 @@ button.wide{{flex:1}}#done{{width:100%;font-size:19px;padding:16px;background:#3
 <p id="end"></p>
 <script nonce="{nonce}">
 const code={code};const q='?code='+encodeURIComponent(code);const $=id=>document.getElementById(id);
-let W=0,H=0,busy=false,ended=false;
+let W=0,H=0,busy=false,ended=false,full=true;
 function end(text){{ended=true;$('live').classList.add('hidden');$('end').style.display='block';$('end').textContent=text}}
 async function post(path,body){{try{{const r=await fetch(path+q,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body||{{}}),credentials:'same-origin'}});
 if(r.status===404){{end('이 링크는 닫혔어요.');return false}}return r.ok}}catch(e){{return false}}}}
-async function frame(){{if(ended||busy)return;busy=true;try{{const r=await fetch('{FRAME_PATH}'+q,{{cache:'no-store',credentials:'same-origin'}});
-if(r.status===404){{end('이 링크는 닫혔어요. 로그인 창도 닫혔고, 로그인했다면 세션이 저장됐어요.');return}}
-if(r.ok){{const d=await r.json();W=d.width;H=d.height;$('shot').src='data:image/jpeg;base64,'+d.jpeg;dialog(d.dialog)}}}}catch(e){{}}finally{{busy=false}}}}
+async function frame(){{if(ended||busy)return;busy=true;try{{const r=await fetch('{FRAME_PATH}'+q+(full?'&full=1':''),{{cache:'no-store',credentials:'same-origin'}});
+if(r.status===404){{end('이 링크는 닫혔어요.');return}}
+if(r.status===204){{full=false;return}}
+if(r.ok){{const d=await r.json();full=false;W=d.width;H=d.height;$('shot').src='data:image/jpeg;base64,'+d.jpeg;dialog(d.dialog)}}}}catch(e){{}}finally{{busy=false}}}}
 function dialog(d){{const box=$('dialog');if(!d){{box.classList.add('hidden');return}}$('dialog-text').textContent=d.text||'';$('dialog-cancel').classList.toggle('hidden',d.kind!=='confirm');box.classList.remove('hidden')}}
 $('dialog-ok').onclick=()=>post('{INPUT_PATH}',{{type:'dialog',answer:'ok'}}).then(()=>setTimeout(frame,150));
 $('dialog-cancel').onclick=()=>post('{INPUT_PATH}',{{type:'dialog',answer:'cancel'}}).then(()=>setTimeout(frame,150));

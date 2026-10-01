@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 from personal_agent import isolated_engine_mcp_bridge
-from personal_agent.agent_runtime import (BROWSER_ACTIONS, BROWSER_SESSION_NOTE, BROWSER_SIGN_IN_NOTE, DEFINITIONS, STATUS_ARGUMENT, STATUS_SCHEMA,
+from personal_agent.agent_runtime import (BROWSER_ACTIONS, BROWSER_SESSION_NOTE, BROWSER_SIGN_IN_DESCRIPTION, BROWSER_SIGN_IN_NOTE, DEFINITIONS, STATUS_ARGUMENT, STATUS_SCHEMA,
                                           Capabilities,
                                           check_arguments)
 from personal_agent.bounded_execution import (
@@ -136,16 +136,24 @@ class OneActionSource(_Store):
         self.assertIn('including what was already there', BROWSER_SESSION_NOTE)
         self.assertIn('never suggest the person you serve can order or pay now', BROWSER_SESSION_NOTE)
         self.assertIn(BROWSER_SESSION_NOTE, NATIVE['browser_open']['description'])
-        # #910: a signed-out page leads the AI to the site's own sign-in page, which starts the in-flow login.
+        # #910: a signed-out page starts the in-flow login; #953: by asking for it directly (browser_sign_in).
         self.assertIn(BROWSER_SIGN_IN_NOTE, NATIVE['browser_open']['description'])
-        self.assertIn("reach the site's sign-in form, by its address or its sign-in control", BROWSER_SIGN_IN_NOTE)
-        for scripted in ('cart', 'order', 'saved item'):
-            self.assertNotIn(scripted, BROWSER_SIGN_IN_NOTE, 'the capability, not a task (C16)')
+        self.assertIn("call browser_sign_in with the site's address", BROWSER_SIGN_IN_NOTE)
+        self.assertIn('on this Mac or from their phone', BROWSER_SIGN_IN_DESCRIPTION)
+        self.assertIn('Never tell the person to sign in in a browser yourself', BROWSER_SIGN_IN_DESCRIPTION)
+        for text in (BROWSER_SIGN_IN_NOTE, BROWSER_SIGN_IN_DESCRIPTION):
+            for scripted in ('cart', 'order', 'saved item', 'mall', 'shop'):
+                self.assertNotIn(scripted, text, 'the capability, not a task (C16)')
         self.assertIn('Never type a password', BROWSER_SIGN_IN_NOTE)
+        self.assertIn('never types a password', BROWSER_SIGN_IN_DESCRIPTION)
+        self.assertEqual(NATIVE['browser_sign_in']['description'], BROWSER_SIGN_IN_DESCRIPTION)
         wire = {tool['name']: tool for tool in AgentOSMcpTools(self.caps(browser=lambda: None)).definitions()}
         self.assertIn(BROWSER_SESSION_NOTE, wire['browser_open']['description'])
         static = {tool['name']: tool for tool in profile_mcp_tools(BOUNDED_PROFILE)}
         self.assertIn(BROWSER_SESSION_NOTE, static['browser_open']['description'])
+        # #953: the sign-in request reaches the CLI bridge with the same text as the API definition.
+        self.assertEqual(wire['browser_sign_in']['description'], BROWSER_SIGN_IN_DESCRIPTION)
+        self.assertEqual(static['browser_sign_in']['description'], BROWSER_SIGN_IN_DESCRIPTION)
 
 
 class DeclaredProfileLimits(unittest.TestCase):
@@ -348,6 +356,8 @@ class SettingsProjection(_Store):
                                              'propose_current_state', 'public_page_read', 'read_file',
                                              'save_note', 'weather', 'web_search', 'browser_open', 'browser_read',
                                              'browser_find', 'browser_click', 'browser_type',
+                                             # #953: the sign-in request, served the same way.
+                                             'browser_sign_in',
                                              # #774: relayed to the service on this route.
                                              'calendar_query', 'calendar_draft_create', 'calendar_draft_update', 'calendar_draft_cancel', 'list_memory', 'search_memory', 'save_memory', 'schedule_preparation',
                                              'ask_location',

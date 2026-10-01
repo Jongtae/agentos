@@ -5,6 +5,8 @@ from pathlib import Path
 HOST_ACTIONS={'web_search','public_page_read','bounded_public_research','weather','calendar_query','calendar_draft_create','calendar_draft_update','calendar_draft_cancel','list_roots','find_files','read_file','list_notes','save_note','save_memory','list_memory','search_memory','list_agents','delegate_agent',
               # SEC-BROWSER-01 (#656): the owner-logged-in browser profile.
               'browser_open','browser_read','browser_find','browser_click','browser_type',
+              # BROWSE-09 (#953): a sign-in request for the owner, read-only on the site.
+              'browser_sign_in',
               # CONTEXT-STATE-01 (#627): a revisable current-state hypothesis.
               'propose_current_state',
               # SEC-ATTN-01 (#659): an owner-accepted preparation (reminder/prepare).

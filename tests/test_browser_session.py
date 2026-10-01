@@ -427,9 +427,12 @@ def flat(value):
 # ---------------------------------------------------------------- schemas
 
 class ToolSchemaTests(unittest.TestCase):
-    def test_five_browser_tools_are_declared_once_with_the_effect_enum(self):
+    def test_six_browser_tools_are_declared_once_with_the_effect_enum(self):
         tools = {d['function']['name']: d['function']['parameters'] for d in DEFINITIONS if d['function']['name'] in BROWSER_ACTIONS}
-        self.assertEqual(set(tools), {'browser_open', 'browser_read', 'browser_find', 'browser_click', 'browser_type'})
+        self.assertEqual(set(tools), {'browser_open', 'browser_read', 'browser_find', 'browser_click', 'browser_type', 'browser_sign_in'})
+        # #953: a sign-in request takes the site's address and no effect; it changes nothing on the site.
+        self.assertEqual(tools['browser_sign_in']['required'], ['url'])
+        self.assertEqual(set(tools['browser_sign_in']['properties']), {'url'})
         self.assertEqual(tools['browser_open']['required'], ['url', 'effect'])
         self.assertEqual(tools['browser_read']['properties'], {})
         self.assertEqual(tools['browser_find']['required'], ['text'])
@@ -466,7 +469,7 @@ class ToolSchemaTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'needs_setup')
         with_browser = Capabilities(store, None, {}, '', 'w', lambda *a: None, browser=lambda: FakeDriver())
         self.assertTrue(BROWSER_ACTIONS <= {d['function']['name'] for d in with_browser.definitions()})
-        self.assertEqual(len(action_definitions(with_browser.tools, BROWSER_ACTIONS)), 5)
+        self.assertEqual(len(action_definitions(with_browser.tools, BROWSER_ACTIONS)), 6)
 
 
 # ---------------------------------------------------------------- mediation
@@ -1103,6 +1106,43 @@ class LoginAndBudgetTests(unittest.TestCase):
         self.assertEqual(withheld_effect('browser_open', result).advanced, False)
         self.assertIsNone(withheld_effect('browser_open', {'state': 'page', 'text': 'x'}))
 
+    def test_a_sign_in_request_is_login_required_records_the_offer_and_loads_nothing(self):
+        """#953 (BROWSE-09): the model asks for the sign-in directly; the result is the in-flow login's own."""
+        class OfferingApprovals(Approvals):
+            def __init__(self):
+                super().__init__()
+                self.offers = []
+
+            def login_required(self, url):
+                self.offers.append(url)
+                return '소유자에게 로그인을 요청했습니다.'
+        approvals = OfferingApprovals()
+        sess, driver = session(approvals=approvals)
+        result = sess.run('browser_sign_in', {'url': ORIGIN + '/account?next=%2Fcart#top'})
+        self.assertEqual(result, {'state': 'login_required', 'url': ORIGIN + '/account', 'title': None, 'needs_setup': True,
+                                  'requires': 'browser-login', 'next_step': '소유자에게 로그인을 요청했습니다.'})
+        self.assertEqual(approvals.offers, [ORIGIN + '/account'], 'the login row gets the site reference, no query or fragment')
+        self.assertEqual(driver.log, [], 'nothing was loaded, typed or read')
+        self.assertIsNone(sess.driver, 'no page driver was even created')
+        self.assertEqual(sess.steps_used, 1, 'a browser step for the budget')
+        self.assertEqual(withheld_effect('browser_sign_in', result).advanced, False)
+        # Without an in-flow login surface the result still points the owner at Settings.
+        sess, _ = session()
+        self.assertEqual(sess.run('browser_sign_in', {'url': ORIGIN + '/'})['next_step'], bs.LOGIN_REQUIRED_TEXT)
+
+    def test_a_sign_in_request_refuses_a_local_or_non_http_address(self):
+        """#953: the same address rule as browser_open; a refused address spends no step."""
+        sess, driver = session()
+        for url in ('', 'ftp://example.test/', 'file:///etc/passwd', 'javascript:alert(1)', 'example.test'):
+            with self.assertRaises(ValueError, msg=url):
+                sess.run('browser_sign_in', {'url': url})
+        for url in ('http://localhost/', 'http://127.0.0.1:8787/', 'http://10.0.0.5/', 'http://host.local/', 'http://[::1]/'):
+            with self.assertRaises(ToolError, msg=url) as caught:
+                sess.run('browser_sign_in', {'url': url})
+            self.assertEqual(caught.exception.code, 'blocked_destination')
+        self.assertEqual(sess.steps_used, 0)
+        self.assertEqual(driver.log, [])
+
     def test_step_cap_and_deadline_are_typed_failures(self):
         sess, _ = session(steps=2)
         sess.open({'url': ORIGIN + '/product', 'effect': 'read'})
@@ -1311,6 +1351,19 @@ class LoopTests(unittest.TestCase):
         failed = [json.loads(d) for t, s, d in self.events if s == 'failed' and t == 'browser_open']
         self.assertEqual(failed[0]['error'], bs.LOGIN_REQUIRED_TEXT)
         self.assertNotIn('owner-browser-session', caps.private_provenance)
+
+    def test_a_sign_in_request_keeps_the_turn_from_claiming_success_and_leaves_no_private_source(self):
+        """#953: the loop treats the direct sign-in request as it treats a login page."""
+        script = Script({'tool_calls': [call('1', 'browser_sign_in', url=ORIGIN + '/')]},
+                        {'content': '장바구니를 확인했습니다.'})
+        caps = self.caps(script, FakeDriver())
+        result = run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': '확인해줘'}], '', caps, self.record)
+        self.assertEqual(result.outcome, 'failed')
+        failed = [json.loads(d) for t, s, d in self.events if s == 'failed' and t == 'browser_sign_in']
+        self.assertEqual(failed[0]['error'], bs.LOGIN_REQUIRED_TEXT)
+        running = [json.loads(d) for t, s, d in self.events if s == 'running' and t == 'browser_sign_in']
+        self.assertEqual(running[0]['step'], {'action': 'browser_sign_in', 'host': urlsplit(ORIGIN).hostname})
+        self.assertNotIn('owner-browser-session', caps.private_provenance, 'nothing was read from the session')
 
     def test_a_delegated_specialist_never_receives_the_browser(self):
         caps = self.caps(Script(), FakeDriver())

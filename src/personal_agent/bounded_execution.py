@@ -95,7 +95,9 @@ _ISOLATED = 'isolation-restricted-profile'
 #: the trusted-local CLI route.  A CLI worker never holds a handle to that
 #: session; the strict-isolated and isolated profiles never offer it.
 _BROWSER = 'browser-profile-served-on-trusted-local-route-only'
-_BROWSER_ACTIONS = ('browser_open', 'browser_read', 'browser_find', 'browser_click', 'browser_type')
+_BROWSER_ACTIONS = ('browser_open', 'browser_read', 'browser_find', 'browser_click', 'browser_type',
+                    # #953: the model asks for the owner's sign-in directly.
+                    'browser_sign_in')
 #: #659: accepting a preparation needs the host's DecisionEngine and its
 #: Telegram acceptance surface, which a CLI bridge process does not hold.
 _PREPARATIONS = 'owner-preparations-not-bound-to-cli-route'

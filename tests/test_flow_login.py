@@ -45,13 +45,13 @@ from personal_agent.conversation_projection import TELEGRAM_RESULT_PREVIEW_CHARS
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import (AgentService, BROWSER_LOGIN_CLOSE_SECONDS, BROWSER_LOGIN_MOVED_LINE,
                                                BROWSER_LOGIN_NO_SESSION_LINE, BROWSER_LOGIN_OFFERED_TEXT,
-                                               BROWSER_LOGIN_RESULT_TEXT, BROWSER_LOGIN_SECONDS, BROWSER_LOGIN_SKIP_LABEL,
-                                               BROWSER_OWNER_SIGNINS_KEY)
+                                               BROWSER_LOGIN_PHONE_LABEL, BROWSER_LOGIN_RESULT_TEXT, BROWSER_LOGIN_SECONDS,
+                                               BROWSER_LOGIN_SKIP_LABEL, BROWSER_OWNER_SIGNINS_KEY)
 from personal_agent.quickstart_store import QuickStore
 
 from test_bounded_execution import _Capabilities
 from test_browser_session import ORIGIN, FakeDriver, Script, call, flat
-from test_cli_route_agency import CHAT as CHAT_BRIDGE, GENERATION as GENERATION_BRIDGE, _BridgeHarness, _call, _value
+from test_cli_route_agency import CHAT as CHAT_BRIDGE, GENERATION as GENERATION_BRIDGE, LIST, _BridgeHarness, _call, _value
 
 CHAT, GENERATION = 42, 'gen-709'
 #: Codex 0.153.4's accepted values for the key (its config loader's own error lists them).
@@ -485,6 +485,68 @@ class InFlowLogin(LoginHarness):
         self.assertTrue(self.service.run_one())
         self.assertIn(self.store.job(job_id)['status'], ('succeeded', 'partial'))
         self.assertEqual(self.drivers[1].posts, [], 'nothing was submitted in the login window')
+
+    # -- #953 (BROWSE-09): the model asks for the sign-in directly, with no sign-in page reached --
+    def sign_in_script(self):
+        # The site address the model gives (the fixture's account page: the fake driver serves no '/').
+        return [Script({'tool_calls': [call('1', 'browser_sign_in', url=ORIGIN + '/account')]},
+                       {'content': '로그인을 요청했습니다.'})]
+
+    def sign_in_errors(self, job_id):
+        with self.store.db() as db:
+            rows = db.execute("SELECT detail FROM tool_events WHERE job_id=? AND tool='browser_sign_in' AND status='failed'",
+                              (job_id,)).fetchall()
+        return [json.loads(row['detail']).get('error') for row in rows]
+
+    def test_a_sign_in_request_without_a_login_page_offers_the_same_login_and_resumes_once(self):
+        """The same window, the same prompt (Mac buttons and the phone button, #939) and the same one resume."""
+        self.scripts = self.sign_in_script()
+        job_id = self.receive('계정 페이지 확인해줘')
+        self.assertTrue(self.service.run_one())
+        self.assertIn(self.store.job(job_id)['status'], ('failed', 'partial'), 'a requested sign-in is not a finished request')
+        self.assertEqual(self.sign_in_errors(job_id), [BROWSER_LOGIN_OFFERED_TEXT], 'the model was told the owner will be asked')
+        self.assertIn('로그인', self.store.job(job_id)['owner_cause'] or '')
+        self.shown(job_id)
+        # The only navigation is the login window's, at the site address the model gave; the run loaded nothing.
+        self.assertEqual([entry for entry in self.driver_log if entry[0] == 'goto'], [('goto', ORIGIN + '/account', bs.ACTION_TIMEOUT_SECONDS)])
+        status = self.service.browser_status()
+        self.assertTrue(status['login_window_open'])
+        self.assertEqual([(row['work_id'], row['host']) for row in status['pending_logins']], [(job_id, 'fixture.test')])
+        self.service.deliver_one()
+        self.assertTrue(wait_until(self.service.deliver_notification), 'the prompt is armed on the window thread (#716)')
+        prompts = self.prompts()
+        self.assertEqual(len(prompts), 1)
+        rows = prompts[-1]['reply_markup']['inline_keyboard']
+        self.assertEqual([button['text'] for button in rows[0]], ['로그인 완료', BROWSER_LOGIN_SKIP_LABEL])
+        self.assertEqual([button['text'] for button in rows[1]], [BROWSER_LOGIN_PHONE_LABEL])
+        self.assertIn('fixture.test', prompts[-1]['text'])
+        self.owner_closes(job_id)
+        self.assertEqual(self.state(job_id), 'resumed')
+        self.assertEqual(self.store.job(job_id)['status'], 'queued')
+        self.assertFalse(self.service.browser_status()['login_window_open'])
+        self.assertEqual(self.window().posts, [], 'nothing was submitted in the login window')
+        # The resumed run reads the page in the signed-in session; the sign-in is asked once.
+        self.scripts = [Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/product', effect='read')]},
+                               {'content': '확인했습니다.'})]
+        self.assertTrue(self.service.run_one())
+        self.assertIn(self.store.job(job_id)['status'], ('succeeded', 'partial'))
+        self.assertEqual(self.state(job_id), 'resumed')
+        self.assertEqual(len(self.prompts()), 1)
+
+    def test_a_sign_in_request_for_a_received_share_is_refused_with_no_window_and_no_prompt(self):
+        """#940 through the same service path: a site this instance received from the owner is never signed in to here."""
+        from personal_agent import family_share
+        self.store.put(family_share.SHARED_KEY, {'fixture.test': {'from': 'owner', 'since': time.time()}})
+        self.scripts = self.sign_in_script()
+        job_id = self.receive('계정 페이지 확인해줘')
+        self.assertTrue(self.service.run_one())
+        self.assertTrue(wait_until(lambda: self.state(job_id) == 'unavailable'), self.state(job_id))
+        self.assertEqual((self.service._browser_login(job_id) or {}).get('cause'), 'refused')
+        self.assertEqual([entry for entry in self.driver_log if entry[0] == 'goto'], [], 'no login window')
+        self.assertFalse(self.service.browser_status()['login_window_open'])
+        self.service.deliver_one()
+        self.assertEqual(self.prompts(), [])
+        self.assertIn(self.store.job(job_id)['status'], ('failed', 'partial'), 'the Work keeps its ended state')
 
     def test_telegram_done_closes_the_window_off_the_poll_thread_and_resumes_once(self):
         job_id, _prompt, _buttons, notification = self.login_work()
@@ -1251,6 +1313,22 @@ class LoginThroughTheCliBridge(_BridgeHarness):
         self.service.ingest_callback(tap, GENERATION_BRIDGE)
         self.service.process_browser_logins()
         self.assertNotEqual(self.store.job(self.job)['status'], 'queued', 'the same tap never resumes it again')
+
+    def test_a_cli_sign_in_request_lists_the_tool_and_offers_the_login(self):
+        """#953: ``mcp__agentos__browser_sign_in`` is listed by the bridge and relayed to the service's in-flow login."""
+        replies = self.wire(LIST, _call(3, 'browser_sign_in', url=ORIGIN + '/account'), text='계정 페이지 확인해줘', telegram=True)
+        self.addCleanup(lambda: [setattr(driver, 'closed', True) for driver in self.drivers])
+        self.assertIn('browser_sign_in', [tool['name'] for tool in replies[2]['result']['tools']])
+        result = _value(replies[3])
+        self.assertEqual((result['state'], result['next_step']), ('login_required', BROWSER_LOGIN_OFFERED_TEXT))
+        self.assertNotIn('text', result)
+        job = self.store.job(self.job)
+        self.assertEqual(job['status'], 'partial', 'a zero exit with a requested sign-in is not a finished request')
+        self.assertIn('로그인', job['owner_cause'])
+        self.assertTrue(wait_until(lambda: (self.service._browser_login(self.job) or {}).get('state') == 'offered'))
+        self.assertTrue(self.profile.status()['login_window_open'])
+        self.assertEqual([entry for entry in self.driver_log if entry[0] == 'goto'], [('goto', ORIGIN + '/account', bs.ACTION_TIMEOUT_SECONDS)],
+                         'the only navigation is the login window\'s')
 
 
 # ---------------------------------------------------------------- the real worker (macOS + PyObjC)

@@ -993,7 +993,39 @@ class BrowserSession:
             return self.click(args)
         if action == 'browser_type':
             return self.type(args)
+        if action == 'browser_sign_in':
+            return self.sign_in(args)
         raise ValueError('허용하지 않은 도구입니다.')
+
+    def sign_in(self, args):
+        """Ask the owner to sign in at ``url`` now, without a sign-in page in the session (#953, BROWSE-09).
+
+        The model calls this when the request needs the owner's own account
+        and the session is signed out there.  It is the same in-flow login a
+        page with a sign-in form starts (``_page_state`` -> ``_offer_login``):
+        ``approvals.login_required(url)`` records the request, the service
+        shows the login window once this run released the profile and asks
+        the owner (on this Mac or from the phone, #939), and the Work resumes
+        once after the sign-in.  The URL is validated as ``browser_open``
+        validates its own (http(s) only; never this computer or a private
+        network); nothing is loaded, typed or read here, and the result is
+        the ``login_required`` state ``_page_state`` returns, so every
+        consumer of that state (withheld effect, the owner's text, the CLI
+        relay) treats it the same way.  It is a browser step for the budget.
+        """
+        url = str(args.get('url') or '').strip()
+        parts = urlsplit(url)
+        if parts.scheme not in ('http', 'https') or not parts.netloc:
+            raise ValueError('http 또는 https 주소만 열 수 있습니다.')
+        if local_destination(url, self._allowed_origins):
+            raise ToolError(BLOCKED_TEXT, 'blocked_destination')
+        self._spend_step()
+        # The login row, Evidence and the relay's page digest carry the site reference only
+        # (no query, fragment or userinfo): the window opens at that address.
+        reference = page_reference(url)
+        return {'state': 'login_required', 'url': reference, 'title': None,
+                'needs_setup': True, 'requires': 'browser-login',
+                'next_step': self._offer_login(reference) or LOGIN_REQUIRED_TEXT}
 
     def open(self, args):
         effect = self._effect(args)

@@ -64,8 +64,6 @@ NO_PORT_TEXT = '이 Mac의 AgentOS 주소를 아직 알 수 없어 휴대폰 로
 BUSY_TEXT = '이미 휴대폰 로그인 링크가 열려 있어요. 그 링크가 닫힌 뒤에 다시 요청해 주세요.'
 #: A link that could not open or be delivered leaves the Mac window and its prompt as they are (review P2-1).
 TUNNEL_FAILED_TEXT = '휴대폰 링크를 열지 못했어요. Mac의 로그인 창에서 로그인해 주세요.'
-#: Review P3-6: a family instance (one paired through a family setup) never opens a phone link to a window.
-FAMILY_INSTANCE_TEXT = '가족 비서에서는 휴대폰 로그인 링크를 만들 수 없어요.'
 #: How many unbound page cookies are kept at once (review P3-1): a later page open never invalidates an earlier one.
 ISSUED_KEPT = 8
 #: Review P3-3: how long after 완료's reply the tunnel is stopped, so the phone gets the answer first.

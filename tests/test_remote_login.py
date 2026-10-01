@@ -672,16 +672,13 @@ class RemoteLoginSurface(unittest.TestCase):
         self.assertEqual(self.request(remote_login.PAGE_PATH + self.code(session), cookie=second)[0], 404)
         self.assertEqual(self.request(remote_login.PAGE_PATH + self.code(session))[0], 404)
 
-    def test_a_family_instance_never_opens_a_phone_link(self):
-        """Review P3-6: a member's instance refuses before any tunnel; typed, not an accidental 404."""
+    def test_a_family_instance_opens_a_phone_link_for_its_own_sign_in(self):
+        """#949: a family member signs in to their own account from their phone (only a received
+        share is refused, #940); the link goes to that instance's own paired chat."""
         self.store.put('telegram', {'enabled': True, 'user_id': CHAT, 'generation': GENERATION, 'cursor': 0, 'pair_user_id': CHAT})
-        with self.assertRaises(ValueError) as caught:
-            self.service.open_browser_for_login({'url': 'https://fixture.test/login', 'phone': True})
-        self.assertEqual(str(caught.exception), remote_login.FAMILY_INSTANCE_TEXT)
-        with self.assertRaises(remote_login.RemoteLoginError):
-            self.service.start_remote_login('w', 'fixture.test', lambda reason: None)
-        self.assertEqual(self.tunnel.processes, [])
-        self.assertEqual(self.drivers, [])
+        receipt = self.service.open_browser_for_login({'url': 'https://fixture.test/login', 'phone': True})
+        self.assertEqual(receipt['state'], 'opening')
+        self.assertTrue(wait_until(lambda: self.tunnel.processes), 'the tunnel opens')
 
     def test_a_received_share_site_is_refused_by_default(self):
         """#940: the family-share rule applies without any hook set."""

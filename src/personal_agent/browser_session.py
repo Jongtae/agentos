@@ -378,10 +378,14 @@ def login_form_present(elements, redirected=False):
         if redirected:
             return True
         form = element.get('form')
-        if form is None:
-            continue
-        if any(other is not element and other.get('form') == form and other.get('tag') == 'input'
-               and str(other.get('type') or '').lower() in USERNAME_TYPES for other in elements):
+        partners = [other for other in elements if other is not element and other.get('form') == form
+                    and other.get('tag') == 'input' and str(other.get('type') or '').lower() in USERNAME_TYPES]
+        if form is not None and partners:
+            return True
+        # #949: a page may leave both fields outside any <form> (a script submits them).  Only
+        # the plain pair counts: one password field on the page and one formless username-like
+        # field, so an account page with a search box and password changes is not a login wall.
+        if form is None and len(partners) == 1 and sum(1 for other in elements if other.get('type') == 'password') == 1:
             return True
     return False
 

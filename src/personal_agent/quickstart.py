@@ -577,7 +577,10 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             reaches nothing (review P2-2).  An instance never set up this way
             is unchanged.
             """
-            if self.tunneled() and family_setup.setup_recorded(store) and path not in family_setup.PUBLIC_PATHS:
+            # #949: a family member signs in to their own accounts from their phone too; the remote-login
+            # paths pass here and ``remote_login_gate`` (exact code, bound client) decides them.
+            if (self.tunneled() and family_setup.setup_recorded(store) and path not in family_setup.PUBLIC_PATHS
+                    and path not in remote_login.PUBLIC_PATHS):
                 self.reply(404,{'error':'찾을 수 없습니다.'})
                 return True
             return False

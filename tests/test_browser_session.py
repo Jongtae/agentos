@@ -1725,3 +1725,24 @@ class FixtureHandler(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class FormlessLoginDetection(unittest.TestCase):
+    """#949: a sign-in page whose fields sit outside any <form>."""
+
+    def field(self, kind, form=None):
+        return {'tag': 'input', 'type': kind, 'form': form}
+
+    def test_the_plain_formless_pair_is_a_login_wall(self):
+        self.assertTrue(bs.login_form_present([self.field('text'), self.field('password'), self.field('checkbox')]))
+
+    def test_formless_pages_that_are_not_sign_in_walls(self):
+        self.assertFalse(bs.login_form_present([self.field('password')]), 'a lone password field')
+        self.assertFalse(bs.login_form_present([self.field('text'), self.field('text'), self.field('password')]),
+                         'a search box beside the pair is ambiguous')
+        self.assertFalse(bs.login_form_present([self.field('text'), self.field('password'), self.field('password')]),
+                         'a password change')
+
+    def test_the_form_rule_is_unchanged(self):
+        self.assertTrue(bs.login_form_present([self.field('email', 1), self.field('password', 1), self.field('text')]))
+        self.assertFalse(bs.login_form_present([self.field('email', 1), self.field('password', 2)]))

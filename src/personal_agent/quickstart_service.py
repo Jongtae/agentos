@@ -5365,7 +5365,6 @@ class AgentService:
             cfg=self.store.config('telegram',{})
             if not (cfg.get('enabled') and isinstance(cfg.get('user_id'),int)):
                 raise ValueError('휴대폰 로그인 링크를 보낼 곳이 없어요. 먼저 텔레그램을 연결해 주세요.')
-            if self.family_instance():raise ValueError(remote_login.FAMILY_INSTANCE_TEXT)
             if self.remote_login_session() is not None:raise ValueError(remote_login.BUSY_TEXT)
         row={'host':host,'cookies_before':self._login_cookie_marks({'host':host}) if host else None}
         # What Settings shows after answering ``opening``: the window's observed outcome (in memory only).
@@ -5970,12 +5969,6 @@ class AgentService:
         return str(reason) if reason else None
 
     # -- the phone's one-time link to the login window (#939) -------------------------------
-    def family_instance(self):
-        """Whether this instance is a family member's (paired through a family setup, #897): no phone link here (review P3-6)."""
-        from . import family_setup
-        cfg=self.store.config('telegram',{})
-        return bool((isinstance(cfg,dict) and cfg.get('pair_user_id') is not None) or family_setup.setup_recorded(self.store))
-
     def remote_login_session(self):
         """The current remote login session while it is alive, else None."""
         session=self._remote_login
@@ -5998,7 +5991,6 @@ class AgentService:
         popen=self.remote_login_popen or subprocess.Popen
         refused=self.login_refusal(site)
         if refused:raise remote_login.RemoteLoginError(refused)
-        if self.family_instance():raise remote_login.RemoteLoginError(remote_login.FAMILY_INSTANCE_TEXT)
         with self.lock:
             if self.remote_login_session() is not None:raise remote_login.RemoteLoginError(remote_login.BUSY_TEXT)
             if popen is subprocess.Popen and not find_cli('ngrok'):raise remote_login.RemoteLoginError(remote_login.NO_NGROK_TEXT)

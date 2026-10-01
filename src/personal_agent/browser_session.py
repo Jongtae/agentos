@@ -1243,6 +1243,8 @@ WORKER_START_SECONDS = 30
 WORKER_GRACE_SECONDS = 5
 WORKER_QUIT_SECONDS = 5
 LOGIN_OPEN_SECONDS = 45
+#: #939: the phone inputs a login window accepts, as the worker's ``remote_*`` ops.
+REMOTE_INPUT_KINDS = ('tap', 'text', 'key', 'nav', 'dialog')
 #: #709: how long closing a login window waits for its save and release.
 LOGIN_CLOSE_SECONDS = 20
 #: #709: how many closed login windows' outcomes a profile remembers.
@@ -1549,6 +1551,41 @@ class WebKitWorkerDriver:
 
     def is_open(self):
         return self.alive() and self._visible
+
+    # -- the phone's view of the login window (#939) -----------------------------------
+    # Only on the worker that shows the window: a worker that exited is never
+    # restarted for these (a restart would show nothing the owner signed in to).
+
+    def _request_shown(self, op, **arguments):
+        with self._lock:
+            if not self.alive() or not self._visible:
+                raise WorkerError('not_shown')
+            return self._send(op, ACTION_TIMEOUT_SECONDS, **arguments)
+
+    def frame(self):
+        """``{'jpeg': base64, 'width': points, 'height': points, 'dialog': {'kind', 'text'} or None}`` of the
+        frontmost login view; never kept here.  ``dialog`` is a page dialog waiting for an answer."""
+        message = self._request_shown('frame')
+        dialog = message.get('dialog') if isinstance(message.get('dialog'), dict) else None
+        return {'jpeg': str(message.get('jpeg') or ''), 'width': message.get('width'), 'height': message.get('height'),
+                'dialog': {'kind': str(dialog.get('kind') or ''), 'text': str(dialog.get('text') or '')} if dialog else None}
+
+    def remote_input(self, kind, **fields):
+        """One phone input into the login window: ``tap`` (x, y), ``text`` (text), ``key`` (key), ``nav``
+        (action) or ``dialog`` (answer)."""
+        if kind not in REMOTE_INPUT_KINDS:
+            raise WorkerError('bad_input')
+        self._request_shown('remote_' + kind, **fields)
+
+    def remote_begin(self):
+        """A phone session starts: the worker holds page dialogs for the phone's answer (#939)."""
+        self._request_shown('remote_begin')
+
+    def remote_end(self):
+        """The phone session ended: a held dialog is cancelled; dialogs go back to the Mac alone."""
+        with self._lock:
+            if self.alive():
+                self._send('remote_end', ACTION_TIMEOUT_SECONDS)
 
     # -- session material: to and from the encrypted jar only ------------------------
     def cookies_export(self):
@@ -1971,6 +2008,7 @@ class BrowserProfile:
                 self.profile_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
                 driver = self.launcher(self.profile_dir, False)
                 self._live = driver
+                record['driver'] = driver   # #939: what the phone drives, while the window is open
                 show = getattr(driver, 'show', None)
                 if show is not None:
                     landed = show(url, LOGIN_OPEN_SECONDS)
@@ -2000,6 +2038,7 @@ class BrowserProfile:
             except Exception as exc:
                 failure.append(type(exc).__name__)
             finally:
+                record.pop('driver', None)   # #939: nothing drives a closing window
                 stored = False
                 if driver is not None:
                     stored = bool(self._save(driver))
@@ -2063,6 +2102,49 @@ class BrowserProfile:
         if record is None or not record['done'].is_set():
             return None
         return record['reason'], bool(record['saved'])
+
+    def login_window_driver(self, window):
+        """The driver of login window ``window`` while it is open (#939), else None."""
+        record = self._login_windows.get(window) if window else None
+        if record is None or record['done'].is_set():
+            return None
+        return record.get('driver')
+
+    def login_window_frame(self, window):
+        """The phone's view of ``window``: ``WebKitWorkerDriver.frame`` of its driver, or None when the
+        window is not open or its driver cannot answer (#939).  The image is returned once, never kept."""
+        driver = self.login_window_driver(window)
+        frame = getattr(driver, 'frame', None) if driver is not None else None
+        if frame is None:
+            return None
+        try:
+            return frame()
+        except Exception:
+            return None
+
+    def login_window_remote(self, window, on):
+        """Begin (``on``) or end a phone session on ``window``'s driver (#939); True when the driver accepted it."""
+        driver = self.login_window_driver(window)
+        method = getattr(driver, 'remote_begin' if on else 'remote_end', None) if driver is not None else None
+        if method is None:
+            return False
+        try:
+            method()
+        except Exception:
+            return False
+        return True
+
+    def login_window_input(self, window, kind, **fields):
+        """One phone input into ``window`` (#939); True when the driver accepted it.  ``fields`` are never logged."""
+        driver = self.login_window_driver(window)
+        remote_input = getattr(driver, 'remote_input', None) if driver is not None else None
+        if remote_input is None:
+            return False
+        try:
+            remote_input(kind, **fields)
+        except Exception:
+            return False
+        return True
 
     def close_login_window(self, window, timeout=LOGIN_CLOSE_SECONDS):
         """Close the login window ``open_for_login`` returned as ``window``, and wait for it (#709).

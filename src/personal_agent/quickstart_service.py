@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import secrets
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -79,6 +80,7 @@ from . import preparations as prep
 # OWNER-MODEL-03 (#805): asynchronous, minimised post-Work owner-model upkeep.
 from . import owner_model as om
 from . import information_use
+from . import remote_login
 from .browser_session import BrowserProfile, ascii_host, binding_digest, registrable_domain
 from .browser_jar import unexpired
 from .cli_browser_relay import BrowserRelay
@@ -347,6 +349,9 @@ BROWSER_LOGIN_NO_SESSION_LINE=('주의: 이 사이트는 AgentOS 로그인 창�
 #: to through an AgentOS login window (evidence of a sign-in when the window closed and saved, #765).
 BROWSER_OWNER_SIGNINS_KEY='browser_owner_signins'
 BROWSER_LOGIN_SKIP_LABEL='예상한 사이트가 아니면 건너뛰기'
+#: #939: the prompt's third button: the same window, driven from the phone through a one-time link.
+BROWSER_LOGIN_PHONE_LABEL='휴대폰에서 로그인'
+BROWSER_LOGIN_PHONE_ALERT='휴대폰에서 로그인할 링크를 보낼게요.'
 #: #818/#836: one Telegram ask per owner message (Work) lists that Work's pending
 #: MemoryCandidates, whoever proposed them (the worker's ``save_memory`` or #805
 #: upkeep); each is confirmed or declined through the owner's approval path.  The
@@ -531,6 +536,15 @@ class AgentService:
         self.stop=threading.Event()
         self.threads=[]
         self.local_server_port=None
+        #: #939: the one remote (phone) login session, and whether one was ever started in this
+        #: process: from then on a tunneled request reaches only the remote-login routes.
+        self._remote_login=None
+        self._remote_login_started=False
+        self.remote_login_popen=None   # a test injects a fake ngrok here
+        #: #940 hook: ``(site) -> owner-facing refusal text or None``.  A login window (explicit, in-flow or
+        #: from the phone) never opens for a site this refuses: the family-share follow-up (#935) sets it to
+        #: refuse the sites this instance *received*, so a family member never re-drives the owner's session.
+        self.refuse_login=None
         # Contextual local authority (#505).  Always present: it declares no
         # connector and grants nothing by existing; it only parks a file
         # request until the owner approves one folder on this Mac.
@@ -5311,6 +5325,16 @@ class AgentService:
             host=urlsplit(url.strip()).hostname
         except ValueError:
             host=None
+        refused=self.login_refusal(host)
+        if refused:raise ValueError(refused)
+        # #939: ``phone``: once the window shows, send the paired owner a one-time link that drives it.
+        phone=isinstance(body,dict) and body.get('phone') is True
+        if phone:
+            cfg=self.store.config('telegram',{})
+            if not (cfg.get('enabled') and isinstance(cfg.get('user_id'),int)):
+                raise ValueError('휴대폰 로그인 링크를 보낼 곳이 없어요. 먼저 텔레그램을 연결해 주세요.')
+            if self.family_instance():raise ValueError(remote_login.FAMILY_INSTANCE_TEXT)
+            if self.remote_login_session() is not None:raise ValueError(remote_login.BUSY_TEXT)
         row={'host':host,'cookies_before':self._login_cookie_marks({'host':host}) if host else None}
         # What Settings shows after answering ``opening``: the window's observed outcome (in memory only).
         token=secrets.token_hex(8)
@@ -5322,6 +5346,13 @@ class AgentService:
             # #765: the same baselines as the in-flow window (after the landing's own cookies were saved).
             row.update(self._login_window_baselines(window,host,landed))
             mark('opened')
+            if phone:
+                site=row.get('landed_site') or registrable_domain(host) or ''
+                chat=self.store.config('telegram',{}).get('user_id')
+                try:self.start_remote_login(window,site,lambda reason:self.browser_profile.close_login_window(window,timeout=0),chat_id=chat)
+                except remote_login.RemoteLoginError as exc:
+                    # Review P2-1: the window stays open for the owner at the Mac; the owner is told why.
+                    self._notify_owner(f'telegram:{chat}',str(exc))
         def closed(window,reason,saved):
             mark('failed' if reason=='failed' and (self._settings_login or {}).get('state')=='opening' else 'closed')
             if saved:self._record_owner_signins(self._signed_in_sites({**row,'window':window}))
@@ -5569,6 +5600,11 @@ class AgentService:
         """
         row=self._browser_login(job['id'])
         if not row or row.get('state')!='requested':return False
+        if self.login_refusal(row.get('host')):
+            # #940: a site this instance may not sign in to again (a received share): no window, no prompt.
+            self._put_browser_login(job['id'],{**row,'state':'unavailable','cause':'refused','closed_at':time.time()})
+            LOG.info('browser login window refused work=%s',job['id'])
+            return False
         # The site's stored sign-in cookies before the window: a login is evidenced by their change.
         now=time.time()
         row={**row,'cookies_before':self._login_cookie_marks(row),'site':registrable_domain(row['host'])}
@@ -5884,6 +5920,104 @@ class AgentService:
                 with self.store.db() as db:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',
                                ('assistant',BROWSER_LOGIN_RESULT_TEXT[shown],job['channel'],time.time(),job.get('workspace_id'),work_id))
+
+    def login_refusal(self, host_or_site):
+        """Why no login window may open for this site, or None (#940).
+
+        By default a site this instance *received* from the owner (family share,
+        #935) is refused; ``refuse_login`` replaces that rule when set.
+        """
+        from . import family_share
+        hook=self.refuse_login if callable(self.refuse_login) else (lambda site:family_share.login_refusal(self.store,site))
+        site=registrable_domain(host_or_site) if host_or_site else None
+        if not site:return None
+        try:reason=hook(site)
+        except Exception as exc:
+            LOG.warning('login refusal hook failed (%s)',type(exc).__name__)
+            return None
+        return str(reason) if reason else None
+
+    # -- the phone's one-time link to the login window (#939) -------------------------------
+    def family_instance(self):
+        """Whether this instance is a family member's (paired through a family setup, #897): no phone link here (review P3-6)."""
+        from . import family_setup
+        cfg=self.store.config('telegram',{})
+        return bool((isinstance(cfg,dict) and cfg.get('pair_user_id') is not None) or family_setup.setup_recorded(self.store))
+
+    def remote_login_session(self):
+        """The current remote login session while it is alive, else None."""
+        session=self._remote_login
+        return session if session is not None and session.alive() else None
+
+    def remote_login_started(self):
+        """Whether a remote login was ever started in this process: the tunnel gate stays closed from then on."""
+        return self._remote_login_started
+
+    def start_remote_login(self, window, site, close, *, chat_id=None):
+        """Start the one remote login session for login window ``window`` and return its link.
+
+        ``close(reason)`` closes that window the way its opener does.  Raises
+        ``remote_login.RemoteLoginError`` (owner-facing message) when one is
+        already open, ngrok is missing, the local port is unknown or the
+        tunnel did not open.  ``chat_id`` must be the paired owner's chat when
+        given; the link is sent there and nowhere else.
+        """
+        from .subscription_engines import find_cli
+        popen=self.remote_login_popen or subprocess.Popen
+        refused=self.login_refusal(site)
+        if refused:raise remote_login.RemoteLoginError(refused)
+        if self.family_instance():raise remote_login.RemoteLoginError(remote_login.FAMILY_INSTANCE_TEXT)
+        with self.lock:
+            if self.remote_login_session() is not None:raise remote_login.RemoteLoginError(remote_login.BUSY_TEXT)
+            if popen is subprocess.Popen and not find_cli('ngrok'):raise remote_login.RemoteLoginError(remote_login.NO_NGROK_TEXT)
+            port=self.local_server_port
+            if not isinstance(port,int):raise remote_login.RemoteLoginError(remote_login.NO_PORT_TEXT)
+            session=remote_login.RemoteLogin(self.browser_profile,window,site,close,popen=popen)
+            self._remote_login=session
+            self._remote_login_started=True
+        try:
+            link=session.start(port)
+        except remote_login.RemoteLoginError:
+            # Review P2-1: the window and its prompt stay for the owner at the Mac; only the session ends.
+            session.finish('failed')
+            raise
+        if chat_id is not None and not self._send_remote_login_link(session,chat_id):
+            # A link nobody received must not keep a public tunnel open; the window stays (review P2-1).
+            LOG.warning('remote login: link not delivered; closing site=%s',session.site)
+            session.finish('failed')
+            raise remote_login.RemoteLoginError(remote_login.TUNNEL_FAILED_TEXT)
+        return link
+
+    def _send_remote_login_link(self, session, chat_id):
+        """Send the link to the paired owner's chat only; False when it was not sent."""
+        cfg=self.store.config('telegram',{})
+        if not (cfg.get('enabled') and isinstance(cfg.get('user_id'),int) and chat_id==cfg['user_id']):return False
+        text=remote_login.LINK_TEXT.format(site=session.site or '로그인',minutes=max(1,int(session.expires-session.clock())//60),link=session.link)
+        try:self.telegram.call('sendMessage',{'chat_id':chat_id,'text':text,'link_preview_options':{'is_disabled':True}})
+        except Exception as exc:
+            LOG.warning('remote login: link not sent (%s)',type(exc).__name__)
+            return False
+        return True
+
+    def _start_remote_login_for_work(self, work_id, nonce, chat_id):
+        """The prompt's 휴대폰에서 로그인: start the session for this Work's offered window on its own thread."""
+        if self.remote_login_session() is not None:return False
+        row=self._browser_login(work_id) or {}
+        window=row.get('window')
+        if not window or not self.browser_profile.login_window_known(window):return False
+        site=row.get('landed_site') or row.get('site') or registrable_domain(row.get('host')) or ''
+        # 완료 is the prompt's 로그인 완료; expiry is its own deadline passing (the work loop settles both).
+        close=lambda reason:self._request_login_decision(work_id,nonce,'resume' if reason=='done' else 'expire')
+
+        def run():
+            try:self.start_remote_login(window,site,close,chat_id=chat_id)
+            except remote_login.RemoteLoginError as exc:
+                self._notify_owner(f'telegram:{chat_id}',str(exc))
+            except Exception as exc:
+                LOG.warning('remote login failed to start (%s)',type(exc).__name__)
+                self._notify_owner(f'telegram:{chat_id}',remote_login.TUNNEL_FAILED_TEXT)
+        threading.Thread(target=run,name='agentos-remote-login-start',daemon=True).start()
+        return True
 
     def process_browser_logins(self, now=None):
         """The work loop's pass over in-flow logins (#709).  Cheap: one config read when none waits.
@@ -6362,6 +6496,9 @@ class AgentService:
                 reply_markup={'inline_keyboard':[[
                     {'text':'로그인 완료','callback_data':f"p7l:{notification['id']}:done"},
                     {'text':BROWSER_LOGIN_SKIP_LABEL,'callback_data':f"p7l:{notification['id']}:skip"},
+                ],[
+                    # #939: the same login window, driven from the phone through a one-time link.
+                    {'text':BROWSER_LOGIN_PHONE_LABEL,'callback_data':f"p7l:{notification['id']}:phone"},
                 ]]}
             elif notification['kind']=='preparation_proposed':
                 # #659: the exact proposals of one Work; changed since -> not offered.
@@ -6783,14 +6920,20 @@ class AgentService:
                 # this notification, sent, this chat and message, and the login
                 # it names is still the offered one (nonce as fingerprint).
                 parts=data.split(':')
-                if len(parts)==3 and parts[2] in ('done','skip'):
+                if len(parts)==3 and parts[2] in ('done','skip','phone'):
                     notification=self.store.notification(parts[1])
                     row=self._browser_login(notification['job_id']) if notification else None
                     exact=(notification and notification['kind']=='browser_login_needed' and notification['state']=='sent'
                            and notification['generation']==generation and notification['chat_id']==sender
                            and notification['message_id']==message.get('message_id') and row
                            and row.get('state')=='offered' and notification['fingerprint']==row.get('nonce'))
-                    if exact:
+                    if exact and parts[2]=='phone':
+                        # #939: the same window from the phone; the link goes to this (paired owner) chat only,
+                        # from its own thread (the tunnel takes seconds to open).
+                        started=self._start_remote_login_for_work(notification['job_id'],row['nonce'],sender)
+                        alert=(BROWSER_LOGIN_PHONE_ALERT if started else remote_login.BUSY_TEXT,not started)
+                        changed=started
+                    elif exact:
                         # The work loop closes the window and settles it (never this poll thread).
                         decided=self._request_login_decision(notification['job_id'],row['nonce'],'resume' if parts[2]=='done' else 'skip')
                         changed=decided.get('state') is not None

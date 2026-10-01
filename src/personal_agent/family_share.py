@@ -81,6 +81,8 @@ PUSH_TIMEOUT = 20
 #: How often the owner's service retries a pending push or revocation.
 RETRY_SECONDS = 30
 PAYMENT_REFUSED_TEXT = '결제는 계정 주인이 해 주세요. 공유받은 로그인으로는 결제 단계를 진행하지 않습니다.'
+#: #940: a received site never gets a login window on this instance (explicit, in-flow or from the phone, #939).
+LOGIN_REFUSED_TEXT = '이 사이트는 공유받은 로그인이라 여기서 다시 로그인할 수 없어요'
 NO_SESSION_TEXT = ('{site}에 저장된 내 로그인 세션이 없어 공유하지 않았어요. 먼저 로그인 창에서 그 사이트에 로그인해 주세요.'
                    '{stored}')
 NOT_INSTALLED_TEXT = "가족 비서 '{instance}'가 이 Mac에 설치되어 있지 않아요."
@@ -215,6 +217,16 @@ def received(store):
     """The sites this instance holds from the owner (``{site: {from, since}}``)."""
     rows = store.config(SHARED_KEY, {})
     return {site: row for site, row in rows.items() if isinstance(row, dict)} if isinstance(rows, dict) else {}
+
+
+def login_refusal(store, site):
+    """Why no login window may open for ``site`` (a registrable domain) on this instance, or None (#940).
+
+    A family member who received the owner's session must not sign in to
+    that site again here, from the Mac window or from a phone link (#939);
+    that would drive or replace the owner's shared session.
+    """
+    return LOGIN_REFUSED_TEXT if site and site in received(store) else None
 
 
 def payment_refusal(store, host):

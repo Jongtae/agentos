@@ -1687,8 +1687,8 @@ class Worker:
         """#955: phone-sized, a phone browser to the site, reloaded so the site serves its mobile page."""
         if getattr(self, 'mobile_restore', None) is not None:
             return
-        frame = self.window.frame()
-        self.mobile_restore = (frame.size.width, frame.size.height)
+        # #956 review: the whole frame (origin and title bar included) is restored as it was.
+        self.mobile_restore = self.window.frame()
         agent = mobile_user_agent()
         self.view.setCustomUserAgent_(agent)
         for entry in getattr(self, 'popups', []) or []:
@@ -1708,7 +1708,7 @@ class Worker:
             return
         self.mobile_restore = None
         self.view.setCustomUserAgent_(None)
-        self.window.setContentSize_(self.Foundation.NSMakeSize(*restore))
+        self.window.setFrame_display_(restore, True)
 
     def op_remote_end(self, ident, command, timeout):
         self.end_remote()

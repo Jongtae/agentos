@@ -361,7 +361,7 @@ Behavioral compatibility does not prove identical LLM choices. New instructions 
 
 ### 18.5 Issue-level obligations
 
-- #960: interface/pattern ADR and change-surface table first; then the already scoped dependency/source compatibility spike, with bounded evidence. No additional design-pattern project.
+- #960: interface/pattern ADR and change-surface table first; then the already scoped dependency/source compatibility spike, with bounded evidence. No additional design-pattern project. Recorded in [SKILL-PREP-01 decision](skill-prep-01-interface-decision.en.md) (2026-10-02).
 - #961: implement the optional knowledge seam; check off, empty/missing, source-failure and stale-loaded-skill recovery paths while keeping action semantics. Preservation precedes default activation.
 - #962/#963: content and binding changes over stable settings/browser ports; targeted representative checks. Do not rescript the service or retest every unrelated feature because a skill changed.
 - #964: own the coverage/evidence map from #960 onward; reuse applicable child results and separate any explicitly budgeted live promotion. It is not the first time existing functions are checked.

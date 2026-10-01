@@ -762,8 +762,11 @@ class AgentService:
             return None
         sites=[row['site'] for row in rows if isinstance(row,dict) and row.get('site')][:BROWSER_SESSION_SITES]
         if not sites:return None
-        shared=family_share.received(self.store)
-        names=[f"{site} (the owner's sign-in shared with you: you act in the owner's account; reading and cart changes only, "
+        try:
+            shared=family_share.received(self.store)
+        except Exception:
+            shared={}   # #943 review: an unreadable share row never blocks the turn
+        names=[f"{site} (the owner's sign-in shared with you: you act in the owner's account; reading and cart changes only; "
                'payment is the owner\'s)' if site in shared else site for site in sites]
         return 'Browser sign-ins (browser_open uses them; no password needed): '+', '.join(names)
 

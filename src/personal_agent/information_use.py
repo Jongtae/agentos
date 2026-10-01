@@ -91,10 +91,28 @@ def profile_keys(text):
     return keys[:40]
 
 
+#: #942: the line ``current_context_text`` adds after the JSON, and how many sites it may name.
+BROWSER_SIGNINS_PREFIX = 'Browser sign-ins'
+
+
+def browser_signin_claims(text):
+    """The sites a rendered context's browser sign-ins line named (#943 review), as claims."""
+    claims = []
+    for line in str(text or '').splitlines():
+        if not line.startswith(BROWSER_SIGNINS_PREFIX) or ':' not in line:
+            continue
+        for item in line.split(':', 1)[1].split(', '):
+            site = item.split(' (', 1)[0].strip()
+            if site and len(claims) < 20:
+                shared = ' (공유받은 로그인)' if "shared with you" in item else ''
+                claims.append({'ref': f'browser:{_text(site, 60)}', 'label': f'로그인한 사이트: {_text(site, 60)}{shared}'})
+    return claims
+
+
 def context_claims(text):
     """Refs and short labels of a rendered current-context snapshot (#627, #804)."""
     body = _json_after_legend(text)
-    claims = []
+    claims = browser_signin_claims(text)
     if body.get('local_time') or body.get('as_of'):
         # #804: every turn carries the clock, with the zone when one is known.
         claims.append({'ref': 'clock', 'label': f"현재 시각 ({_text(body.get('timezone') or 'unknown', 40)})"})

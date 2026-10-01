@@ -34,6 +34,8 @@ class BrowserSessionsInContext(unittest.TestCase):
         self.assertIn('payment is the owner', line)
         self.assertIn(', news.test', line)
         self.assertNotIn("news.test (the owner's", line)
+        labels = [claim['label'] for claim in context_claims('legend\n{}\n' + line)]
+        self.assertEqual(labels, ['로그인한 사이트: shop.test (공유받은 로그인)', '로그인한 사이트: news.test'])
 
     def test_a_broken_view_is_no_line(self):
         def broken():
@@ -43,7 +45,14 @@ class BrowserSessionsInContext(unittest.TestCase):
 
     def test_the_information_use_record_still_reads_the_context_json(self):
         rendered = 'Current context (legend)\n{"local_time": "2026-10-01T14:00", "timezone": "Asia/Seoul"}\nBrowser sign-ins: shop.test'
-        self.assertEqual(context_claims(rendered)[0]['ref'], 'clock')
+        claims = context_claims(rendered)
+        self.assertIn('clock', [claim['ref'] for claim in claims])
+        self.assertIn({'ref': 'browser:shop.test', 'label': '로그인한 사이트: shop.test'}, claims, 'the audit names the sites sent')
+
+    def test_an_unreadable_share_row_never_blocks_the_turn(self):
+        self.view('shop.test')
+        self.store.config = lambda key, default=None: (_ for _ in ()).throw(ValueError('corrupt')) if key == family_share.SHARED_KEY else default
+        self.assertIn('shop.test', self.text())
 
 
 if __name__ == '__main__':

@@ -1593,7 +1593,7 @@ class SecretaryStandard(Harness):
         self.assertIn('never the request sentence itself', CORE_INSTRUCTIONS)
         # #923: no invented title for the owner; no offer the assistant cannot carry out.
         self.assertIn('never invent one', CORE_INSTRUCTIONS)
-        self.assertIn('do not copy one that earlier replies in the conversation used', CORE_INSTRUCTIONS)
+        self.assertIn('do not copy one that only earlier replies used (a title the owner asked for stays)', CORE_INSTRUCTIONS)
         self.assertIn('only what you can actually carry out with the tools you have', CORE_INSTRUCTIONS)
         self.assertIn('capable personal secretary', GOAL_REACHED_PROPOSITION)
         self.assertIn('read in the light of the recent conversation', GOAL_REACHED_PROPOSITION)

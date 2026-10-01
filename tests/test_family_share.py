@@ -514,7 +514,14 @@ class FamilySide(unittest.TestCase):
         self.assertEqual(self.put(tunneled=True)[0], 404)
         self.assertEqual(self.put(secret='')[0], 404)
         self.assertEqual((self.jar.site_rows('shop.test'), family_share.received(self.store)), ([], {}))
-        self.assertEqual(self.request(None, secret=self.secret, raw=b'x' * (family_share.MAX_BODY + 1))[0], 400)
+        # The server refuses an oversized body before reading it, so the client may see the
+        # refusal or a closed connection while still sending; either way nothing is stored.
+        try:
+            status = self.request(None, secret=self.secret, raw=b'x' * (family_share.MAX_BODY + 1))[0]
+        except OSError:
+            status = 400
+        self.assertEqual(status, 400)
+        self.assertEqual(family_share.received(self.store), {})
         self.assertEqual(self.request({'op': 'rename', 'site': 'shop.test'}, secret=self.secret)[0], 400)
 
     def test_without_a_secret_file_nothing_answers(self):

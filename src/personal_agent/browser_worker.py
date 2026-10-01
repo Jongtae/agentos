@@ -85,6 +85,9 @@ from urllib.parse import urlsplit
 EMBEDDED_UA_TOKEN = 'AgentOS-Embedded/1'
 #: #930: where the worker window waits, ordered in but off every screen.
 PARK_ORIGIN = -30000
+#: #936: the most page dialogs one step records, and how much of each it keeps.
+DIALOG_RECORDS = 5
+DIALOG_TEXT_LIMIT = 200
 
 #: ``index`` is an element's position in ``document.querySelectorAll(SELECTOR)``.
 SELECTOR = ('a[href], button, input, select, textarea, summary, [role="button"], [role="link"], [role="textbox"], '
@@ -817,6 +820,7 @@ class Worker:
         self.cancelled = None      # the last cancelled submit not yet reported
         self.reported = []         # ids of cancelled submits already reported
         self.held = None           # the last reported one: what an approval may release (#700)
+        self.dialog_step = None    # #936: the click/type in progress, for page dialogs
         self.controller = config.userContentController()
         self._install_guard_scripts()
         self.controller.addScriptMessageHandler_contentWorld_name_(self.delegate, self.world, GUARD_HANDLER)
@@ -842,6 +846,51 @@ class Worker:
         except Exception:
             pass
         self.park()
+
+    def js_dialog(self, kind, message):
+        """Answer a page's own alert/confirm/prompt (#936); the confirm's answer, else None.
+
+        WebKit answers ``confirm()`` with false when nothing handles it, so a site's
+        "삭제하시겠습니까?" silently undid the AI's click.  While the owner's login
+        window shows, the owner answers.  During a click/type the AI made, a
+        confirmation is accepted, except one that may commit a purchase or payment
+        without an approved step.  Outside a step nothing is confirmed.
+        """
+        text = ' '.join(str(message or '').split())[:DIALOG_TEXT_LIMIT]
+        if self.owner_visible:
+            return self.ask_owner(kind, text)
+        step = self.dialog_step
+        answer = None
+        if kind == 'confirm':
+            from .browser_session import commit_question
+            if step is None:
+                answer, outcome = False, 'declined'
+            elif step['approved']:
+                # The owner approved this very press (a purchase control); its confirmation is part of it.
+                answer, outcome = True, 'accepted'
+            elif commit_question(text) or not step.get('confirm_ok'):
+                # #937 review: a payment question, or any question on a page that shows a payment field.
+                answer, outcome = False, 'declined_payment'
+            else:
+                answer, outcome = True, 'accepted'
+        else:
+            outcome = 'shown' if kind == 'alert' else 'dismissed'
+        if step is not None and len(step['dialogs']) < DIALOG_RECORDS:
+            step['dialogs'].append({'kind': kind, 'message': text, 'outcome': outcome})
+        return answer
+
+    def ask_owner(self, kind, text):
+        """The owner's own login window: show the page's question to the owner (#936)."""
+        AppKit = self.AppKit
+        alert = AppKit.NSAlert.alloc().init()
+        alert.setMessageText_(text or ' ')
+        alert.addButtonWithTitle_('확인')
+        if kind == 'confirm':
+            alert.addButtonWithTitle_('취소')
+        response = alert.runModal()
+        if self.dialog_step is not None and len(self.dialog_step['dialogs']) < DIALOG_RECORDS:
+            self.dialog_step['dialogs'].append({'kind': kind, 'message': text, 'outcome': 'owner'})
+        return response == AppKit.NSAlertFirstButtonReturn if kind == 'confirm' else None
 
     def park(self):
         """Keep the window ordered in but off every screen and out of the owner's way (#930).
@@ -1023,6 +1072,8 @@ class Worker:
         A script error (the page navigated away) reads nothing from the page;
         a submit that page's guard cancelled still arrived through the handler.
         """
+        # #937 review P2: a step's dialog rule ends with the step, a timed-out one included.
+        self.dialog_step = None
         def ended(value, error):
             record = value.get('cancelled') if error is None and isinstance(value, dict) else None
             if record is not None:
@@ -1054,7 +1105,9 @@ class Worker:
                 return self.fail(ident, 'submit_refused')
             if blocked_before is not None and self.blocked > blocked_before:
                 return self.fail(ident, 'blocked_destination')
-            self.reply(ident, **({'navigated': True} if navigated else {}))
+            dialogs = (step or {}).get('dialogs') or []
+            self.reply(ident, **({'navigated': True} if navigated else {}), **({'dialogs': dialogs} if dialogs else {}))
+        step, self.dialog_step = getattr(self, 'dialog_step', None), None
         self.end_step(answer)
 
     # -- destinations ----------------------------------------------------------
@@ -1219,6 +1272,9 @@ class Worker:
             return self.fail(ident, 'target_changed')   # never press an element nobody classified
         nonce = uuid.uuid4().hex
         self.step_refused = self.refused_submits
+        # #936: a page's own alert/confirm/prompt during this step is answered by its rule.
+        self.dialog_step = {'approved': command.get('dialog_approved') is True,
+                            'confirm_ok': command.get('confirm_ok') is True, 'dialogs': []}
         # Only a step the parent consumed an owner approval for may let a
         # payment-form submit through (#698); its allowance ends by itself even
         # if the step's end never reaches the page (#700 review).
@@ -1298,6 +1354,8 @@ class Worker:
             return self.fail(ident, 'submit_changed')
         self.held = None   # released at most once
         self.step_refused = self.refused_submits
+        # #937 review P2: the owner approved exactly this submit, so its own confirmation may be answered.
+        self.dialog_step = {'approved': True, 'confirm_ok': True, 'dialogs': []}
         self.deadline(ident, timeout, on_timeout=self.end_step)
         blocked_before, baseline = self.blocked, (self.main_navigations, self.landed)
 
@@ -1547,6 +1605,27 @@ def _popup_delegate_class():
             self.worker.decide(url, False, lambda allowed: handler(
                 WebKit.WKNavigationActionPolicyAllow if allowed else WebKit.WKNavigationActionPolicyCancel))
 
+        def webView_runJavaScriptAlertPanelWithMessage_initiatedByFrame_completionHandler_(self, view, message, frame, handler):
+            # #936: answered by the worker's rule; never left to WebKit's silent default.
+            try:
+                self.worker.js_dialog('alert', message)
+            finally:
+                handler()
+
+        def webView_runJavaScriptConfirmPanelWithMessage_initiatedByFrame_completionHandler_(self, view, message, frame, handler):
+            answer = False
+            try:
+                answer = bool(self.worker.js_dialog('confirm', message))
+            finally:
+                handler(answer)
+
+        def webView_runJavaScriptTextInputPanelWithPrompt_defaultText_initiatedByFrame_completionHandler_(
+                self, view, prompt, default, frame, handler):
+            try:
+                self.worker.js_dialog('prompt', prompt)
+            finally:
+                handler(None)
+
         def webView_createWebViewWithConfiguration_forNavigationAction_windowFeatures_(self, view, config, action, features):
             request = action.request()
             url = request.URL() if request is not None else None
@@ -1649,6 +1728,27 @@ def _delegate_class():
         def webView_didFailProvisionalNavigation_withError_(self, view, navigation, error):
             self.worker.landed += 1   # a navigation that never commits has landed too (#736)
             self.worker.navigation_finished(navigation, error)
+
+        def webView_runJavaScriptAlertPanelWithMessage_initiatedByFrame_completionHandler_(self, view, message, frame, handler):
+            # #936: answered by the worker's rule; never left to WebKit's silent default.
+            try:
+                self.worker.js_dialog('alert', message)
+            finally:
+                handler()
+
+        def webView_runJavaScriptConfirmPanelWithMessage_initiatedByFrame_completionHandler_(self, view, message, frame, handler):
+            answer = False
+            try:
+                answer = bool(self.worker.js_dialog('confirm', message))
+            finally:
+                handler(answer)
+
+        def webView_runJavaScriptTextInputPanelWithPrompt_defaultText_initiatedByFrame_completionHandler_(
+                self, view, prompt, default, frame, handler):
+            try:
+                self.worker.js_dialog('prompt', prompt)
+            finally:
+                handler(None)
 
         def webView_createWebViewWithConfiguration_forNavigationAction_windowFeatures_(self, view, config, action, features):
             # A link that asks for a new window opens in this one: one page, one

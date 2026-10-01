@@ -1068,6 +1068,8 @@ class Worker:
         A script error (the page navigated away) reads nothing from the page;
         a submit that page's guard cancelled still arrived through the handler.
         """
+        # #937 review P2: a step's dialog rule ends with the step, a timed-out one included.
+        self.dialog_step = None
         def ended(value, error):
             record = value.get('cancelled') if error is None and isinstance(value, dict) else None
             if record is not None:
@@ -1347,6 +1349,8 @@ class Worker:
             return self.fail(ident, 'submit_changed')
         self.held = None   # released at most once
         self.step_refused = self.refused_submits
+        # #937 review P2: the owner approved exactly this submit, so its own confirmation may be answered.
+        self.dialog_step = {'approved': True, 'dialogs': []}
         self.deadline(ident, timeout, on_timeout=self.end_step)
         blocked_before, baseline = self.blocked, (self.main_navigations, self.landed)
 

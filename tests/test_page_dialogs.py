@@ -43,6 +43,14 @@ class PageDialogRule(unittest.TestCase):
         self.assertTrue(all(len(row['message']) <= bw.DIALOG_TEXT_LIMIT for row in state.dialog_step['dialogs']))
 
 
+class StepWindow(unittest.TestCase):
+    def test_ending_a_step_ends_its_dialog_rule(self):
+        """#937 review P2: a timed-out step must not leave its approval for later dialogs."""
+        state = types.SimpleNamespace(dialog_step={'approved': True, 'dialogs': []}, run=lambda *args, **kwargs: None)
+        WORKER.end_step(state)
+        self.assertIsNone(state.dialog_step)
+
+
 class StepDialogsMediation(unittest.TestCase):
     def test_only_known_shapes_reach_the_model(self):
         rows = bs.step_dialogs({'dialogs': [{'kind': 'confirm', 'message': 'ok?', 'outcome': 'accepted'},

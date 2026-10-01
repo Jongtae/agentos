@@ -971,6 +971,7 @@ class Worker:
     def end_remote(self):
         """The phone session ended (or the window hid): a held dialog is cancelled, nothing more is held."""
         self.remote = False
+        self.last_frame = None   # never shown to a later session
         self.answer_dialog(False)
 
     def park(self):
@@ -1555,6 +1556,13 @@ class Worker:
         """A JPEG of the frontmost login view (base64) and that view's size in points."""
         if not self._remote_allowed(ident):
             return
+        held = self.held_dialog
+        last = getattr(self, 'last_frame', None)
+        if held is not None and last is not None:
+            # A page waiting on its own dialog renders nothing until it is answered, so a
+            # snapshot would never complete: the phone gets the last frame and the question.
+            return self.reply(ident, jpeg=last[0], width=last[1], height=last[2],
+                              dialog={'kind': held['kind'], 'text': held['text']})
         view = self.front_view()
         size = view.frame().size
         width, height = float(size.width), float(size.height)
@@ -1571,7 +1579,9 @@ class Worker:
                 return self.fail(ident, 'frame_failed')
             held = self.held_dialog
             dialog = {'kind': held['kind'], 'text': held['text']} if held is not None else None
-            self.reply(ident, jpeg=base64.b64encode(data).decode('ascii'), width=width, height=height, dialog=dialog)
+            encoded = base64.b64encode(data).decode('ascii')
+            self.last_frame = (encoded, width, height)
+            self.reply(ident, jpeg=encoded, width=width, height=height, dialog=dialog)
         view.takeSnapshotWithConfiguration_completionHandler_(config, done)
 
     def op_remote_tap(self, ident, command, timeout):

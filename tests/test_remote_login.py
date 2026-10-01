@@ -169,6 +169,17 @@ class WorkerOpsWhileParked(unittest.TestCase):
                 worker.handle({'id': 7, 'op': op, **command})
                 self.assertEqual(worker.replies[-1], {'id': 7, 'ok': False, 'error': 'not_shown'})
 
+    def test_a_frame_while_a_dialog_is_held_is_the_last_frame_without_a_snapshot(self):
+        """Live 2026-10-01: a page waiting on its own confirm() renders nothing, so a snapshot never completes."""
+        worker = self.worker()
+        worker.owner_visible = True
+        worker.held_dialog = {'kind': 'confirm', 'text': 'delete?', 'handler': None, 'sheet': None}
+        worker.last_frame = ('AAAA', 1280.0, 900.0)
+        worker.front_view = lambda: self.fail('no snapshot while a dialog is held')
+        worker.handle({'id': 9, 'op': 'frame'})
+        self.assertEqual(worker.replies[-1], {'id': 9, 'ok': True, 'jpeg': 'AAAA', 'width': 1280.0, 'height': 900.0,
+                                              'dialog': {'kind': 'confirm', 'text': 'delete?'}})
+
     def test_a_page_dialog_is_held_for_the_phone_only_during_a_phone_session(self):
         """#936's rule stays in force without a phone session; with one, the phone (or the Mac's sheet) answers."""
         worker = self.worker()

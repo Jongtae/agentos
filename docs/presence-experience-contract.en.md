@@ -104,7 +104,7 @@ A short ordinary request should normally yield one useful answer. Internal Work 
 
 One concise acknowledgement is allowed when latency or handoff makes it useful. Further updates require a meaningful owner-relevant state change such as a blocker, authority request, important partial result or completion. Event count must never mechanically determine message count.
 
-For paired Telegram, a queued acknowledgement card exists only while cancellation is still available. Remove it when the Work starts running; use the existing native typing/thinking presence for the running interval, not a second status bubble.
+For paired Telegram there is no acknowledgement card (owner decision 2026-10-01, #958). Queued Work shows only the received reaction on the owner's message; the owner withdraws it in words or with Telegram's native Stop. Use the existing native typing/thinking presence for the running interval, not a status bubble.
 
 ### Telegram presence: reactions, thinking draft and typing (#581, #835, #858)
 

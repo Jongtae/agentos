@@ -457,20 +457,37 @@ class WaitSurfaceTests(NativePresenceTestCase):
         self.service.acknowledge_long_work(now=job['created'] + 30)
         self.assertEqual(len(self.calls), before)
 
-    def test_queued_acknowledgement_is_removed_when_work_starts(self):
+    def test_queued_work_shows_only_the_received_reaction_then_the_draft_when_it_runs(self):
+        """#958: no card and no buttons while queued; the 👀 is the only surface, then the draft."""
         self.connect_model()
-        job_id, _ = self.receive('줄 서 있는 요청')
-        self.service.acknowledge_long_work(now=time.time() + 10)
-        with self.store.db() as db:
-            db.execute('UPDATE telegram_task_cards SET created=? WHERE job_id=?', (time.time() - 10, job_id))
+        job_id, message_id = self.receive('줄 서 있는 요청')
+        self.assertEqual(self.service.acknowledge_long_work(now=time.time() + 10), [job_id])
+        self.assertEqual(self.methods(), ['setMessageReaction'])
+        self.assertEqual(self.reactions(), [{'chat_id': CHAT, 'message_id': message_id,
+                                             'reaction': [{'type': 'emoji', 'emoji': RECEIVED_REACTION}]}])
+        self.assertEqual(self.service.acknowledge_long_work(now=time.time() + 11), [], 'the 👀 is set once')
+        self.assertIsNone(self.store.task_card(job_id))
+        self.assertNotIn('sendMessage', self.methods())
+        # It starts: the draft with Stop appears as for any running Work; the 👀 is not set again.
+        self.during_model = lambda job: [self.service.acknowledge_long_work(now=job['created'] + t) for t in (6, 8)]
         self.service.run_one()
         self.service.deliver_one()
-        texts = [body['text'] for method, body in self.calls if method in ('sendMessage', 'editMessageText')]
-        self.assertEqual(texts[0], '요청을 받았습니다. 곧 시작할게요.')
-        self.assertEqual(texts[-1], self.text)
-        self.assertEqual(texts, ['요청을 받았습니다. 곧 시작할게요.', self.text])
-        self.assertTrue(any(method == 'deleteMessage' for method, _body in self.calls))
-        self.assertIsNone(self.store.task_card(job_id))
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, DONE_REACTION])
+        self.assertEqual(len(self.draft_methods()), 2, 'a queued then running Work gets its draft')
+        self.assertEqual([body['text'] for body in self.sends()], [self.text])
+        self.assertNotIn('deleteMessage', self.methods())
+        self.assertNotIn('editMessageText', self.methods())
+
+    def test_a_queued_work_is_withdrawn_by_words_and_keeps_no_reaction_to_answer(self):
+        """The owner's words cancel a queued Work through the existing path (no button, #958)."""
+        self.connect_model()
+        job_id, _ = self.receive('아직 시작 전인 요청')
+        self.assertEqual(self.service.acknowledge_long_work(now=time.time() + 10), [job_id])
+        cancelled, _reply = self.service.cancel_focused_work(self.store.job(job_id), CHAT)
+        self.assertTrue(cancelled)
+        self.assertEqual(self.store.job(job_id)['status'], 'cancelled')
+        self.assertFalse(self.service.run_one(), 'cancelled Work never runs')
+        self.assertEqual(self.methods(), ['setMessageReaction'], 'nothing else was sent for it')
 
 
 class PresentationFailureTests(NativePresenceTestCase):
@@ -1144,7 +1161,6 @@ class TimingTests(unittest.TestCase):
         self.assertEqual(timing.wait_surface(0.5), WAIT_NONE)
         self.assertEqual(timing.wait_surface(2), WAIT_CHAT_ACTION)
         self.assertEqual(timing.wait_surface(6), WAIT_DRAFT)
-        self.assertEqual(timing.wait_surface(6, durable_surface=True), WAIT_CHAT_ACTION)
         self.assertEqual(timing.wait_surface(6, draft_available=False), WAIT_CHAT_ACTION)
 
     def test_draft_ids_are_stable_and_non_zero(self):

@@ -32,7 +32,7 @@ from personal_agent.conversation_projection import (TERMINAL_FAILED_HEADER, TERM
                                                     TERMINAL_INTERRUPTED_NOTE, TERMINAL_NEXT_ACTION,
                                                     TERMINAL_PARTIAL_HEADER, TERMINAL_VERIFIED_LABEL)
 from personal_agent.providers import ModelAdapter
-from personal_agent.quickstart_service import TELEGRAM_CARD_GRACE_SECONDS, AgentService
+from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from test_agency_loop import goal_engine
 
@@ -110,11 +110,12 @@ class TerminalResultTestCase(unittest.TestCase):
         job_id = self.store.enqueue(message, f'ask-{len(self.sent)}',
                                     channel=f'telegram:{GENERATION}', chat_id=CHAT)
         if card:
-            # A carded job is held back for the cancel grace window; age it past
-            # that so this turn runs, without touching the window itself.
-            self.service.create_task_card(job_id, message, CHAT)
+            # A card sent before #958 (nothing sends one now).  A carded job is
+            # held back for the cancel grace window; age it past that so this
+            # turn runs, without touching the window itself.
+            created=time.time() - 60
+            self.store.save_task_card(job_id, CHAT, 700, 'queued')
             with self.store.db() as db:
-                created=time.time() - TELEGRAM_CARD_GRACE_SECONDS - 1
                 db.execute('UPDATE jobs SET created=? WHERE id=?',(created, job_id))
                 db.execute('UPDATE telegram_task_cards SET created=? WHERE job_id=?',(created, job_id))
         self.service.run_one()

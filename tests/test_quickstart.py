@@ -80,6 +80,11 @@ class QuickstartTests(unittest.TestCase):
             db.execute("UPDATE jobs SET created=? WHERE id=?", (created, job_id))
             db.execute("UPDATE telegram_task_cards SET created=? WHERE job_id=?", (created, job_id))
 
+    def old_card(self, job_id, message_id=77):
+        """A task card sent before #958; nothing sends one now, but its edits keep working."""
+        self.store.save_task_card(job_id, 42, message_id, 'queued')
+        return self.store.task_card(job_id)
+
     def test_claim_session_restart_and_redaction(self):
         self.store.claim(self.store.bootstrap.read_text(),'a-long-test-password')
         self.assertFalse(self.store.bootstrap.exists())
@@ -864,17 +869,27 @@ finally:
         self.assertIsNone(self.store.config('telegram')['user_id'])
         self.assertEqual(self.store.jobs(),[])
 
-    def test_natural_language_task_card_has_safe_progress_and_queued_cancellation(self):
+    def test_queued_natural_language_work_gets_no_task_card(self):
+        # #958: the queued acknowledgement card and its buttons are gone.
+        generation=self.pair()
+        self.service.run_one();self.service.deliver_one()
+        baseline=len(self.calls)
+        request={'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'내일 회의 준비를 정리해 줘'}}
+        self.service.ingest_update(request,generation)
+        self.service.acknowledge_long_work(now=time.time()+10)
+        job=self.store.jobs()[0]
+        self.assertEqual(job['status'],'queued')
+        self.assertIsNone(self.store.task_card(job['id']))
+        self.assertFalse(any(c[0].endswith(('/sendMessage','/editMessageText')) for c in self.calls[baseline:]))
+        self.assertTrue(self.service.run_one(),'no cancel grace window holds a Work without a card')
+
+    def test_an_old_task_card_s_cancel_button_still_cancels_queued_work_once(self):
         generation=self.pair()
         self.service.run_one();self.service.deliver_one()
         request={'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'내일 회의 준비를 정리해 줘'}}
         self.service.ingest_update(request,generation)
-        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
         job=self.store.jobs()[0]
-        card=self.store.task_card(job['id'])
-        self.assertIsNotNone(card)
-        create=[c for c in self.calls if c[0].endswith('/sendMessage')][-1]
-        self.assertEqual(create[1]['reply_markup']['inline_keyboard'][0][1]['callback_data'],f"p7c:{job['id']}")
+        card=self.old_card(job['id'])
         callback_message={'chat':{'id':42,'type':'private'},'message_id':card['message_id']}
         self.service.ingest_callback({'id':'cancel-1','from':{'id':42},'message':callback_message,'data':f"p7c:{job['id']}"},generation)
         self.service.ingest_callback({'id':'cancel-2','from':{'id':42},'message':callback_message,'data':f"p7c:{job['id']}"},generation)
@@ -884,31 +899,16 @@ finally:
         self.assertEqual(len(edits),1)
         self.assertIn('취소됨',edits[0][1]['text'])
 
-    def test_telegram_task_card_waits_briefly_for_cancellation(self):
-        generation=self.pair()
-        self.service.run_one();self.service.deliver_one()
-        self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'잠시 뒤 실행할 요청'}},generation)
-        queued=self.store.jobs()[0]
-        self.make_due(queued['id'])  # waited behind earlier Work before its card exists
-        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
-        job=self.store.job(queued['id'])
-        self.assertFalse(self.service.run_one())
-        self.assertEqual(self.store.job(queued['id'])['status'],'queued')
-        card=self.store.task_card(job['id'])
-        self.service.ingest_callback({'id':'cancel','from':{'id':42},'message':{'chat':{'id':42,'type':'private'},'message_id':card['message_id']},'data':f"p7c:{job['id']}"},generation)
-        self.assertEqual(self.store.job(queued['id'])['status'],'cancelled')
-
     def test_task_callbacks_require_owner_and_cannot_cancel_running_work(self):
         generation=self.pair()
         self.service.run_one();self.service.deliver_one()
         self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'작업 시작해 줘'}},generation)
-        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
         job=self.store.jobs()[0]
+        card=self.old_card(job['id'])
         callback={'id':'foreign','from':{'id':99},'message':{'chat':{'id':99,'type':'private'},'message_id':999},'data':f"p7c:{job['id']}"}
         self.service.ingest_callback(callback,generation)
         self.assertEqual(self.store.jobs()[0]['status'],'queued')
         self.make_due(job['id'])
-        card=self.store.task_card(job['id'])
         self.service.run_one()
         self.assertIsNone(self.store.task_card(job['id']))
         self.service.ingest_callback({'id':'late','from':{'id':42},'message':{'chat':{'id':42,'type':'private'},'message_id':card['message_id']},'data':f"p7c:{job['id']}"},generation)
@@ -934,9 +934,6 @@ finally:
         docs=Path(self.temp.name).resolve()/'docs';docs.mkdir();(docs/'plan.txt').write_text('plan')
         self.service.save_roots({'paths':[str(docs)]})
         self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'문서를 찾아 줘'}},generation)
-        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
-        card=[c for c in self.calls if c[0].endswith('/sendMessage') and c[1]['text'].startswith('요청을 받았습니다.')][-1]
-        self.assertNotIn('문서를 찾아',card[1]['text'])
         self.make_due(self.store.jobs()[0]['id'])
         self.service.run_one()
         self.assertTrue(self.service.deliver_notification())
@@ -973,7 +970,9 @@ finally:
         self.service.ingest_callback({'id':'choose','from':{'id':42},'message':{'chat':{'id':42,'type':'private'},'message_id':choice['message_id']},'data':callback},generation)
         self.assertEqual(self.store.job(job['id'])['status'],'queued')
         self.assertEqual(self.store.context_attachment(job['id'])['event_ids'],[item['id']])
-        self.assertIsNotNone(self.store.task_card(job['id']))
+        # #958: the choice is confirmed on its own message; no task card follows.
+        self.assertIsNone(self.store.task_card(job['id']))
+        self.assertFalse(any(c[0].endswith('/sendMessage') and c[1].get('text','').startswith('요청을 받았습니다.') for c in self.calls))
 
     def test_telegram_context_is_explicit_source_evidenced_and_per_job_approved(self):
         generation=self.pair()
@@ -1002,16 +1001,12 @@ finally:
         self.assertTrue(any('Aurora launches on Friday' in json.dumps(body) for body in sent))
         self.assertIn('컨텍스트:',self.store.job(job['id'])['response'])
 
-    def test_task_card_progress_button_returns_safe_owner_bound_evidence(self):
+    def test_an_old_task_card_s_progress_button_returns_safe_owner_bound_evidence(self):
         generation=self.pair()
         self.service.run_one();self.service.deliver_one()
         self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'private request secret'}},generation)
-        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
         job=self.store.jobs()[0]
-        card=self.store.task_card(job['id'])
-        initial=[c for c in self.calls if c[0].endswith('/sendMessage') and c[1].get('text','').startswith('요청을 받았습니다.')][-1]
-        labels=[button['text'] for button in initial[1]['reply_markup']['inline_keyboard'][0]]
-        self.assertEqual(labels,['진행 보기','작업 취소'])
+        card=self.old_card(job['id'])
         self.service.ingest_callback({'id':'foreign-progress','from':{'id':99},'message':{'chat':{'id':99,'type':'private'},'message_id':card['message_id']},'data':f"p7v:{job['id']}"},generation)
         self.assertFalse(any(c[0].endswith(('/sendMessage','/answerCallbackQuery')) and c[1].get('text','').startswith('작업 상태:') for c in self.calls))
         self.service.ingest_callback({'id':'progress','from':{'id':42},'message':{'chat':{'id':42,'type':'private'},'message_id':card['message_id']},'data':f"p7v:{job['id']}"},generation)
@@ -1070,13 +1065,12 @@ finally:
         self.assertFalse(self.service.deliver_notification())
         self.assertEqual(self.store.job(job['id'])['delivery'],'sent')
 
-    def test_task_card_progress_truthfully_explains_restart_and_uncertain_delivery(self):
+    def test_an_old_task_card_s_progress_truthfully_explains_restart_and_uncertain_delivery(self):
         generation=self.pair()
         self.service.run_one();self.service.deliver_one()
         self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'private recovery request'}},generation)
-        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
         job=self.store.jobs()[0]
-        card=self.store.task_card(job['id'])
+        card=self.old_card(job['id'])
         with self.store.db() as db:
             db.execute("UPDATE jobs SET status='running',delivery='sending' WHERE id=?",(job['id'],))
         self.store.recover()
@@ -1124,8 +1118,7 @@ finally:
         generation=self.pair()
         self.service.run_one();self.service.deliver_one()
         self.service.ingest_update({'update_id':11,'message':{'from':{'id':42},'chat':{'id':42,'type':'private'},'text':'secret request'}},generation)
-        self.service.acknowledge_long_work(now=time.time()+10)  # the card is the long-work acknowledgement (#510)
-        job=self.store.jobs()[0];card=self.store.task_card(job['id'])
+        job=self.store.jobs()[0];card=self.old_card(job['id'])  # historical P7-03 evidence used the card's cancel
         self.service.ingest_callback({'id':'cancel','from':{'id':42},'message':{'chat':{'id':42,'type':'private'},'message_id':card['message_id']},'data':f"p7c:{job['id']}"},generation)
         approval=self.store.queue_notification(job['id'],42,generation,'approval_needed',self.service.document_fingerprint())
         self.store.update_notification(approval['id'],'approved')

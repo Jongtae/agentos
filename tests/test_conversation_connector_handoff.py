@@ -469,9 +469,8 @@ class ParkedRequestSurvivesConversationTests(HandoffTestCase):
     def park_with_card(self, message):
         """Park a request whose Telegram card already shows the waiting state.
 
-        The card is recorded directly because the worker deliberately skips a
-        freshly carded Work for a grace period; what is under test is what
-        happens to an existing card later.
+        The card is recorded directly: nothing sends a new card since #958,
+        and what is under test is what happens to a card that already exists.
         """
         job_id = self.park(message)
         self.store.save_task_card(job_id, CHAT, 500 + len(self.sent), 'awaiting_connection')

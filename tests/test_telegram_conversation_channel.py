@@ -194,15 +194,13 @@ class TelegramPolicyRoutingTests(unittest.TestCase):
         self.store.secret('telegram_token', 'BOT:TOKEN')
         self.store.put('telegram', {'enabled': True, 'generation': 'g', 'user_id': 42, 'cursor': 11})
 
-    def test_task_card_lifecycle_routes_through_named_channel_methods(self):
+    def test_an_old_task_card_is_deleted_through_the_named_channel_method(self):
+        # #958: nothing sends a card any more; one sent before that is still reconciled.
         job_id=self.store.enqueue('자료를 요약해 줘','card-lifecycle')
-        self.service.create_task_card(job_id, '자료를 요약해 줘', 42)
+        self.store.save_task_card(job_id, 42, 7, 'queued')
         self.service.update_task_card({'id': job_id, 'message': '자료를 요약해 줘'}, 'running')
-        self.assertEqual(self.channel.names, ['send_message', 'delete_message'])
-        sent = self.channel.calls[0][1]
-        self.assertEqual(sent['chat_id'], 42)
-        self.assertEqual(sent['reply_markup'], self.service.task_card_markup(job_id, 'queued'))
-        self.assertEqual(self.channel.calls[1][1], {'chat_id': 42, 'message_id': 7})
+        self.assertEqual(self.channel.names, ['delete_message'])
+        self.assertEqual(self.channel.calls[0][1], {'chat_id': 42, 'message_id': 7})
         self.assertIsNone(self.store.task_card(job_id))
 
     def test_polling_routes_through_get_updates_with_the_durable_cursor(self):

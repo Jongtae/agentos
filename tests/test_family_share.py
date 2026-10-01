@@ -112,6 +112,19 @@ class Names(unittest.TestCase):
             family_share.resolve_instance('남편 비서', names)
         self.assertIn('아내 비서(family-1)', str(caught.exception))
 
+    def test_an_id_wins_over_a_display_name_and_a_shared_name_is_refused(self):
+        # #966 review P2-1: display names are chosen by whoever made each bot; they must name exactly one instance.
+        rows = {'family-1': {'name': 'family-2', 'state': 'paired'}, 'family-2': {'name': '아들 비서', 'state': 'paired'}}
+        self.assertEqual(family_share.resolve_instance('family-2', rows), 'family-2', 'the id, not the bot named like it')
+        self.assertEqual(family_share.resolve_instance('아들 비서', rows), 'family-2')
+        twins = {'family-1': {'name': '비서', 'state': 'paired'}, 'family-2': {'name': '비서', 'state': 'setting_up'}, 'main': {'name': '김비서'}}
+        with self.assertRaises(ValueError) as caught:
+            family_share.resolve_instance('비서', twins)
+        self.assertIn('여럿이에요: 비서(family-1, 연결됨), 비서(family-2, 설정 중)', str(caught.exception))
+        self.assertIn('id로', str(caught.exception))
+        self.assertEqual(family_share.resolve_instance('family-2', twins), 'family-2')
+        self.assertEqual(family_share.resolve_instance('김비서', twins), 'main')
+
     def test_the_link_secret_is_owner_only_and_reused(self):
         with tempfile.TemporaryDirectory() as tmp:
             first = family_share.ensure_link_secret(tmp)
@@ -990,6 +1003,76 @@ class MainInstanceReceives(unittest.TestCase):
                          ([], {}, []))
         self.assertIsNone(self.service.browser_approvals_for({'id': 'w'}).refuse('www.shop.test'))
         self.assertEqual(self.giver_jar.site_rows('shop.test')[0]['value'], SECRET_VALUE)
+
+    def test_a_receivers_own_session_is_never_replaced_and_it_keeps_every_authority_there(self):
+        # #966 review P1-1: the owner's main instance is signed in to the site as itself; a family member
+        # shares the same site.  Nothing is swapped, marked or set aside: the push is refused, in words.
+        self.jar.save_export({'shop.test': [cookie('.shop.test', value='OWNER-OWN-SESSION')]})
+        other = Opener()
+        with self.assertLogs('personal_agent.family_share', level='INFO') as logs:
+            receipt = family_share.share(self.giver_store, self.giver_jar, 'main', 'shop.test', locate=self.locate, label='김비서', now=2000.0)
+        self.assertEqual((receipt['delivered'], receipt['refused']), (False, 'receiver_signed_in'))
+        self.assertEqual(receipt['response'], family_share.RECEIVER_SIGNED_IN_RECEIPT.format(label='김비서', site='shop.test'))
+        self.assertNotIn(SECRET_VALUE, '\n'.join(logs.output))
+        self.assertNotIn('OWNER-OWN-SESSION', '\n'.join(logs.output))
+        grant = family_share.grants(self.giver_store)[0]
+        self.assertEqual((grant['error'], grant['synced'], grant['attempted']), ('receiver_signed_in', None, 2000.0))
+        # The owner's instance: rows, payment, login window and onward sharing exactly as before.
+        self.assertEqual([row['value'] for row in self.jar.site_rows('shop.test')], ['OWNER-OWN-SESSION'])
+        self.assertEqual(family_share.received(self.store), {})
+        self.assertIsNone(self.service.browser_approvals_for({'id': 'w'}).refuse('www.shop.test'))
+        self.assertEqual(self.profile.login_excluded(), set())
+        self.assertIsNone(family_share.login_refusal(self.store, 'shop.test'))
+        onward = family_share.share(self.store, self.jar, 'family-1', 'shop.test', locate=lambda name: (8807, Path(self.tmp.name) / 'f1'), opener=other)
+        self.assertTrue(onward['delivered'], 'the owner still shares his own site onward')
+        self.assertEqual([row['value'] for row in other.bodies()[-1]['cookies']], ['OWNER-OWN-SESSION'])
+        # The giver does not knock every tick: only when its rows for the site change, or at start.
+        self.assertFalse(family_share.pending(self.giver_store))
+        self.assertEqual(family_share.sync(self.giver_store, self.giver_jar, set(), locate=self.locate, now=2100.0, retry_after=30), 0)
+        self.assertEqual(family_share.grants(self.giver_store)[0]['attempted'], 2000.0, 'not attempted again')
+        self.assertEqual(family_share.sync(self.giver_store, self.giver_jar, {'shop.test'}, locate=self.locate, now=2200.0), 0)
+        self.assertEqual((family_share.grants(self.giver_store)[0]['error'], family_share.grants(self.giver_store)[0]['attempted']),
+                         ('receiver_signed_in', 2200.0), 'asked again after a change, refused again')
+        self.assertEqual([row['value'] for row in self.jar.site_rows('shop.test')], ['OWNER-OWN-SESSION'])
+        # A later unshare deletes nothing on the owner's instance.
+        receipt = family_share.unshare(self.giver_store, 'main', 'shop.test', locate=self.locate, labels={'main': '김비서'})
+        self.assertEqual((receipt['instances'], receipt['removed'], family_share.grants(self.giver_store)), (['main'], True, []))
+        self.assertEqual([row['value'] for row in self.jar.site_rows('shop.test')], ['OWNER-OWN-SESSION'])
+        self.assertEqual(family_share.received(self.store), {})
+        # Once the owner signs out there, the same share lands (the giver's own session is its to give).
+        self.jar.remove('shop.test')
+        receipt = family_share.share(self.giver_store, self.giver_jar, 'main', 'shop.test', locate=self.locate, label='김비서')
+        self.assertEqual((receipt['delivered'], receipt['refused'], set(family_share.received(self.store))), (True, None, {'shop.test'}))
+        self.assertEqual([row['value'] for row in self.jar.site_rows('shop.test')], [SECRET_VALUE, 'p'])
+
+    def test_a_refusal_is_a_coded_400_and_an_ordinary_400_stays_a_transport_error(self):
+        self.jar.save_export({'shop.test': [cookie('.shop.test', value='OWNER-OWN-SESSION')]})
+        secret = family_share.ensure_link_secret(self.store.root)
+        with self.assertRaises(family_share.Refused) as caught:
+            family_share.push(self.server.server_port, secret, 'shop.test', [cookie('.shop.test')])
+        self.assertEqual((caught.exception.code, str(caught.exception)), ('receiver_signed_in', family_share.RECEIVER_SIGNED_IN_TEXT))
+        with self.assertRaises(HTTPError):
+            family_share._post(self.server.server_port, secret, {'op': 'rename', 'site': 'shop.test'})
+        # Already received: a refreshed push for that site is accepted (the mark says it is the giver's).
+        self.store.put(family_share.SHARED_KEY, {'shop.test': {'from': 'owner', 'since': 1.0}})
+        self.assertEqual(family_share.push(self.server.server_port, secret, 'shop.test', [cookie('.shop.test')])['cookies'], 1)
+
+    def test_an_instance_is_never_a_target_for_itself(self):
+        # #966 review P2-2: ``main`` (or any id) that resolves to this instance's own data dir is refused before
+        # a link secret is written or a grant recorded; a ``main`` with no store there is not installed.
+        self.giver_jar.save_export({'shop.test': [cookie('.shop.test')]})
+        with self.assertRaises(ValueError) as caught:
+            family_share.share(self.giver_store, self.giver_jar, 'main', 'shop.test', locate=lambda name: (8787, self.giver_store.root))
+        self.assertEqual(str(caught.exception), family_share.SELF_TEXT)
+        self.assertFalse(family_share.link_secret_path(self.giver_store.root).exists())
+        self.assertEqual(family_share.grants(self.giver_store), [])
+        empty = Path(self.tmp.name) / 'nothing-here'
+        with self.assertRaises(ValueError) as caught:
+            family_share.share(self.giver_store, self.giver_jar, 'main', 'shop.test', locate=lambda name: (8787, empty), label='김비서')
+        self.assertEqual(str(caught.exception), family_share.NOT_INSTALLED_TEXT.format(instance='김비서'))
+        self.assertFalse(family_share.link_secret_path(empty).exists())
+        self.assertEqual(family_share.instances(home=Path(self.tmp.name), locate=lambda name: (8787, self.giver_store.root),
+                                               own=self.giver_store.root), {})
 
     def test_the_main_instances_endpoint_answers_loopback_with_the_secret_only_never_a_tunnel(self):
         secret = family_share.ensure_link_secret(self.store.root)

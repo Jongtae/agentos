@@ -598,6 +598,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     length=int(self.headers.get('Content-Length','0'))
                     if not 0<length<=family_share.MAX_BODY:raise ValueError('요청 크기가 올바르지 않습니다.')
                     return self.reply(200,family_share.accept(service,json.loads(self.rfile.read(length))))
+                except family_share.Refused as exc:return self.reply(400,{'error':str(exc),'code':exc.code})
                 except ValueError as exc:return self.reply(400,{'error':str(exc)})
             if path=='/api/family/telegram-token' and method=='POST':
                 record=family_setup.read_setup(store)

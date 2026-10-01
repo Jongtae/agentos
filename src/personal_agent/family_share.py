@@ -65,6 +65,20 @@ from ``getMe`` at connect and backfilled once at start) plus its instance
 id, and its state comes from that instance's own store, read-only
 (``instance_state``): ``paired``, ``setting_up`` or ``not_connected``.  No
 site, person or bot name is written into code.
+
+* **A receiver's own session is never replaced (#966 review P1-1).** A
+  ``put`` for a site the receiver holds its own rows for, and never
+  received, is refused before any mark is written (400 with the code
+  ``receiver_signed_in``, content-free): the receiver keeps its session and
+  all its authority there (payment, login window, onward sharing).  The
+  giver records the refusal on the grant (``error``) and tells its owner in
+  words; the refusal is retried only when the giver's rows for that site
+  change or at start, not every retry tick.
+* **A name resolves to exactly one instance (review P2-1).** An instance id
+  wins over a display name; a display name two instances share is refused
+  with the candidates and their ids.  An instance is never a target for
+  itself (review P2-2): ``share`` refuses its own data directory, and
+  ``main`` without a store there.
 """
 import hmac
 import json
@@ -74,6 +88,7 @@ import secrets
 import sqlite3
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -103,6 +118,14 @@ NO_SESSION_TEXT = ('{site}에 저장된 내 로그인 세션이 없어 공유하
                    '{stored}')
 NOT_INSTALLED_TEXT = "'{instance}' 비서가 이 Mac에 설치되어 있지 않아요."
 NOT_YOURS_TEXT = '{site} 로그인은 계정 주인에게 받은 것이라 다른 비서에게 공유할 수 없어요. 아무것도 바꾸지 않았어요.'
+SELF_TEXT = '이 비서 자신에게는 공유할 수 없어요. 아무것도 바꾸지 않았어요.'
+#: #966 review P1-1: the receiving instance already holds its own session for the site.
+RECEIVER_SIGNED_IN = 'receiver_signed_in'
+RECEIVER_SIGNED_IN_TEXT = '이 비서는 그 사이트에 자기 계정으로 이미 로그인되어 있어 공유받지 않았어요.'
+RECEIVER_SIGNED_IN_RECEIPT = ("'{label}' 비서는 {site}에 이미 자기 계정으로 로그인되어 있어 공유하지 않았어요. 그 비서의 로그인은 그대로예요. "
+                              '그 비서가 그 사이트에서 로그아웃하면 다시 공유할 수 있어요.')
+#: Refusals the receiver decided; retried only when the giver's rows change or at start, not every tick.
+REFUSALS = frozenset({RECEIVER_SIGNED_IN})
 #: #957: the owner's default service as a share target.  ``service_control`` refuses it as a named
 #: instance's name, so the id can never collide with one read from a plist.
 MAIN_INSTANCE = 'main'
@@ -119,6 +142,14 @@ def store_lock(store):
     with _LOCKS_GUARD:
         return _LOCKS.setdefault(key, threading.RLock())
 JAR_UNREADABLE_TEXT = '저장된 로그인 세션을 읽지 못해 공유하지 않았어요. 설정의 브라우저 로그인 세션 상태를 확인해 주세요.'
+
+
+class Refused(ValueError):
+    """A refusal the receiving instance decided, with a content-free ``code`` (``REFUSALS``)."""
+
+    def __init__(self, code, text):
+        super().__init__(text)
+        self.code = code
 
 
 # -- names ---------------------------------------------------------------
@@ -213,6 +244,10 @@ def locate_instance(instance, home=None, environ=None):
     return controller.port, controller.data_dir
 
 
+def _has_store(data_dir):
+    return (Path(data_dir) / 'private' / 'quickstart.db').is_file()
+
+
 def _same_dir(left, right):
     try:
         return Path(left).expanduser().resolve() == Path(right).expanduser().resolve()
@@ -236,7 +271,7 @@ def instances(home=None, locate=locate_instance, own=None, now=None):
             continue
         if own is not None and _same_dir(data_dir, own):
             continue
-        if name == MAIN_INSTANCE and not (Path(data_dir) / 'private' / 'quickstart.db').is_file():
+        if name == MAIN_INSTANCE and not _has_store(data_dir):
             continue   # no default service was ever set up here
         rows[name] = {'name': display_name(data_dir) or name, 'state': instance_state(data_dir, now), 'main': name == MAIN_INSTANCE}
     return rows
@@ -261,9 +296,17 @@ def resolve_instance(value, rows):
     wanted = ' '.join(str(value or '').split()).lower()
     if not wanted:
         raise ValueError('어느 비서인지 이름을 주세요. 아무것도 바꾸지 않았어요.')
-    for name, label in labels.items():
-        if wanted in (name.lower(), ' '.join(str(label).split()).lower()):
+    # Review P2-1: an instance id is exact and wins; a display name (chosen by whoever made that bot) must
+    # name exactly one instance, or the candidates are listed with their ids.
+    for name in labels:
+        if wanted == name.lower():
             return name
+    matches = [name for name, label in labels.items() if wanted == ' '.join(str(label).split()).lower()]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        listed = ', '.join(describe(name, (rows or {}).get(name)) for name in matches)
+        raise ValueError(f"'{value}'라는 이름의 비서가 여럿이에요: {listed}. 어느 비서인지 괄호 안의 id로 말해 주세요. 아무것도 바꾸지 않았어요.")
     listed = ', '.join(describe(name, row) for name, row in (rows or {}).items()) or '없음'
     raise ValueError(f"'{value}'라는 비서를 찾지 못했어요. 이 Mac의 다른 비서: {listed}. 아무것도 바꾸지 않았어요.")
 
@@ -353,8 +396,19 @@ def _post(port, secret, body, opener=None, timeout=PUSH_TIMEOUT):
     """One loopback call to the family instance; never through a proxy or tunnel."""
     request = urllib.request.Request(f'http://127.0.0.1:{int(port)}{SHARE_PATH}', data=json.dumps(body).encode(),
                                      method='POST', headers={'Content-Type': 'application/json', LINK_HEADER: secret})
-    with (opener or _LOOPBACK.open)(request, timeout=timeout) as response:
-        return json.loads(response.read() or b'{}')
+    try:
+        with (opener or _LOOPBACK.open)(request, timeout=timeout) as response:
+            return json.loads(response.read() or b'{}')
+    except urllib.error.HTTPError as error:
+        # Review P1-1: a refusal the receiver decided carries a code; anything else stays a transport failure.
+        try:
+            answer = json.loads(error.read() or b'{}')
+        except ValueError:
+            answer = {}
+        code = answer.get('code') if isinstance(answer, dict) else None
+        if error.code == 400 and code in REFUSALS:
+            raise Refused(code, str(answer.get('error') or code)) from None
+        raise
 
 
 def push(port, secret, site, rows, opener=None):
@@ -395,7 +449,7 @@ def _deliver(row, jar, locate, opener, now):
             LOG.info('family share: %s -> %s (%d cookies)', row['site'], row['instance'], len(rows))
     except Exception as exc:
         # Review P2-3: a failed delivery is due again (``synced`` cleared, ``error`` set) until it lands.
-        row['error'] = type(exc).__name__
+        row['error'] = exc.code if isinstance(exc, Refused) else type(exc).__name__
         row['attempted'] = now
         row['synced'] = None
         LOG.warning('family share: %s -> %s not delivered (%s)', row['site'], row['instance'], type(exc).__name__)
@@ -423,9 +477,12 @@ def share(store, jar, instance, site, *, locate=locate_instance, opener=None, no
     if not rows:
         stored = [row['site'] for row in jar.sites()]
         raise ValueError(NO_SESSION_TEXT.format(site=site, stored=f' 지금 로그인된 사이트: {", ".join(stored)}.' if stored else ''))
-    port, _data_dir = locate(instance)
-    if port is None:
-        raise ValueError(NOT_INSTALLED_TEXT.format(instance=instance))
+    port, data_dir = locate(instance)
+    # Review P2-2: never itself, however ``main`` or this instance's ``--data`` resolved; and no main without a store.
+    if _same_dir(data_dir, store.root):
+        raise ValueError(SELF_TEXT)
+    if port is None or (instance == MAIN_INSTANCE and not _has_store(data_dir)):
+        raise ValueError(NOT_INSTALLED_TEXT.format(instance=label))
     with store_lock(store):
         current = grants(store)
         index = _grant_index(current, instance, site)
@@ -436,10 +493,12 @@ def share(store, jar, instance, site, *, locate=locate_instance, opener=None, no
         _put_grants(store, current)
         delivered = _deliver(row, jar, locate, opener, now)
         _put_grants(store, current)
+    refused = row.get('error') if row.get('error') in REFUSALS else None
     text = (f"{label} 비서에 {site} 로그인 세션을 공유했어요(쿠키 {len(rows)}개). 내 세션이 갱신되면 따라가고, "
             f"결제는 계정 주인만 할 수 있어요." if delivered else
+            RECEIVER_SIGNED_IN_RECEIPT.format(label=label, site=site) if refused == RECEIVER_SIGNED_IN else
             f"{label} 비서가 지금 응답하지 않아 {site} 로그인 세션은 비서가 켜지면 전달돼요. 공유는 기록해 두었어요.")
-    return {'instance': instance, 'site': site, 'cookies': len(rows), 'delivered': delivered, 'response': text}
+    return {'instance': instance, 'site': site, 'cookies': len(rows), 'delivered': delivered, 'refused': refused, 'response': text}
 
 
 def unshare(store, instance, site, *, locate=locate_instance, opener=None, now=None, labels=None):
@@ -500,6 +559,8 @@ def sync(store, jar, touched=None, *, locate=locate_instance, opener=None, now=N
         for row in list(current):
             if row['site'] in held:
                 continue
+            if row.get('error') in REFUSALS and not (touched is None or row['site'] in touched):
+                continue   # review P1-1: the receiver decided; asked again only when these rows change or at start
             due = (row.get('state') == 'revoking' or row.get('synced') is None or row.get('error')
                    or touched is None or row['site'] in touched)
             if not due or (row.get('error') and now - float(row.get('attempted') or 0) < retry_after):
@@ -523,7 +584,8 @@ def sync(store, jar, touched=None, *, locate=locate_instance, opener=None, now=N
 
 def pending(store):
     """Whether any grant still waits for a push or a revocation."""
-    return any(row.get('state') == 'revoking' or row.get('synced') is None or row.get('error') for row in grants(store))
+    return any(row.get('state') == 'revoking' or (row.get('synced') is None and row.get('error') not in REFUSALS)
+               or (row.get('error') and row.get('error') not in REFUSALS) for row in grants(store))
 
 
 def listing(store, rows=None):
@@ -562,6 +624,11 @@ def accept(service, body, now=None):
                 raise ValueError('쿠키 목록을 확인하세요.')
             rows = [row for row in rows if isinstance(row, dict) and isinstance(row.get('name'), str)
                     and _belongs(row.get('domain'), site)]
+            if site not in marks and _holds_own(service, site):
+                # Review P1-1: this instance's own sign-in there stays, with every authority it has; the
+                # giver is told so.  Nothing is set aside, nothing is marked.
+                LOG.info('family share: %s refused; this instance holds its own session', site)
+                raise Refused(RECEIVER_SIGNED_IN, RECEIVER_SIGNED_IN_TEXT)
             # Fail closed: the mark that refuses payment is durable before any cookie is usable here.  A
             # crash or a failed import leaves a mark without rows (harmless, and ``remove`` clears it),
             # never rows without a mark.
@@ -595,6 +662,17 @@ def accept(service, body, now=None):
         LOG.info('family share: removed %s', site)
         return {'ok': True, 'op': 'remove', 'site': site, 'deleted': bool(result.get('deleted')), 'received': True,
                 'running_browser': result.get('running_browser')}
+
+
+def _holds_own(service, site):
+    """Whether this instance's jar holds rows for ``site`` of its own; an unreadable jar refuses the push (content-free)."""
+    jar = getattr(service.browser_profile, 'jar', None)
+    if jar is None:
+        return False
+    try:
+        return bool(jar.site_rows(site))
+    except JarError as exc:
+        raise ValueError(f'이 비서의 로그인 세션 저장소를 읽을 수 없습니다({exc}).') from None
 
 
 def _belongs(domain, site):

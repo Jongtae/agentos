@@ -34,7 +34,7 @@ class _Capabilities:
 # declared profile action (Capabilities offers it only while context is on).
 # #774: the owner-state tools are relayed to the service on the trusted-local route.
 # #814: so are the owner settings tools.
-BOUNDED_NAMES = ['ask_location', 'bounded_public_research', 'browser_click', 'browser_find', 'browser_open', 'browser_read', 'browser_type',
+BOUNDED_NAMES = ['ask_location', 'bounded_public_research', 'browser_click', 'browser_find', 'browser_open', 'browser_read', 'browser_sign_in', 'browser_type',
                  'calendar_draft_cancel', 'calendar_draft_create', 'calendar_draft_update', 'calendar_query', 'find_files',
                  'information_use', 'list_memory', 'list_notes', 'list_roots', 'propose_current_state', 'public_page_read',
                  'read_file', 'save_memory', 'save_note', 'schedule_preparation',

@@ -243,6 +243,7 @@ FALLBACK_STEP_LINES = {
     'browser_find': ('{host} 페이지에서 찾는 중', '페이지에서 찾는 중'),
     'browser_click': ('{host}에서 선택하는 중', '페이지에서 선택하는 중'),
     'browser_type': ('{host}에서 입력 중', '페이지에서 입력 중'),
+    'browser_sign_in': ('{host} 로그인 요청 중', '로그인 요청 중'),
     'weather': (None, '날씨 확인 중'),
     'calendar_query': (None, '일정 확인 중'),
     'calendar_draft_create': (None, '일정 변경안 만드는 중'),

@@ -162,7 +162,7 @@ class StrictLaunchArguments(unittest.TestCase):
         # #623: both pre-approve exactly their bridge tools; strict also removes
         # every built-in tool.  #701: trusted-local adds the browser tools.
         browser = ',mcp__agentos__browser_open,mcp__agentos__browser_read,mcp__agentos__browser_find,' \
-                  'mcp__agentos__browser_click,mcp__agentos__browser_type'
+                  'mcp__agentos__browser_click,mcp__agentos__browser_type,mcp__agentos__browser_sign_in'
         # #774: trusted-local also pre-approves the owner-state tools its service relays.
         owner_state = (',mcp__agentos__calendar_query,mcp__agentos__calendar_draft_create,'
                        'mcp__agentos__calendar_draft_update,mcp__agentos__calendar_draft_cancel,'

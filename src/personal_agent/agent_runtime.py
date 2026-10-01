@@ -28,7 +28,8 @@ STRING={'type':'string'}
 #: SEC-BROWSER-01 (#656): actions inside the owner-logged-in browser profile
 #: (``browser_session``).  ``effect`` is the model's declared class; the
 #: deterministic guard there never depends on it.
-BROWSER_ACTIONS=frozenset({'browser_open','browser_read','browser_find','browser_click','browser_type'})
+#: #953 (BROWSE-09): ``browser_sign_in`` asks the owner for a sign-in directly, without a sign-in page.
+BROWSER_ACTIONS=frozenset({'browser_open','browser_read','browser_find','browser_click','browser_type','browser_sign_in'})
 EFFECT={'type':'string','enum':['read','navigate','mutate','payment']}
 #: The argument recorded as a length placeholder, per host action: typed
 #: browser text (#656) and a proposed current-state value (#627), which the
@@ -190,10 +191,23 @@ BROWSER_SESSION_NOTE=(' The owner cannot see this browser session: whatever it h
 #: #910 (live, Work 6b3bf077): the cart page showed "signed out" as ordinary content,
 #: so no login_required state arose and the owner was only told in text.  The
 #: in-flow login (#709) starts when a page carries a sign-in form.
-BROWSER_SIGN_IN_NOTE=(' Whenever a page you open or reach shows a sign-in form, AgentOS asks the owner to sign in on this Mac '
-                      'and continues the request once they have. So when the owner\'s own account is needed and a page shows '
-                      'you are signed out, reach the site\'s sign-in form, by its address or its sign-in control. Never type '
+#: #953 (BROWSE-09, live 2026-10-01): a worker on a site's main page, shown signed out, never reached a
+#: sign-in form and told the owner to sign in in a browser instead.  The model now asks for the sign-in
+#: directly (``browser_sign_in``); AgentOS runs the same in-flow login.
+BROWSER_SIGN_IN_NOTE=(' Whenever a page you open or reach shows a sign-in form, AgentOS asks the owner to sign in (on this Mac, '
+                      'and from their phone where that is set up) and continues the request once they have. When the owner\'s own account is needed '
+                      'and a page shows you are signed out or asks you to sign in, call browser_sign_in with the site\'s '
+                      'address instead of looking for its sign-in page or telling the owner to sign in somewhere. Never type '
                       'a password yourself.')
+#: #953: the model-facing text of ``browser_sign_in`` (generic: no site, provider or category is named).
+BROWSER_SIGN_IN_DESCRIPTION=('When the request needs the owner\'s own account on a site and you are not signed in there (a page shows '
+                             'you are signed out or asks you to sign in), call this with the site\'s address (its home page or '
+                             'the page you need) instead of telling the person to sign in somewhere: AgentOS asks them to sign '
+                             'in (on this Mac, and from their phone where that is set up) and continues the request '
+                             'afterwards, so end your turn after calling it and say the sign-in was requested, unless the '
+                             'result says signing in there is not possible; then say that. It changes nothing on the site and never '
+                             'types a password. Never tell the person to sign in in a browser yourself, and never call it for a '
+                             'site where you are already signed in.')
 BROWSER_EFFECT_NOTE=' Declare effect: read (only looking), navigate (moving between pages), mutate (changes account state such as a cart or a form), payment (pays or enters card data; always needs owner approval). AgentOS refuses card/one-time-code/password fields and their form buttons without the owner\'s approval whatever the label says.'
 #: #655: actions whose one public search takes the model's provider/locale.
 SEARCH_BACKED_ACTIONS=frozenset({'web_search','bounded_public_research'})
@@ -259,6 +273,7 @@ DEFINITIONS=[
  schema('browser_read','Return the current page state of the owner\'s browser session again (visible text and numbered interactive elements), for example after the page changed.'),
  schema('browser_find','Find visible text on the current browser page. Returns the matching lines and interactive elements, each element with its number for browser_click and its nearby text (near). It searches the first 300 interactive elements of the page, including those beyond the listed ones (more_elements counts them), by name or nearby text; when the page state says elements_capped, later controls are not searched, so scroll or narrow the page (for example a search or filter) instead of concluding a control is absent. Use it to reach the right control and to confirm the right item or price before acting.',{'text':STRING},['text']),
  schema('browser_click','Click one interactive element of the current browser page. target is the element number from the page state or its exact visible name. Returns the resulting page state.'+BROWSER_EFFECT_NOTE,{'target':STRING,'effect':EFFECT},['target','effect']),
+ schema('browser_sign_in',BROWSER_SIGN_IN_DESCRIPTION,{'url':STRING},['url']),
  schema('browser_type','Type text into one field of the current browser page (replacing its content). target is the element number or its visible name. Returns the resulting page state. Never type passwords, card numbers or one-time codes.'+BROWSER_EFFECT_NOTE,{'target':STRING,'text':STRING,'effect':EFFECT},['target','text','effect']),
  schema('delegate_agent','Give a bounded task to a registered specialist. Pass relevant context explicitly. Separate model execution returns a report; specialists cannot recursively delegate or write notes.',{'agent_id':STRING,'task':STRING},['agent_id','task']),
 ]
@@ -1376,7 +1391,8 @@ def work_stop_requested(store, job_id):
 EFFECT_FREE_READS=frozenset({'list_roots','find_files','read_file','list_notes','list_memory','search_memory','calendar_query',
                              'web_search','public_page_read','weather','list_agents','bounded_public_research',
                              # A navigation or read in the owner's browser session (#656): no form is submitted.
-                             'browser_open','browser_read','browser_find',
+                             # #953: a sign-in request opens nothing and submits nothing; the owner signs in by hand.
+                             'browser_open','browser_read','browser_find','browser_sign_in',
                              # #814: the owner settings snapshot; no draft, no effect.
                              'settings_read',
                              # #826: a read of AgentOS's own Work records.

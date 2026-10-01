@@ -46,7 +46,7 @@ READ_CATEGORIES = {
     # #826 review: an earlier Work's audit read into this Work is itself owner information used here.
     'information_use': 'records',
     'browser_open': 'browser', 'browser_read': 'browser', 'browser_find': 'browser', 'browser_click': 'browser',
-    'browser_type': 'browser',
+    'browser_type': 'browser', 'browser_sign_in': 'browser',
     # ATTN-WAIT-01 (#839): an item AgentOS reminded the owner of on the waiting draft.
     'attention_surface': 'attention',
 }

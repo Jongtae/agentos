@@ -447,7 +447,7 @@ class OwnerCommand(unittest.TestCase):
     def test_a_missing_ngrok_stops_before_anything_is_created(self):
         """#913 review P2-2: checked before the route is copied or the instance installed."""
         from unittest.mock import patch
-        with patch('shutil.which', return_value=None), patch('pathlib.Path.home', return_value=self.root / 'home'):
+        with patch('personal_agent.subscription_engines.find_cli', return_value=None), patch('pathlib.Path.home', return_value=self.root / 'home'):
             code = family_setup.family_main(['add', 'spouse'], service_action=self.service_action, owner_data=self.root / 'owner',
                                             environ=self.environ, opener=self.opener, out=self.output.append,
                                             sleep=lambda _s: None, free=lambda port: True)

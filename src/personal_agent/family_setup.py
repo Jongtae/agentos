@@ -323,7 +323,10 @@ def start_tunnel(port, popen=subprocess.Popen, timeout=30):
     daemon thread for the tunnel's life, so a full pipe never stalls it, and
     the address is awaited with a real deadline (review P2-4).
     """
-    process = popen(['ngrok', 'http', f'127.0.0.1:{int(port)}', '--host-header=rewrite', '--inspect=false',
+    from .subscription_engines import find_cli
+    # #932: under launchd PATH lacks Homebrew; the real launcher runs the found binary.
+    binary = (find_cli('ngrok') or 'ngrok') if popen is subprocess.Popen else 'ngrok'
+    process = popen([binary, 'http', f'127.0.0.1:{int(port)}', '--host-header=rewrite', '--inspect=false',
                      '--log', 'stdout', '--log-format', 'json'],
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     lines = queue.Queue()
@@ -574,7 +577,8 @@ def prepare_family_setup(owner_store, name, display_name, *, service_action, env
         raise SetupError(str(exc)) from None
     display_name = ' '.join(str(display_name or '').split())[:64] or f'{name} 비서'
     import shutil
-    if popen is subprocess.Popen and not shutil.which('ngrok'):
+    from .subscription_engines import find_cli
+    if popen is subprocess.Popen and not find_cli('ngrok'):
         # #913 review P2-2: checked before anything is created or copied.
         raise SetupError('가족에게 보낼 임시 링크를 만들 ngrok이 이 Mac에 없어 가족 비서를 만들지 않았습니다.')
     cfg = owner_store.config('telegram', {})

@@ -1238,7 +1238,7 @@ class BoundedExecutionAdapter:
     not an engine prompt option.
     """
     def __init__(self, finder=None, runner=subprocess.run, runtime_root=None, codex_home=None, credentials=None):
-        from shutil import which
+        from .subscription_engines import find_cli as which
         self.finder = finder or which
         self.runner = runner
         configured_root = runtime_root or os.environ.get('AGENTOS_ENGINE_RUNS')

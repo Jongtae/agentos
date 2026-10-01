@@ -561,6 +561,9 @@ def mediate_snapshot(raw, excluded=(), requested_url=None):
         snapshot['elements_capped'] = True
     snapshot['_rows'] = visible
     snapshot['_elements'] = internal
+    # #934: where each form posts, so a step's destination host is known before it runs.
+    snapshot['_form_actions'] = {form['id']: form.get('action') for form in raw.get('forms') or []
+                                 if isinstance(form, dict) and 'id' in form}
     # Internal only (never returned): the unmediated page reference the
     # approval binds to, and the page state a guarded step is bound to.
     snapshot['_page'] = page_reference(raw.get('url'))
@@ -994,6 +997,10 @@ class BrowserSession:
         if local_destination(url, self._allowed_origins):
             raise ToolError(BLOCKED_TEXT, 'blocked_destination')
         self._spend_step()
+        # #934: the requested destination counts before the page is opened: a shared site's payment
+        # deep link is refused here (no approval consumed), and any open of one makes the Work's
+        # refusal sticky.
+        self._note_refusal((parts.hostname,))
         self._guard(step_binding(self.work_id, 'browser_open', url, url, url), f'{_host(parts)} 페이지 열기',
                     effect == 'payment')
         self._last_input = None   # a submit cancelled on the new page is not that step's (#700)
@@ -1036,6 +1043,7 @@ class BrowserSession:
             if context:
                 description += f' · {context[:80]}'
         binding = step_binding(self.work_id, 'browser_click', snapshot['_page'], key, key, state)
+        self._note_refusal(self._destinations(snapshot, element))
         # #758: a control whose name commits a purchase needs approval whatever form it
         # is in (a stored payment method or a fetch charge leaves no card field to see).
         approved = self._guard(binding, description, element['submit_guarded'] or element['commit'] or effect == 'payment')
@@ -1076,6 +1084,7 @@ class BrowserSession:
         binding = step_binding(self.work_id, 'browser_type', snapshot['_page'], target_key(element), text,
                                self._state_of(snapshot, element))
         description = f"'{element.get('name') or element.get('role')}' 입력란에 입력"
+        self._note_refusal(self._destinations(snapshot, element))
         # Typing presses the field first, so a label forwarding that press is guarded too.
         required = element['payment'] or element.get('forwards_payment') or effect == 'payment'
         approved = self._guard(binding, description, required)
@@ -1084,6 +1093,19 @@ class BrowserSession:
                                                                  confirm_ok=confirm_ok),
                     description)
         return self._with_dialogs(self._page_state(), answer)
+
+    @staticmethod
+    def _destinations(snapshot, element):
+        """The hosts a step on ``element`` may navigate to, known before it runs (#934): its link, its form's action."""
+        hosts = []
+        row = next((row for row in snapshot.get('_rows') or () if row.get('n') == element.get('n')), None)
+        if row and row.get('href'):
+            hosts.append(landed_host(row['href']))
+        actions = snapshot.get('_form_actions') or {}
+        for form_id in (element.get('form'), element.get('label_form')):
+            if form_id is not None and actions.get(form_id):
+                hosts.append(landed_host(actions[form_id]))
+        return [host for host in hosts if host]
 
     @staticmethod
     def _state_of(snapshot, element):

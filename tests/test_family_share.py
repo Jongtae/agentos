@@ -26,7 +26,7 @@ from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.settings_orchestrator import SettingsError
 
-from test_browser_session import ORIGIN, Approvals, FakeDriver
+from test_browser_session import ORIGIN, PAGES, Approvals, FakeDriver
 
 SECRET_VALUE = 'cookie-secret-value-9f8e7d'
 OTHER_VALUE = 'news-cookie-value-1a2b3c'
@@ -454,6 +454,42 @@ class FamilySide(unittest.TestCase):
         self.assertEqual((self.jar.site_rows('shop.test'), family_share.received(self.store), family_share.grants(owner_store)),
                          ([], {}, []))
 
+    def test_the_mark_is_durable_before_the_cookies_and_survives_a_failed_import(self):
+        # Codex thread: a crash or a failed import between the mark and the jar leaves a mark without rows,
+        # never rows without a mark; payment stays refused either way.
+        from personal_agent.browser_jar import JarError
+        original = self.profile.import_site
+        self.profile.import_site = lambda site, rows: (_ for _ in ()).throw(JarError('key_missing'))
+        with self.assertLogs('personal_agent', level='WARNING') as logs:
+            status, body = self.put()
+        self.assertEqual(status, 400)
+        mark = family_share.received(self.store)['shop.test']
+        self.assertEqual((mark['from'], mark['error'], 'importing' in mark), ('owner', 'JarError', False))
+        self.assertEqual(self.jar.site_rows('shop.test'), [])
+        self.assertNotIn(SECRET_VALUE, '\n'.join(logs.output))
+        approvals = self.service.browser_approvals_for({'id': 'work-1'})
+        self.assertEqual(approvals.refuse('www.shop.test'), family_share.PAYMENT_REFUSED_TEXT, 'mark without rows: still refused')
+        self.profile.import_site = original
+        status, body = self.put()
+        self.assertEqual((status, body['cookies']), (200, 2))
+        mark = family_share.received(self.store)['shop.test']
+        self.assertEqual((mark['error'], mark['since']), (None, mark['since']))
+        self.assertEqual(len(self.jar.site_rows('shop.test')), 2)
+        status, body = self.request({'op': 'remove', 'site': 'shop.test'}, secret=self.secret)
+        self.assertEqual((status, body['received'], family_share.received(self.store)), (200, True, {}))
+
+    def test_at_start_a_jar_site_with_a_mark_is_refused_for_payment(self):
+        # The family instance restarts: the mark alone decides, whether or not the jar holds the rows yet.
+        self.store.put(family_share.SHARED_KEY, {'shop.test': {'from': 'owner', 'since': 1.0}})
+        self.jar.save_export({'shop.test': [cookie('.shop.test')]}, imported={'shop.test'})
+        restarted = AgentService(self.store, ModelAdapter(lambda *a, **k: {}), lambda *a, **k: {'ok': True, 'result': []},
+                                 browser_profile=self.profile)
+        self.assertEqual(restarted.browser_approvals_for({'id': 'w'}).refuse('www.shop.test'), family_share.PAYMENT_REFUSED_TEXT)
+        self.store.put(family_share.SHARED_KEY, {'shop.test': {'from': 'owner', 'since': 1.0, 'importing': 2.0}})
+        self.jar.remove('shop.test')
+        self.assertEqual(restarted.browser_approvals_for({'id': 'w'}).refuse('shop.test'), family_share.PAYMENT_REFUSED_TEXT,
+                         'crashed between the mark and the import: still refused')
+
     def test_the_retry_runs_off_the_work_loop_one_at_a_time(self):
         # Review P3-3: the owner's service starts one delivery thread; the loop thread never reads the jar.
         owner_store = QuickStore(Path(self.tmp.name) / 'owner')
@@ -507,8 +543,8 @@ class RefusingApprovals(Approvals):
 class PaymentRefusal(unittest.TestCase):
     """On a shared site a payment step is refused outright: no approval request, no consumed approval."""
 
-    def session(self, approvals):
-        driver = FakeDriver()
+    def session(self, approvals, driver=None):
+        driver = driver or FakeDriver()
         return bs.BrowserSession(lambda: driver, work_id='work-1', approvals=approvals), driver
 
     def test_card_entry_and_the_pay_button_are_refused_without_a_request(self):
@@ -571,6 +607,47 @@ class PaymentRefusal(unittest.TestCase):
         driver.cancelled = {'page': 'http://pg-gateway.test/checkout', 'dom': 0, 'method': 'post', 'action': ORIGIN + '/pay', 'state': 's'}
         with self.assertRaises(ToolError) as caught:
             sess.read()
+        self.assertEqual((caught.exception.code, approvals.requests), ('approval_refused', []))
+
+    def test_a_direct_payment_deep_link_into_the_shared_site_is_refused_before_anything_opens(self):
+        # Codex thread: the first attempt has no page yet; the requested destination decides.
+        approvals = RefusingApprovals()
+        sess, driver = self.session(approvals)
+        with self.assertRaises(ToolError) as caught:
+            sess.open({'url': ORIGIN + '/checkout', 'effect': 'payment'})
+        self.assertEqual((caught.exception.code, approvals.requests, driver.log), ('approval_refused', [], []))
+        # The resumed, "approved" attempt: the family member's approval is neither consumed nor honoured.
+        binding = bs.step_binding('work-1', 'browser_open', ORIGIN + '/checkout', ORIGIN + '/checkout', ORIGIN + '/checkout')
+        approvals = RefusingApprovals(binding)
+        sess, driver = self.session(approvals)
+        with self.assertRaises(ToolError) as caught:
+            sess.open({'url': ORIGIN + '/checkout', 'effect': 'payment'})
+        self.assertEqual((caught.exception.code, len(approvals.issued), driver.log), ('approval_refused', 1, []))
+
+    def test_navigating_into_the_shared_site_from_an_unshared_page_is_refused_for_payment(self):
+        # Codex thread: the link's or the form's destination counts before the step runs; a plain
+        # navigation into the shared site is allowed and makes the Work's refusal sticky.
+        pages = {'/start': f'''<html><head><title>시작</title></head><body>
+              <a href="{ORIGIN}/checkout">결제 페이지</a>
+              <form action="{ORIGIN}/pay" method="post"><label>카드번호 <input type="text" autocomplete="cc-number" name="card"></label>
+              <button type="submit">바로 결제</button></form></body></html>''', '/checkout': PAGES['/checkout']}
+        approvals = RefusingApprovals()
+        sess, driver = self.session(approvals, FakeDriver(pages=pages))
+        sess.open({'url': 'http://unshared.test/start', 'effect': 'navigate'})
+        for step, args in (('click', {'target': '결제 페이지', 'effect': 'payment'}),
+                           ('type', {'target': '카드번호', 'text': '4111', 'effect': 'payment'}),
+                           ('click', {'target': '바로 결제', 'effect': 'mutate'})):
+            with self.subTest(step=step), self.assertRaises(ToolError) as caught:
+                getattr(sess, step)(args)
+            self.assertEqual(caught.exception.code, 'approval_refused')
+        self.assertEqual((approvals.requests, driver.posts), ([], []))
+        approvals = RefusingApprovals()
+        sess, driver = self.session(approvals, FakeDriver(pages=pages))
+        sess.open({'url': 'http://unshared.test/start', 'effect': 'navigate'})
+        sess.click({'target': '결제 페이지', 'effect': 'navigate'})
+        self.assertEqual(driver.url, ORIGIN + '/checkout', 'reading the shared site is allowed')
+        with self.assertRaises(ToolError) as caught:
+            sess.type({'target': '카드번호', 'text': '4111', 'effect': 'payment'})
         self.assertEqual((caught.exception.code, approvals.requests), ('approval_refused', []))
 
     def test_a_work_that_never_touched_a_shared_site_keeps_the_ordinary_approval_path(self):

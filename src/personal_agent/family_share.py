@@ -443,11 +443,24 @@ def accept(service, body, now=None):
                 raise ValueError('쿠키 목록을 확인하세요.')
             rows = [row for row in rows if isinstance(row, dict) and isinstance(row.get('name'), str)
                     and _belongs(row.get('domain'), site)]
+            # Fail closed: the mark that refuses payment is durable before any cookie is usable here.  A
+            # crash or a failed import leaves a mark without rows (harmless, and ``remove`` clears it),
+            # never rows without a mark.
+            mark = {'from': 'owner', 'since': (marks.get(site) or {}).get('since') or now, 'importing': now}
+            marks[site] = mark
+            store.put(SHARED_KEY, marks)
             try:
                 result = service.browser_profile.import_site(site, rows)
-            except JarError as exc:
-                raise ValueError(f'이 비서의 로그인 세션 저장소를 쓸 수 없습니다({exc}).') from None
-            marks[site] = {'from': 'owner', 'since': (marks.get(site) or {}).get('since') or now, 'updated': now}
+            except Exception as exc:
+                mark.update(error=type(exc).__name__, updated=now)
+                mark.pop('importing', None)
+                store.put(SHARED_KEY, marks)
+                LOG.warning('family share: %s not imported (%s); the mark stays', site, type(exc).__name__)
+                if isinstance(exc, JarError):
+                    raise ValueError(f'이 비서의 로그인 세션 저장소를 쓸 수 없습니다({exc}).') from None
+                raise ValueError('이 비서에 로그인 세션을 저장하지 못했습니다.') from None
+            mark.update(updated=now, error=None)
+            mark.pop('importing', None)
             store.put(SHARED_KEY, marks)
             LOG.info('family share: received %s (%d cookies)', site, result['cookies'])
             return {'ok': True, 'op': 'put', 'site': site, 'cookies': result['cookies'], 'running_browser': result['running_browser']}

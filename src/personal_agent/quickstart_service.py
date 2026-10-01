@@ -1,4 +1,5 @@
 """One personal conversation shared by web and an explicitly paired Telegram user."""
+import concurrent.futures
 import hmac
 import json
 import logging
@@ -455,6 +456,14 @@ class AgentService:
         self.progress_reaction_flight=threading.Lock()
         self.progress_reaction_spawn=lambda target:threading.Thread(
             target=target,name='agentos-telegram-progress-reaction',daemon=True).start()
+        # #969 (PERF-START-01): the chosen start emoji is judged off the worker,
+        # so the Work never waits for it; and judgments that read only the
+        # owner's message and prior state overlap on this seam while the worker
+        # runs the next one.  Both are injectable so tests stay deterministic.
+        self.turn_reaction_spawn=lambda target:threading.Thread(
+            target=target,name='agentos-telegram-turn-reaction',daemon=True).start()
+        self.early_judgment_spawn=lambda target:threading.Thread(
+            target=target,name='agentos-early-judgment',daemon=True).start()
         self.presence_timing=PresenceTiming()
         self.presence={}
         # #718: the CLI's own streamed step per running Work (presentation only, never persisted).
@@ -1929,6 +1938,36 @@ class AgentService:
     @current_work_id.setter
     def current_work_id(self, value):
         self.__dict__.setdefault('_work_local',threading.local()).work_id=value
+
+    def start_early_judgment(self, work_id, call, *args, **kwargs):
+        """Run one Work-scoped judgment off the worker; its Future carries the result or exception (#969).
+
+        The worker consumes the Future exactly where it made the call before,
+        so the decision, its fallbacks and its recorded evidence are the same;
+        only the wall clock overlaps.  The call is linked to ``work_id`` on
+        its own thread (`current_work_id` is per thread, #826).  If the seam
+        cannot start a thread the call runs in line, so no turn depends on it.
+        """
+        future=concurrent.futures.Future()
+
+        def run():
+            if not future.set_running_or_notify_cancel():return
+            self.current_work_id=work_id
+            try:future.set_result(call(*args,**kwargs))
+            except BaseException as exc:future.set_exception(exc)
+
+        try:self.early_judgment_spawn(run)
+        except Exception as exc:
+            LOG.info('early judgment runs in line: %s',type(exc).__name__)
+            run()
+        return future
+
+    @staticmethod
+    def settle_early_judgment(future):
+        """Wait for an early judgment this turn no longer reads, so none outlives its Work (#969)."""
+        if future is None:return
+        try:future.result()
+        except Exception:pass
 
     def record_decision(self, record):
         # Link a DecisionEngine call to the Work being processed (#570).
@@ -4476,8 +4515,8 @@ class AgentService:
         """React to the owner's message when its Work starts (#835, #858).
 
         Every natural-language owner turn gets 👀 at once, with nothing read
-        from its words.  Then, once per run and from the worker thread like
-        every other per-turn judgment, the owner's Judgment AI chooses the
+        from its words.  Then, once per run and off the worker thread (#969:
+        the Work never waits for it), the owner's Judgment AI chooses the
         emoji that fits the message (`ConversationJudgments.turn_reaction`,
         `RECEIVED_CANDIDATES`) and it replaces the 👀; an unavailable or
         unconfident judgment keeps 👀.  At delivery, the outcome truth gate
@@ -4491,16 +4530,37 @@ class AgentService:
         self._react_received(job,state)
         if state.reaction is None or state.reaction_asked:return
         state.reaction_asked=True
-        self._react_chosen(job,state)
+        self._spawn_turn_reaction(job,state)
+
+    def _spawn_turn_reaction(self, job, state):
+        """Judge the chosen start emoji off the worker, so the Work never waits for it (#969).
+
+        The judgment is linked to this Work on its own thread (#826 audit);
+        `_react_chosen` keeps every guard, so a late choice is dropped once
+        the Work has ended or shown a progress stage.  A seam that cannot
+        start a thread judges in line, as before.
+        """
+        work_id=job['id']
+
+        def judge_and_apply():
+            self.current_work_id=work_id
+            try:self._react_chosen(job,state)
+            except Exception as exc:  # presentation only
+                LOG.info('telegram turn reaction skipped: %s',type(exc).__name__)
+
+        try:self.turn_reaction_spawn(judge_and_apply)
+        except Exception as exc:
+            LOG.info('telegram turn reaction dispatch runs in line: %s',type(exc).__name__)
+            judge_and_apply()
 
     def _react_chosen(self, job, state):
-        """Replace the 👀 by the Judgment AI's choice for this message (#858).
+        """Replace the 👀 by the Judgment AI's choice for this message (#858, #969).
 
-        The judgment runs outside the lock (it may take a model round trip);
-        the send is under `self.lock` and only while the Work is still
-        running with its presence state, so it can never follow the outcome
-        reaction of a Work that finished meanwhile.  Best-effort like every
-        presence call.
+        The judgment runs on its own thread, outside the lock (it may take a
+        model round trip); the send is under `self.lock` and only while the
+        Work is still running with its presence state, so it can never
+        follow the outcome reaction of a Work that finished meanwhile.
+        Best-effort like every presence call.
         """
         try:
             emoji=self.decision_judge.turn_reaction(job.get('message'),RECEIVED_CANDIDATES)
@@ -7576,6 +7636,18 @@ class AgentService:
                 settings_answer=(None if resumed or continued or job.get('owner_typed')!=1
                                  or self.calendar_conversation.claims(connector_owner,owner_prompt)
                                  else self.settings_draft_answer(job,owner_prompt))
+                # #969 (PERF-START-01): the routing judgment (`classify_intent`, which may
+                # ask capability-need) and the follow-up judgment below both read only
+                # the owner's message and prior state, and the state between here and
+                # the routing decision is read, not written.  So the routing judgment
+                # starts off the worker now and is read where it was decided before;
+                # a judged retry still classifies the replayed message afresh, and a
+                # judged cancel still answers without one.  Same decisions, same
+                # records; only the wall clock overlaps.
+                early_intent=(None if resumed or settings_answer else
+                              self.start_early_judgment(job['id'],self.classify_intent,owner_prompt,
+                                                        calendar_pending=False if continued else None,
+                                                        owner_id=connector_owner))
                 continuity=None if resumed or continued or settings_answer else self.continuity_relation(owner_prompt,connector_owner,current_work_id=job['id'])
                 if continuity:
                     relation,previous=continuity['relation'],continuity['previous']
@@ -7612,6 +7684,7 @@ class AgentService:
                         self.record_continuity(job['id'],previous['id'],relation,
                                                executed=cancelled,
                                                reason=None if cancelled else response)
+                        self.settle_early_judgment(early_intent)
                         return self.complete_continuity_turn(job,response)
                     else:
                         # Reference/correction changes how this Work relates to
@@ -7638,9 +7711,17 @@ class AgentService:
                 # said it literally or an AgentOS rule derived it; a
                 # DecisionEngine answer can only pick among AgentOS-declared
                 # candidates (#417) and reaches no other branch here.
-                decision=(IntentDecision(INTENT_SETTINGS,AUTHORITY_OWNER,argument=prompt) if settings_answer else
-                          resumed_decision or self.classify_intent(prompt,calendar_pending=False if continued else None,
-                                                                   owner_id=connector_owner))
+                if settings_answer:
+                    decision=IntentDecision(INTENT_SETTINGS,AUTHORITY_OWNER,argument=prompt)
+                elif resumed_decision:
+                    decision=resumed_decision
+                elif early_intent is not None and prompt==owner_prompt:
+                    decision=early_intent.result()
+                else:
+                    # A judged retry replays another Work's message: that is what is routed.
+                    self.settle_early_judgment(early_intent)
+                    decision=self.classify_intent(prompt,calendar_pending=False if continued else None,
+                                                  owner_id=connector_owner)
                 # A pending calendar draft claims cue-free follow-ups ("치과",
                 # "오후 4시", "승인").  Anything it does not recognise as its
                 # own - and any other intent - drops the draft, says so, and

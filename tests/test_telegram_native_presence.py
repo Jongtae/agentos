@@ -89,6 +89,10 @@ class NativePresenceTestCase(unittest.TestCase):
             return {'message': {'content': self.text}}
 
         self.service = AgentService(self.store, ModelAdapter(model), transport)
+        # #969: the chosen start emoji is judged off the worker.  Tests that read the
+        # emoji sequence run that judgment in line (as they do the progress one);
+        # ``StartLatencyTests`` exercises the seam itself.
+        self.service.turn_reaction_spawn = lambda target: target()
         self.store.put('telegram', {'enabled': True, 'user_id': CHAT, 'generation': GENERATION, 'cursor': 0})
 
     # --- helpers -----------------------------------------------------------
@@ -1117,6 +1121,185 @@ class OutcomeReactionServiceTests(NativePresenceTestCase):
         _job, message_id = self.turn('아니 국물 말고')
         self.assertEqual(self.emojis(), [RECEIVED_REACTION, DONE_REACTION])
         self.assertEqual({body['message_id'] for body in self.reactions()}, {message_id})
+
+
+class StartLatencyTests(NativePresenceTestCase):
+    """#969 (PERF-START-01): the Work never waits for the chosen start emoji, and the
+    judgments that read only the owner's message overlap instead of queueing."""
+
+    JUDGED = ('conversation-followup', 'capability-need')
+
+    def install_judgments(self, choices, delay=0.0, block=None):
+        """A fixture engine that logs ``(purpose, start, end, linked Work, facts)`` per judgment.
+
+        ``delay`` is a fake model round trip for the two message-only judgments;
+        ``block`` is an Event the turn-reaction judgment waits for.
+        """
+        self.judgment_log = []
+
+        def choose(context, candidates, question):
+            start = time.monotonic()
+            if context.purpose in self.JUDGED and delay:
+                time.sleep(delay)
+            if context.purpose == 'turn-reaction' and block is not None:
+                block.wait(5)
+            self.judgment_log.append((context.purpose, start, time.monotonic(),
+                                      self.service.current_work_id, dict(context.facts)))
+            return SelectionDecision(OUTCOME_DECIDED, choices.get(context.purpose, 'none-of-these'),
+                                     tuple(candidates), fixture_confidence())
+
+        self.service.use_decision_engine(FixtureDecisionEngine(choose=choose))
+
+    def purposes(self):
+        return [entry[0] for entry in self.judgment_log]
+
+    # -- the turn reaction never blocks the Work ------------------------------
+
+    def test_the_work_runs_before_the_turn_reaction_is_judged(self):
+        self.connect_model()
+        pending = []
+        self.service.turn_reaction_spawn = pending.append
+        self.install_judgments({'turn-reaction': '🤗', 'closing-reaction': '🎉'})
+
+        def during(job):
+            # The worker reached the model while the chosen emoji is still unjudged: 👀 only.
+            self.assertEqual(len(pending), 1)
+            self.assertNotIn('turn-reaction', self.purposes())
+            self.assertEqual(self.emojis(), [RECEIVED_REACTION])
+            pending.pop()()   # the judgment resolves while the Work still runs
+            self.assertEqual(self.emojis(), [RECEIVED_REACTION, '🤗'])
+
+        self.during_model = during
+        job, message_id = self.turn('고마워, 이 계획 괜찮을까?')
+        self.assertEqual(job['status'], 'succeeded')
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, '🤗', '🎉'])
+        self.assertTrue(all(body['message_id'] == message_id for body in self.reactions()))
+        [turn] = [entry for entry in self.judgment_log if entry[0] == 'turn-reaction']
+        self.assertEqual(turn[3], job['id'], 'the judgment stays linked to its Work (#826)')
+
+    def test_a_turn_reaction_that_resolves_after_the_outcome_is_not_sent(self):
+        self.connect_model()
+        pending = []
+        self.service.turn_reaction_spawn = pending.append
+        self.install_judgments({'turn-reaction': '🤗', 'closing-reaction': '🎉'})
+        self.turn('고마워')
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, '🎉'])
+        self.assertEqual(len(pending), 1)
+        pending.pop()()
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, '🎉'], 'a late start emoji never follows the outcome')
+        self.assertIn('turn-reaction', self.purposes(), 'the judgment was made; only its late answer is dropped')
+        self.assertEqual(self.methods(), ['setMessageReaction', 'sendMessage', 'setMessageReaction'])
+
+    def test_on_a_real_thread_the_work_finishes_while_the_turn_reaction_is_still_judging(self):
+        self.connect_model()
+        release = threading.Event()
+        threads = []
+
+        def spawn(target):
+            thread = threading.Thread(target=target, daemon=True)
+            threads.append(thread)
+            thread.start()
+
+        self.service.turn_reaction_spawn = spawn
+        self.install_judgments({'turn-reaction': '🤗', 'closing-reaction': '🎉'}, block=release)
+        job, _ = self.turn('고마워')
+        self.assertEqual(job['status'], 'succeeded')
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, '🎉'])
+        self.assertEqual(len(threads), 1)
+        release.set()
+        for thread in threads:
+            thread.join(5)
+        self.assertFalse(any(thread.is_alive() for thread in threads))
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, '🎉'])
+        [turn] = [entry for entry in self.judgment_log if entry[0] == 'turn-reaction']
+        self.assertEqual(turn[3], job['id'], 'linked on its own thread, after the worker moved on')
+
+    def test_a_spawn_that_cannot_start_judges_in_line(self):
+        self.connect_model()
+
+        def refuse(target):
+            raise RuntimeError("can't start new thread")
+
+        self.service.turn_reaction_spawn = refuse
+        self.install_judgments({'turn-reaction': '🤗', 'closing-reaction': '🎉'})
+        job, _ = self.turn('고마워')
+        self.assertEqual(job['status'], 'succeeded')
+        self.assertEqual(self.emojis(), [RECEIVED_REACTION, '🤗', '🎉'])
+
+    # -- message-only judgments overlap ----------------------------------------
+
+    def followup_turn(self, delay=0.0):
+        """A focused Work, then a short follow-up: both message-only judgments are asked."""
+        self.connect_model()
+        self.install_judgments({'conversation-followup': FOLLOWUP_REFERENCE, 'closing-reaction': '🎉'}, delay=delay)
+        self.turn('오늘 저녁 메뉴 추천해줘')
+        self.calls.clear()
+        self.judgment_log.clear()
+        started = time.monotonic()
+        job, _ = self.turn('아니 국물 말고')
+        return job, time.monotonic() - started
+
+    def test_followup_and_capability_need_overlap(self):
+        delay = 0.3
+        job, elapsed = self.followup_turn(delay=delay)
+        self.assertEqual(job['status'], 'succeeded')
+        self.assertEqual(job['relation_kind'], FOLLOWUP_REFERENCE)
+        timed = {entry[0]: entry for entry in self.judgment_log if entry[0] in self.JUDGED}
+        self.assertEqual(set(timed), set(self.JUDGED), 'both judgments are still asked, once each')
+        starts = [entry[1] for entry in timed.values()]
+        ends = [entry[2] for entry in timed.values()]
+        self.assertLess(max(starts), min(ends), 'the second judgment starts before the first ends')
+        self.assertLess(max(ends) - min(starts), 2 * delay * 0.9, 'their window is about the longer one, not the sum')
+        self.assertLess(elapsed, 2 * delay + 0.5)
+        self.assertTrue(all(entry[3] == job['id'] for entry in timed.values()),
+                        'each judgment is linked to this Work on whichever thread asks it (#826)')
+
+    def test_overlapped_results_match_the_sequential_path(self):
+        def observe():
+            job, _ = self.followup_turn()
+            calls = sorted((entry[0], entry[3] == job['id'], json.dumps(entry[4], sort_keys=True, ensure_ascii=False))
+                           for entry in self.judgment_log)
+            return (calls, job['status'], job['relation_kind'], job['related_job_id'] is not None, job['response'],
+                    self.methods(), self.emojis())
+
+        overlapped = observe()
+        # A second service on a fresh store, with the seam running in line (the sequential order).
+        self.setUp()
+        self.service.early_judgment_spawn = lambda target: target()
+        sequential = observe()
+        self.assertEqual(overlapped, sequential)
+        self.assertEqual(sorted(call[0] for call in overlapped[0]),
+                         ['capability-need', 'closing-reaction', 'conversation-followup', 'turn-reaction'])
+
+    def test_a_judged_cancel_does_not_read_the_early_routing_judgment(self):
+        self.connect_model()
+        self.install_judgments({'conversation-followup': FOLLOWUP_CANCEL})
+        first, _ = self.turn('오늘 저녁 메뉴 추천해줘')
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='running' WHERE id=?", (first['id'],))
+        self.judgment_log.clear()
+        job, _ = self.turn('그만')
+        self.assertEqual(job['relation_kind'], FOLLOWUP_CANCEL)
+        self.assertEqual(job['model'], 'continuity')
+        self.assertIn('conversation-followup', self.purposes())
+
+    def test_a_routing_judgment_error_surfaces_where_it_did_before(self):
+        self.connect_model()
+        log = []
+
+        def choose(context, candidates, question):
+            log.append(context.purpose)
+            if context.purpose == 'capability-need':
+                raise RuntimeError('judge down')
+            return SelectionDecision(OUTCOME_DECIDED, 'none-of-these', tuple(candidates), fixture_confidence())
+
+        self.service.use_decision_engine(FixtureDecisionEngine(choose=choose))
+        # As on the sequential path, the routing judgment's own error leaves `run_one`
+        # at the routing decision; the Future re-raises it there, nowhere earlier.
+        with self.assertRaisesRegex(RuntimeError, 'judge down'):
+            self.turn('오늘 저녁 메뉴 추천해줘')
+        self.assertEqual(log, ['capability-need'])
+        self.assertEqual(self.store.jobs()[0]['status'], 'running')
 
 
 class LiveWaitTests(NativePresenceTestCase):

@@ -266,7 +266,8 @@ class SettingsOrchestrator:
                                  note="내 AI 구독을 함께 쓰는 가족 전용 비서를 만들고, 가족에게 보낼 설정 링크를 텔레그램으로 드립니다."),
                 "share_site": self._row("share_site", "", shared, None, format="가족 비서 이름|사이트 주소(예: 아내 비서|example.com)",
                                         note=FAMILY_SHARE_NOTE, assistants=names, signed_in_sites=signed_in,
-                                        shared=[{"instance": row["instance"], "site": row["site"]} for row in shares]),
+                                        shared=[{"instance": row["instance"], "site": row["site"]} for row in shares],
+                                        received_sites=sorted(family_share.received(self.store))),
                 "unshare_site": self._row("unshare_site", "", shared, None,
                                           format="사이트 주소, 또는 가족 비서 이름|사이트 주소(예: example.com)",
                                           shared=[{"instance": row["instance"], "site": row["site"]} for row in shares])}
@@ -301,6 +302,9 @@ class SettingsOrchestrator:
             if len(holders) > 1:
                 raise SettingsError(f"{site}은(는) 여러 가족 비서({', '.join(holders)})와 공유 중이에요. 어느 비서인지 이름을 주세요.")
             return f"{holders[0]}|{site}"
+        if setting == "share_site" and site in (row["share_site"].get("received_sites") or ()):
+            # Review P1-1: a session received from the owner is not this instance's to pass on.
+            raise SettingsError(family_share.NOT_YOURS_TEXT.format(site=site))
         try:
             instance = family_share.resolve_instance(who, row["share_site"].get("assistants") or {})
         except ValueError as exc:

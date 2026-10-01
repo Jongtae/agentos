@@ -36,7 +36,17 @@ owner's encrypted jar (``browser_jar``) into the family instance's.
 * **Payment.** On a shared site the family assistant can read pages and
   add to a cart; a step that would need payment approval is refused outright
   (``PAYMENT_REFUSED_TEXT``), without an approval request and whatever the
-  family member approves.  Widening this is an explicit owner decision.
+  family member approves.  The refusal sticks for the rest of the Work once
+  it landed on a shared site, so a checkout handed to a payment page on
+  another domain stays refused.  Widening this is an explicit owner decision.
+* **Not onward.** A site an instance received is never its to share
+  (``share`` and the settings draft refuse it), and a ``remove`` for a site
+  an instance never received leaves the family member's own session alone.
+* **Serialized.** Every change of one store's grants or marks, and the
+  delivery in between, runs under that store's lock (``store_lock``);
+  ``revoking`` is on disk before a ``remove`` is sent, a push whose grant was
+  revoked meanwhile is followed by a ``remove``, and a failed delivery stays
+  due until it lands.
 
 Nothing here logs, returns to a model or records as Evidence a cookie value
 or the link secret: site names and counts only.
@@ -46,6 +56,7 @@ import json
 import logging
 import os
 import secrets
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -73,6 +84,17 @@ PAYMENT_REFUSED_TEXT = '결제는 계정 주인이 해 주세요. 공유받은 �
 NO_SESSION_TEXT = ('{site}에 저장된 내 로그인 세션이 없어 공유하지 않았어요. 먼저 로그인 창에서 그 사이트에 로그인해 주세요.'
                    '{stored}')
 NOT_INSTALLED_TEXT = "가족 비서 '{instance}'가 이 Mac에 설치되어 있지 않아요."
+NOT_YOURS_TEXT = '{site} 로그인은 계정 주인에게 받은 것이라 다른 비서에게 공유할 수 없어요. 아무것도 바꾸지 않았어요.'
+
+#: Review P2-2: every read-modify-write of one store's grant list or received marks, and the
+#: delivery in between, runs under that store's lock, so a push can never land after a remove.
+_LOCKS, _LOCKS_GUARD = {}, threading.Lock()
+
+
+def store_lock(store):
+    key = str(getattr(store, 'root', id(store)))
+    with _LOCKS_GUARD:
+        return _LOCKS.setdefault(key, threading.RLock())
 JAR_UNREADABLE_TEXT = '저장된 로그인 세션을 읽지 못해 공유하지 않았어요. 설정의 브라우저 로그인 세션 상태를 확인해 주세요.'
 
 
@@ -242,6 +264,11 @@ def _deliver(row, jar, locate, opener, now):
     """
     try:
         port, data_dir = locate(row['instance'])
+        if port is None and row.get('state') == 'revoking':
+            # Review P3-2: the instance is gone (no launchd definition): nothing is left to revoke.
+            LOG.info('family share: %s: instance %s is not installed; nothing left to revoke', row['site'], row['instance'])
+            row['error'] = None
+            return True
         if port is None:
             raise RuntimeError('not installed')
         secret = ensure_link_secret(data_dir)
@@ -253,8 +280,10 @@ def _deliver(row, jar, locate, opener, now):
             push(port, secret, row['site'], rows, opener)
             LOG.info('family share: %s -> %s (%d cookies)', row['site'], row['instance'], len(rows))
     except Exception as exc:
+        # Review P2-3: a failed delivery is due again (``synced`` cleared, ``error`` set) until it lands.
         row['error'] = type(exc).__name__
         row['attempted'] = now
+        row['synced'] = None
         LOG.warning('family share: %s -> %s not delivered (%s)', row['site'], row['instance'], type(exc).__name__)
         return False
     row['error'] = None
@@ -271,6 +300,9 @@ def share(store, jar, instance, site, *, locate=locate_instance, opener=None, no
     """
     now = time.time() if now is None else now
     site = normalize_site(site)
+    if site in received(store):
+        # Review P1-1: a session received from the owner is not this instance's to pass on.
+        raise ValueError(NOT_YOURS_TEXT.format(site=site))
     rows = _rows_for(jar, site)
     if not rows:
         stored = [row['site'] for row in jar.sites()]
@@ -278,15 +310,16 @@ def share(store, jar, instance, site, *, locate=locate_instance, opener=None, no
     port, _data_dir = locate(instance)
     if port is None:
         raise ValueError(NOT_INSTALLED_TEXT.format(instance=instance))
-    current = grants(store)
-    index = _grant_index(current, instance, site)
-    row = current[index] if index is not None else {'instance': instance, 'site': site, 'since': now}
-    row.update(state='shared', synced=None, error=None)
-    if index is None:
-        current.append(row)
-    _put_grants(store, current)
-    delivered = _deliver(row, jar, locate, opener, now)
-    _put_grants(store, current)
+    with store_lock(store):
+        current = grants(store)
+        index = _grant_index(current, instance, site)
+        row = current[index] if index is not None else {'instance': instance, 'site': site, 'since': now}
+        row.update(state='shared', synced=None, error=None)
+        if index is None:
+            current.append(row)
+        _put_grants(store, current)
+        delivered = _deliver(row, jar, locate, opener, now)
+        _put_grants(store, current)
     text = (f"{instance} 비서에 {site} 로그인 세션을 공유했어요(쿠키 {len(rows)}개). 내 세션이 갱신되면 따라가고, "
             f"결제는 계정 주인만 할 수 있어요." if delivered else
             f"{instance} 비서가 지금 응답하지 않아 {site} 로그인 세션은 비서가 켜지면 전달돼요. 공유는 기록해 두었어요.")
@@ -302,20 +335,24 @@ def unshare(store, instance, site, *, locate=locate_instance, opener=None, now=N
     """
     now = time.time() if now is None else now
     site = normalize_site(site)
-    current = grants(store)
-    targets = [row for row in current if row['site'] == site and instance in (None, row['instance'])]
-    if not targets:
-        return {'site': site, 'instances': [], 'removed': True, 'idempotent': True,
-                'response': f'{site} 로그인 세션은 공유하고 있지 않아요. 바꿀 것이 없어요.'}
-    done, pending = [], []
-    for row in targets:
-        row.update(state='revoking', synced=None)
-        if _deliver(row, jar=None, locate=locate, opener=opener, now=now):
-            current.remove(row)
-            done.append(row['instance'])
-        else:
-            pending.append(row['instance'])
-    _put_grants(store, current)
+    with store_lock(store):
+        current = grants(store)
+        targets = [row for row in current if row['site'] == site and instance in (None, row['instance'])]
+        if not targets:
+            return {'site': site, 'instances': [], 'removed': True, 'idempotent': True,
+                    'response': f'{site} 로그인 세션은 공유하고 있지 않아요. 바꿀 것이 없어요.'}
+        # Review P2-2: ``revoking`` is on disk before anything is sent, so no push is sent meanwhile.
+        for row in targets:
+            row.update(state='revoking', synced=None)
+        _put_grants(store, current)
+        done, pending = [], []
+        for row in targets:
+            if _deliver(row, jar=None, locate=locate, opener=opener, now=now):
+                current.remove(row)
+                done.append(row['instance'])
+            else:
+                pending.append(row['instance'])
+        _put_grants(store, current)
     parts = []
     if done:
         parts.append(f"{', '.join(done)} 비서에서 {site} 로그인 세션을 지웠어요. 내 세션은 그대로예요.")
@@ -335,22 +372,33 @@ def sync(store, jar, touched=None, *, locate=locate_instance, opener=None, now=N
     were delivered.
     """
     now = time.time() if now is None else now
-    current = grants(store)
-    if not current:
+    if not grants(store):
         return 0
-    held = set(received(store))
-    delivered = 0
-    for row in list(current):
-        if row['site'] in held:
-            continue
-        due = (row.get('state') == 'revoking' or row.get('synced') is None or touched is None or row['site'] in touched)
-        if not due or (row.get('error') and now - float(row.get('attempted') or 0) < retry_after):
-            continue
-        if _deliver(row, jar, locate, opener, now):
+    with store_lock(store):
+        current = grants(store)
+        held = set(received(store))
+        delivered = 0
+        for row in list(current):
+            if row['site'] in held:
+                continue
+            due = (row.get('state') == 'revoking' or row.get('synced') is None or row.get('error')
+                   or touched is None or row['site'] in touched)
+            if not due or (row.get('error') and now - float(row.get('attempted') or 0) < retry_after):
+                continue
+            if not _deliver(row, jar, locate, opener, now):
+                continue
             delivered += 1
             if row.get('state') == 'revoking':
                 current.remove(row)
-    _put_grants(store, current)
+                continue
+            # Review P2-2: a push that another writer revoked meanwhile is undone at once.
+            latest = grants(store)
+            index = _grant_index(latest, row['instance'], row['site'])
+            if index is None or latest[index].get('state') == 'revoking':
+                row['state'] = 'revoking'
+                if _deliver(row, None, locate, opener, now):
+                    current.remove(row)
+        _put_grants(store, current)
     return delivered
 
 
@@ -385,22 +433,27 @@ def accept(service, body, now=None):
     if site != str(body.get('site') or '').strip().lower():
         raise ValueError('사이트 이름은 등록 가능한 도메인이어야 합니다.')
     store = service.store
-    marks = received(store)
-    if op == 'put':
-        rows = body.get('cookies')
-        if not isinstance(rows, list):
-            raise ValueError('쿠키 목록을 확인하세요.')
-        rows = [row for row in rows if isinstance(row, dict) and isinstance(row.get('name'), str)
-                and _belongs(row.get('domain'), site)]
-        try:
-            result = service.browser_profile.import_site(site, rows)
-        except JarError as exc:
-            raise ValueError(f'이 비서의 로그인 세션 저장소를 쓸 수 없습니다({exc}).') from None
-        marks[site] = {'from': 'owner', 'since': (marks.get(site) or {}).get('since') or now, 'updated': now}
-        store.put(SHARED_KEY, marks)
-        LOG.info('family share: received %s (%d cookies)', site, result['cookies'])
-        return {'ok': True, 'op': 'put', 'site': site, 'cookies': result['cookies'], 'running_browser': result['running_browser']}
-    if op == 'remove':
+    if op not in ('put', 'remove'):
+        raise ValueError('지원하지 않는 요청입니다.')
+    with store_lock(store):
+        marks = received(store)
+        if op == 'put':
+            rows = body.get('cookies')
+            if not isinstance(rows, list):
+                raise ValueError('쿠키 목록을 확인하세요.')
+            rows = [row for row in rows if isinstance(row, dict) and isinstance(row.get('name'), str)
+                    and _belongs(row.get('domain'), site)]
+            try:
+                result = service.browser_profile.import_site(site, rows)
+            except JarError as exc:
+                raise ValueError(f'이 비서의 로그인 세션 저장소를 쓸 수 없습니다({exc}).') from None
+            marks[site] = {'from': 'owner', 'since': (marks.get(site) or {}).get('since') or now, 'updated': now}
+            store.put(SHARED_KEY, marks)
+            LOG.info('family share: received %s (%d cookies)', site, result['cookies'])
+            return {'ok': True, 'op': 'put', 'site': site, 'cookies': result['cookies'], 'running_browser': result['running_browser']}
+        if site not in marks:
+            # Review P3-1: a site never received here is the family member's own session; it stays.
+            return {'ok': True, 'op': 'remove', 'site': site, 'deleted': False, 'received': False, 'running_browser': None}
         try:
             result = service.browser_profile.delete_site(site)
         except ValueError as exc:
@@ -408,9 +461,8 @@ def accept(service, body, now=None):
         marks.pop(site, None)
         store.put(SHARED_KEY, marks)
         LOG.info('family share: removed %s', site)
-        return {'ok': True, 'op': 'remove', 'site': site, 'deleted': bool(result.get('deleted')),
+        return {'ok': True, 'op': 'remove', 'site': site, 'deleted': bool(result.get('deleted')), 'received': True,
                 'running_browser': result.get('running_browser')}
-    raise ValueError('지원하지 않는 요청입니다.')
 
 
 def _belongs(domain, site):

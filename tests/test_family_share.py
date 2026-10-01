@@ -19,6 +19,7 @@ from personal_agent import browser_session as bs
 from personal_agent import family_share
 from personal_agent.agent_runtime import DEFINITIONS, ToolError
 from personal_agent.browser_jar import JAR_NAME, CookieJar, MemoryKey
+from personal_agent.family_setup import _LOOPBACK
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart import make_handler
 from personal_agent.quickstart_service import AgentService
@@ -239,6 +240,7 @@ class OwnerSide(unittest.TestCase):
         self.assertIn('비서가 켜지면', receipt['response'])
         grant = family_share.grants(self.store)[0]
         self.assertEqual((grant['synced'], grant['error'], grant['attempted']), (None, 'URLError', 2000.0))
+        self.assertFalse(family_share.listing(self.store)[0]['delivered'])
         self.assertTrue(family_share.pending(self.store))
         self.assertNotIn(SECRET_VALUE, '\n'.join(logs.output))
         # Still down, inside the retry window: not attempted again.
@@ -273,6 +275,61 @@ class OwnerSide(unittest.TestCase):
         self.jar.save_export({'shop.test': [cookie('.shop.test', value='newer')]}, imported={'shop.test'})
         self.assertEqual(self.sync({'shop.test'}), 1)
         self.assertEqual(self.opener.bodies(), [{'op': 'remove', 'site': 'shop.test'}], 'a revoking grant never pushes rows')
+        self.assertEqual(family_share.grants(self.store), [])
+
+    def test_a_failed_repush_is_due_again_until_it_lands_including_an_emptying_one(self):
+        # Review P2-3: a delivered grant whose later push fails (here: the owner signed out).
+        self.share()
+        self.opener.down = True
+        self.jar.remove('shop.test')
+        self.assertEqual(self.sync({'shop.test'}, now=2100.0), 0)
+        grant = family_share.grants(self.store)[0]
+        self.assertEqual((grant['synced'], grant['error']), (None, 'URLError'))
+        self.assertTrue(family_share.pending(self.store))
+        self.opener.down = False
+        self.opener.requests.clear()
+        self.assertEqual(self.sync(set(), now=2120.0, retry_after=30), 0, 'inside the retry window')
+        self.assertEqual(self.sync(set(), now=2140.0, retry_after=30), 1, 'the work-loop retry delivers it')
+        self.assertEqual(self.opener.bodies(), [{'op': 'put', 'site': 'shop.test', 'cookies': []}], 'the family copy is emptied')
+        self.assertFalse(family_share.pending(self.store))
+
+    def test_a_received_site_cannot_be_shared_onward(self):
+        # Review P1-1: a family instance holding the owner's session (a mark and the rows) may not pass it on.
+        self.store.put(family_share.SHARED_KEY, {'shop.test': {'from': 'owner', 'since': 1.0}})
+        with self.assertRaises(ValueError) as caught:
+            family_share.share(self.store, self.jar, 'family-1', 'www.shop.test', locate=self.locate, opener=self.opener)
+        self.assertEqual(str(caught.exception), family_share.NOT_YOURS_TEXT.format(site='shop.test'))
+        self.assertEqual((self.opener.requests, family_share.grants(self.store)), ([], []))
+        self.assertEqual(self.share('news.test')['site'], 'news.test', "the family member's own sessions are theirs to share")
+
+    def test_a_stop_against_an_uninstalled_instance_settles_as_revoked(self):
+        # Review P3-2: the plist is gone, so there is nothing left to revoke; the grant is dropped and logged.
+        self.share()
+        self.opener.requests.clear()
+        with self.assertLogs('personal_agent.family_share', level='INFO') as logs:
+            receipt = family_share.unshare(self.store, 'family-1', 'shop.test', locate=lambda name: (None, self.family_dir),
+                                           opener=self.opener)
+        self.assertEqual((receipt['instances'], receipt['removed'], family_share.grants(self.store)), (['family-1'], True, []))
+        self.assertEqual(self.opener.requests, [])
+        self.assertIn('nothing left to revoke', '\n'.join(logs.output))
+
+    def test_a_push_that_another_writer_revoked_meanwhile_is_undone(self):
+        # Review P2-2: between the push and its write-back the grant turned revoking (another process); the
+        # push is followed by a remove and the row is dropped.
+        self.share()
+        self.opener.requests.clear()
+        inner = self.opener.__call__
+
+        def racing(request, timeout=None):
+            body = json.loads(request.data)
+            if body['op'] == 'put':
+                rows = family_share.grants(self.store)
+                rows[0]['state'] = 'revoking'
+                self.store.put(family_share.GRANTS_KEY, rows)
+            return inner(request, timeout)
+        self.opener.__call__ = racing
+        self.assertEqual(family_share.sync(self.store, self.jar, {'shop.test'}, locate=self.locate, opener=racing, now=3000.0), 1)
+        self.assertEqual([body['op'] for body in self.opener.bodies()], ['put', 'remove'])
         self.assertEqual(family_share.grants(self.store), [])
 
     def test_a_received_site_is_never_pushed_back(self):
@@ -356,9 +413,64 @@ class FamilySide(unittest.TestCase):
         self.assertIn('shop.test', self.drivers[0].deleted, 'the running worker dropped it too')
         self.assertEqual(family_share.received(self.store), {})
         status, body = self.request({'op': 'remove', 'site': 'shop.test'}, secret=self.secret)
-        self.assertEqual((status, body['ok']), (200, True), 'a second removal is reported, not failed')
-        self.assertEqual(self.drivers[0].deleted.count('shop.test'), 2, 'the running worker is told again; harmless')
+        self.assertEqual((status, body['ok'], body['received']), (200, True, False), 'a second removal is reported, not failed')
+        self.assertEqual(self.drivers[0].deleted.count('shop.test'), 1, 'nothing received: the worker is not touched again')
         driver.close()
+
+    def test_a_removal_leaves_the_family_members_own_session_alone(self):
+        # Review P3-1: no mark for the site means it is the member's own sign-in, never the owner's copy.
+        self.jar.save_export({'shop.test': [cookie('.shop.test', value='the-members-own-session')]})
+        driver = self.profile.driver_factory('work-1')()
+        status, body = self.request({'op': 'remove', 'site': 'shop.test'}, secret=self.secret)
+        self.assertEqual((status, body['deleted'], body['received']), (200, False, False))
+        self.assertEqual([row['value'] for row in self.jar.site_rows('shop.test')], ['the-members-own-session'])
+        self.assertEqual(self.drivers[0].deleted, [])
+        driver.close()
+
+    def test_a_save_during_a_stop_cannot_leave_the_family_holding_the_session(self):
+        # Review P2-2: the owner's push from a jar save fires while the remove is in flight.  Under the
+        # store lock it waits, then finds no grant; the family ends with no rows and no mark.
+        owner_root = Path(self.tmp.name) / 'owner'
+        owner_store, owner_jar = QuickStore(owner_root), jar_at(owner_root)
+        owner_jar.save_export({'shop.test': [cookie('.shop.test')]})
+        locate = lambda name: (self.server.server_port, self.store.root)
+        racers = []
+
+        def opener(request, timeout=None):
+            if json.loads(request.data)['op'] == 'remove':
+                thread = threading.Thread(target=lambda: family_share.sync(owner_store, owner_jar, {'shop.test'},
+                                                                           locate=locate, opener=opener))
+                thread.start()
+                thread.join(0.3)
+                self.assertTrue(thread.is_alive(), 'the push waits for the stop to finish')
+                racers.append(thread)
+            return _LOOPBACK.open(request, timeout=timeout)
+        family_share.share(owner_store, owner_jar, 'family-1', 'shop.test', locate=locate, opener=opener)
+        self.assertEqual([row['value'] for row in self.jar.site_rows('shop.test')], [SECRET_VALUE])
+        receipt = family_share.unshare(owner_store, 'family-1', 'shop.test', locate=locate, opener=opener)
+        for thread in racers:
+            thread.join(5)
+        self.assertEqual((receipt['removed'], len(racers)), (True, 1))
+        self.assertEqual((self.jar.site_rows('shop.test'), family_share.received(self.store), family_share.grants(owner_store)),
+                         ([], {}, []))
+
+    def test_the_retry_runs_off_the_work_loop_one_at_a_time(self):
+        # Review P3-3: the owner's service starts one delivery thread; the loop thread never reads the jar.
+        owner_store = QuickStore(Path(self.tmp.name) / 'owner')
+        owner = AgentService(owner_store, ModelAdapter(lambda *a, **k: {}), lambda *a, **k: {'ok': True, 'result': []},
+                             browser_profile=bs.BrowserProfile(Path(self.tmp.name) / 'owner' / 'private' / 'browser-profile',
+                                                               launcher=lambda d, h: FakeDriver(), jar=jar_at(Path(self.tmp.name) / 'owner')))
+        self.assertEqual(owner.retry_shared_sites(), 0, 'nothing pending: no thread')
+        owner_store.put(family_share.GRANTS_KEY, [{'instance': 'family-1', 'site': 'shop.test', 'since': 1.0, 'synced': None}])
+        calls, gate = [], threading.Event()
+        original = family_share.sync
+        family_share.sync = lambda store, jar, touched, **kwargs: (calls.append((threading.current_thread().name, touched, kwargs)), gate.wait(5))
+        self.addCleanup(setattr, family_share, 'sync', original)
+        self.assertEqual(owner.retry_shared_sites(), 1)
+        self.assertEqual(owner.retry_shared_sites(), 0, 'one delivery at a time')
+        gate.set()
+        owner._shared_sites_thread.join(5)
+        self.assertEqual(calls, [('agentos-family-share-retry', set(), {'retry_after': family_share.RETRY_SECONDS})])
 
     def test_a_wrong_or_missing_secret_and_a_tunnel_are_refused_and_store_nothing(self):
         self.assertEqual(self.put(secret='wrong')[0], 404)
@@ -439,7 +551,29 @@ class PaymentRefusal(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'approval_refused')
         self.assertEqual(approvals.requests, [])
 
-    def test_another_site_is_unaffected(self):
+    def test_the_refusal_sticks_for_the_work_across_a_payment_gateway_hop(self):
+        # Review P2-1: the shared site hands checkout to a payment page on another domain.
+        approvals = RefusingApprovals()
+        sess, driver = self.session(approvals)
+        sess.open({'url': ORIGIN + '/cart', 'effect': 'navigate'})
+        sess.open({'url': 'http://pg-gateway.test/checkout', 'effect': 'navigate'})
+        for step, args in (('type', {'target': '카드번호', 'text': '4111', 'effect': 'payment'}),
+                           ('click', {'target': '결제하기', 'effect': 'mutate'})):
+            with self.subTest(step=step), self.assertRaises(ToolError) as caught:
+                getattr(sess, step)(args)
+            self.assertEqual(caught.exception.code, 'approval_refused')
+        self.assertEqual((approvals.requests, driver.posts), ([], []))
+
+    def test_a_held_submit_that_posts_to_the_shared_site_is_refused_from_another_page(self):
+        approvals = RefusingApprovals()
+        sess, driver = self.session(approvals)
+        sess.open({'url': 'http://pg-gateway.test/checkout', 'effect': 'navigate'})
+        driver.cancelled = {'page': 'http://pg-gateway.test/checkout', 'dom': 0, 'method': 'post', 'action': ORIGIN + '/pay', 'state': 's'}
+        with self.assertRaises(ToolError) as caught:
+            sess.read()
+        self.assertEqual((caught.exception.code, approvals.requests), ('approval_refused', []))
+
+    def test_a_work_that_never_touched_a_shared_site_keeps_the_ordinary_approval_path(self):
         approvals = RefusingApprovals(refused=('elsewhere.test',))
         sess, _ = self.session(approvals)
         sess.open({'url': ORIGIN + '/checkout', 'effect': 'navigate'})
@@ -505,6 +639,15 @@ class Conversation(unittest.TestCase):
         with self.assertRaises(SettingsError) as caught:
             self.draft('share_site', '아내 비서|shop.test')
         self.assertIn('이미 공유', str(caught.exception))
+
+    def test_a_received_site_cannot_be_shared_onward_from_the_conversation(self):
+        # Review P1-1: on a family instance the model is offered the same tool; the session is not its to pass on.
+        self.store.put(family_share.SHARED_KEY, {'shop.test': {'from': 'owner', 'since': 1.0}})
+        self.assertEqual(self.settings.read('owner', 'family')['settings']['family']['share_site']['received_sites'], ['shop.test'])
+        with self.assertRaises(SettingsError) as caught:
+            self.draft('share_site', '아내 비서|https://www.shop.test/')
+        self.assertEqual(str(caught.exception), family_share.NOT_YOURS_TEXT.format(site='shop.test'))
+        self.assertEqual(self.calls, [])
 
     def test_a_stop_may_name_the_site_alone_when_one_assistant_holds_it(self):
         with self.assertRaises(SettingsError) as caught:

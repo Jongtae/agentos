@@ -714,6 +714,9 @@ class BrowserSession:
         # (#698).  Cleared by browser_open and a navigation (#700).
         self._last_input = None
         self._refused_pending = False   # a between-steps refused form post not yet told (#758)
+        # #934 (review P2-1): once this Work landed on a site whose sign-in was received from the
+        # owner, the reason it may not approve anything; it then holds for the rest of the Work.
+        self._refusal = None
 
     # -- plumbing --
     def _driver(self):
@@ -766,6 +769,7 @@ class BrowserSession:
         excluded = self._excluded()
         raw = self._call(lambda timeout: self._driver().snapshot())
         self.last = mediate_snapshot(raw, excluded, requested_url)
+        self._note_refusal((landed_host(self.last.get('url')),))
         if isinstance(raw, dict) and raw.get('refused_submit'):
             # #758: a form post the guard refused between steps, with nothing to hold;
             # the next result the model sees says so (``run``).
@@ -803,8 +807,9 @@ class BrowserSession:
         """
         record = record if isinstance(record, dict) else {}
         binding = self._submit_binding(record)
-        # #934: a held payment-form submit on a family-shared site is never released or asked about.
-        self._refuse_unapprovable()
+        # #934: a held payment-form submit in a Work that touched a family-shared site, or whose form
+        # posts to one, is never released or asked about.
+        self._refuse_unapprovable((landed_host(record.get('action')),))
         if depth < 2 and self.approvals.consume(binding):
             release = getattr(self._driver(), 'release_submit', None)
             if not callable(release):
@@ -898,25 +903,42 @@ class BrowserSession:
             self._refuse(binding, description)
         return False
 
-    def _refuse_unapprovable(self):
-        """Refuse a guarded step outright when no approval may be asked for it on this page (#934).
+    def _note_refusal(self, hosts):
+        """Remember the first reason ``approvals.refuse(host)`` gives for any of ``hosts`` (#934).
 
-        ``approvals.refuse(host)`` (optional) answers the owner-facing reason,
-        or None: on a family instance a site whose sign-in the owner shared
-        lets the family assistant read and add to a cart, but its payment
-        steps are the account owner's alone, so neither an approval request
-        nor a consumed approval lets one through.
+        ``refuse`` (optional) answers the owner-facing reason, or None: on a
+        family instance a site whose sign-in the owner shared lets the family
+        assistant read and add to a cart, but its payment steps are the
+        account owner's alone.  The reason is sticky for the Work: a checkout
+        that hands off to a payment page on another domain (the ordinary
+        gateway hop) stays refused (review P2-1).
         """
+        if self._refusal is not None:
+            return
         refuse = getattr(self.approvals, 'refuse', None)
         if not callable(refuse):
             return
-        host = landed_host((self.last or {}).get('url'))
-        try:
-            reason = refuse(host) if host else None
-        except Exception:
-            reason = None
-        if reason:
-            raise ToolError(str(reason), 'approval_refused')
+        for host in hosts:
+            if not host:
+                continue
+            try:
+                reason = refuse(host)
+            except Exception:
+                reason = None
+            if reason:
+                self._refusal = str(reason)
+                return
+
+    def _refuse_unapprovable(self, hosts=()):
+        """Refuse a guarded step outright when this Work may not approve anything (#934).
+
+        Neither an approval request nor a consumed approval lets the step
+        through.  ``hosts`` adds hosts the step itself names (a held submit's
+        form action) to the current page's.
+        """
+        self._note_refusal((landed_host((self.last or {}).get('url')), *hosts))
+        if self._refusal:
+            raise ToolError(self._refusal, 'approval_refused')
 
     def _refuse(self, binding, description):
         try:

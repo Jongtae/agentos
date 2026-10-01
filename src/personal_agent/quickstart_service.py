@@ -5403,14 +5403,27 @@ class AgentService:
         return family_share.sync(self.store,self.browser_profile.jar,touched)
 
     def retry_shared_sites(self, now=None):
-        """Deliver pending pushes and revocations (owner start, then every ``RETRY_SECONDS`` while any waits)."""
+        """Start one delivery of pending pushes and revocations off the work loop; 1 when started, else 0.
+
+        Review P3-3: the jar read may wait on the Keychain, so, as at start,
+        it never runs on the ``work()`` thread; one delivery thread at a time.
+        """
         from . import family_share
         try:
             if not family_share.pending(self.store):return 0
-            return family_share.sync(self.store,self.browser_profile.jar,set(),retry_after=family_share.RETRY_SECONDS)
         except Exception as exc:
             LOG.warning('family share: retry failed (%s)',type(exc).__name__)
             return 0
+        with self.lock:
+            running=self.__dict__.get('_shared_sites_thread')
+            if running is not None and running.is_alive():return 0
+            def deliver():
+                try:family_share.sync(self.store,self.browser_profile.jar,set(),retry_after=family_share.RETRY_SECONDS)
+                except Exception as exc:LOG.warning('family share: retry failed (%s)',type(exc).__name__)
+            thread=threading.Thread(target=deliver,daemon=True,name='agentos-family-share-retry')
+            self._shared_sites_thread=thread
+            thread.start()
+        return 1
 
     def _browser_step_keys(self, binding):
         """Keyed digests of one step binding: what the approval row and request row hold.

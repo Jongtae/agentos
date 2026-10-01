@@ -183,7 +183,10 @@ BROWSER_SESSION_NOTE=(' The owner cannot see this browser session: whatever it h
                       'cart, an order, a reservation, a saved item) gets no link to the account page, which opens signed out '
                       'in a chat app\'s browser: say in words where to check it, in the site\'s own app or website signed in '
                       'to the same account. On a site whose sign-in the owner shared with you, that account is the owner\'s: '
-                      'say the account owner can see it there, never that the person you serve should sign in to it.')
+                      'say the account owner can see it there, never that the person you serve should sign in to it. After '
+                      'changing a cart or other account state, report what it holds now as you observed it, including what '
+                      'was already there. On a shared sign-in the order and payment are the account owner\'s: never suggest '
+                      'the person you serve can order or pay now.')
 #: #910 (live, Work 6b3bf077): the cart page showed "signed out" as ordinary content,
 #: so no login_required state arose and the owner was only told in text.  The
 #: in-flow login (#709) starts when a page carries a sign-in form.

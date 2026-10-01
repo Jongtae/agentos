@@ -228,6 +228,44 @@ def commit_name(name, link=False):
     return (not link or len(text) <= COMMIT_SHORT) and any(pattern.search(text) for pattern in COMMIT_VERBS)
 
 
+#: #936: a site's own confirmation question that a purchase, payment or transfer hangs on.
+#: Deliberately over-inclusive (a false match only leaves the question unconfirmed and says so).
+COMMIT_QUESTION = re.compile(
+    r"결제|구매|주문|송금|이체|충전|구독|후원|\b(?:pay(?:ment)?|purchase|checkout|order|subscri\w*|donat\w*|transfer)\b"
+    r"|注文|購入|支払|決済|送金|支付|付款|购买|購買|下单|下單|订购|訂購|转账|轉帳", re.IGNORECASE)
+
+
+def commit_question(text):
+    """A confirmation question that may commit a purchase or payment (#936)."""
+    text = _commit_text(text)
+    return bool(text) and (commit_name(text) or bool(COMMIT_QUESTION.search(text)))
+
+
+#: #936: what a page's own alert/confirm/prompt during a step said, and how it was answered.
+DIALOG_KINDS = ('alert', 'confirm', 'prompt')
+DIALOG_OUTCOMES = {
+    'accepted': '확인을 눌렀습니다',
+    'shown': '알림을 닫았습니다',
+    'declined': '취소했습니다',
+    'declined_payment': '결제·주문 확인이라 주인 승인 없이 확인하지 않았습니다',
+    'dismissed': '입력 창을 닫았습니다',
+    'owner': '이 기기에서 주인이 답했습니다',
+}
+DIALOG_TEXT_LIMIT = 200
+
+
+def step_dialogs(message):
+    """The bounded ``[{kind, message, outcome}]`` a worker step reported (#936)."""
+    rows = message.get('dialogs') if isinstance(message, dict) else None
+    out = []
+    for row in (rows if isinstance(rows, list) else [])[:5]:
+        if not isinstance(row, dict) or row.get('kind') not in DIALOG_KINDS or row.get('outcome') not in DIALOG_OUTCOMES:
+            continue
+        out.append({'kind': row['kind'], 'message': str(row.get('message') or '')[:DIALOG_TEXT_LIMIT],
+                    'outcome': row['outcome']})
+    return out
+
+
 def _text_parts(value):
     """A worker ``name | own text`` pair as its separate texts."""
     return [part for part in str(value or '').split(' | ') if part.strip()]
@@ -962,6 +1000,15 @@ class BrowserSession:
         if (isinstance(answer, dict) and answer.get('navigated')) or page_reference(page.get('url')) != before:
             page['navigated'] = True
             self._last_input = None
+        return self._with_dialogs(page, answer)
+
+    def _with_dialogs(self, page, answer):
+        """#936: a page's own alert/confirm/prompt during the step, mediated like page text."""
+        rows = answer.get('dialogs') if isinstance(answer, dict) else None
+        if rows:
+            excluded = self._excluded()
+            page['dialogs'] = [{'kind': row['kind'], 'message': scrub(row['message'], excluded)[0],
+                                'answer': DIALOG_OUTCOMES[row['outcome']]} for row in rows]
         return page
 
     def type(self, args):
@@ -979,9 +1026,9 @@ class BrowserSession:
         # Typing presses the field first, so a label forwarding that press is guarded too.
         required = element['payment'] or element.get('forwards_payment') or effect == 'payment'
         approved = self._guard(binding, description, required)
-        self._input(lambda timeout: self._driver().type(element['index'], text, timeout, approved=approved),
+        answer = self._input(lambda timeout: self._driver().type(element['index'], text, timeout, approved=approved),
                     description)
-        return self._page_state()
+        return self._with_dialogs(self._page_state(), answer)
 
     @staticmethod
     def _state_of(snapshot, element):
@@ -1373,10 +1420,11 @@ class WebKitWorkerDriver:
         waited for (#736).  No URL crosses here; the next snapshot is mediated.
         """
         message = self._request('click', timeout, approved=approved is True, **self._target(index))
-        return {'navigated': bool(message.get('navigated'))}
+        return {'navigated': bool(message.get('navigated')), 'dialogs': step_dialogs(message)}
 
     def type(self, index, text, timeout, approved=False):
-        self._request('type', timeout, text=text, approved=approved is True, **self._target(index))
+        message = self._request('type', timeout, text=text, approved=approved is True, **self._target(index))
+        return {'dialogs': step_dialogs(message)}
 
     def release_submit(self, record, timeout):
         """Release the cancelled payment-form submit ``record`` names, which the owner approved (#700).

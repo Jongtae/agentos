@@ -722,6 +722,18 @@ class PhoneButton(_flow_harness()):
     def link_messages(self):
         return [body for method, body in self.calls if method == 'sendMessage' and 'remote-login?code=' in str(body.get('text'))]
 
+    def test_the_link_follows_the_prompt_without_a_tap(self):
+        """#953 (owner 2026-10-01): the phone link is sent with the login prompt, no extra tap."""
+        from test_flow_login import CHAT as FLOW_CHAT
+        self.service.AUTO_PHONE_LOGIN = True
+        job_id, prompt, buttons, notification = self.login_work()
+        self.assertTrue(wait_until(lambda: self.link_messages()), 'the link was sent with the prompt')
+        self.assertEqual([body['chat_id'] for body in self.link_messages()], [FLOW_CHAT])
+        self.assertEqual(len(self.tunnel.processes), 1)
+        self.tap(f"p7l:{notification['id']}:phone", notification['message_id'])
+        time.sleep(0.3)
+        self.assertEqual(len(self.tunnel.processes), 1, 'a tap while the link is open starts no second session')
+
     def test_the_prompt_offers_the_phone_and_the_link_goes_to_the_owner_chat_only(self):
         from test_flow_login import CHAT as FLOW_CHAT
         job_id, prompt, buttons, notification = self.login_work()

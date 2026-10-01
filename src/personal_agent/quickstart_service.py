@@ -334,8 +334,8 @@ BROWSER_LOGIN_OFFERED_TEXT=('이 페이지는 로그인이 필요합니다. 이 
 #: (``example.com.lookalike.io``) reads as the site it is (``lookalike.io``).
 BROWSER_LOGIN_PROMPT=('로그인 요청 사이트: {site}\n'
                       '{address}{moved}{session}'
-                      '이 Mac에 열린 AgentOS 로그인 창에서 직접 로그인한 뒤 창을 닫거나 "로그인 완료"를 누르면 요청을 한 번 '
-                      '이어서 처리합니다. 예상한 사이트가 아니면 로그인하지 말고 건너뛰세요. 지금까지의 결과로 마칩니다. '
+                      '곧 보내는 휴대폰 로그인 링크나 이 Mac에 열린 AgentOS 로그인 창에서 직접 로그인한 뒤 완료하면(링크의 완료, '
+                      '창 닫기 또는 "로그인 완료") 요청을 한 번 이어서 처리합니다. 예상한 사이트가 아니면 로그인하지 말고 건너뛰세요. 지금까지의 결과로 마칩니다. '
                       '10분 안에 응답이 없으면 창을 닫습니다. AgentOS는 로그인 창의 입력 내용을 보지 않습니다.')
 #: The full host, shown only when it is longer than the site.
 BROWSER_LOGIN_ADDRESS_LINE='전체 주소: {host}\n'
@@ -398,6 +398,10 @@ BROWSER_SESSION_SITES = 20
 
 
 class AgentService:
+    #: #953: a Telegram login prompt is followed by the phone link at once.  The test suite turns this
+    #: off (tests/conftest.py) so no test ever starts a real tunnel; a test that wants it injects a fake.
+    AUTO_PHONE_LOGIN=True
+
     def __init__(self, store, adapter=None, telegram_transport=None, subscription_engines=None, execution_adapter=None,
                  isolated_engine_adapter=None, isolated_mcp_registry=None,
                  drive_web_oauth=None, connector_registry=None, gmail=None, calendar=None, calendar_oauth=None, calendar_factory=None,
@@ -6587,6 +6591,14 @@ class AgentService:
                 self.store.update_notification(notification['id'],'memory_listed' if listed else 'sent',
                                                message_id if isinstance(message_id,int) else None,
                                                json.dumps(memory_prompt) if notification['kind'] in MEMORY_PROMPT_KINDS else None)
+                if notification['kind']=='browser_login_needed' and self.AUTO_PHONE_LOGIN:
+                    # #953 (owner 2026-10-01): the person on Telegram is on their phone; the one-time
+                    # link follows the prompt at once instead of waiting for 휴대폰에서 로그인.
+                    try:
+                        self._start_remote_login_for_work(notification.get('job_id'),notification.get('fingerprint'),
+                                                          notification['chat_id'])
+                    except Exception as exc:
+                        LOG.warning('remote login auto start skipped (%s)',type(exc).__name__)
                 if notification['kind']==prep.NOTIFY_KIND:
                     # #719: only a confirmed send is what the owner was last told.
                     try:

@@ -407,6 +407,8 @@ class AgentService:
         # under the owner-only private directory.  The embedded WebKit worker
         # starts only when a Work's browser tool runs or the owner opens the login window.
         self.browser_profile=browser_profile or BrowserProfile(store.private/'browser-profile')
+        # #950 review P1: a login window never carries a site received from the owner (#934).
+        self.browser_profile.login_excluded=lambda:set(__import__('personal_agent.family_share',fromlist=['received']).received(self.store))
         # #680 review P2-4: the pre-#680 Playwright Chromium profile in that
         # folder kept cookies in plaintext; it is deleted once and recorded.
         try:

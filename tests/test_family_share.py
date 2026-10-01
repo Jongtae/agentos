@@ -753,3 +753,72 @@ class Conversation(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class LoginWindowNeverCarriesAReceivedSite(unittest.TestCase):
+    """#950 review P1: a family member's login window (Mac or phone) never loads, drives or
+    overwrites a site received from the owner; agent sessions still carry it."""
+
+    def test_the_window_seed_and_save_leave_the_received_site_alone(self):
+        import tempfile
+        from personal_agent import browser_session as bs
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        jar = CookieJar(Path(temp.name) / JAR_NAME, MemoryKey(), lambda: 1000.0)
+        jar.save_export({'shared.test': [cookie('.shared.test')], 'own.test': [cookie('.own.test')]}, ())
+        seeded, drivers = [], []
+
+        class Driver:
+            closed = False
+
+            def __init__(self, profile):
+                seeded.extend(row['domain'] for row in profile._seed())
+
+            def goto(self, url, timeout):
+                return url
+
+            def show(self, url, timeout):
+                return {'url': url}
+
+            def is_open(self):
+                return not self.closed
+
+            def navigations(self):
+                return 0
+
+            def hide(self):
+                self.closed = True
+
+            def cookies_export(self):
+                # The member signed in to the received site in the window: never saved back.
+                return {'shared.test': [cookie('.shared.test', value='member-session')],
+                        'own.test': [cookie('.own.test', value='member-own')]}, ()
+
+            def close(self):
+                self.closed = True
+
+        profile = bs.BrowserProfile(Path(temp.name), jar=jar, available=lambda: True,
+                                    launcher=lambda directory, headless: drivers.append(Driver(profile)) or drivers[-1])
+        profile.login_excluded = lambda: {'shared.test'}
+        result = profile.open_for_login('https://own.test/login', on_opened=lambda window, host: None,
+                                        on_closed=lambda *args: None)
+        self.assertTrue(wait_for(lambda: drivers), result)
+        profile.close_login_window(result['window'])
+        self.assertEqual(seeded, ['.own.test'], 'the received site is never loaded into the window')
+        self.assertEqual([row['value'] for row in jar.site_rows('shared.test')], [SECRET_VALUE], 'nor overwritten')
+        self.assertEqual([row['value'] for row in jar.site_rows('own.test')], ['member-own'])
+        profile._acquire('work')   # an agent session after the window: the share is carried again
+        try:
+            self.assertIn('.shared.test', [row['domain'] for row in profile._seed()])
+        finally:
+            profile._release()
+
+
+def wait_for(condition, seconds=5.0):
+    import time
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.02)
+    return condition()

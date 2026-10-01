@@ -1676,6 +1676,9 @@ class BrowserProfile:
         # changed (None: every site) after a save or delete, outside the jar
         # lock, never with a value.  The owner's service pushes shared sites.
         self.on_saved = None
+        #: #950 review P1: ``() -> {site}`` a login window must never load or overwrite (a family
+        #: instance's sites received from the owner); None for none.  Agent sessions are unaffected.
+        self.login_excluded = None
 
     def allow_origins_for_tests(self, *origins):
         """Test-only: exact ``host:port`` fixture origins the worker may load.  Never set by config."""
@@ -1688,6 +1691,11 @@ class BrowserProfile:
         except JarError as exc:
             self._import_error = str(exc)
             return []
+        if self._suppressed:
+            # #950 review P1: a login window never holds a session it must not drive.
+            sites = set(sites) - self._suppressed
+            rows = [row for row in rows
+                    if registrable_domain(str(row.get('domain') or '').lstrip('.')) not in self._suppressed]
         self._imported |= sites
         return rows
 
@@ -1999,6 +2007,12 @@ class BrowserProfile:
             self._acquire('login')
         except ToolError:
             return {'state': 'busy', 'message': BUSY_TEXT}
+        try:
+            # #950 review P1: excluded sites are neither loaded into the window nor saved back from it.
+            self._suppressed |= set(self.login_excluded() or ()) if callable(self.login_excluded) else set()
+        except Exception:
+            self._release()
+            raise
         opened = threading.Event()
         window_id = secrets.token_hex(8)
         # The flag a programmatic close sets before it stops the loop, so an

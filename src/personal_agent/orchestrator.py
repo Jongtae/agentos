@@ -159,7 +159,9 @@ QUESTION = (
     'with its own web search, web_search means that search. When earlier attempts are listed, their replies were '
     'judged not to serve the owner\'s message: read what each one called, what failed or never completed and why, '
     'then change the worker or the model. A combination of worker and model that already fell short is refused. '
-    'reason is one short line saying why this worker fits.')
+    'reason is one short line saying why this worker fits. account_change is true when the owner\'s message may change '
+    'something in an account the browser is signed in to (adding to or removing from a cart, a booking or reservation, '
+    'a saved item, a submitted form), else false; such work never runs on the lowest-cost model.')
 PURPOSE = 'work-orchestration'
 
 
@@ -427,6 +429,23 @@ def render_catalogue(workers):
     return '\n'.join(lines)
 
 
+def lift_model(worker, model):
+    """The model an account-changing attempt runs instead of a lowest-cost one, or None (#947).
+
+    ``model`` "" means the worker's default.  The cheapest higher-cost model the
+    worker lists replaces a lowest-cost choice; an unranked one only when no
+    ranked higher model exists.  A worker with nothing above leaves it as is.
+    """
+    tiers = worker.get('model_tiers') or {}
+    effective = model or worker.get('default_model') or ''
+    if not effective or tiers.get(effective) != TIER_LOWEST:
+        return None
+    models = [item for item in worker.get('models') or () if item and item != effective]
+    higher = [item for item in models if tiers.get(item) == TIER_HIGHER] or \
+        [item for item in models if tiers.get(item, TIER_UNRANKED) == TIER_UNRANKED]
+    return higher[0] if higher else None
+
+
 def plan_schema(workers):
     return {'type': 'object', 'additionalProperties': False,
             'properties': {
@@ -435,8 +454,9 @@ def plan_schema(workers):
                 'brief': {'type': 'object', 'additionalProperties': False,
                           'properties': {'notes': {'type': 'string'}},
                           'required': ['notes']},
-                'reason': {'type': 'string'}},
-            'required': ['worker', 'model', 'brief', 'reason']}
+                'reason': {'type': 'string'},
+                'account_change': {'type': 'boolean'}},
+            'required': ['worker', 'model', 'brief', 'reason', 'account_change']}
 
 
 def plan_shape(data):
@@ -456,7 +476,7 @@ class Attempt:
     """
 
     __slots__ = ('number', 'worker', 'model', 'notes', 'sections', 'reason', 'planned',
-                 'fallback', 'digest', 'signature')
+                 'fallback', 'digest', 'signature', 'account_change', 'lifted_from')
 
     def __init__(self, number, worker, *, model='', notes='', reason='', planned=False, fallback=''):
         self.number, self.worker, self.model = number, worker, model
@@ -465,6 +485,8 @@ class Attempt:
         self.notes, self.sections = notes, frozenset(ALWAYS_SECTIONS)
         self.reason, self.planned, self.fallback = reason, planned, fallback
         self.digest = digest({'notes': notes}) if planned else ''
+        #: #947: the plan judged the message may change a signed-in account; the model a lift replaced.
+        self.account_change, self.lifted_from = False, None
 
     def brief(self, adjusted=False):
         """The notes section text a worker receives, or None (#820: supplementary only).
@@ -627,6 +649,14 @@ class Orchestration:
             # #735 review: the worker's default was refused for this account;
             # this attempt runs the substitute the catalogue chose, explicitly.
             model = worker['default_model']
+        account_change = data.get('account_change') is True
+        lifted_from = None
+        if account_change:
+            # #947 (owner decision 2026-10-01): account-changing work never runs on the
+            # lowest-cost model; the decision model judged the message, this only lifts.
+            lifted = lift_model(worker, model)
+            if lifted is not None:
+                lifted_from, model = model or worker.get('default_model') or '', lifted
         # #820: notes are optional and supplementary; the owner's message is the goal.
         notes = data['brief']['notes'].strip()[:MAX_NOTES_CHARS]
         if self.signature(worker, model) in self.failed:
@@ -636,6 +666,7 @@ class Orchestration:
             return None, 'budget'
         attempt = Attempt(number, worker['id'], model=model, notes=notes, reason=one_line(data['reason'], MAX_REASON_CHARS),
                           planned=True)
+        attempt.account_change, attempt.lifted_from = account_change, lifted_from
         attempt.signature = self.signature(worker, model)
         return attempt, ''
 
@@ -666,6 +697,8 @@ class Orchestration:
 
     def _planned(self, attempt):
         self.record(PLANNED, {'attempt': attempt.number, 'worker': attempt.worker, 'model': attempt.model or None,
+                              'account_change': getattr(attempt, 'account_change', False),
+                              'lifted_from': getattr(attempt, 'lifted_from', None),
                               'brief_digest': attempt.digest, 'sections': sorted(attempt.sections),
                               'reason': self._redact(attempt.reason),
                               'text': f'{attempt.number}번째 시도: {self._worker_label(attempt)} — {self._redact(attempt.reason)}'})

@@ -803,6 +803,8 @@ class BrowserSession:
         """
         record = record if isinstance(record, dict) else {}
         binding = self._submit_binding(record)
+        # #934: a held payment-form submit on a family-shared site is never released or asked about.
+        self._refuse_unapprovable()
         if depth < 2 and self.approvals.consume(binding):
             release = getattr(self._driver(), 'release_submit', None)
             if not callable(release):
@@ -888,11 +890,33 @@ class BrowserSession:
         needs its own approval, even while an approval of a cancelled submit
         is issued: a press can pay by ``fetch`` without any submit (#700 review).
         """
+        if required:
+            self._refuse_unapprovable()
         if self.approvals.consume(binding):
             return True
         if required:
             self._refuse(binding, description)
         return False
+
+    def _refuse_unapprovable(self):
+        """Refuse a guarded step outright when no approval may be asked for it on this page (#934).
+
+        ``approvals.refuse(host)`` (optional) answers the owner-facing reason,
+        or None: on a family instance a site whose sign-in the owner shared
+        lets the family assistant read and add to a cart, but its payment
+        steps are the account owner's alone, so neither an approval request
+        nor a consumed approval lets one through.
+        """
+        refuse = getattr(self.approvals, 'refuse', None)
+        if not callable(refuse):
+            return
+        host = landed_host((self.last or {}).get('url'))
+        try:
+            reason = refuse(host) if host else None
+        except Exception:
+            reason = None
+        if reason:
+            raise ToolError(str(reason), 'approval_refused')
 
     def _refuse(self, binding, description):
         try:
@@ -1555,6 +1579,10 @@ class BrowserProfile:
         self._view = None
         self._view_refreshing = False
         self._allowed_origins = ()
+        # #934: called with the names of the sites whose stored rows may have
+        # changed (None: every site) after a save or delete, outside the jar
+        # lock, never with a value.  The owner's service pushes shared sites.
+        self.on_saved = None
 
     def allow_origins_for_tests(self, *origins):
         """Test-only: exact ``host:port`` fixture origins the worker may load.  Never set by config."""
@@ -1704,7 +1732,50 @@ class BrowserProfile:
             except Exception:
                 return False
             self.save_error = None
-            return True
+            # Exported sites were replaced; imported sites missing from the export were dropped.
+            touched = set(sites) | set(self._imported)
+        self._saved(touched)
+        return True
+
+    def _saved(self, touched):
+        """Tell ``on_saved`` which sites' stored rows may have changed (#934); a failing hook never fails a save."""
+        hook = self.on_saved
+        if hook is None:
+            return
+        try:
+            hook(touched)
+        except Exception as exc:
+            LOG.warning('browser profile: saved hook failed (%s)', type(exc).__name__)
+
+    def import_site(self, site, rows):
+        """Store one site's rows pushed by the owner's instance (#934) and give them to a running worker.
+
+        The site's stored rows are replaced (empty ``rows`` removes them);
+        every other site is untouched.  A running worker drops the site and
+        imports the rows; when it cannot, it is stopped without saving, so
+        the Work's next step starts a fresh worker from the jar.  Returns
+        names and counts only.  Raises ``JarError`` when the jar cannot be
+        read; nothing is then written.  ``on_saved`` is not called: a site
+        received from the owner is never pushed anywhere.
+        """
+        site = str(site or '').strip().lower()
+        rows = [row for row in rows or () if isinstance(row, dict) and row.get('name')]
+        with self._jar_lock:
+            self.jar.save_export({site: rows}, imported={site})
+            live = self._live
+            worker = None
+            if live is not None and hasattr(live, 'cookies_import') and _alive(live):
+                try:
+                    if hasattr(live, 'cookies_delete'):
+                        live.cookies_delete(site)
+                    if rows:
+                        live.cookies_import(rows)
+                    self._imported.add(site)
+                    worker = 'imported'
+                except Exception:
+                    self._worker_failed(live)
+                    worker = 'failed'
+        return {'site': site, 'cookies': len(rows), 'running_browser': worker}
 
     def driver_factory(self, work_id):
         """A zero-argument factory a ``BrowserSession`` calls on first use, or None when unavailable."""
@@ -1762,6 +1833,7 @@ class BrowserProfile:
                 removed = self.jar.remove(site)
             except Exception:
                 raise ValueError('저장된 로그인 세션을 읽지 못했습니다. "모두 삭제"로 초기화할 수 있습니다.') from None
+        self._saved({site})
         if worker == 'failed':
             return {'deleted': False, 'site': site, 'removed_from_jar': bool(removed), 'running_browser': 'failed',
                     'message': WORKER_DELETE_FAILED_TEXT}
@@ -1787,6 +1859,7 @@ class BrowserProfile:
             cleared = self.jar.clear()
             legacy = self.remove_legacy_profile()
             self.save_error = None
+        self._saved(None)
         result = {'all': True, 'jar_deleted': cleared['jar_deleted'] or legacy, 'key_deleted': cleared['key_deleted'],
                   'key_error': cleared['key_error'], 'running_browser': worker}
         result['deleted'] = cleared['key_error'] is None and worker != 'failed'

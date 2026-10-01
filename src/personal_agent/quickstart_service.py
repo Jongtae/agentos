@@ -404,6 +404,8 @@ class AgentService:
             if self.browser_profile.remove_legacy_profile():store.put(BROWSER_LEGACY_KEY,time.time())
         except Exception:
             pass
+        # #934: a jar save or delete that touched a site the owner shares with a family instance pushes it.
+        self.browser_profile.on_saved=self._shared_sites_saved
         # AX-11 (#603): identity of the code this process loaded, taken once
         # near start-up and recorded with each turn's provenance, so a stale
         # running build is distinguishable from a missing route binding.
@@ -5372,7 +5374,43 @@ class AgentService:
             def request(self,binding,description):return service._request_browser_step(job,binding,description)
             # #709: a login page during this Work asks the owner in-flow.
             def login_required(self,url):return service._request_browser_login(job,url)
+            # #934: on a site received from the owner, a payment step is refused outright (no request, no approval).
+            def refuse(self,host):
+                from .family_share import payment_refusal
+                return payment_refusal(service.store,host)
         return Approvals()
+
+    # -- #934: one signed-in site shared with a family instance -------------------------
+    def share_site(self, instance, site):
+        """Grant a family instance the owner's session for one site and push it; names and counts only."""
+        from . import family_share
+        return family_share.share(self.store,self.browser_profile.jar,instance,site)
+
+    def unshare_site(self, instance, site):
+        """End a share: the family jar, its running worker and its mark are cleared; the owner's session stays."""
+        from . import family_share
+        return family_share.unshare(self.store,instance,site)
+
+    def shared_sites(self):
+        """The owner's shares, names only, with each instance's display name."""
+        from . import family_share
+        return family_share.listing(self.store,family_share.instances())
+
+    def _shared_sites_saved(self, touched):
+        """``BrowserProfile.on_saved``: push the touched sites the owner shares (never a received one)."""
+        from . import family_share
+        if not self.store.config(family_share.GRANTS_KEY,[]):return 0
+        return family_share.sync(self.store,self.browser_profile.jar,touched)
+
+    def retry_shared_sites(self, now=None):
+        """Deliver pending pushes and revocations (owner start, then every ``RETRY_SECONDS`` while any waits)."""
+        from . import family_share
+        try:
+            if not family_share.pending(self.store):return 0
+            return family_share.sync(self.store,self.browser_profile.jar,set(),retry_after=family_share.RETRY_SECONDS)
+        except Exception as exc:
+            LOG.warning('family share: retry failed (%s)',type(exc).__name__)
+            return 0
 
     def _browser_step_keys(self, binding):
         """Keyed digests of one step binding: what the approval row and request row hold.
@@ -8436,8 +8474,15 @@ class AgentService:
         self.decision_routes.recover_qualification()
         # #814 review: a settings draft a restart cut off mid-apply is settled unknown (never re-applied).
         self.settings_orchestrator.reconcile()
+        # #934: every share is re-pushed at start (a family instance that was down, a session refreshed
+        # while it was); off this thread, since the jar read may wait on the Keychain.
+        from . import family_share
+        if self.store.config(family_share.GRANTS_KEY,[]):
+            threading.Thread(target=lambda:family_share.sync(self.store,self.browser_profile.jar,None),
+                             daemon=True,name='agentos-family-share-sync').start()
         def work():
             next_document_resume_prune=0.0
+            next_shared_sites_retry=0.0
             while not self.stop.is_set():
                 # #659: one indexed query; nothing due costs no model or network call.
                 self.run_due_preparation()
@@ -8454,6 +8499,10 @@ class AgentService:
                 if now>=next_document_resume_prune:
                     self.prune_expired_document_resumes()
                     next_document_resume_prune=now+30
+                if now>=next_shared_sites_retry:
+                    # #934: a push or revocation a family instance did not confirm is retried; one config read otherwise.
+                    self.retry_shared_sites()
+                    next_shared_sites_retry=now+family_share.RETRY_SECONDS
                 # #805: claim one pending owner-model upkeep when idle; it runs off this thread.
                 self.run_owner_model_upkeep()
                 self.stop.wait(.3)

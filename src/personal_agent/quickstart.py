@@ -36,6 +36,7 @@ from .isolated_engine_gateway import IsolatedEngineGateway
 from .drive_web_oauth import DriveWebOAuthHandoff, EncryptedDriveSecretStore, DriveWebOAuthError
 from .connector_contract import ConnectorRegistry
 from . import family_setup
+from . import family_share
 from .service_control import service_action
 from .connector_http import contained_opener
 from .gmail import (GMAIL_CONNECTOR, EncryptedGmailSecretStore, GmailConnector,
@@ -583,6 +584,16 @@ def make_handler(service, public_hosts=(), public_access_token=''):
         def family_route(self,method,parts):
             """The family setup page and its APIs (#897); None when the path is not one of them."""
             path=parts.path
+            if path==family_share.SHARE_PATH and method=='POST':
+                # #934: the owner's instance on loopback only, with the link secret it wrote into this
+                # instance's private folder (same macOS user); never through a tunnel or a forwarded request.
+                if not (self.local_setup() and family_share.link_ok(store.root,self.headers.get(family_share.LINK_HEADER,''))):
+                    return self.reply(404,{'error':'찾을 수 없습니다.'})
+                try:
+                    length=int(self.headers.get('Content-Length','0'))
+                    if not 0<length<=family_share.MAX_BODY:raise ValueError('요청 크기가 올바르지 않습니다.')
+                    return self.reply(200,family_share.accept(service,json.loads(self.rfile.read(length))))
+                except ValueError as exc:return self.reply(400,{'error':str(exc)})
             if path=='/api/family/telegram-token' and method=='POST':
                 record=family_setup.read_setup(store)
                 # Loopback from the owner's instance only: never through a tunnel.
@@ -809,7 +820,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if not self.valid_host():return
             parts=urlsplit(self.path)
             if self.family_gate(parts.path):return
-            if parts.path in family_setup.PUBLIC_PATHS or parts.path=='/api/family/telegram-token':return self.family_route('POST',parts)
+            if parts.path in family_setup.PUBLIC_PATHS or parts.path in ('/api/family/telegram-token',family_share.SHARE_PATH):return self.family_route('POST',parts)
             if parts.path==ISOLATED_MCP_PATH:
                 # This is an internal engine callback, not a browser API.  A
                 # session cookie never authorizes it and public tunnel hosts

@@ -348,8 +348,15 @@ class LoginHarness(unittest.TestCase):
         self.addCleanup(self.close_windows)
 
     def close_windows(self):
+        """Close every window and wait for its thread: its final save and ``on_opened``/``on_closed`` write under
+        the data directory (``browser_step_secret``, sign-in records), which the temporary directory removes next."""
         for driver in self.drivers:
             driver.closed = True
+        for record in list(self.profile._login_windows.values()):
+            record['done'].wait(5)
+        thread = self.profile._login_thread
+        if thread is not None:
+            thread.join(5)
 
     def receive(self, text):
         self.update_id += 1

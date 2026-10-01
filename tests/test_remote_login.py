@@ -268,11 +268,18 @@ class RemoteLoginSurface(unittest.TestCase):
         self.base = f'http://127.0.0.1:{self.server.server_port}'
 
     def close_windows(self):
+        """End the session and every login window, and wait for their threads: the window's final save and
+        ``on_closed`` write under the data directory, which the temporary directory removes right after."""
         session = self.service.remote_login_session()
         if session is not None:
             session.finish('closed')
         for driver in self.drivers:
             driver.open = False
+        for record in list(self.profile._login_windows.values()):
+            record['done'].wait(5)
+        thread = self.profile._login_thread
+        if thread is not None:
+            thread.join(5)
 
     def request(self, path, method='GET', body=None, tunneled=True, cookie=None):
         headers = {}
@@ -396,6 +403,23 @@ class RemoteLoginSurface(unittest.TestCase):
         self.assertNotIn('<link', page)
 
     # -- driving the window ----------------------------------------------------------
+    def test_the_page_clears_text_or_claims_done_only_when_the_operation_said_ok(self):
+        """Codex P2: a 200 with ``{ok: false}`` (focus lost, worker refused) must not clear the typed text or show 완료."""
+        session = self.open_window()
+        cookie = self.bound_cookie(session)
+        page = self.request(remote_login.PAGE_PATH + self.code(session), cookie=cookie)[1].decode()
+        post = page.split('async function post')[1].split('\n')[1]
+        self.assertIn('if(!r.ok)return false;const d=await r.json();return d&&d.ok===true', post)
+        self.assertNotRegex(post, r'return r\.ok\}', 'the HTTP status alone never counts as success')
+        self.assertIn("if(await post('/api/remote-login/input',{type:'text',text:t})){$('text').value=''}", page)
+        self.assertIn("if(await post('/api/remote-login/done')){end(", page)
+        # The server side of that contract: a refused input is a 200 whose ok is false.
+        self.drivers[-1].open = False
+        self.drivers[-1].remote_input = lambda kind, **fields: (_ for _ in ()).throw(bs.WorkerError('not_typable'))
+        self.drivers[-1].open = True
+        status, answer, _ = self.request(remote_login.INPUT_PATH + self.code(session), 'POST', {'type': 'text', 'text': 'x'}, cookie=cookie)
+        self.assertEqual((status, json.loads(answer)), (200, {'ok': False}))
+
     def test_frames_come_from_the_window_each_time_and_inputs_reach_it_with_no_log(self):
         session = self.open_window()
         cookie = self.bound_cookie(session)

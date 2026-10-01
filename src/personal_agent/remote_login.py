@@ -313,7 +313,7 @@ const code={code};const q='?code='+encodeURIComponent(code);const $=id=>document
 let W=0,H=0,busy=false,ended=false,full=true;
 function end(text){{ended=true;$('live').classList.add('hidden');$('end').style.display='block';$('end').textContent=text}}
 async function post(path,body){{try{{const r=await fetch(path+q,{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(body||{{}}),credentials:'same-origin'}});
-if(r.status===404){{end('이 링크는 닫혔어요.');return false}}return r.ok}}catch(e){{return false}}}}
+if(r.status===404){{end('이 링크는 닫혔어요.');return false}}if(!r.ok)return false;const d=await r.json();return d&&d.ok===true}}catch(e){{return false}}}}
 async function frame(){{if(ended||busy)return;busy=true;try{{const r=await fetch('{FRAME_PATH}'+q+(full?'&full=1':''),{{cache:'no-store',credentials:'same-origin'}});
 if(r.status===404){{end('이 링크는 닫혔어요.');return}}
 if(r.status===204){{full=false;return}}

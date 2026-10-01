@@ -50,21 +50,53 @@ owner's encrypted jar (``browser_jar``) into the family instance's.
 
 Nothing here logs, returns to a model or records as Evidence a cookie value
 or the link secret: site names and counts only.
+
+**Any instance to any other (FAMILY-SHARE-03 #957).** The giver is whichever
+instance holds the session, and a target is any *other* AgentOS instance on
+this Mac: the owner's default service (``MAIN_INSTANCE``, ``@main``, an id no
+named instance can have, located the way ``service_control`` does) and the
+launchd-named instances, never the
+instance itself.  A family member thus shares a site with the owner's own
+assistant too, and the machinery above runs unchanged in direction: the
+giver writes the link secret into the receiver's data directory, the
+receiver marks the site, refuses payment there and never opens a login
+window for it, and nothing it received is ever its to pass on.  Each target
+is named by its bot's Telegram display name (``telegram.bot_name``, kept
+from ``getMe`` at connect and backfilled once at start) plus its instance
+id, and its state comes from that instance's own store, read-only
+(``instance_state``): ``paired``, ``setting_up`` or ``not_connected``.  No
+site, person or bot name is written into code.
+
+* **A receiver's own session is never replaced (#966 review P1-1).** A
+  ``put`` for a site the receiver holds its own rows for, and never
+  received, is refused before any mark is written (400 with the code
+  ``receiver_signed_in``, content-free): the receiver keeps its session and
+  all its authority there (payment, login window, onward sharing).  The
+  giver records the refusal on the grant (``error``) and tells its owner in
+  words; the refusal is retried only when the giver's rows for that site
+  change or at start, not every retry tick.
+* **A name resolves to exactly one instance (review P2-1).** An instance id
+  wins over a display name; a display name two instances share is refused
+  with the candidates and their ids.  An instance is never a target for
+  itself (review P2-2): ``share`` refuses its own data directory, and
+  ``main`` without a store there.
 """
 import hmac
 import json
 import logging
 import os
 import secrets
+import sqlite3
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from .browser_jar import JarError
 from .browser_session import registrable_domain
-from .family_setup import _LOOPBACK, family_instances, setup_path
+from .family_setup import _LOOPBACK, family_instances, read_setup, setup_path
 
 LOG = logging.getLogger('personal_agent.family_share')
 
@@ -85,8 +117,22 @@ PAYMENT_REFUSED_TEXT = '결제는 계정 주인이 해 주세요. 공유받은 �
 LOGIN_REFUSED_TEXT = '이 사이트는 공유받은 로그인이라 여기서 다시 로그인할 수 없어요'
 NO_SESSION_TEXT = ('{site}에 저장된 내 로그인 세션이 없어 공유하지 않았어요. 먼저 로그인 창에서 그 사이트에 로그인해 주세요.'
                    '{stored}')
-NOT_INSTALLED_TEXT = "가족 비서 '{instance}'가 이 Mac에 설치되어 있지 않아요."
+NOT_INSTALLED_TEXT = "'{instance}' 비서가 이 Mac에 설치되어 있지 않아요."
 NOT_YOURS_TEXT = '{site} 로그인은 계정 주인에게 받은 것이라 다른 비서에게 공유할 수 없어요. 아무것도 바꾸지 않았어요.'
+SELF_TEXT = '이 비서 자신에게는 공유할 수 없어요. 아무것도 바꾸지 않았어요.'
+#: #966 review P1-1: the receiving instance already holds its own session for the site.
+RECEIVER_SIGNED_IN = 'receiver_signed_in'
+RECEIVER_SIGNED_IN_TEXT = '이 비서는 그 사이트에 자기 계정으로 이미 로그인되어 있어 공유받지 않았어요.'
+RECEIVER_SIGNED_IN_RECEIPT = ("'{label}' 비서는 {site}에 이미 자기 계정으로 로그인되어 있어 공유하지 않았어요. 그 비서의 로그인은 그대로예요. "
+                              '그 비서가 그 사이트에서 로그아웃하면 다시 공유할 수 있어요.')
+#: Refusals the receiver decided; retried only when the giver's rows change or at start, not every tick.
+REFUSALS = frozenset({RECEIVER_SIGNED_IN})
+#: #957: the owner's default service as a share target.  ``@`` has never been allowed in an instance name
+#: (``service_control._INSTANCE_NAME``), so this id can never collide with one read from a plist, and a legacy
+#: instance that was named ``main`` keeps its own id, grants and data directory (#966 review).
+MAIN_INSTANCE = '@main'
+#: #957: what each target's own store says about its Telegram (never the one-time setup link's expiry).
+STATE_LABELS = {'paired': '연결됨', 'setting_up': '설정 중', 'not_connected': '연결 안 됨'}
 
 #: Review P2-2: every read-modify-write of one store's grant list or received marks, and the
 #: delivery in between, runs under that store's lock, so a push can never land after a remove.
@@ -98,6 +144,14 @@ def store_lock(store):
     with _LOCKS_GUARD:
         return _LOCKS.setdefault(key, threading.RLock())
 JAR_UNREADABLE_TEXT = '저장된 로그인 세션을 읽지 못해 공유하지 않았어요. 설정의 브라우저 로그인 세션 상태를 확인해 주세요.'
+
+
+class Refused(ValueError):
+    """A refusal the receiving instance decided, with a content-free ``code`` (``REFUSALS``)."""
+
+    def __init__(self, code, text):
+        super().__init__(text)
+        self.code = code
 
 
 # -- names ---------------------------------------------------------------
@@ -118,14 +172,59 @@ def normalize_site(value):
     return site
 
 
+def _peek_config(data_dir, key, default=None):
+    """One config row of another instance's store, read-only; ``default`` when there is no store or no row.
+
+    The store belongs to a running process of the same macOS user.  A
+    read-only SQLite connection never creates, migrates or locks it the way
+    opening a ``QuickStore`` would (#957).
+    """
+    path = Path(data_dir) / 'private' / 'quickstart.db'
+    if not path.is_file():
+        return default
+    try:
+        connection = sqlite3.connect(f'file:{path}?mode=ro', uri=True, timeout=2)
+        try:
+            row = connection.execute('SELECT value FROM config WHERE key=?', (key,)).fetchone()
+        finally:
+            connection.close()
+        return json.loads(row[0]) if row else default
+    except (sqlite3.Error, ValueError, OSError):
+        return default
+
+
+def _telegram_config(data_dir):
+    cfg = _peek_config(data_dir, 'telegram', {})
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def _clean_name(value):
+    return ' '.join(str(value).split()) if isinstance(value, str) and value.strip() else None
+
+
 def display_name(data_dir):
-    """The Telegram name a family instance was set up with, or None."""
+    """The instance's bot's Telegram display name (``telegram.bot_name``, #957), else the name it was set up with, or None."""
+    name = _clean_name(_telegram_config(data_dir).get('bot_name'))
+    if name:
+        return name
     try:
         record = json.loads(setup_path(_Private(data_dir)).read_text())
     except (OSError, ValueError):
         return None
-    name = record.get('display_name') if isinstance(record, dict) else None
-    return ' '.join(str(name).split()) if isinstance(name, str) and name.strip() else None
+    return _clean_name(record.get('display_name')) if isinstance(record, dict) else None
+
+
+def instance_state(data_dir, now=None):
+    """``paired``, ``setting_up`` or ``not_connected``, from that instance's own store (#957).
+
+    Paired means its Telegram config holds the member's user id; a live
+    setup record alone means the setup is still open.  The one-time setup
+    link's expiry says nothing once the instance is paired.
+    """
+    user_id = _telegram_config(data_dir).get('user_id')
+    if isinstance(user_id, int) and not isinstance(user_id, bool):
+        return 'paired'
+    return 'setting_up' if read_setup(_Private(data_dir), now) else 'not_connected'
 
 
 class _Private:
@@ -136,34 +235,82 @@ class _Private:
 
 
 def locate_instance(instance, home=None, environ=None):
-    """``(port, data_dir)`` of an installed family instance; ``port`` is None when it was never installed."""
+    """``(port, data_dir)`` of an installed instance; ``port`` is None when it was never installed.
+
+    ``MAIN_INSTANCE`` is the owner's default service, resolved exactly as
+    ``service_control`` does (the default label's plist, ``AGENTOS_DATA``,
+    the default data directory; port 8787).
+    """
     from .service_control import ServiceController
-    controller = ServiceController(instance=instance, home=home, environ=environ)
+    controller = ServiceController(instance=None if instance == MAIN_INSTANCE else instance, home=home, environ=environ)
     return controller.port, controller.data_dir
 
 
-def instances(home=None, locate=locate_instance):
-    """``{instance: display name or instance}`` of the family instances on this Mac."""
-    names = {}
-    for name in family_instances(home):
+def _has_store(data_dir):
+    return (Path(data_dir) / 'private' / 'quickstart.db').is_file()
+
+
+def _same_dir(left, right):
+    try:
+        return Path(left).expanduser().resolve() == Path(right).expanduser().resolve()
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def instances(home=None, locate=locate_instance, own=None, now=None):
+    """The other AgentOS instances on this Mac: ``{instance: {name, state, main}}`` (#957).
+
+    The owner's default service and the launchd-named instances, minus the
+    one whose data directory is ``own`` (this instance), so an assistant is
+    never offered itself.  ``name`` is the bot's display name, else the
+    setup name, else the instance id; ``state`` is ``instance_state``.
+    """
+    rows = {}
+    for name in [MAIN_INSTANCE, *family_instances(home)]:
         try:
             _port, data_dir = locate(name)
         except Exception:
-            data_dir = None
-        names[name] = (display_name(data_dir) if data_dir else None) or name
-    return names
+            continue
+        if own is not None and _same_dir(data_dir, own):
+            continue
+        if name == MAIN_INSTANCE and not _has_store(data_dir):
+            continue   # no default service was ever set up here
+        rows[name] = {'name': display_name(data_dir) or name, 'state': instance_state(data_dir, now), 'main': name == MAIN_INSTANCE}
+    return rows
 
 
-def resolve_instance(value, names):
-    """The instance whose name or display name the owner gave (case and spacing aside), or ``ValueError``."""
+def names(rows):
+    """``{instance: display name}`` from ``instances`` rows (or an older plain ``{instance: name}``)."""
+    return {name: (row.get('name') or name) if isinstance(row, dict) else (row or name) for name, row in (rows or {}).items()}
+
+
+def describe(instance, row):
+    """One target for a listing: ``name(instance, state)``; names only."""
+    row = row if isinstance(row, dict) else {'name': row}
+    label = row.get('name') or instance
+    parts = ([] if label == instance else [instance]) + ([STATE_LABELS[row['state']]] if row.get('state') in STATE_LABELS else [])
+    return f"{label}({', '.join(parts)})" if parts else label
+
+
+def resolve_instance(value, rows):
+    """The instance whose id or display name was given (case and spacing aside), or ``ValueError``."""
+    labels = names(rows)
     wanted = ' '.join(str(value or '').split()).lower()
     if not wanted:
-        raise ValueError('어느 가족 비서인지 이름을 주세요. 아무것도 바꾸지 않았어요.')
-    for name, label in names.items():
-        if wanted in (name.lower(), ' '.join(str(label).split()).lower()):
+        raise ValueError('어느 비서인지 이름을 주세요. 아무것도 바꾸지 않았어요.')
+    # Review P2-1: an instance id is exact and wins; a display name (chosen by whoever made that bot) must
+    # name exactly one instance, or the candidates are listed with their ids.
+    for name in labels:
+        if wanted == name.lower():
             return name
-    listed = ', '.join(f'{label}({name})' if label != name else name for name, label in names.items()) or '없음'
-    raise ValueError(f"'{value}'라는 가족 비서를 찾지 못했어요. 이 Mac의 가족 비서: {listed}. 아무것도 바꾸지 않았어요.")
+    matches = [name for name, label in labels.items() if wanted == ' '.join(str(label).split()).lower()]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        listed = ', '.join(describe(name, (rows or {}).get(name)) for name in matches)
+        raise ValueError(f"'{value}'라는 이름의 비서가 여럿이에요: {listed}. 어느 비서인지 괄호 안의 id로 말해 주세요. 아무것도 바꾸지 않았어요.")
+    listed = ', '.join(describe(name, row) for name, row in (rows or {}).items()) or '없음'
+    raise ValueError(f"'{value}'라는 비서를 찾지 못했어요. 이 Mac의 다른 비서: {listed}. 아무것도 바꾸지 않았어요.")
 
 
 # -- the link secret ------------------------------------------------------
@@ -251,8 +398,19 @@ def _post(port, secret, body, opener=None, timeout=PUSH_TIMEOUT):
     """One loopback call to the family instance; never through a proxy or tunnel."""
     request = urllib.request.Request(f'http://127.0.0.1:{int(port)}{SHARE_PATH}', data=json.dumps(body).encode(),
                                      method='POST', headers={'Content-Type': 'application/json', LINK_HEADER: secret})
-    with (opener or _LOOPBACK.open)(request, timeout=timeout) as response:
-        return json.loads(response.read() or b'{}')
+    try:
+        with (opener or _LOOPBACK.open)(request, timeout=timeout) as response:
+            return json.loads(response.read() or b'{}')
+    except urllib.error.HTTPError as error:
+        # Review P1-1: a refusal the receiver decided carries a code; anything else stays a transport failure.
+        try:
+            answer = json.loads(error.read() or b'{}')
+        except ValueError:
+            answer = {}
+        code = answer.get('code') if isinstance(answer, dict) else None
+        if error.code == 400 and code in REFUSALS:
+            raise Refused(code, str(answer.get('error') or code)) from None
+        raise
 
 
 def push(port, secret, site, rows, opener=None):
@@ -293,7 +451,7 @@ def _deliver(row, jar, locate, opener, now):
             LOG.info('family share: %s -> %s (%d cookies)', row['site'], row['instance'], len(rows))
     except Exception as exc:
         # Review P2-3: a failed delivery is due again (``synced`` cleared, ``error`` set) until it lands.
-        row['error'] = type(exc).__name__
+        row['error'] = exc.code if isinstance(exc, Refused) else type(exc).__name__
         row['attempted'] = now
         row['synced'] = None
         LOG.warning('family share: %s -> %s not delivered (%s)', row['site'], row['instance'], type(exc).__name__)
@@ -303,14 +461,16 @@ def _deliver(row, jar, locate, opener, now):
     return True
 
 
-def share(store, jar, instance, site, *, locate=locate_instance, opener=None, now=None):
-    """Grant one family instance the owner's session for ``site`` and push it now; a content-free receipt.
+def share(store, jar, instance, site, *, locate=locate_instance, opener=None, now=None, label=None):
+    """Grant one other instance this instance's session for ``site`` and push it now; a content-free receipt.
 
-    Refused (nothing recorded) when the owner has no stored session for the
+    Refused (nothing recorded) when there is no stored session for the
     site, so a misresolved name is caught rather than granted.  A push the
-    family instance did not confirm keeps the grant: ``sync`` retries it.
+    receiving instance did not confirm keeps the grant: ``sync`` retries it.
+    ``label`` is the target's display name for the receipt (#957).
     """
     now = time.time() if now is None else now
+    label = label or instance
     site = normalize_site(site)
     if site in received(store):
         # Review P1-1: a session received from the owner is not this instance's to pass on.
@@ -319,9 +479,12 @@ def share(store, jar, instance, site, *, locate=locate_instance, opener=None, no
     if not rows:
         stored = [row['site'] for row in jar.sites()]
         raise ValueError(NO_SESSION_TEXT.format(site=site, stored=f' 지금 로그인된 사이트: {", ".join(stored)}.' if stored else ''))
-    port, _data_dir = locate(instance)
-    if port is None:
-        raise ValueError(NOT_INSTALLED_TEXT.format(instance=instance))
+    port, data_dir = locate(instance)
+    # Review P2-2: never itself, however ``main`` or this instance's ``--data`` resolved; and no main without a store.
+    if _same_dir(data_dir, store.root):
+        raise ValueError(SELF_TEXT)
+    if port is None or (instance == MAIN_INSTANCE and not _has_store(data_dir)):
+        raise ValueError(NOT_INSTALLED_TEXT.format(instance=label))
     with store_lock(store):
         current = grants(store)
         index = _grant_index(current, instance, site)
@@ -332,20 +495,24 @@ def share(store, jar, instance, site, *, locate=locate_instance, opener=None, no
         _put_grants(store, current)
         delivered = _deliver(row, jar, locate, opener, now)
         _put_grants(store, current)
-    text = (f"{instance} 비서에 {site} 로그인 세션을 공유했어요(쿠키 {len(rows)}개). 내 세션이 갱신되면 따라가고, "
+    refused = row.get('error') if row.get('error') in REFUSALS else None
+    text = (f"{label} 비서에 {site} 로그인 세션을 공유했어요(쿠키 {len(rows)}개). 내 세션이 갱신되면 따라가고, "
             f"결제는 계정 주인만 할 수 있어요." if delivered else
-            f"{instance} 비서가 지금 응답하지 않아 {site} 로그인 세션은 비서가 켜지면 전달돼요. 공유는 기록해 두었어요.")
-    return {'instance': instance, 'site': site, 'cookies': len(rows), 'delivered': delivered, 'response': text}
+            RECEIVER_SIGNED_IN_RECEIPT.format(label=label, site=site) if refused == RECEIVER_SIGNED_IN else
+            f"{label} 비서가 지금 응답하지 않아 {site} 로그인 세션은 비서가 켜지면 전달돼요. 공유는 기록해 두었어요.")
+    return {'instance': instance, 'site': site, 'cookies': len(rows), 'delivered': delivered, 'refused': refused, 'response': text}
 
 
-def unshare(store, instance, site, *, locate=locate_instance, opener=None, now=None):
-    """End the share: the family jar, its running worker and its mark are cleared, then the grant is removed.
+def unshare(store, instance, site, *, locate=locate_instance, opener=None, now=None, labels=None):
+    """End the share: the receiver's jar, its running worker and its mark are cleared, then the grant is removed.
 
     ``instance`` None ends every grant for the site.  Idempotent: a site that
-    is not shared is reported, not failed.  A family instance that does not
+    is not shared is reported, not failed.  A receiving instance that does not
     confirm keeps the grant as ``revoking`` (no more pushes) until it does.
+    ``labels`` maps instance ids to display names for the receipt (#957).
     """
     now = time.time() if now is None else now
+    labels = labels or {}
     site = normalize_site(site)
     with store_lock(store):
         current = grants(store)
@@ -367,9 +534,10 @@ def unshare(store, instance, site, *, locate=locate_instance, opener=None, now=N
         _put_grants(store, current)
     parts = []
     if done:
-        parts.append(f"{', '.join(done)} 비서에서 {site} 로그인 세션을 지웠어요. 내 세션은 그대로예요.")
+        parts.append(f"{', '.join(labels.get(name, name) for name in done)} 비서에서 {site} 로그인 세션을 지웠어요. 내 세션은 그대로예요.")
     if pending:
-        parts.append(f"{', '.join(pending)} 비서가 지금 응답하지 않아 {site} 세션은 비서가 켜지면 지워져요. 그때까지 새 세션은 보내지 않아요.")
+        parts.append(f"{', '.join(labels.get(name, name) for name in pending)} 비서가 지금 응답하지 않아 {site} 세션은 비서가 켜지면 지워져요. "
+                     '그때까지 새 세션은 보내지 않아요.')
     return {'site': site, 'instances': done, 'pending': pending, 'removed': not pending, 'idempotent': False,
             'response': ' '.join(parts)}
 
@@ -393,6 +561,8 @@ def sync(store, jar, touched=None, *, locate=locate_instance, opener=None, now=N
         for row in list(current):
             if row['site'] in held:
                 continue
+            if row.get('error') in REFUSALS and not (touched is None or row['site'] in touched):
+                continue   # review P1-1: the receiver decided; asked again only when these rows change or at start
             due = (row.get('state') == 'revoking' or row.get('synced') is None or row.get('error')
                    or touched is None or row['site'] in touched)
             if not due or (row.get('error') and now - float(row.get('attempted') or 0) < retry_after):
@@ -416,13 +586,14 @@ def sync(store, jar, touched=None, *, locate=locate_instance, opener=None, now=N
 
 def pending(store):
     """Whether any grant still waits for a push or a revocation."""
-    return any(row.get('state') == 'revoking' or row.get('synced') is None or row.get('error') for row in grants(store))
+    return any(row.get('state') == 'revoking' or (row.get('synced') is None and row.get('error') not in REFUSALS)
+               or (row.get('error') and row.get('error') not in REFUSALS) for row in grants(store))
 
 
-def listing(store, names=None):
+def listing(store, rows=None):
     """What the owner may see: ``[{instance, label, site, since, delivered, state}]``, names only."""
-    names = names or {}
-    return [{'instance': row['instance'], 'label': names.get(row['instance'], row['instance']), 'site': row['site'],
+    labels = names(rows)
+    return [{'instance': row['instance'], 'label': labels.get(row['instance'], row['instance']), 'site': row['site'],
              'since': row.get('since'), 'delivered': row.get('synced') is not None and not row.get('error'),
              'state': row.get('state') or 'shared'} for row in grants(store)]
 
@@ -455,6 +626,11 @@ def accept(service, body, now=None):
                 raise ValueError('쿠키 목록을 확인하세요.')
             rows = [row for row in rows if isinstance(row, dict) and isinstance(row.get('name'), str)
                     and _belongs(row.get('domain'), site)]
+            if site not in marks and _holds_own(service, site):
+                # Review P1-1: this instance's own sign-in there stays, with every authority it has; the
+                # giver is told so.  Nothing is set aside, nothing is marked.
+                LOG.info('family share: %s refused; this instance holds its own session', site)
+                raise Refused(RECEIVER_SIGNED_IN, RECEIVER_SIGNED_IN_TEXT)
             # Fail closed: the mark that refuses payment is durable before any cookie is usable here.  A
             # crash or a failed import leaves a mark without rows (harmless, and ``remove`` clears it),
             # never rows without a mark.
@@ -488,6 +664,17 @@ def accept(service, body, now=None):
         LOG.info('family share: removed %s', site)
         return {'ok': True, 'op': 'remove', 'site': site, 'deleted': bool(result.get('deleted')), 'received': True,
                 'running_browser': result.get('running_browser')}
+
+
+def _holds_own(service, site):
+    """Whether this instance's jar holds rows for ``site`` of its own; an unreadable jar refuses the push (content-free)."""
+    jar = getattr(service.browser_profile, 'jar', None)
+    if jar is None:
+        return False
+    try:
+        return bool(jar.site_rows(site))
+    except JarError as exc:
+        raise ValueError(f'이 비서의 로그인 세션 저장소를 읽을 수 없습니다({exc}).') from None
 
 
 def _belongs(domain, site):

@@ -4,9 +4,26 @@ This module deliberately does not start an engine or inspect credential files.
 Codex and Claude Code retain their official login sessions; AgentOS only
 records an owner's choice for a later bounded adapter.
 """
+import os
 from dataclasses import dataclass
 from shutil import which
 from time import time
+
+#: Where the official installers put these CLIs, searched after PATH (#932): a
+#: launchd service starts with PATH=/usr/bin:/bin:/usr/sbin:/sbin and so finds
+#: none of them.  Claude Code's native installer uses ~/.local/bin; Homebrew
+#: uses /opt/homebrew/bin (Apple silicon) or /usr/local/bin.
+INSTALL_DIRS = ('~/.local/bin', '/opt/homebrew/bin', '/usr/local/bin')
+
+
+def find_cli(command, *, path=None, home=None):
+    """``command`` on PATH, else in an official install directory; None when absent."""
+    found = which(command, path=path)
+    if found:
+        return found
+    base = os.path.expanduser('~') if home is None else str(home)
+    dirs = [os.path.join(base, entry[2:]) if entry.startswith('~/') else entry for entry in INSTALL_DIRS]
+    return which(command, path=os.pathsep.join(dirs))
 
 
 @dataclass(frozen=True)
@@ -26,7 +43,7 @@ ENGINES = {
 
 class SubscriptionEngines:
     """Find official CLIs without reading credentials or invoking a shell."""
-    def __init__(self, finder=which, clock=time):
+    def __init__(self, finder=find_cli, clock=time):
         self.finder, self.clock = finder, clock
 
     def available(self):

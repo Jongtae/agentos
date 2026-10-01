@@ -687,6 +687,20 @@ def local_url(url, allowed_origins=()):
     return parts.scheme not in ('http', 'https') or local_host(host)
 
 
+#: #932: NSURLErrorCannotFindHost - the name has no DNS record.
+URL_ERROR_CANNOT_FIND_HOST = -1003
+
+
+def navigation_error_code(error):
+    """The failed navigation's code: ``host_not_found`` for a name with no DNS record (#932)."""
+    try:
+        if str(error.domain()) == 'NSURLErrorDomain' and int(error.code()) == URL_ERROR_CANNOT_FIND_HOST:
+            return 'host_not_found'
+    except Exception:
+        pass
+    return 'navigation_failed'
+
+
 def destination_refusal(url, allowed_origins=(), resolver=None):
     """None when ``url`` may be loaded, else ``blocked_destination``.
 
@@ -1138,7 +1152,7 @@ class Worker:
         if ident not in self.pending:
             return
         if error is not None:
-            return self.fail(ident, 'navigation_failed')
+            return self.fail(ident, navigation_error_code(error))
         self.reply(ident, url=str(self.view.URL().absoluteString()) if self.view.URL() else '')
 
     def op_snapshot(self, ident, command, timeout):

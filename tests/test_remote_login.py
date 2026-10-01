@@ -58,9 +58,23 @@ class WindowDriver:
         self.sites = {}
         self.navigated = 0
         self.frames = 0
+        self.remote = False
+        #: A page dialog waiting for an answer, as the worker reports it in a frame.
+        self.dialog = None
 
     def alive(self):
         return True
+
+    def remote_begin(self):
+        if not self.open:
+            raise bs.WorkerError('not_shown')
+        self.remote = True
+        self.log.append(('remote_begin',))
+
+    def remote_end(self):
+        self.remote = False
+        self.dialog = None
+        self.log.append(('remote_end',))
 
     def show(self, url, timeout):
         self.open = True
@@ -77,12 +91,14 @@ class WindowDriver:
         if not self.open:
             raise bs.WorkerError('not_shown')
         self.frames += 1
-        return {'jpeg': 'AAAA', 'width': 1280.0, 'height': 900.0}
+        return {'jpeg': 'AAAA', 'width': 1280.0, 'height': 900.0, 'dialog': self.dialog}
 
     def remote_input(self, kind, **fields):
         if not self.open:
             raise bs.WorkerError('not_shown')
         self.log.append(('remote_' + kind, fields))
+        if kind == 'dialog':
+            self.dialog = None
         if kind == 'key' and fields.get('key') == 'Enter':
             # The sign-in: the site now holds a session cookie.
             self.navigated += 1
@@ -147,10 +163,47 @@ class WorkerOpsWhileParked(unittest.TestCase):
     def test_every_remote_op_answers_not_shown_while_the_window_is_parked(self):
         worker = self.worker()
         for op, command in (('frame', {}), ('remote_tap', {'x': 1, 'y': 1}), ('remote_text', {'text': 'x'}),
-                            ('remote_key', {'key': 'Enter'}), ('remote_nav', {'action': 'back'})):
+                            ('remote_key', {'key': 'Enter'}), ('remote_nav', {'action': 'back'}),
+                            ('remote_begin', {}), ('remote_dialog', {'answer': 'ok'})):
             with self.subTest(op=op):
                 worker.handle({'id': 7, 'op': op, **command})
                 self.assertEqual(worker.replies[-1], {'id': 7, 'ok': False, 'error': 'not_shown'})
+
+    def test_a_page_dialog_is_held_for_the_phone_only_during_a_phone_session(self):
+        """#936's rule stays in force without a phone session; with one, the phone (or the Mac's sheet) answers."""
+        worker = self.worker()
+        worker.owner_visible = True
+        worker.dialog_step = None
+        worker.held_dialog = None
+        worker.remote = False
+        worker.show_dialog_sheet = lambda kind, text: None   # the Mac's sheet needs AppKit; not here
+        answers = []
+        self.assertFalse(worker.hold_dialog('confirm', 'Sure?', answers.append), 'no phone session: #936 applies')
+        worker.handle({'id': 1, 'op': 'remote_begin'})
+        self.assertEqual(worker.replies[-1], {'id': 1, 'ok': True})
+        self.assertTrue(worker.hold_dialog('confirm', '  삭제  하시겠습니까?  ', answers.append))
+        self.assertEqual(worker.held_dialog['text'], '삭제 하시겠습니까?')
+        self.assertEqual(answers, [], 'held, not answered')
+        # A second dialog while one is held is cancelled at once.
+        second = []
+        self.assertTrue(worker.hold_dialog('alert', 'again', lambda: second.append('shown')))
+        self.assertEqual(second, ['shown'])
+        # The phone answers 확인: the page's confirm gets true, once.
+        worker.handle({'id': 2, 'op': 'remote_dialog', 'answer': 'ok'})
+        self.assertEqual(worker.replies[-1], {'id': 2, 'ok': True, 'answered': True})
+        self.assertEqual(answers, [True])
+        worker.handle({'id': 3, 'op': 'remote_dialog', 'answer': 'ok'})
+        self.assertEqual(worker.replies[-1], {'id': 3, 'ok': True, 'answered': False}, 'nothing held now')
+        worker.handle({'id': 4, 'op': 'remote_dialog', 'answer': 'maybe'})
+        self.assertEqual(worker.replies[-1], {'id': 4, 'ok': False, 'error': 'bad_answer'})
+        # Ending the session cancels a held dialog and stops holding.
+        prompts = []
+        self.assertTrue(worker.hold_dialog('prompt', 'name?', prompts.append))
+        worker.handle({'id': 5, 'op': 'remote_end'})
+        self.assertEqual(prompts, [None])
+        self.assertFalse(worker.remote)
+        self.assertFalse(worker.hold_dialog('confirm', 'Sure?', answers.append))
+        self.assertEqual(answers, [True], 'back to the #936 path: not held, not answered here')
 
     def test_the_keys_and_actions_the_phone_offers_are_the_ones_the_worker_knows(self):
         self.assertEqual(set(remote_login.KEYS), set(browser_worker.REMOTE_KEYS))
@@ -164,7 +217,8 @@ class InputValidation(unittest.TestCase):
         self.assertEqual(remote_login.validate_input({'type': 'text', 'text': 'abc'}), ('text', {'text': 'abc'}))
         self.assertEqual(remote_login.validate_input({'type': 'key', 'key': 'Backspace'}), ('key', {'key': 'Backspace'}))
         self.assertEqual(remote_login.validate_input({'type': 'nav', 'action': 'reload'}), ('nav', {'action': 'reload'}))
-        for bad in ({'type': 'tap', 'x': -1, 'y': 0}, {'type': 'tap', 'x': True, 'y': 1}, {'type': 'text', 'text': ''},
+        self.assertEqual(remote_login.validate_input({'type': 'dialog', 'answer': 'cancel'}), ('dialog', {'answer': 'cancel'}))
+        for bad in ({'type': 'dialog', 'answer': 'yes'}, {'type': 'dialog', 'answer': True},{'type': 'tap', 'x': -1, 'y': 0}, {'type': 'tap', 'x': True, 'y': 1}, {'type': 'text', 'text': ''},
                     {'type': 'text', 'text': 'a\nb'}, {'type': 'text', 'text': 'x' * (remote_login.TEXT_LIMIT + 1)},
                     {'type': 'key', 'key': 'F5'}, {'type': 'nav', 'action': 'forward'}, {'type': 'script'}, [], None):
             with self.subTest(bad=bad):
@@ -229,7 +283,8 @@ class RemoteLoginSurface(unittest.TestCase):
         receipt = self.service.open_browser_for_login({'url': 'https://fixture.test/login', 'phone': phone})
         self.assertEqual(receipt['state'], 'opening')
         self.assertTrue(wait_until(lambda: self.service.remote_login_session() is not None and
-                                   self.service.remote_login_session().link is not None), 'the session started')
+                                   self.service.remote_login_session().link is not None
+                                   and any(method == 'sendMessage' for method, _ in self.calls)), 'the session started and the link was sent')
         return self.service.remote_login_session()
 
     def code(self, session):
@@ -273,7 +328,8 @@ class RemoteLoginSurface(unittest.TestCase):
                     body = {'type': 'key', 'key': 'Enter'} if method == 'POST' else None
                     self.assertEqual(self.request(path + query, method, body, cookie=cookie)[0], 404)
         self.assertTrue(session.alive(), 'guessing never closes the session')
-        self.assertFalse([entry for entry in self.driver_log if entry[0].startswith('remote_')], 'nothing reached the window')
+        self.assertFalse([entry for entry in self.driver_log if entry[0].startswith('remote_') and entry[0] != 'remote_begin'],
+                         'nothing reached the window')
 
     def test_a_second_client_without_the_bound_cookie_is_404(self):
         session = self.open_window()
@@ -333,7 +389,7 @@ class RemoteLoginSurface(unittest.TestCase):
         with self.assertLogs('personal_agent', level='DEBUG') as logs:
             status, body, _ = self.request(remote_login.FRAME_PATH + self.code(session), cookie=cookie)
             self.assertEqual(status, 200)
-            self.assertEqual(json.loads(body), {'jpeg': 'AAAA', 'width': 1280.0, 'height': 900.0})
+            self.assertEqual(json.loads(body), {'jpeg': 'AAAA', 'width': 1280.0, 'height': 900.0, 'dialog': None})
             self.assertEqual(driver.frames, frames_before + 1, 'read from the window now, never cached')
             for body in ({'type': 'tap', 'x': 640, 'y': 300}, {'type': 'text', 'text': SECRET_TEXT},
                          {'type': 'key', 'key': 'Backspace'}, {'type': 'nav', 'action': 'reload'}):
@@ -345,7 +401,7 @@ class RemoteLoginSurface(unittest.TestCase):
                              b'{"ok": false}')
             # A log line exists (content-free), so assertLogs has something to inspect.
             logging.getLogger('personal_agent.remote_login').info('remote login probe site=%s', session.site)
-        remote = [entry for entry in self.driver_log if entry[0].startswith('remote_')]
+        remote = [entry for entry in self.driver_log if entry[0].startswith('remote_') and entry[0] != 'remote_begin']
         self.assertEqual(remote, [('remote_tap', {'x': 640.0, 'y': 300.0}), ('remote_text', {'text': SECRET_TEXT}),
                                   ('remote_key', {'key': 'Backspace'}), ('remote_nav', {'action': 'reload'})])
         self.assertNotIn(SECRET_TEXT, '\n'.join(logs.output))
@@ -361,6 +417,46 @@ class RemoteLoginSurface(unittest.TestCase):
                 for row in db.execute(f'SELECT * FROM {table}'):
                     self.assertNotIn(SECRET_TEXT, json.dumps([str(value) for value in row]))
         self.assertFalse(hasattr(session, 'frames') or hasattr(session, 'last_frame'), 'a session keeps no frame')
+
+    def test_a_page_dialog_reaches_the_phone_and_its_answer_reaches_the_window(self):
+        session = self.open_window()
+        cookie = self.bound_cookie(session)
+        driver = self.drivers[-1]
+        self.assertTrue(driver.remote, 'the session told the worker to hold dialogs for the phone')
+        driver.dialog = {'kind': 'confirm', 'text': '삭제하시겠습니까?'}
+        status, body, _ = self.request(remote_login.FRAME_PATH + self.code(session), cookie=cookie)
+        self.assertEqual(json.loads(body)['dialog'], {'kind': 'confirm', 'text': '삭제하시겠습니까?'})
+        page = self.request(remote_login.PAGE_PATH + self.code(session), cookie=cookie)[1].decode()
+        self.assertIn('기다리고 있어요', page)
+        self.assertIn('dialog-ok', page)
+        status, answer, _ = self.request(remote_login.INPUT_PATH + self.code(session), 'POST', {'type': 'dialog', 'answer': 'ok'}, cookie=cookie)
+        self.assertEqual((status, json.loads(answer)), (200, {'ok': True}))
+        self.assertIn(('remote_dialog', {'answer': 'ok'}), self.driver_log)
+        self.assertIsNone(json.loads(self.request(remote_login.FRAME_PATH + self.code(session), cookie=cookie)[1])['dialog'])
+        session.finish('done')
+        self.assertIn(('remote_end',), self.driver_log, 'ending the session ends the hold')
+
+    def test_a_received_share_refuses_the_window_and_the_phone(self):
+        """#940 hook: a site this instance received (family share, #935) never gets a login window here."""
+        refusals = []
+
+        def refuse(site):
+            refusals.append(site)
+            return '이 사이트는 공유받은 로그인이라 여기서 다시 로그인할 수 없어요' if site == 'fixture.test' else None
+        self.service.refuse_login = refuse
+        for body in ({'url': 'https://www.fixture.test/login'}, {'url': 'https://fixture.test/login', 'phone': True}):
+            with self.assertRaises(ValueError) as caught:
+                self.service.open_browser_for_login(body)
+            self.assertEqual(str(caught.exception), '이 사이트는 공유받은 로그인이라 여기서 다시 로그인할 수 없어요')
+        self.assertEqual(refusals, ['fixture.test', 'fixture.test'], 'asked by registrable site')
+        self.assertEqual(self.drivers, [], 'no window opened')
+        self.assertEqual(self.tunnel.processes, [], 'no tunnel opened')
+        with self.assertRaises(remote_login.RemoteLoginError):
+            self.service.start_remote_login('w', 'fixture.test', lambda reason: None)
+        # Another site is unaffected.
+        receipt = self.service.open_browser_for_login({'url': 'https://other.test/login'})
+        self.assertEqual(receipt['state'], 'opening')
+        self.assertTrue(wait_until(lambda: self.drivers))
 
     def test_done_closes_the_window_saves_the_jar_and_stops_the_tunnel(self):
         session = self.open_window()
@@ -520,6 +616,18 @@ class PhoneButton(_flow_harness()):
         self.assertEqual(self.settle(job_id), 'resumed')
         self.assertTrue(self.tunnel.processes[0].terminated)
         self.assertEqual(self.store.job(job_id)['status'], 'queued', 'the Work continues once')
+
+    def test_an_in_flow_login_for_a_received_share_shows_no_window_and_no_prompt(self):
+        """#940 hook on the in-flow path: the row is unavailable; no window, no Telegram prompt."""
+        self.service.refuse_login = lambda site: '이 사이트는 공유받은 로그인이라 여기서 다시 로그인할 수 없어요' if site == 'fixture.test' else None
+        self.scripts = self.login_script()
+        job_id = self.receive('계정 페이지 확인해줘')
+        self.assertTrue(self.service.run_one())
+        self.assertTrue(wait_until(lambda: self.state(job_id) == 'unavailable'), self.state(job_id))
+        self.assertEqual((self.service._browser_login(job_id) or {}).get('cause'), 'refused')
+        self.assertEqual(len(self.drivers), 1, 'only the Work\'s own driver; no login window')
+        self.service.deliver_one()
+        self.assertEqual(self.prompts(), [])
 
     def test_a_skip_on_telegram_ends_the_phone_session(self):
         job_id, prompt, buttons, notification = self.login_work()

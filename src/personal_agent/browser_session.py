@@ -1244,7 +1244,7 @@ WORKER_GRACE_SECONDS = 5
 WORKER_QUIT_SECONDS = 5
 LOGIN_OPEN_SECONDS = 45
 #: #939: the phone inputs a login window accepts, as the worker's ``remote_*`` ops.
-REMOTE_INPUT_KINDS = ('tap', 'text', 'key', 'nav')
+REMOTE_INPUT_KINDS = ('tap', 'text', 'key', 'nav', 'dialog')
 #: #709: how long closing a login window waits for its save and release.
 LOGIN_CLOSE_SECONDS = 20
 #: #709: how many closed login windows' outcomes a profile remembers.
@@ -1563,15 +1563,29 @@ class WebKitWorkerDriver:
             return self._send(op, ACTION_TIMEOUT_SECONDS, **arguments)
 
     def frame(self):
-        """``{'jpeg': base64, 'width': points, 'height': points}`` of the frontmost login view; never kept here."""
+        """``{'jpeg': base64, 'width': points, 'height': points, 'dialog': {'kind', 'text'} or None}`` of the
+        frontmost login view; never kept here.  ``dialog`` is a page dialog waiting for an answer."""
         message = self._request_shown('frame')
-        return {'jpeg': str(message.get('jpeg') or ''), 'width': message.get('width'), 'height': message.get('height')}
+        dialog = message.get('dialog') if isinstance(message.get('dialog'), dict) else None
+        return {'jpeg': str(message.get('jpeg') or ''), 'width': message.get('width'), 'height': message.get('height'),
+                'dialog': {'kind': str(dialog.get('kind') or ''), 'text': str(dialog.get('text') or '')} if dialog else None}
 
     def remote_input(self, kind, **fields):
-        """One phone input into the login window: ``tap`` (x, y), ``text`` (text), ``key`` (key) or ``nav`` (action)."""
+        """One phone input into the login window: ``tap`` (x, y), ``text`` (text), ``key`` (key), ``nav``
+        (action) or ``dialog`` (answer)."""
         if kind not in REMOTE_INPUT_KINDS:
             raise WorkerError('bad_input')
         self._request_shown('remote_' + kind, **fields)
+
+    def remote_begin(self):
+        """A phone session starts: the worker holds page dialogs for the phone's answer (#939)."""
+        self._request_shown('remote_begin')
+
+    def remote_end(self):
+        """The phone session ended: a held dialog is cancelled; dialogs go back to the Mac alone."""
+        with self._lock:
+            if self.alive():
+                self._send('remote_end', ACTION_TIMEOUT_SECONDS)
 
     # -- session material: to and from the encrypted jar only ------------------------
     def cookies_export(self):
@@ -2107,6 +2121,18 @@ class BrowserProfile:
             return frame()
         except Exception:
             return None
+
+    def login_window_remote(self, window, on):
+        """Begin (``on``) or end a phone session on ``window``'s driver (#939); True when the driver accepted it."""
+        driver = self.login_window_driver(window)
+        method = getattr(driver, 'remote_begin' if on else 'remote_end', None) if driver is not None else None
+        if method is None:
+            return False
+        try:
+            method()
+        except Exception:
+            return False
+        return True
 
     def login_window_input(self, window, kind, **fields):
         """One phone input into ``window`` (#939); True when the driver accepted it.  ``fields`` are never logged."""

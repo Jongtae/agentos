@@ -46,7 +46,8 @@ INPUT_PATH = '/api/remote-login/input'
 DONE_PATH = '/api/remote-login/done'
 PUBLIC_PATHS = frozenset({PAGE_PATH, FRAME_PATH, INPUT_PATH, DONE_PATH})
 COOKIE_NAME = 'agentos_remote_login'
-INPUT_KINDS = ('tap', 'text', 'key', 'nav')
+INPUT_KINDS = ('tap', 'text', 'key', 'nav', 'dialog')
+DIALOG_ANSWERS = ('ok', 'cancel')
 KEYS = ('Enter', 'Backspace', 'Tab')
 NAV_ACTIONS = ('back', 'reload')
 #: Characters one text input may carry (a page's field, never a document).
@@ -79,7 +80,8 @@ def validate_input(body):
     """``(kind, fields)`` of one phone input, or None when it is not one.
 
     ``tap`` carries ``x``/``y`` (numbers), ``text`` a bounded string, ``key``
-    one of ``KEYS`` and ``nav`` one of ``NAV_ACTIONS``.  Nothing else passes.
+    one of ``KEYS``, ``nav`` one of ``NAV_ACTIONS`` and ``dialog`` (the
+    answer to a page's own dialog) one of ``DIALOG_ANSWERS``.  Nothing else passes.
     """
     if not isinstance(body, dict):
         return None
@@ -98,6 +100,9 @@ def validate_input(body):
     elif kind == 'nav':
         if body.get('action') in NAV_ACTIONS:
             return 'nav', {'action': body['action']}
+    elif kind == 'dialog':
+        if body.get('answer') in DIALOG_ANSWERS:
+            return 'dialog', {'answer': body['answer']}
     return None
 
 
@@ -139,6 +144,8 @@ class RemoteLogin:
         except (OSError, RuntimeError) as exc:
             raise RemoteLoginError(TUNNEL_FAILED_TEXT + ' ' + str(exc)) from None
         self.link = f'{public}{PAGE_PATH}?code={quote(self.code)}'
+        # Page dialogs (#936) are now held for the phone's answer and shown on the Mac as a sheet.
+        self.profile.login_window_remote(self.window, True)
         LOG.info('remote login open site=%s', self.site)
         threading.Thread(target=self._watch, name='agentos-remote-login', daemon=True).start()
         return self.link
@@ -172,6 +179,7 @@ class RemoteLogin:
                 pass
         LOG.info('remote login %s site=%s', reason, self.site)
         if reason != 'closed':
+            self.profile.login_window_remote(self.window, False)
             try:
                 self._close(reason)
             except Exception as exc:
@@ -245,9 +253,12 @@ h1{{font-size:16px;margin:0 0 8px;font-weight:600}}.note{{font-size:13px;color:#
 .row{{display:flex;gap:6px;margin:8px 0}}input{{flex:1;font-size:16px;padding:12px;border-radius:10px;border:1px solid #48484a;background:#2c2c2e;color:#fff}}
 button{{font-size:15px;padding:12px 10px;border-radius:10px;border:0;background:#3a3a3c;color:#fff}}button.main{{background:#0a84ff}}
 button.wide{{flex:1}}#done{{width:100%;font-size:19px;padding:16px;background:#30d158;color:#000;font-weight:600;margin-top:10px}}
-#end{{display:none;text-align:center;padding:30px 0;font-size:18px}}.hidden{{display:none}}</style></head><body>
+#end{{display:none;text-align:center;padding:30px 0;font-size:18px}}.hidden{{display:none}}
+#dialog{{background:#2c2c2e;border:1px solid #ffd60a;border-radius:10px;padding:12px;margin:8px 0}}#dialog p{{margin:0 0 8px;white-space:pre-wrap}}</style></head><body>
 <h1>{site} 로그인</h1>
-<div id="live"><img id="shot" alt="Mac의 로그인 창">
+<div id="live"><div id="dialog" class="hidden"><p class="note">Mac의 로그인 창이 이 질문에 답하기를 기다리고 있어요.</p><p id="dialog-text"></p>
+<div class="row"><button id="dialog-ok" class="main wide">확인</button><button id="dialog-cancel" class="wide">취소</button></div></div>
+<img id="shot" alt="Mac의 로그인 창">
 <p class="note">화면을 누르면 Mac의 로그인 창에서 같은 자리가 눌려요. 입력할 칸을 먼저 누른 뒤 아래에 글자를 넣고 [입력]을 누르세요.</p>
 <div class="row"><input id="text" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="선택한 칸에 넣을 글자" maxlength="{TEXT_LIMIT}"><button id="hide">가리기</button><button id="send" class="main">입력</button></div>
 <div class="row"><button id="enter" class="wide">엔터</button><button id="back" class="wide">←지우기</button><button id="nav-back" class="wide">뒤로</button><button id="reload" class="wide">새로고침</button></div>
@@ -262,7 +273,10 @@ async function post(path,body){{try{{const r=await fetch(path+q,{{method:'POST',
 if(r.status===404){{end('이 링크는 닫혔어요.');return false}}return r.ok}}catch(e){{return false}}}}
 async function frame(){{if(ended||busy)return;busy=true;try{{const r=await fetch('{FRAME_PATH}'+q,{{cache:'no-store',credentials:'same-origin'}});
 if(r.status===404){{end('이 링크는 닫혔어요. 로그인 창도 닫혔고, 로그인했다면 세션이 저장됐어요.');return}}
-if(r.ok){{const d=await r.json();W=d.width;H=d.height;$('shot').src='data:image/jpeg;base64,'+d.jpeg}}}}catch(e){{}}finally{{busy=false}}}}
+if(r.ok){{const d=await r.json();W=d.width;H=d.height;$('shot').src='data:image/jpeg;base64,'+d.jpeg;dialog(d.dialog)}}}}catch(e){{}}finally{{busy=false}}}}
+function dialog(d){{const box=$('dialog');if(!d){{box.classList.add('hidden');return}}$('dialog-text').textContent=d.text||'';$('dialog-cancel').classList.toggle('hidden',d.kind!=='confirm');box.classList.remove('hidden')}}
+$('dialog-ok').onclick=()=>post('{INPUT_PATH}',{{type:'dialog',answer:'ok'}}).then(()=>setTimeout(frame,150));
+$('dialog-cancel').onclick=()=>post('{INPUT_PATH}',{{type:'dialog',answer:'cancel'}}).then(()=>setTimeout(frame,150));
 setInterval(frame,{REFRESH_MS});frame();
 $('shot').addEventListener('click',e=>{{if(!W||!H)return;const r=e.currentTarget.getBoundingClientRect();
 const x=Math.max(0,Math.min(W,(e.clientX-r.left)/r.width*W)),y=Math.max(0,Math.min(H,(e.clientY-r.top)/r.height*H));post('{INPUT_PATH}',{{type:'tap',x:x,y:y}}).then(()=>setTimeout(frame,150))}});

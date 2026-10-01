@@ -541,6 +541,10 @@ class AgentService:
         self._remote_login=None
         self._remote_login_started=False
         self.remote_login_popen=None   # a test injects a fake ngrok here
+        #: #940 hook: ``(site) -> owner-facing refusal text or None``.  A login window (explicit, in-flow or
+        #: from the phone) never opens for a site this refuses: the family-share follow-up (#935) sets it to
+        #: refuse the sites this instance *received*, so a family member never re-drives the owner's session.
+        self.refuse_login=None
         # Contextual local authority (#505).  Always present: it declares no
         # connector and grants nothing by existing; it only parks a file
         # request until the owner approves one folder on this Mac.
@@ -5321,6 +5325,8 @@ class AgentService:
             host=urlsplit(url.strip()).hostname
         except ValueError:
             host=None
+        refused=self.login_refusal(host)
+        if refused:raise ValueError(refused)
         # #939: ``phone``: once the window shows, send the paired owner a one-time link that drives it.
         phone=isinstance(body,dict) and body.get('phone') is True
         if phone:
@@ -5593,6 +5599,11 @@ class AgentService:
         """
         row=self._browser_login(job['id'])
         if not row or row.get('state')!='requested':return False
+        if self.login_refusal(row.get('host')):
+            # #940: a site this instance may not sign in to again (a received share): no window, no prompt.
+            self._put_browser_login(job['id'],{**row,'state':'unavailable','cause':'refused','closed_at':time.time()})
+            LOG.info('browser login window refused work=%s',job['id'])
+            return False
         # The site's stored sign-in cookies before the window: a login is evidenced by their change.
         now=time.time()
         row={**row,'cookies_before':self._login_cookie_marks(row),'site':registrable_domain(row['host'])}
@@ -5909,6 +5920,18 @@ class AgentService:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',
                                ('assistant',BROWSER_LOGIN_RESULT_TEXT[shown],job['channel'],time.time(),job.get('workspace_id'),work_id))
 
+    def login_refusal(self, host_or_site):
+        """Why no login window may open for this site (``refuse_login``, #940), or None."""
+        hook=self.refuse_login
+        if not callable(hook):return None
+        site=registrable_domain(host_or_site) if host_or_site else None
+        if not site:return None
+        try:reason=hook(site)
+        except Exception as exc:
+            LOG.warning('login refusal hook failed (%s)',type(exc).__name__)
+            return None
+        return str(reason) if reason else None
+
     # -- the phone's one-time link to the login window (#939) -------------------------------
     def remote_login_session(self):
         """The current remote login session while it is alive, else None."""
@@ -5930,6 +5953,8 @@ class AgentService:
         """
         from .subscription_engines import find_cli
         popen=self.remote_login_popen or subprocess.Popen
+        refused=self.login_refusal(site)
+        if refused:raise remote_login.RemoteLoginError(refused)
         with self.lock:
             if self.remote_login_session() is not None:raise remote_login.RemoteLoginError(remote_login.BUSY_TEXT)
             if popen is subprocess.Popen and not find_cli('ngrok'):raise remote_login.RemoteLoginError(remote_login.NO_NGROK_TEXT)

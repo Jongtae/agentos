@@ -842,6 +842,8 @@ class Worker:
         self.reported = []         # ids of cancelled submits already reported
         self.held = None           # the last reported one: what an approval may release (#700)
         self.dialog_step = None    # #936: the click/type in progress, for page dialogs
+        self.remote = False        # #939: a phone drives the login window (``op_remote_begin``)
+        self.held_dialog = None    # #939: a page dialog waiting for the phone's (or the Mac's) answer
         self.controller = config.userContentController()
         self._install_guard_scripts()
         self.controller.addScriptMessageHandler_contentWorld_name_(self.delegate, self.world, GUARD_HANDLER)
@@ -912,6 +914,64 @@ class Worker:
         if self.dialog_step is not None and len(self.dialog_step['dialogs']) < DIALOG_RECORDS:
             self.dialog_step['dialogs'].append({'kind': kind, 'message': text, 'outcome': 'owner'})
         return response == AppKit.NSAlertFirstButtonReturn if kind == 'confirm' else None
+
+    # -- a page dialog while the phone drives the window (#939) ----------------------
+    def hold_dialog(self, kind, message, handler):
+        """While a phone drives the login window, hold a page dialog for its answer; True when held.
+
+        The phone's page shows the question (``op_frame`` reports it) and
+        answers it (``op_remote_dialog``); the Mac shows the same question as
+        a sheet on the window, so whoever is there answers first.  Without a
+        phone session the #936 rule (``js_dialog``) applies unchanged.  A
+        second dialog while one is held gets the cancel answer at once.
+        """
+        if not (self.remote and self.owner_visible):
+            return False
+        text = ' '.join(str(message or '').split())[:DIALOG_TEXT_LIMIT]
+        if self.held_dialog is not None:
+            _answer_dialog_handler(kind, handler, False)
+            return True
+        self.held_dialog = {'kind': kind, 'text': text, 'handler': handler, 'sheet': None}
+        try:
+            self.show_dialog_sheet(kind, text)
+        except Exception:
+            pass
+        return True
+
+    def show_dialog_sheet(self, kind, text):
+        """The same question on the Mac, as a sheet on the frontmost login window (never modal: the worker keeps answering)."""
+        AppKit = self.AppKit
+        alert = AppKit.NSAlert.alloc().init()
+        alert.setMessageText_(text or ' ')
+        alert.addButtonWithTitle_('확인')
+        if kind == 'confirm':
+            alert.addButtonWithTitle_('취소')
+        view = self.front_view()
+        window = view.window() if view is not self.view and view.window() is not None else self.window
+        self.held_dialog['sheet'] = (alert, window)
+        alert.beginSheetModalForWindow_completionHandler_(
+            window, lambda response: self.answer_dialog(response == AppKit.NSAlertFirstButtonReturn, from_sheet=True))
+
+    def answer_dialog(self, ok, from_sheet=False):
+        """Answer the held dialog once: ``ok`` is 확인 (a confirm's true); False is 취소.  True when one was held."""
+        held, self.held_dialog = self.held_dialog, None
+        if held is None:
+            return False
+        sheet = held.get('sheet')
+        if sheet is not None and not from_sheet:
+            try:
+                sheet[1].endSheet_(sheet[0].window())
+            except Exception:
+                pass
+        if self.dialog_step is not None and len(self.dialog_step['dialogs']) < DIALOG_RECORDS:
+            self.dialog_step['dialogs'].append({'kind': held['kind'], 'message': held['text'], 'outcome': 'owner'})
+        _answer_dialog_handler(held['kind'], held['handler'], ok)
+        return True
+
+    def end_remote(self):
+        """The phone session ended (or the window hid): a held dialog is cancelled, nothing more is held."""
+        self.remote = False
+        self.answer_dialog(False)
 
     def park(self):
         """Keep the window ordered in but off every screen and out of the owner's way (#930).
@@ -1461,6 +1521,7 @@ class Worker:
                 self.popups.remove(entry)
 
     def op_hide(self, ident, command, timeout):
+        self.end_remote()
         self.close_popup()
         self.owner_visible = False
         self.park()
@@ -1468,6 +1529,7 @@ class Worker:
         self.reply(ident)
 
     def window_closed_by_owner(self):
+        self.end_remote()
         self.close_popup()
         self.owner_visible = False
         self.park()
@@ -1507,7 +1569,9 @@ class Worker:
             data = _jpeg_bytes(self.AppKit, image) if error is None and image is not None else None
             if data is None:
                 return self.fail(ident, 'frame_failed')
-            self.reply(ident, jpeg=base64.b64encode(data).decode('ascii'), width=width, height=height)
+            held = self.held_dialog
+            dialog = {'kind': held['kind'], 'text': held['text']} if held is not None else None
+            self.reply(ident, jpeg=base64.b64encode(data).decode('ascii'), width=width, height=height, dialog=dialog)
         view.takeSnapshotWithConfiguration_completionHandler_(config, done)
 
     def op_remote_tap(self, ident, command, timeout):
@@ -1570,6 +1634,26 @@ class Worker:
         else:
             view.reload()
         self.reply(ident)
+
+    def op_remote_begin(self, ident, command, timeout):
+        """A phone session starts: page dialogs are held for its answer (``hold_dialog``)."""
+        if not self._remote_allowed(ident):
+            return
+        self.remote = True
+        self.reply(ident)
+
+    def op_remote_end(self, ident, command, timeout):
+        self.end_remote()
+        self.reply(ident)
+
+    def op_remote_dialog(self, ident, command, timeout):
+        """The phone's answer to the held page dialog: ``answer`` is ``ok`` or ``cancel``."""
+        if not self._remote_allowed(ident):
+            return
+        answer = command.get('answer')
+        if answer not in ('ok', 'cancel'):
+            return self.fail(ident, 'bad_answer')
+        self.reply(ident, answered=self.answer_dialog(answer == 'ok'))
 
     def op_state(self, ident, command, timeout):
         # #765: ``navigations`` is a count of main-frame navigations (never a URL).
@@ -1654,6 +1738,19 @@ class Worker:
     def op_quit(self, ident, command, timeout):
         self.reply(ident)
         self.AppHelper.stopEventLoop()
+
+
+def _answer_dialog_handler(kind, handler, ok):
+    """Call a WebKit dialog completion handler the way its kind expects, once and never raising."""
+    try:
+        if kind == 'confirm':
+            handler(bool(ok))
+        elif kind == 'prompt':
+            handler(None)
+        else:
+            handler()
+    except Exception:
+        pass
 
 
 def _jpeg_bytes(AppKit, image, quality=FRAME_JPEG_QUALITY):
@@ -1757,12 +1854,16 @@ def _popup_delegate_class():
 
         def webView_runJavaScriptAlertPanelWithMessage_initiatedByFrame_completionHandler_(self, view, message, frame, handler):
             # #936: answered by the worker's rule; never left to WebKit's silent default.
+            if self.worker.hold_dialog('alert', message, handler):
+                return   # #939: the phone (or the Mac's sheet) answers
             try:
                 self.worker.js_dialog('alert', message)
             finally:
                 handler()
 
         def webView_runJavaScriptConfirmPanelWithMessage_initiatedByFrame_completionHandler_(self, view, message, frame, handler):
+            if self.worker.hold_dialog('confirm', message, handler):
+                return   # #939: the phone (or the Mac's sheet) answers
             answer = False
             try:
                 answer = bool(self.worker.js_dialog('confirm', message))
@@ -1771,6 +1872,8 @@ def _popup_delegate_class():
 
         def webView_runJavaScriptTextInputPanelWithPrompt_defaultText_initiatedByFrame_completionHandler_(
                 self, view, prompt, default, frame, handler):
+            if self.worker.hold_dialog('prompt', prompt, handler):
+                return   # #939: the phone (or the Mac's sheet) answers
             try:
                 self.worker.js_dialog('prompt', prompt)
             finally:
@@ -1881,12 +1984,16 @@ def _delegate_class():
 
         def webView_runJavaScriptAlertPanelWithMessage_initiatedByFrame_completionHandler_(self, view, message, frame, handler):
             # #936: answered by the worker's rule; never left to WebKit's silent default.
+            if self.worker.hold_dialog('alert', message, handler):
+                return   # #939: the phone (or the Mac's sheet) answers
             try:
                 self.worker.js_dialog('alert', message)
             finally:
                 handler()
 
         def webView_runJavaScriptConfirmPanelWithMessage_initiatedByFrame_completionHandler_(self, view, message, frame, handler):
+            if self.worker.hold_dialog('confirm', message, handler):
+                return   # #939: the phone (or the Mac's sheet) answers
             answer = False
             try:
                 answer = bool(self.worker.js_dialog('confirm', message))
@@ -1895,6 +2002,8 @@ def _delegate_class():
 
         def webView_runJavaScriptTextInputPanelWithPrompt_defaultText_initiatedByFrame_completionHandler_(
                 self, view, prompt, default, frame, handler):
+            if self.worker.hold_dialog('prompt', prompt, handler):
+                return   # #939: the phone (or the Mac's sheet) answers
             try:
                 self.worker.js_dialog('prompt', prompt)
             finally:

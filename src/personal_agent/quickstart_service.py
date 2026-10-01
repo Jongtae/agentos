@@ -85,7 +85,7 @@ from .browser_session import BrowserProfile, ascii_host, binding_digest, registr
 from .browser_jar import unexpired
 from .cli_browser_relay import BrowserRelay
 from .telegram_presence import (ATTENTION_ACTION, ATTENTION_ASK, ATTENTION_COOLDOWN, ATTENTION_MEMORY_ASK_FRESH, ATTENTION_PREPARED, ATTENTION_REMINDER,
-                                ATTENTION_REMINDER_HORIZON, ATTENTION_TOOL, CONTROL_DETAILS, CONTROL_RETRY, NO_STEP_LINE,
+                                ATTENTION_REMINDER_HORIZON, ATTENTION_TOOL, CLEAR_REACTION, CONTROL_DETAILS, CONTROL_RETRY, NO_STEP_LINE,
                                 CLOSING_CANDIDATES, DONE_REACTIONS, PROGRESS_CANDIDATES, RECEIVED_CANDIDATES,
                                 RECEIVED_REACTION, WAIT_CHAT_ACTION, WAIT_DRAFT, WROTE_REACTION, PresenceTiming, TelegramTurnAddressing,
                                 WaitState, draft_frame, draft_id_for, draft_step, outcome_reaction, pick_attention,
@@ -168,7 +168,6 @@ TOOL_PROBE = {
 TELEGRAM_CARD_GRACE_SECONDS = 3
 #: A Telegram request still queued/running after this long gets its one
 #: acknowledgement card; a shorter one answers in a single bubble (#510).
-TELEGRAM_ACK_AFTER_SECONDS = 4
 TELEGRAM_PHOTO_ALBUM_SETTLE_SECONDS = 2
 TELEGRAM_WORK_PHOTO_LIMIT = 10
 TELEGRAM_WORK_PHOTO_BYTES_LIMIT = 20 * 1024 * 1024
@@ -2294,6 +2293,7 @@ class AgentService:
             if changed:
                 if self.context_observations.cancel_work_requests(work_id):self.store.remove_telegram_photo(work_id)
                 self.update_task_card(self.store.job(work_id),'cancelled')
+                self._clear_queued_presence(self.store.job(work_id))
                 return True,'이전 요청을 취소했습니다.'
         if previous.get('status') not in ('queued','running') and self.context_observations.cancel_work_requests(work_id):
             # #774: a finished Work that asked for a location continues only on its
@@ -4405,43 +4405,36 @@ class AgentService:
         return ''
 
     def acknowledge_long_work(self, now=None):
-        """Acknowledge Work that is taking long, with the smallest native surface.
+        """Acknowledge Work the owner is waiting on, with the smallest native surface.
 
         Short Work answers in a single bubble, so nothing is sent when a
         request arrives.  Running Work gets Telegram-native presence only
         (`typing…`, then an ephemeral draft with Stop; see
         `present_waiting_work`, #581) - never a "processing" bubble.  Work
-        still *queued* behind another request after TELEGRAM_ACK_AFTER_SECONDS
-        gets its task card once, because only there is a durable 작업 취소
-        control meaningful.  Later card edits happen only on owner-relevant
-        transitions.  Runs on its own thread, so a blocking model call cannot
-        suppress it.
+        still *queued* behind another request shows only the 👀 on the
+        owner's message (#958): no task card and no buttons.  The owner
+        withdraws a queued Work in words (`cancel_focused_work`) or with
+        Telegram's native Stop (`ingest_stop`).  Runs on its own thread, so
+        a blocking model call cannot suppress it.  Returns the ids of queued
+        Work that got its 👀 on this call.
         """
         cfg=self.store.config('telegram',{})
         if not (cfg.get('enabled') and isinstance(cfg.get('user_id'),int)):return []
         self.present_waiting_work(now=now)
-        cutoff=(time.time() if now is None else now)-TELEGRAM_ACK_AFTER_SECONDS
         with self.store.db() as db:
-            rows=db.execute("SELECT j.id,j.message,j.chat_id,j.status FROM jobs j WHERE j.channel=? AND j.chat_id=? AND j.status='queued' AND j.created<=? AND NOT EXISTS (SELECT 1 FROM telegram_task_cards c WHERE c.job_id=j.id) ORDER BY j.created",
-                            (f"telegram:{cfg.get('generation')}",cfg['user_id'],cutoff)).fetchall()
+            rows=db.execute("SELECT id,message FROM jobs WHERE channel=? AND chat_id=? AND status='queued' ORDER BY created",
+                            (f"telegram:{cfg.get('generation')}",cfg['user_id'])).fetchall()
         acknowledged=[]
         for row in rows:
             if not self.is_natural_language(row['message']):continue
-            # Serialize card creation/reconciliation with terminal delivery.
-            # Otherwise a concurrent worker can send the answer while this
-            # Telegram acknowledgement is still in flight, reversing the
-            # owner's message order.
+            # Under the lock terminal delivery holds while sending, so the
+            # reaction can never land after a concurrent worker's answer.
             with self.lock:
-                current=self.store.job(row['id'])
-                if not current or current['status']!='queued':
-                    continue
-                self.create_task_card(row['id'],row['message'],row['chat_id'],state=current['status'])
-                card=self.store.task_card(row['id'])
-                if card and card['message_id']>0:
-                    acknowledged.append(row['id'])
-                    current=self.store.job(row['id'])
-                    if current and card and current['status']!=card['state']:
-                        self.update_task_card(current,current['status'])
+                job=self.store.job(row['id'])
+                if not job or job['status']!='queued' or not self._telegram_work(job):continue
+                state=self.presence.setdefault(job['id'],WaitState())
+                if self._react_received(job,state):
+                    acknowledged.append(job['id'])
         return acknowledged
 
     # --- PRESENCE-TG-01 / #581: native Telegram presence ------------------------
@@ -4540,6 +4533,21 @@ class AgentService:
             state.reaction=RECEIVED_REACTION
         return True
 
+    def _clear_queued_presence(self, job):
+        """A queued Work was cancelled: take its 👀 off the owner's message and forget its state (#958).
+
+        Queued Work has no delivery turn, so the outcome path that clears the
+        reaction for a cancelled Work (`_present_outcome`) never runs for it.
+        Best-effort like every presence call; the cancellation is already
+        durable.
+        """
+        if not job:return
+        state=self.presence.pop(job['id'],None)
+        if state is None or state.reaction is None:return
+        source=self.telegram_turns.source(job['id'])
+        if isinstance(source,int):
+            self._presence_call('set_message_reaction',job['chat_id'],source,CLEAR_REACTION)
+
     def _pending_progress_reaction(self, job, state):
         """Claim one new observed running step for an optional reaction judgment.
 
@@ -4556,7 +4564,7 @@ class AgentService:
         """Dispatch one optional judgment off the acknowledgement loop.
 
         The Telegram acknowledgement loop also refreshes typing/drafts and
-        queued Work cards. A slow provider must not stall that loop, so this
+        the 👀 of queued Work. A slow provider must not stall that loop, so this
         best-effort judgment runs on the existing background-thread seam and
         is single-flight across all Works.
         """
@@ -4697,9 +4705,7 @@ class AgentService:
                 if not job or job['status']!='running' or not self._telegram_work(job):continue
                 state=self.presence.get(job['id'])
                 if state is None or state.stopped:continue
-                surface=timing.wait_surface(now-job['created'],
-                                            durable_surface=self.store.task_card(job['id']) is not None,
-                                            draft_available=not state.draft_failed)
+                surface=timing.wait_surface(now-job['created'],draft_available=not state.draft_failed)
                 if surface not in (WAIT_CHAT_ACTION,WAIT_DRAFT):continue
                 if surface==WAIT_DRAFT:
                     # #718: the draft names the observed step in flight, as the latest line.
@@ -6659,30 +6665,15 @@ class AgentService:
             lines.append('Telegram 전달은 취소되었습니다.')
         return '\n'.join(lines)
 
-    def create_task_card(self, job_id, message, chat_id, state='queued'):
-        # This is deliberately a single best-effort send.  Retrying after an
-        # unknown Telegram response could create a second card for one request.
-        reserved_state=self.store.reserve_task_card(job_id,chat_id)
-        if not reserved_state:return
-        try:
-            result=self.telegram.send_message(chat_id,self.task_card_text(message,reserved_state),
-                                              self.task_card_markup(job_id,reserved_state))
-            message_id=result.get('message_id') if isinstance(result,dict) else None
-            if isinstance(message_id,int):
-                self.store.save_task_card(job_id,chat_id,message_id,reserved_state)
-        except ProviderError:
-            # A timeout or lost response does not prove Telegram rejected the
-            # message. Keep the reservation as unknown so polling cannot send
-            # a duplicate acknowledgement; queued work may still proceed.
-            self.store.mark_task_card_delivery_unknown(job_id)
-        except Exception:
-            self.store.mark_task_card_delivery_unknown(job_id)
-            raise
-        else:
-            if not isinstance(message_id,int):
-                self.store.mark_task_card_delivery_unknown(job_id)
-
     def update_task_card(self, job, state):
+        """Reconcile a task card that still exists for this Work.
+
+        Nothing sends a new card since #958 (queued Work shows only the 👀;
+        running Work the draft with Stop).  Cards sent before that change may
+        still sit in the owner's chat, so a state change keeps editing them
+        (and `running` deletes them) exactly as before; a Work without a card
+        is a no-op here.
+        """
         card=self.store.task_card(job['id'])
         if not card or card['message_id']<1 or card['state']==state:return
         if state=='running':
@@ -6877,6 +6868,7 @@ class AgentService:
                 if changed:
                     if self.context_observations.cancel_work_requests(job_id):self.store.remove_telegram_photo(job_id)
                     self.update_task_card(job,'cancelled')
+                    self._clear_queued_presence(job)
             elif authorized and isinstance(data,str) and data.startswith('p7x:'):
                 choice=self.store.telegram_context_choice(data[4:])
                 exact=(choice and choice['state']=='offered' and choice['generation']==generation
@@ -6894,7 +6886,6 @@ class AgentService:
                     if job:
                         try:self.telegram.edit_message_text(sender,message.get('message_id'),'선택한 컨텍스트를 이 요청에만 연결했습니다. 작업을 시작할게요.',{'inline_keyboard':[]})
                         except ProviderError:pass
-                        self.create_task_card(job['id'],job['message'],sender)
                         changed=True
             elif authorized and isinstance(data,str) and data.startswith('p7n:'):
                 job_id=data[4:]
@@ -6910,7 +6901,6 @@ class AgentService:
                 if job:
                     try:self.telegram.edit_message_text(sender,message.get('message_id'),'컨텍스트 없이 이 요청을 시작할게요.',{'inline_keyboard':[]})
                     except ProviderError:pass
-                    self.create_task_card(job['id'],job['message'],sender)
                     changed=True
             elif authorized and isinstance(data,str) and data.startswith('p7a:'):
                 parts=data.split(':')
@@ -7353,10 +7343,10 @@ class AgentService:
             if authorized and self.is_natural_language(text) and task_id:
                 if guided_context:
                     self.offer_telegram_context_choices(task_id,sender,generation)
-                # An ordinary request gets no card here: short Work answers in
-                # one bubble; running Work gets native typing/draft presence and
-                # only Work still queued after TELEGRAM_ACK_AFTER_SECONDS gets a
-                # card (`acknowledge_long_work`, #510/#581).
+                # An ordinary request gets no card: short Work answers in one
+                # bubble; queued Work shows only the 👀 on the owner's message
+                # and running Work gets native typing/draft presence
+                # (`acknowledge_long_work`, #510/#581/#958).
 
     def poll_telegram(self):
         with self.lock:
@@ -8713,7 +8703,7 @@ class AgentService:
                     self.store.put('telegram_status',{'state':'error','message':'Telegram 연결을 확인하세요. 수신을 다시 시도합니다.'})
                 self.stop.wait(.5)
         def acknowledge():
-            # Keep the four-second owner acknowledgement deadline independent
+            # Keep the owner-facing presence (👀, typing…, draft) independent
             # of Telegram's long poll and any network delay in receiving updates.
             while not self.stop.is_set():
                 try:

@@ -22,8 +22,7 @@ from personal_agent.conversation_projection import (BLOCKER_NO_AI_ROUTE, TERMINA
 from personal_agent.decision import (OUTCOME_DECIDED, FixtureDecisionEngine, SelectionDecision,
                                      UnavailableDecisionEngine, fixture_confidence)
 from personal_agent.providers import ModelAdapter, ProviderError
-from personal_agent.quickstart_service import (TELEGRAM_ACK_AFTER_SECONDS, TELEGRAM_CARD_GRACE_SECONDS,
-                                               AgentService)
+from personal_agent.quickstart_service import AgentService
 from personal_agent.quickstart_store import QuickStore
 
 CHAT = 4242
@@ -41,6 +40,7 @@ class ProjectionTestCase(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.store = QuickStore(Path(self.temp.name) / 'data')
         self.outbound = []      # ('send'|'edit', text) in the order the owner would see them
+        self.reactions = []     # setMessageReaction bodies (#958: the only queued-Work surface)
         self.text = '완료했습니다.'
         self.plan = []
         # #657: when set, the model ends a tool-using turn with a finish claim citing every result it was shown.
@@ -54,6 +54,8 @@ class ProjectionTestCase(unittest.TestCase):
             if url.endswith('/editMessageText'):
                 self.outbound.append(('edit', body['text']))
                 return {'ok': True, 'result': {'message_id': body['message_id']}}
+            if url.endswith('/setMessageReaction'):
+                self.reactions.append(body)
             if url.endswith('/getMe'):
                 return {'ok': True, 'result': {'username': 'owner_test_bot'}}
             return {'ok': True, 'result': {}}
@@ -88,7 +90,8 @@ class ProjectionTestCase(unittest.TestCase):
         """The owner sends one Telegram message; returns the job id."""
         self.update_id += 1
         self.service.ingest_update({'update_id': self.update_id, 'message': {
-            'from': {'id': CHAT}, 'chat': {'id': CHAT, 'type': 'private'}, 'text': text}}, GENERATION)
+            'message_id': self.update_id, 'from': {'id': CHAT}, 'chat': {'id': CHAT, 'type': 'private'},
+            'text': text}}, GENERATION)
         return self.store.jobs()[0]['id']
 
     def turn(self, text):
@@ -103,10 +106,11 @@ class ProjectionTestCase(unittest.TestCase):
         with self.store.db() as db:
             db.execute('UPDATE jobs SET created=? WHERE id=?', (time.time() - seconds, job_id))
 
-    def age_card(self, job_id, seconds):
+    def old_card(self, job_id, message_id, state='queued'):
+        """A task card sent before #958, aged past the worker's cancel grace window."""
+        self.store.save_task_card(job_id, CHAT, message_id, state)
         with self.store.db() as db:
-            db.execute('UPDATE telegram_task_cards SET created=? WHERE job_id=?',
-                       (time.time() - seconds, job_id))
+            db.execute('UPDATE telegram_task_cards SET created=? WHERE job_id=?', (time.time() - 60, job_id))
 
     def assistant_messages(self, job_id):
         with self.store.db() as db:
@@ -147,14 +151,14 @@ class ShortWorkTests(ProjectionTestCase):
     def test_no_acknowledgement_is_sent_for_work_that_finished_in_time(self):
         self.connect_model()
         job, _bubbles = self.turn('짧은 질문')
-        self.assertEqual(self.service.acknowledge_long_work(now=time.time() + TELEGRAM_ACK_AFTER_SECONDS + 1), [])
+        self.assertEqual(self.service.acknowledge_long_work(now=time.time() + 10), [])
         self.assertIsNone(self.store.task_card(job['id']))
 
 
 class LongWorkTests(ProjectionTestCase):
     """Matrix row G: one acknowledgement, then only owner-relevant changes."""
 
-    def test_long_work_gets_one_card_then_the_answer_and_no_per_event_edits(self):
+    def test_long_work_gets_the_received_reaction_then_the_answer_and_no_per_event_edits(self):
         self.connect_model()
         # This test asserts conversation/card projection, not live search
         # availability. Keep its three tool Events deterministic and offline.
@@ -172,12 +176,13 @@ class LongWorkTests(ProjectionTestCase):
         self.service.use_decision_engine(goal_engine(True))
         job_id = self.receive('제주 여행 준비 자료 조사해줘')
         self.assertEqual(self.outbound, [], 'nothing is said when the request arrives')
-        # The Work is still waiting after the acknowledgement delay (the worker was busy).
-        self.age(job_id, TELEGRAM_ACK_AFTER_SECONDS + 1)
+        # The Work is still waiting (the worker was busy): the 👀 is its only surface (#958).
+        self.age(job_id, 10)
         self.assertEqual(self.service.acknowledge_long_work(), [job_id])
-        self.assertEqual(self.outbound, [('send', '요청을 받았습니다. 곧 시작할게요.')])
-        self.assertEqual(self.service.acknowledge_long_work(), [], 'acknowledged once')
-        self.age_card(job_id, TELEGRAM_CARD_GRACE_SECONDS + 1)
+        self.assertEqual(self.outbound, [], 'no card, no buttons')
+        self.assertEqual([body['reaction'][0]['emoji'] for body in self.reactions], ['👀'])
+        self.assertEqual(self.service.acknowledge_long_work(), [], 'reacted once')
+        self.assertIsNone(self.store.task_card(job_id))
         self.service.run_one()
         self.service.deliver_one()
         job = self.store.job(job_id)
@@ -185,14 +190,10 @@ class LongWorkTests(ProjectionTestCase):
         with self.store.db() as db:
             events = db.execute("SELECT COUNT(*) AS n FROM tool_events WHERE job_id=? AND tool!='model'", (job_id,)).fetchone()['n']
         self.assertGreaterEqual(events, 3, 'the Events exist internally')
-        kinds = [kind for kind, _ in self.outbound]
-        # Card, its two state edits (running: the cancel button goes away;
-        # terminal), and the answer.  Event count did not become message count.
-        self.assertEqual(self.outbound[0], ('send', '요청을 받았습니다. 곧 시작할게요.'))
-        self.assertEqual(self.outbound[-1][0], 'send')
+        # The answer is the only bubble.  Event count did not become message count.
+        self.assertEqual([kind for kind, _ in self.outbound], ['send'])
         self.assertTrue(self.outbound[-1][1].startswith(self.text), self.outbound[-1][1])
-        self.assertEqual(kinds.count('send'), 2)
-        self.assertLessEqual(kinds.count('edit'), 2)
+        self.assertEqual(len(self.reactions), 2, 'the 👀 once (not again when the Work runs), then the outcome')
         self.assertOneVoice(self.outbound)
 
     def test_running_work_gets_native_presence_and_no_processing_card(self):
@@ -201,7 +202,7 @@ class LongWorkTests(ProjectionTestCase):
         job_id = self.receive('진행 중인 긴 요청')
         with self.store.db() as db:
             db.execute("UPDATE jobs SET status='running' WHERE id=?", (job_id,))
-        self.age(job_id, TELEGRAM_ACK_AFTER_SECONDS + 1)
+        self.age(job_id, 10)
         self.assertEqual(self.service.acknowledge_long_work(), [])
         self.assertEqual(self.outbound, [], 'no "요청을 처리하고 있어요" bubble')
         self.assertIsNone(self.store.task_card(job_id))
@@ -214,99 +215,42 @@ class LongWorkTests(ProjectionTestCase):
         self.assertEqual(self.service.acknowledge_long_work(), [])
         self.assertEqual(self.outbound, [])
 
-    def test_card_is_reconciled_if_work_finishes_while_telegram_accepts_it(self):
+    def test_a_queued_work_is_withdrawn_by_the_owner_s_words_not_a_button(self):
+        """#958: no 작업 취소 button; the existing cancel path answers the owner's words."""
+        self.connect_model()
+        job_id = self.receive('오래 걸릴 요청')
+        self.assertEqual(self.service.acknowledge_long_work(), [job_id])
+        self.assertEqual(self.outbound, [])
+        cancelled, reply = self.service.cancel_focused_work(self.store.job(job_id), CHAT)
+        self.assertTrue(cancelled)
+        self.assertEqual(reply, '이전 요청을 취소했습니다.')
+        self.assertEqual(self.store.job(job_id)['status'], 'cancelled')
+        self.assertFalse(self.service.run_one(), 'cancelled Work never runs')
+        self.assertEqual(self.outbound, [], 'no card to edit')
+
+    def test_a_card_from_before_the_change_is_still_reconciled(self):
+        """Cards sent before #958 may still sit in the chat: their edits keep working."""
         self.connect_model()
         job_id = self.receive('긴 요청을 처리해 줘')
-        self.age(job_id, TELEGRAM_ACK_AFTER_SECONDS + 1)
-        original = self.service.telegram_transport
-        raced = False
-        delivery_thread = None
-
-        def transport(url, body=None, headers=None, timeout=60):
-            nonlocal raced, delivery_thread
-            if url.endswith('/editMessageText') and body.get('message_id') == -1:
-                raise ProviderError('card reservation has no remote message id yet')
-            if (not raced and url.endswith('/sendMessage')
-                    and body.get('text') == '요청을 받았습니다. 곧 시작할게요.'):
-                raced = True
-                # Model the Work finishing during Telegram's send.
-                with self.store.db() as db:
-                    db.execute("UPDATE jobs SET status='succeeded',response=?,delivery='pending' WHERE id=?",
-                               (self.text,job_id))
-                self.service.update_task_card(self.store.job(job_id),'succeeded')
-                delivery_thread = threading.Thread(target=self.service.deliver_one)
-                delivery_thread.start()
-                delivery_thread.join(timeout=0.05)
-                self.assertTrue(delivery_thread.is_alive(), 'terminal delivery waits for card reconciliation')
-            return original(url, body, headers, timeout)
-
-        self.service.telegram_transport = transport
-        self.assertEqual(self.service.acknowledge_long_work(), [job_id])
-        delivery_thread.join(timeout=2)
-        self.assertFalse(delivery_thread.is_alive())
+        self.old_card(job_id, 909)
+        self.assertEqual(self.service.acknowledge_long_work(), [job_id], 'the 👀 does not depend on the card')
+        self.service.run_one()
+        self.service.deliver_one()
         self.assertEqual(self.store.job(job_id)['status'], 'succeeded')
-        self.assertEqual(self.store.task_card(job_id)['state'], 'succeeded', self.outbound)
-        self.assertEqual([kind for kind, _text in self.outbound], ['send', 'edit', 'send'])
-        self.assertEqual(self.outbound[0][1], '요청을 받았습니다. 곧 시작할게요.')
-        self.assertEqual(self.outbound[1][1], '요청을 처리했어요.')
-        self.assertTrue(self.outbound[2][1].startswith(self.text))
+        # This transport never confirms a delete, so the card stays and its terminal edit lands as before.
+        self.assertEqual(self.store.task_card(job_id)['state'], 'succeeded')
+        self.assertEqual([kind for kind, _text in self.outbound], ['edit', 'send'])
+        self.assertEqual(self.outbound[0][1], '요청을 처리했어요.')
 
-    def test_in_flight_card_reservation_is_not_expired_by_the_grace_check(self):
+    def test_an_old_card_s_cancel_button_still_cancels_queued_work(self):
         job_id = self.receive('오래 걸릴 요청')
-        self.age(job_id, TELEGRAM_ACK_AFTER_SECONDS + 1)
-        original = self.service.telegram_transport
-        attempted = []
-
-        def transport(url, body=None, headers=None, timeout=60):
-            if url.endswith('/sendMessage') and body.get('text') == '요청을 받았습니다. 곧 시작할게요.':
-                with self.store.db() as db:
-                    db.execute('UPDATE telegram_task_cards SET created=? WHERE job_id=?',
-                               (time.time() - TELEGRAM_CARD_GRACE_SECONDS - 1, job_id))
-                attempted.append(self.service.run_one())
-            return original(url, body, headers, timeout)
-
-        self.service.telegram_transport = transport
-        self.assertEqual(self.service.acknowledge_long_work(), [job_id])
-        self.assertEqual(attempted, [False])
-        self.assertEqual(self.store.job(job_id)['status'], 'queued')
-
-    def test_uncertain_card_send_is_not_retried_and_does_not_strand_work(self):
-        job_id = self.receive('오래 걸릴 요청')
-        self.age(job_id, TELEGRAM_ACK_AFTER_SECONDS + 1)
-        sends = []
-
-        def uncertain(url, body=None, headers=None, timeout=60):
-            if url.endswith('/sendMessage'):
-                sends.append(body['text'])
-                raise ProviderError('response lost')
-            return self.transport(url, body, headers, timeout)
-
-        self.service.telegram_transport = uncertain
-        self.assertEqual(self.service.acknowledge_long_work(), [])
-        card = self.store.task_card(job_id)
-        self.assertEqual(card['message_id'], -2)
-        self.assertEqual(self.service.acknowledge_long_work(), [])
-        self.assertEqual(len(sends), 1)
-        self.age_card(job_id, TELEGRAM_CARD_GRACE_SECONDS + 1)
-        self.assertTrue(self.service.run_one(), 'unknown acknowledgement must not block the queued Work')
-
-    def test_uncertain_card_can_be_adopted_from_owner_cancel_callback(self):
-        job_id = self.receive('오래 걸릴 요청')
-        self.age(job_id, TELEGRAM_ACK_AFTER_SECONDS + 1)
-
-        def uncertain(url, body=None, headers=None, timeout=60):
-            if url.endswith('/sendMessage'):
-                raise ProviderError('response lost')
-            return self.transport(url, body, headers, timeout)
-
-        self.service.telegram_transport = uncertain
-        self.assertEqual(self.service.acknowledge_long_work(), [])
-        self.assertFalse(self.service.run_one(), 'keep a short cancellation window while delivery is uncertain')
+        self.old_card(job_id, 909)
         self.service.ingest_callback({'id': 'cb-1', 'from': {'id': CHAT}, 'data': f'p7c:{job_id}',
                                       'message': {'message_id': 909, 'chat': {'id': CHAT, 'type': 'private'}}},
                                      GENERATION)
         self.assertEqual(self.store.job(job_id)['status'], 'cancelled')
-        self.assertEqual(self.store.task_card(job_id)['message_id'], 909)
+        self.assertEqual(self.store.task_card(job_id)['state'], 'cancelled')
+        self.assertEqual(self.outbound, [('edit', '이 요청은 취소됨 상태입니다.')])
 
 
 class BlockedTurnTests(ProjectionTestCase):

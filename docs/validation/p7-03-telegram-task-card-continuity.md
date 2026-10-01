@@ -4,6 +4,10 @@ Status: awaiting an owner-run live acceptance. This file is a procedure, not
 evidence that a Telegram account has been exercised. The release loop stays
 blocked until the authenticated owner records the completed observations.
 
+Successor note (PRESENCE-TG-11 / #958, 2026-10-01): no task card is sent any
+more. Queued Work shows only the received reaction; running Work the native
+typing/draft presence with Stop. The card steps below are historical scope.
+
 Successor note (PRESENCE-CONV-01 / #510, 2026-09-24): the task card is now the
 acknowledgement for *long-running* Work only. A request that finishes within
 `TELEGRAM_ACK_AFTER_SECONDS` answers in a single bubble and shows no card; a

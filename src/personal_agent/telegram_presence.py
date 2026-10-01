@@ -522,16 +522,15 @@ class PresenceTiming:
     #: Telegram's guidance of about one message per second in one chat.
     dots_refresh: float = 1.5
 
-    def wait_surface(self, elapsed, *, durable_surface=False, draft_available=True):
+    def wait_surface(self, elapsed, *, draft_available=True):
         """The one wait surface for Work that has been waiting ``elapsed`` seconds.
 
-        ``durable_surface`` is true when a task card already represents this
-        Work; then a draft would be a second progress surface, so only
-        ``typing…`` is used.
+        The draft is the only progress surface of running Work (#958): no
+        task card represents a Work any more, so nothing suppresses it.
         """
         if elapsed < self.chat_action_after:
             return WAIT_NONE
-        if elapsed >= self.draft_after and draft_available and not durable_surface:
+        if elapsed >= self.draft_after and draft_available:
             return WAIT_DRAFT
         return WAIT_CHAT_ACTION
 

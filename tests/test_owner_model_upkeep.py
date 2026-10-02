@@ -180,7 +180,7 @@ class Tick(Upkeep):
         self.assertEqual(item['category']['enum'], list(om.CATEGORIES))
         self.assertEqual(item['kind']['enum'], ['stated', 'inferred'])
         self.assertIn('model-stated', question)
-        self.assertIn('never assert it as fact', question)
+        self.assertIn('remembered like a stated fact and the owner is told with an undo', question)
 
     def test_a_stored_secret_never_reaches_the_judgment_facts(self):
         self.store.secret('telegram_token', SECRET)

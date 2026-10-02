@@ -53,7 +53,8 @@ class SaveAndTell(TelegramHarness):
     def told(self, **kwargs):
         """Run, deliver the reply, deliver the notice; return (job, notice, notification row)."""
         job_id = self.saved_turn(**kwargs)
-        self.assertEqual(self.notification(job_id, MEMORY_SAVED_KIND), [], 'nothing is told before the reply')
+        self.assertEqual([row['state'] for row in self.notification(job_id, MEMORY_SAVED_KIND)], ['held'],
+                         'held at save time; nothing is told before the reply')
         self.service.deliver_one()
         self.assertEqual(self.sends()[-1]['text'], self.text, 'the answer as the secretary said it')
         self.assertTrue(self.service.deliver_notification())
@@ -67,7 +68,7 @@ class SaveAndTell(TelegramHarness):
     def upkeep_saves(self, job_id, key=SECOND_KEY, content=SECOND_VALUE):
         """Run the #805 upkeep path with a scripted result that saved one fact at once."""
         def run(job, judgments, **_kwargs):
-            memory = self.store.save_memory(key, content, MEMORY_OWNER, work_id=job['id'])
+            memory = self.store.save_memory(key, content, MEMORY_OWNER, work_id=job['id'], notice=True)
             return 'done', 1, 'recorded', {'applied': [{'memory_key': key, 'memory_id': memory['id'],
                                                          'outcome': 'memory', 'auto_saved': True}]}
         self.service.owner_model.run = run
@@ -121,14 +122,73 @@ class SaveAndTell(TelegramHarness):
                     self.assertNotIn('👎', button['text'])
         self.assertEqual(self.notification(job['id'], MEMORY_CANDIDATES_KIND), [])
 
-    def test_no_notice_after_an_unknown_reply_delivery(self):
+    # --- review P2: a save is never untold ---------------------------------------------
+
+    def test_the_save_holds_its_notice_in_the_same_transaction(self):
+        job_id = self.saved_turn()
+        [row] = self.notification(job_id, MEMORY_SAVED_KIND)
+        self.assertEqual(row['state'], 'held', 'durable at save time, released after the reply')
+        self.assertFalse(self.service.deliver_notification(), 'held is not queued: nothing goes out before the reply')
+        self.service._memory_saved_release_sweep = 0
+        self.service.release_memory_saved_notices()
+        self.assertEqual(self.notification(job_id, MEMORY_SAVED_KIND)[0]['state'], 'held', 'the reply is still pending')
+
+    def test_the_notice_is_told_after_an_unknown_reply_delivery(self):
         job_id = self.saved_turn()
         self.lose_reply = True
         self.service.deliver_one()
         self.assertEqual(self.store.job(job_id)['delivery'], 'unknown')
-        self.assertEqual(self.notification(job_id, MEMORY_SAVED_KIND), [])
+        self.assertEqual(self.notification(job_id, MEMORY_SAVED_KIND)[0]['state'], 'queued')
+        self.assertTrue(self.service.deliver_notification())
+        [row] = self.notification(job_id, MEMORY_SAVED_KIND)
+        self.assertEqual((row['state'], self.sends()[-1]['text']), ('sent', f'기억했어요: {VALUE}'))
+        self.tap(f"p7u:{row['id']}:1", row['message_id'])
+        self.assertEqual(self.store.memories(), [], 'the undo works on the notice that followed the unknown reply')
+
+    def test_a_crash_between_the_reply_and_the_release_is_recovered_by_the_sweep(self):
+        job_id = self.saved_turn()
+        real = self.service.release_memory_saved
+        self.service.release_memory_saved = lambda job: (_ for _ in ()).throw(RuntimeError('crash'))
+        self.service.deliver_one()
+        self.service.release_memory_saved = real
+        self.assertEqual(self.store.job(job_id)['delivery'], 'sent')
+        self.assertEqual(self.notification(job_id, MEMORY_SAVED_KIND)[0]['state'], 'held')
         self.assertFalse(self.service.deliver_notification())
-        self.assertEqual([m['content'] for m in self.store.memories()], [VALUE], 'saved all the same; 내 기록 shows it')
+        self.service._memory_saved_release_sweep = 0
+        self.service.release_memory_saved_notices()
+        self.assertEqual(self.notification(job_id, MEMORY_SAVED_KIND)[0]['state'], 'queued')
+        self.assertTrue(self.service.deliver_notification())
+        self.assertEqual(self.sends()[-1]['text'], f'기억했어요: {VALUE}')
+
+    def test_a_notice_lost_in_sending_is_told_again_after_a_restart(self):
+        job, _notice, row = self.told()
+        # A crash while the notice was being sent leaves 'sending'; recover() marks it 'unknown' (#581).
+        self.store.update_notification(row['id'], 'sending')
+        self.store.recover()
+        self.assertEqual(self.notification(job['id'], MEMORY_SAVED_KIND)[0]['state'], 'unknown')
+        sends = len(self.sends())
+        self.service._memory_saved_release_sweep = 0
+        self.service.release_memory_saved_notices()
+        self.assertTrue(self.service.deliver_notification())
+        self.assertEqual(len(self.sends()), sends + 1)
+        [again] = self.notification(job['id'], MEMORY_SAVED_KIND)
+        self.assertEqual((again['state'], self.sends()[-1]['text']), ('sent', f'기억했어요: {VALUE}'))
+        self.assertEqual(self.binding(again)['retells'], 1)
+        self.tap(f"p7u:{again['id']}:1", again['message_id'])
+        self.assertEqual(self.store.memories(), [])
+        # Told again at most once: a second loss stays in 내 기록.
+        self.store.update_notification(again['id'], 'unknown')
+        self.service._memory_saved_release_sweep = 0
+        self.service.release_memory_saved_notices()
+        self.assertEqual(self.notification(job['id'], MEMORY_SAVED_KIND)[0]['state'], 'unknown')
+
+    def test_an_upkeep_save_after_an_unknown_reply_is_told_too(self):
+        job_id = self.saved_turn()
+        self.lose_reply = True
+        self.service.deliver_one()
+        self.assertTrue(self.service.deliver_notification())
+        self.upkeep_saves(job_id)
+        self.assertEqual(self.edits()[-1]['text'], f'기억했어요\n1. {VALUE}\n2. {SECOND_VALUE}')
 
     def test_a_web_work_tells_nothing_on_telegram(self):
         job_id = self.saved_turn(channel=False)
@@ -315,6 +375,34 @@ class SaveAndTell(TelegramHarness):
         self.assertEqual(len(self.binding(row)['items']), 1)
         self.tap(f"p7u:{row['id']}:a", row['message_id'])
         self.assertEqual([m['content'] for m in self.store.memories()], [SECOND_VALUE], 'the unshown fact is never undone')
+        # Review P3: the refused edit fell back to a notice of its own, so the fact is still told.
+        self.assertTrue(self.service.deliver_notification())
+        self.assertEqual(self.sends()[-1]['text'], f'기억했어요: {SECOND_VALUE}')
+        [upkeep] = self.notification(job['id'], MEMORY_SAVED_UPKEEP_KIND)
+        self.tap(f"p7u:{upkeep['id']}:1", upkeep['message_id'])
+        self.assertEqual(self.store.memories(), [])
+
+    def test_a_joined_fact_restarts_the_undo_window(self):
+        job, _notice, row = self.told()
+        binding = self.binding(row)
+        binding['sent'] -= 6 * 86400
+        self.store.update_notification(row['id'], 'sent', fingerprint=json.dumps(binding))
+        self.upkeep_saves(job['id'])
+        self.assertGreater(self.binding(row)['sent'], binding['sent'] + 5 * 86400, 'review P3: the week restarts at the join')
+        self.tap(f"p7u:{row['id']}:2", row['message_id'])
+        self.assertEqual([m['content'] for m in self.store.memories()], [VALUE])
+
+    def test_a_deleted_previous_value_is_not_shown_as_empty(self):
+        kept = self.store.save_memory(KEY, '서울 역삼 오피스')
+        job_id = self.saved_turn()
+        with self.store.db() as db:
+            db.execute('DELETE FROM memories WHERE id=?', (kept['id'],))
+        self.service.deliver_one()
+        self.assertTrue(self.service.deliver_notification())
+        self.assertEqual(self.sends()[-1]['text'], f'기억했어요: {VALUE}', 'review P3: no "(전에는 )"')
+        [row] = self.notification(job_id, MEMORY_SAVED_KIND)
+        self.tap(f"p7u:{row['id']}:1", row['message_id'])
+        self.assertEqual(self.edits()[-1]['text'], f'되돌렸어요: {VALUE}')
 
     def test_an_upkeep_fact_after_an_undone_notice_gets_its_own_notice(self):
         job, _notice, row = self.told()
@@ -532,7 +620,9 @@ class Guidance(unittest.TestCase):
         self.assertIn('remembered at once and the owner is told afterwards with an undo', save_memory['description'])
         self.assertNotIn('asked with one tap', save_memory['description'])
         self.assertNotIn('candidate', save_memory['description'])
-        self.assertIn('Never save an inference as a fact, and never save a credential', save_memory['description'])
+        self.assertIn('may be saved the same way, as what you inferred', save_memory['description'])
+        self.assertIn('Never save a credential', save_memory['description'])
+        self.assertNotIn('Never save an inference as a fact', save_memory['description'])
         self.assertIn("Speak as the owner's secretary", CORE_INSTRUCTIONS)
 
 

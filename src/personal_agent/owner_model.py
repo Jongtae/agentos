@@ -109,7 +109,7 @@ QUESTION = ('From this one finished request, propose durable facts about the own
             'what the assistant answered (model-stated) and is never by itself a fact about the owner. Use kind '
             '"stated" only for what the owner said about themselves in owner_request, and write its content in the '
             'owner\'s own words. Use kind "inferred" for a reasonable inference from what the owner said (for '
-            'example a routine); the owner can undo it, so never assert it as fact. category is '
+            'example a routine); it is remembered like a stated fact and the owner is told with an undo (#918: the owner asked for exactly this, for example "배우자가 있음"). category is'
             'one of: ' + ', '.join(CATEGORIES) + '. memory_key starts with "profile." and names the fact, not '
             'the request (profile.<category>.<name>); when the fact updates a key already in owner_profile, use '
             'that key and set supersedes_key to it, otherwise supersedes_key is an empty string. content and '
@@ -442,7 +442,8 @@ class Upkeep:
             # an undo (the Work's memory_saved notice) instead of a per-fact #597 judgment and an ask.
             # A write is not a model call, so the cap and the deadline do not stop it; the pause does.
             try:
-                memory = self.store.save_memory(key, content, MEMORY_OWNER, work_id=job['id'])
+                # Review: the owner notice is held in the same transaction as the row, so a save is never untold.
+                memory = self.store.save_memory(key, content, MEMORY_OWNER, work_id=job['id'], notice=True)
             except ValueError:
                 dropped.append({'key_digest': key_digest(key), 'reason': 'store-refused'})
                 continue

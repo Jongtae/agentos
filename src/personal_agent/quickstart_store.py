@@ -440,12 +440,40 @@ class QuickStore:
                    (memory_id,memory_key,content,time.time(),previous['id'] if previous else None,'current',owner_key,work_key,digest,candidate_id))
         return self._memory_row(db.execute('SELECT * FROM memories WHERE id=?',(memory_id,)).fetchone())
 
-    def save_memory(self, memory_key, content, owner_id='local-owner', work_id=None):
+    #: #918 review: the Telegram notice kind a direct save holds in its own transaction.
+    MEMORY_SAVED_NOTICE_KIND='memory_saved'
+    #: The notice's state while it waits for the Work's reply to be delivered.
+    NOTICE_HELD='held'
+
+    def save_memory(self, memory_key, content, owner_id='local-owner', work_id=None, notice=False):
+        """Write one current Memory row; with ``notice``, hold its owner notice durably in the same transaction (#918).
+
+        A direct save by the owner's own AI must never end without the owner
+        being told.  When the Work is a Telegram Work, a ``memory_saved``
+        notification row is inserted ``held`` here (``INSERT OR IGNORE``: one
+        per Work); the service releases it after the reply, and a sweep
+        releases what a crash or an unknown delivery left behind.
+        """
         memory_key,content=self._memory_value(memory_key,content);owner_key=self._memory_binding(owner_id)
         work_key=self._work_binding(work_id) if work_id is not None else None
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
-            return self._save_memory(db,memory_key,content,owner_key,work_key)
+            row=self._save_memory(db,memory_key,content,owner_key,work_key)
+            if notice and isinstance(work_id,str):
+                job=db.execute('SELECT channel,chat_id FROM jobs WHERE id=?',(work_id,)).fetchone()
+                channel=str(job['channel'] or '') if job else ''
+                if job and channel.startswith('telegram:') and isinstance(job['chat_id'],int):
+                    db.execute('INSERT OR IGNORE INTO telegram_notifications VALUES (?,?,?,?,?,?,?,?,?)',
+                               (str(uuid.uuid4()),work_id,job['chat_id'],channel[len('telegram:'):],self.MEMORY_SAVED_NOTICE_KIND,
+                                json.dumps({'items':[[row['id'],row['content_digest']]],'more':0}),self.NOTICE_HELD,None,time.time()))
+            return row
+
+    def held_notifications(self, kind):
+        """Held notices of ``kind`` with their Work's delivery state, oldest first (#918 review: release sweep)."""
+        with self.db() as db:
+            rows=db.execute('SELECT n.*, j.delivery AS job_delivery FROM telegram_notifications n LEFT JOIN jobs j ON j.id=n.job_id '
+                            'WHERE n.kind=? AND n.state=? ORDER BY n.created',(kind,self.NOTICE_HELD)).fetchall()
+            return [dict(row) for row in rows]
 
     def save_memory_candidate(self, job_id, memory_key, content, owner_id='local-owner', work_id=None):
         memory_key,content=self._memory_value(memory_key,content)
@@ -1386,6 +1414,12 @@ class QuickStore:
         with self.db() as db:
             return db.execute('DELETE FROM telegram_task_cards WHERE job_id=? AND message_id=?',
                               (job_id,message_id)).rowcount == 1
+
+    def notification_of(self, job_id, kind):
+        """The one notification of ``kind`` on ``job_id`` (``UNIQUE(job_id, kind)``), or None."""
+        with self.db() as db:
+            row=db.execute('SELECT * FROM telegram_notifications WHERE job_id=? AND kind=?',(job_id,kind)).fetchone()
+            return dict(row) if row else None
 
     def notification(self, notification_id):
         with self.db() as db:

@@ -82,7 +82,9 @@ class ProfileJudgmentAndGuidance(unittest.TestCase):
         self.assertIn('where they live or work, a preference, an allergy, a routine', save_memory)
         # #918 slice (a): remembered at once; the owner is told afterwards, with undo.
         self.assertIn('it is remembered at once and the owner is told afterwards with an undo', save_memory)
-        self.assertIn('Never save an inference as a fact, and never save a credential', save_memory)
+        # #918: an inferred durable fact is saved and told with undo too; a credential never.
+        self.assertIn('as what you inferred', save_memory)
+        self.assertIn('Never save a credential', save_memory)
         for text in (save_memory, list_memory, API_TOOL_GUIDANCE):
             self.assertNotIn('explicit owner request', text)
             self.assertNotIn('explicitly owner-authorized', text)

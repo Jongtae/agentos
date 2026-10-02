@@ -34,8 +34,8 @@ from test_agency_loop import CFG, Script, call, finish, judgments
 
 SKILL = 'agentos/agentos-management'
 FOLDER = BUNDLED_ROOT / 'agentos-management'
-ASSISTANTS = {'@main': {'name': '내 비서', 'state': 'paired', 'main': True},
-              'family-1': {'name': '아내 비서', 'state': 'paired', 'main': False},
+#: The *other* assistants, as ``family_share.instances`` lists them: never the current instance itself.
+ASSISTANTS = {'family-1': {'name': '아내 비서', 'state': 'paired', 'main': False},
               'family-2': {'name': '둘째 비서', 'state': 'setting_up', 'main': False}}
 
 
@@ -47,9 +47,12 @@ class _Service(unittest.TestCase):
         self.service = AgentService(self.store)
         self.started = []
         self.service.start_family_setup = lambda display_name, name=None, notify=None: self.started.append(display_name) or {'state': 'requested'}
-        patcher = mock.patch('personal_agent.family_share.instances', return_value=dict(ASSISTANTS))
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for target, value in (('personal_agent.family_share.instances', dict(ASSISTANTS)),
+                              # The current instance's own bot name, read from its own store.
+                              ('personal_agent.family_share.display_name', '내 비서')):
+            patcher = mock.patch(target, return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.settings = SettingsOrchestrator(self.store, service=self.service)
 
     def tearDown(self):
@@ -70,6 +73,11 @@ class TheSkillIsBundledContent(_Service):
         self.assertEqual(loaded['resources'], ['references/family.md', 'references/main-ai.md', 'references/sharing.md'])
         for reference in loaded['resources']:
             self.assertTrue(binding.resource(SKILL, reference)['content'])
+
+    def test_a_new_name_is_the_owners_words_not_a_listed_value(self):
+        """#973 review: creating something new must not be blocked by the "only listed values" rule."""
+        text = (FOLDER / 'SKILL.md').read_text()
+        self.assertIn('When the change creates something new, the value is not listed', text)
 
     def test_it_points_only_at_the_existing_settings_tools(self):
         text = '\n'.join(path.read_text() for path in sorted(FOLDER.rglob('*.md')))
@@ -106,8 +114,10 @@ class RepeatedCreationMakesNoDuplicate(_Service):
         result = self.settings.confirm('owner', 'web', draft['draft_id'], draft['digest'])
         self.assertEqual((result['state'], self.started), ('requested', ['둘째 비서']))
 
-    def test_the_owners_own_assistant_name_is_not_reused(self):
-        with self.assertRaisesRegex(SettingsError, '이미 있어요'):
+    def test_the_current_assistants_own_name_is_not_reused(self):
+        """#973 review: the listing leaves the current instance out, so its own name is checked separately."""
+        self.assertNotIn('내 비서', [row['name'] for row in ASSISTANTS.values()])
+        with self.assertRaisesRegex(SettingsError, '이 비서의 이름'):
             self.settings.propose('owner', 'web', 'family', 'add', '내 비서')
 
 

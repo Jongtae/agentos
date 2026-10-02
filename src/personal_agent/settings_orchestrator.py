@@ -432,6 +432,11 @@ class SettingsOrchestrator:
             from . import family_share
             same = [(instance, item) for instance, item in (row["share_site"].get("assistants") or {}).items()
                     if " ".join(str(item.get("name") or "").split()).lower() == name.lower() and item.get("state") == "paired"]
+            # The listing leaves this instance out (it never offers itself), so its own bot name is checked here.
+            own = " ".join(str(family_share.display_name(self.store.root) or "").split())
+            if own and own.lower() == name.lower():
+                raise SettingsError(f"'{name}'은(는) 지금 대화하고 있는 이 비서의 이름이에요. 새로 만들지 않았어요. "
+                                    "가족의 비서라면 다른 이름으로 다시 요청해 주세요.")
             if same:
                 listed = ", ".join(family_share.describe(instance, item) for instance, item in same)
                 raise SettingsError(f"'{name}' 비서는 이미 있어요: {listed}. 새로 만들지 않았어요. "

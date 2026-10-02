@@ -84,6 +84,7 @@ GITHUB_TREE = re.compile(r'^(?:https://)?github\.com/([A-Za-z0-9][A-Za-z0-9_.-]*
 REVOKED_TEXT = ('이 작업이 읽은 스킬({skill})이 작업 중에 꺼지거나 바뀌어 이 작업은 더 진행하지 않았어요. '
                 '같은 요청을 다시 보내면 지금 설정으로 새로 시작해요.')
 UNAVAILABLE_TEXT = '이 작업에서 쓸 수 있는 스킬 목록에 없는 스킬이에요. 스킬 없이 진행하세요.'
+OUTDATED_TEXT = '이 작업이 시작될 때의 스킬({skill}) 버전이 바뀌었거나 꺼져 읽지 않았어요. 스킬 없이 진행하세요.'
 
 
 class SkillError(ValueError):
@@ -581,6 +582,9 @@ class SkillBinding:
         self.library = library
         self.entries = {entry['skill']: entry for entry in entries}
         self.loaded = {}
+        #: The withdrawn skill that stopped this Work (#977 review): once set it stays set, so a
+        #: later rollback to the same content never revives the Work.
+        self.revoked = None
         self.loads = 0
         self.resource_reads = 0
 
@@ -609,8 +613,11 @@ class SkillBinding:
         entry = self.entries.get(skill if isinstance(skill, str) else '')
         if entry is None:
             raise SkillError(UNAVAILABLE_TEXT, 'skill_unavailable')
+        if self.revoked:
+            raise SkillError(REVOKED_TEXT.format(skill=self.revoked), 'skill_revoked')
         if not self.library.current(entry):
-            raise SkillError(REVOKED_TEXT.format(skill=entry['skill']), 'skill_revoked')
+            # Not loaded yet: this Work simply cannot use that revision; its other tools are unaffected.
+            raise SkillError(OUTDATED_TEXT.format(skill=entry['skill']), 'skill_unavailable')
         return entry
 
     def recall(self, store, job_id):
@@ -623,8 +630,16 @@ class SkillBinding:
             with store.db() as db:
                 rows = db.execute("SELECT detail FROM tool_events WHERE job_id=? AND tool='skill_load' AND status='succeeded'",
                                   (job_id,)).fetchall()
+                stopped = db.execute("SELECT detail FROM tool_events WHERE job_id=? AND status='failed' AND detail LIKE ?",
+                                     (job_id, '%skill_revoked%')).fetchall()
         except Exception:
             return
+        for (detail,) in stopped:
+            try:
+                if json.loads(detail).get('code') == 'skill_revoked':
+                    self.revoked = self.revoked or '이 작업이 읽은 스킬'
+            except (TypeError, ValueError, AttributeError):
+                continue
         for (detail,) in rows:
             try:
                 evidence = json.loads(detail).get('evidence') or {}
@@ -635,9 +650,12 @@ class SkillBinding:
                 self.loaded.setdefault(entry['skill'], entry)
 
     def check_current(self):
-        """Refuse when a skill this Work loaded is no longer current (every later tool call)."""
+        """Refuse when a skill this Work loaded is no longer current (every later tool call), and from then on."""
+        if self.revoked:
+            raise SkillError(REVOKED_TEXT.format(skill=self.revoked), 'skill_revoked')
         for skill, entry in sorted(self.loaded.items()):
             if not self.library.current(entry):
+                self.revoked = skill
                 raise SkillError(REVOKED_TEXT.format(skill=skill), 'skill_revoked')
 
     def identity(self, entry):

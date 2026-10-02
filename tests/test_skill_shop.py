@@ -75,7 +75,7 @@ class ReferencePackages(unittest.TestCase):
         method = '\n'.join(path.read_text() for path in sorted((ROOT / 'skills' / SHOPPING).rglob('*.md')))
         for phrase in ('Read the cart back', 'click once per unit, and read the quantity after each click', 'read the cart before doing anything else', '**Add** N',
                        '**Set** the total to N', '**Ensure** at least N', 'do not pick a substitute silently',
-                       'Do not send a cart link as proof', 'AgentOS refuses it'):
+                       'Do not send a cart link as proof', 'Never start checkout or payment'):
             self.assertIn(phrase, method)
         self.assertNotRegex(method.lower(), r'emart|ssg|coupang|kurly', 'the method names no site')
         site = (ROOT / 'skills' / SITE / 'SKILL.md').read_text()
@@ -124,6 +124,29 @@ class FirstUseOnAFreshStore(_Shop):
                 {'tool_calls': [call('6', 'finish', status='done', evidence_refs=['5'],
                                      summary='장바구니에 세탁세제 3L × 1이 있습니다.')]}]
 
+    @staticmethod
+    def counting_judgments(asked):
+        """Every judgment AgentOS asks, of any purpose, is recorded (#977 review: count the verifier path too)."""
+        from personal_agent.conversation_handoff import ConversationJudgments
+        from personal_agent.decision import OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, fixture_confidence
+
+        def judge(context, proposition):
+            asked.append(context.purpose)
+            return BinaryDecision(OUTCOME_DECIDED, True, fixture_confidence()) if context.purpose == 'goal-reached' else None
+        return ConversationJudgments(FixtureDecisionEngine(judge=judge))
+
+    def test_supplied_knowledge_adds_no_model_or_judgment_call(self):
+        """#964 item 10: the same flow with and without the skill loads asks the same judgments."""
+        counts = {}
+        for label, flow in (('with', self.flow('fixture-mart/fixture-mart')), ('without', self.flow(None)[2:])):
+            asked, script = [], Script(*flow)
+            binding = self.install(f'skills/{SHOPPING}', 'tests/fixtures/skills/fixture-mart') if label == 'with' else None
+            caps = self.caps(script, FakeDriver(), skills=binding, judgments=self.counting_judgments(asked))
+            run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': '세탁세제 장바구니에 담아줘'}], '', caps, self.record)
+            counts[label] = (len(script.bodies) - (2 if label == 'with' else 0), asked)
+            caps.close_browser()
+        self.assertEqual(counts['with'], counts['without'], 'only the two skill_load steps differ')
+
     def test_supplied_knowledge_is_used_on_the_first_request_with_one_change_and_a_readback(self):
         binding = self.install(f'skills/{SHOPPING}', 'tests/fixtures/skills/fixture-mart')
         script, driver = Script(*self.flow('fixture-mart/fixture-mart')), FakeDriver()
@@ -139,8 +162,6 @@ class FirstUseOnAFreshStore(_Shop):
         reads = [json.loads(d)['evidence'] for t, s, d in self.events if t == 'browser_open' and s == 'succeeded']
         self.assertEqual(reads[-1]['url'], ORIGIN + '/cart', 'the claim rests on the cart read after the change')
         self.assertEqual([e for e in self.events if e[1] == 'failed'], [])
-        # #964 item 10: supplied knowledge adds no planner, translator or verifier model call.
-        self.assertEqual(len(script.bodies), 8, 'one model call per scripted step, nothing more')
         caps.close_browser()
 
     def test_the_same_method_works_with_the_published_site_package_without_core_edits(self):

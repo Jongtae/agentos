@@ -24,4 +24,4 @@ Follow the `shopping-cart` skill for the method. This skill only adds what is kn
 - **Stay in the Emart mall.** For an Emart request, search on `emart.ssg.com`. Results on `www.ssg.com` mix in other sellers and malls, whose products, prices and delivery differ.
 - **Delivery types.** The mall offers more than one delivery type, such as 쓱배송 and 새벽배송. Keep the type the owner asked for, and do not switch an item's delivery type on your own. If the owner named none, leave the site's default and say which one the item uses.
 - **Check the cart line is the item you chose.** The SSG.COM cart can also hold items from other malls and sellers. When reading the cart back, check that the line is the Emart item you added, using any mall, seller or delivery label the line shows, and not the same name from elsewhere.
-- **Payment** happens only in the owner's SSG.COM app or website. AgentOS will not pay.
+- **Payment** is the owner's own step in the SSG.COM app or website. Do not open checkout.

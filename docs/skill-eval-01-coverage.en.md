@@ -23,13 +23,13 @@ This is not a second test project. Each implementing child already checked its o
 | 1 | A fresh user completes a task with supplied knowledge, with no failed first attempt | `test_skill_supply.FreshUserFirstUse` (U). `test_skill_shop.test_supplied_knowledge_is_used_on_the_first_request_with_one_change_and_a_readback` (U, fixture shop) | Covered (fixture) |
 | 2 | An externally authored package goes through the real import path | `anthropics/skills` `internal-comms` (Apache-2.0), byte-identical fixture (`ThirdPartyFixtureIsPinned`, U). Real bridge process (`test_the_real_bridge_process_serves_the_pinned_skill`, I). One live public GitHub install into a temporary store on 2026-10-02 (P; #971) | Covered |
 | 3 | A repeat with changed products or quantity modes reuses the know-how and re-reads current facts | New `test_skill_shop.test_a_later_request_reuses_the_pinned_revision_without_fetching` (U). Re-reading facts is in the method (content). | Structure covered. **Model behavior: L, pending** |
-| 4 | A Main AI change keeps the skill version; unsupported bindings stay explicit; API/Codex/Claude parity | Route snapshot per Work (`test_ai_route_selection.test_switch_during_running_work_does_not_redirect_it`, U). Binding captured once per Work before the attempts loop, refs recorded in turn provenance (S, `quickstart_service`). Host → bridge parity (`test_the_bridge_rebuilds_the_exact_binding_the_host_passed`, U; real bridge, I). Strict/isolated declared unavailable (U). Codex `CODEX_HOME` skills kept out (`test_codex_trusted_local_keeps_codex_home_skills_out`, I, opt-in) | Covered |
+| 4 | A Main AI change keeps the skill version; unsupported bindings stay explicit; API/Codex/Claude parity | Route snapshot per Work (`test_ai_route_selection.test_switch_during_running_work_does_not_redirect_it`, U). Binding captured once per Work before the attempts loop, refs recorded in turn provenance (S, `quickstart_service`). Host → bridge parity (`test_the_bridge_rebuilds_the_exact_binding_the_host_passed`, U; real bridge, I). Strict/isolated declared unavailable (U). Codex `CODEX_HOME` skills kept out (`test_codex_trusted_local_keeps_codex_home_skills_out`, I, opt-in). Claude Code: only the argv and allowlist shape is checked (S, `test_strict_isolation`); no Claude process has served a skill | API and Codex covered. **Claude CLI path: pending (I or L)** |
 | 5 | Management setters separate requested/configured/effective/observed; family setup-ready versus paired | `test_skill_manage` (U). Existing `test_owner_settings_conversation`, family tests (U) | Covered |
 | 6 | UI drift, expired login, unavailable item, partial result, duplicate request, interruption and restart recover without unverified replay | Host side: `test_browser_session` login continuation, unknown-effect and `tool_incomplete` handling, payment guard (U). Withdrawal mid-flow stops the next click (`test_withdrawing_the_method_mid_flow_…`, U). Model side: method steps 4 and 6 (content) | Host covered. **Model behavior on drift: L, pending** |
 | 7 | A concurrent shared-cart change is not falsely attributed or claimed exactly-once | Method step 6 (content). Cookie sharing boundary: `test_family_share` (U) | **Model behavior: L, pending.** Not observable in fixtures |
-| 8 | Disabled/removed skill after load, unavailable supplier, tampering, permission-expanding update and rollback | `RevocationAfterLoading`, `test_tampered_content_is_refused`, `ReviewRemediations`, `ManifestDeclarations` (a skill package cannot declare tools, so no update can widen permissions) (U). New `test_a_rollback_restores_the_older_revision_without_reviving_a_newer_works_binding` (U) | Covered |
+| 8 | Disabled/removed skill after load, unavailable supplier, tampering, permission-expanding update and rollback | `RevocationAfterLoading`, `test_tampered_content_is_refused`, `ReviewRemediations`, `ManifestDeclarations` (a skill package cannot declare tools, so no update can widen permissions) (U). New `test_a_rollback_restores_the_older_revision_without_reviving_a_newer_works_binding` (U): rollback restores content and **never revives a Work that was stopped**. Once a Work's loaded skill is withdrawn, the stop is permanent for that Work, including across processes through the recorded event (`test_a_stop_recorded_by_another_process_stays_a_stop`, U) | Covered |
 | 9 | A second site fixture uses the common contract without core edits | `fixture-mart` flow and the published `emart-ssg` package installed and loaded (`test_skill_shop`, U). No core literal names a skill or compares a skill identity (`test_no_scenario_code`: `CoreNamesNoSkill`, `CoreSelectsNoSkill`, `CoreReadsNoSkillFiles`, S) | Covered (fixture). Held-out live site: L, not planned |
-| 10 | One voice, no new rituals, confirmations or compulsory specialist/verifier calls | New assertion: the fresh-user run makes exactly one model call per scripted step (U). Skill reads need no confirmation; adding one uses the existing settings draft (U). Transcript quality: eval scenario `skill-add-reference-by-name` (rubric-judged) | Structure covered. **Transcript: L, pending** |
+| 10 | One voice, no new rituals, confirmations or compulsory specialist/verifier calls | New `test_supplied_knowledge_adds_no_model_or_judgment_call` (U): the same flow with and without the skill loads makes the same model calls (apart from the two loads) and asks the same judgments. Skill reads need no confirmation; adding one uses the existing settings draft (U). Transcript quality: eval scenario `skill-add-reference-by-name` (rubric-judged) | Structure covered. **Transcript: L, pending** |
 
 **Gaps closed by this child.** Each is a new model-free check named in the table:
 
@@ -80,13 +80,30 @@ No target percentage. An inconclusive result stays inconclusive.
 | Route | The owner's main AgentOS, current Main AI (trusted-local Codex), the owner's signed-in browser profile |
 | Condition | **B** only (skills on with `shopping-cart` + `emart-ssg`). A is the existing redacted records; no second, shadow mutation |
 | Cases (sequential) | **L1 ensure:** "이마트몰 장바구니에 서울우유 1L 하나 담아줘". **L2 add:** "그 우유 하나 더 담아줘". **L3 set:** "그 우유 1개로 맞춰줘". **L4 cleanup:** "그 우유 장바구니에서 빼줘" |
-| Permitted effects | Add, change quantity or remove **that one product line** only. No checkout and no payment (the host refuses it anyway). No other line may change |
+| Baseline | Before L1, read the cart and record that product line's quantity (0 if absent). This is the state to restore |
+| Permitted effects | Add, change quantity or remove **that one product line** only. No other line may change. No checkout and no payment: payment is approval-gated per action, and the run never approves one |
 | Caps | At most 4 Works; each Work within the existing `WorkBudget` (9 model turns, 40 tool attempts, 600 s); total wall clock 30 min |
-| Stop condition | The first false completion, any unrequested cart effect, a sign-in prompt, or a usage limit. Stop, report, do not retry automatically |
-| Cleanup | L4. If L4 does not leave the line removed, the owner removes it by hand and the result is reported as a failure |
+| Stop condition | The first false completion, any unrequested cart effect, any navigation to checkout or payment, a sign-in prompt, or a usage limit. Stop, report, do not retry automatically |
+| Cleanup | On **every** exit, including an early stop: read the cart, then restore the baseline quantity of that line. L4 does this on the normal path. After an early stop, or a failed L4, the owner restores it by hand, and the case is reported as a failure |
 | Decision use | Pass/fail per case with the cart read-back reference. A run either supports or does not support the claim "the method is followed on the real site for these 3 quantity modes", nothing broader |
 
-## 5. What may be claimed now
+## 5. Live sample results
+
+**Run 1, 2026-10-03.** Route: the main AgentOS, Codex trusted-local. Skills: `shopping-cart` and `emart-ssg` at `efb5977`, installed with the owner's approval.
+
+| Case | Outcome | Observed (L) |
+| --- | --- | --- |
+| L1 ensure | **Stopped: sign-in prompt** (93 s) | Loaded both skills, opened the mall and the cart first, found the session signed out, and called `browser_sign_in` directly. No click that changes the cart. The answer said truthfully that nothing was added yet |
+| L2–L4 | Not run | Waiting for the owner to sign in |
+
+The baseline for cleanup: no cart change happened, so nothing needs restoring.
+
+**Findings to follow up separately (not fixed here):**
+
+- The Work was recorded as `succeeded` although its goal waits for a sign-in.
+- The answer mentioned an account owner ("아내분 계정"), an inference that is not in the request.
+
+## 6. What may be claimed now
 
 - **Structural:** skill supply, pinning, revocation, route parity, the off path, management content and the shopping/site packages behave as specified on fixtures and through a real bridge process. One live public GitHub install also worked (#971).
 - **Not claimed:**

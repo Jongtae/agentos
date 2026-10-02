@@ -29,8 +29,10 @@ CONTEXT_GATED_ACTIONS=frozenset({'propose_current_state'})
 ROLE_PERMISSIONS={'read_only','bounded_write'}
 #: Tool ids the agent loop itself owns (#657 `finish`); no package may declare one.
 RESERVED_TOOL_IDS=frozenset({'finish'})
-#: #961: package ids only AgentOS may use: its tools and its bundled skills.
-RESERVED_PACKAGE_IDS=frozenset({'builtin','agentos'})
+#: Package ids only AgentOS may use: its tools (#604) and, for skill packages, its bundled skills (#961).
+#: ``agentos`` is reserved only for skill packages, so an existing tool package of that id keeps working.
+RESERVED_PACKAGE_IDS=frozenset({'builtin'})
+RESERVED_SKILL_PACKAGE_IDS=frozenset({'agentos'})
 #: #960 section 5: the compatibility statuses a declared skill may carry.
 SKILL_STATUSES=frozenset({'supported_as_is','adapted','requires_connection','unsupported_environment',
                           'scripts_or_hooks_required','licence_unknown','invalid_package'})
@@ -83,7 +85,7 @@ def _validate_skills(manifest):
 def validate_package(manifest):
  """Validate a third-party package: the built-in ids are reserved (#604, #961)."""
  manifest=validate(manifest)
- if manifest.get('id') in RESERVED_PACKAGE_IDS:raise ValueError(f"{manifest['id']}은 AgentOS 기본 패키지 전용 id입니다.")
+ if manifest.get('id') in RESERVED_PACKAGE_IDS or (manifest.get('skills') is not None and manifest.get('id') in RESERVED_SKILL_PACKAGE_IDS):raise ValueError(f"{manifest['id']}은 AgentOS 기본 패키지 전용 id입니다.")
  return manifest
 
 def load(path):return validate(json.loads(Path(path).read_text()))

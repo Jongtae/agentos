@@ -11,8 +11,9 @@ tools and no roles.  It is never a tool, a permission or an executor:
   revisions (content digests) it may load, so a revision never changes
   under a running Work;
 * a skill this Work loaded that is no longer current (switch off, package
-  disabled, removed or updated, content changed on disk) refuses every later
-  tool call of the Work (``SkillBinding.check_current``), not only the next load;
+  disabled, removed or updated) refuses every later tool call of the Work
+  (``SkillBinding.check_current``), not only the next load; content changed
+  on disk is refused at its next read (``SkillLibrary.read``);
 * acquisition fetches one exact GitHub commit, stages and inspects the bytes,
   and installs only instruction/resource skills with a recognised licence.
   Scripts, hooks and executables are never run, and a skill that needs them
@@ -74,7 +75,8 @@ BUNDLED_ROOT = Path(__file__).with_name('bundled_skills')
 #: The owner's switch: ``{"enabled": bool}``; absent means off.
 SETTINGS_KEY = 'skills'
 #: The one supported acquisition source (#960 section 6): a GitHub folder at one commit.
-GITHUB_TREE = re.compile(r'^(?:https://)?github\.com/([A-Za-z0-9][\w.-]*)/([\w.-]+)/tree/([^/\s]+)/([^\s?#]+?)/?$')
+GITHUB_TREE = re.compile(r'^(?:https://)?github\.com/([A-Za-z0-9][A-Za-z0-9_.-]*)/([A-Za-z0-9_.-]+)/tree/([A-Za-z0-9_.-]+)/'
+                         r'([A-Za-z0-9_./-]+?)/?$')
 
 REVOKED_TEXT = ('이 작업이 읽은 스킬({skill})이 작업 중에 꺼지거나 바뀌어 이 작업은 더 진행하지 않았어요. '
                 '같은 요청을 다시 보내면 지금 설정으로 새로 시작해요.')
@@ -95,12 +97,19 @@ _LOADER = []
 
 
 def _loader():
-    """``SafeLoader`` that refuses a duplicate mapping key; PyYAML is imported only when a skill is parsed."""
+    """``SafeLoader`` that refuses a duplicate key and any alias; PyYAML is imported only when a skill is parsed.
+
+    Aliases are refused because a few nested ones expand into billions of
+    items (review P2): frontmatter never needs them.
+    """
     if not _LOADER:
         import yaml
 
         class Loader(yaml.SafeLoader):
-            pass
+            def compose_node(self, parent, index):
+                if self.check_event(yaml.events.AliasEvent):
+                    raise yaml.composer.ComposerError(None, None, 'aliases are not allowed', self.peek_event().start_mark)
+                return super().compose_node(parent, index)
 
         def mapping(loader, node, deep=False):
             keys = [loader.construct_object(key, deep=deep) for key, _value in node.value]
@@ -125,7 +134,7 @@ def parse_frontmatter(text):
     try:
         data = yaml.load(head, Loader=loader)  # noqa: S506 - SafeLoader subclass
     except yaml.YAMLError:
-        raise SkillError('SKILL.md 머리말을 읽을 수 없어요(형식 오류, 중복 키 또는 허용하지 않는 태그).', 'invalid_package') from None
+        raise SkillError('SKILL.md 머리말을 읽을 수 없어요(형식 오류, 중복 키, 별칭 또는 허용하지 않는 태그).', 'invalid_package') from None
     if not isinstance(data, dict):
         raise SkillError('SKILL.md 머리말이 키-값 목록이 아니에요.', 'invalid_package')
     return data, body[1:]
@@ -164,15 +173,22 @@ def _walk(root):
 def _licence(frontmatter, files):
     """``(label, recognised)`` of a skill's licence; a referenced file must be packaged."""
     declared = frontmatter.get('license')
-    if isinstance(declared, str) and declared.strip() in SPDX_LICENCES:
-        return declared.strip(), True
+    if declared is not None and not isinstance(declared, str):
+        return '', False
+    declared = (declared or '').strip()
+    if declared in SPDX_LICENCES:
+        return declared, True
     named = [rel for rel in files if '/' not in rel and rel.upper().startswith(('LICENSE', 'LICENCE', 'COPYING'))]
+    # A declared non-SPDX licence counts only when it points to the packaged file (review P3):
+    # "Proprietary" is not overridden by words that happen to appear in a LICENSE file.
+    if declared:
+        named = [rel for rel in named if rel.lower() in declared.lower()]
     for rel in named:
         head = files[rel][:4000].decode('utf-8', 'replace').lower()
         for spdx, words in LICENCE_TEXTS:
             if all(word in head for word in words):
                 return f'{spdx} ({rel})', True
-    return (str(declared).strip()[:80] if declared else ''), False
+    return declared[:80], False
 
 
 def inspect_skill(root):
@@ -204,8 +220,9 @@ def inspect_skill(root):
     if not isinstance(metadata, dict):
         raise SkillError('metadata는 키-값 목록이어야 해요.', 'invalid_package')
     status, notes = set(), []
-    executable = sorted(rel for rel in files if rel.split('/')[0] in EXECUTABLE_DIRS
-                        or Path(rel).suffix.lower() in EXECUTABLE_SUFFIXES)
+    executable = sorted(rel for rel, data in files.items()
+                        if any(part.lower() in EXECUTABLE_DIRS for part in rel.split('/')[:-1])
+                        or Path(rel).suffix.lower() in EXECUTABLE_SUFFIXES or data.startswith(b'#!'))
     if executable:
         status.add('scripts_or_hooks_required')
         notes.append('실행 파일: ' + ', '.join(executable[:5]))
@@ -213,7 +230,10 @@ def inspect_skill(root):
     if extra:
         status.add('adapted')
         notes.append('표준 밖 머리말(메타데이터로만 보관): ' + ', '.join(map(str, extra[:5])))
-    allowed_tools = str(frontmatter.get('allowed-tools') or '').split()
+    allowed_tools = frontmatter.get('allowed-tools') or ''
+    if not isinstance(allowed_tools, str):
+        raise SkillError('allowed-tools는 글자여야 해요.', 'invalid_package')
+    allowed_tools = allowed_tools.split()
     licence, recognised = _licence(frontmatter, files)
     if not recognised:
         status.add('licence_unknown')
@@ -228,16 +248,28 @@ def inspect_skill(root):
 
 # -- source adapter: one GitHub folder at one commit --------------------------------------
 
+class _GitHubRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to the two GitHub hosts over HTTPS (review P3)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.startswith(GITHUB_HOSTS):
+            raise urllib.error.URLError('redirect outside GitHub')
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+GITHUB_HOSTS = ('https://codeload.github.com/', 'https://api.github.com/')
+
+
 def http_get(url, limit=MAX_DOWNLOAD_BYTES, timeout=30):
     """Bytes of one HTTPS GET to GitHub, bounded; the default transport."""
-    if not url.startswith(('https://codeload.github.com/', 'https://api.github.com/')):
+    if not url.startswith(GITHUB_HOSTS):
         raise SkillError('스킬은 GitHub에서만 받아요.', 'invalid_source')
     # The commits API answers a ref with only its SHA under this documented media type
     # (the default JSON carries the whole diff).
     accept = 'application/vnd.github.sha' if url.startswith('https://api.github.com/') else 'application/octet-stream'
     request = urllib.request.Request(url, headers={'User-Agent': 'personal-agentos-skills', 'Accept': accept})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - fixed https host
+        with urllib.request.build_opener(_GitHubRedirects).open(request, timeout=timeout) as response:
             data = response.read(limit + 1)
     except (urllib.error.URLError, TimeoutError, OSError):
         raise SkillError('GitHub에서 스킬을 받지 못했어요. 잠시 뒤 다시 요청하세요.', 'source_unavailable') from None
@@ -281,7 +313,7 @@ def fetch_github(source, dest, transport=http_get):
     """Extract exactly ``source['path']`` of the pinned commit into ``dest``; nothing else is written."""
     data = transport(f"https://codeload.github.com/{source['repo']}/tar.gz/{source['revision']}")
     prefix = source['path'].strip('/') + '/'
-    written = 0
+    written = count = 0
     try:
         with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as archive:
             for member in archive:
@@ -299,7 +331,8 @@ def fetch_github(source, dest, transport=http_get):
                 if not member.isfile():
                     raise SkillError(f'스킬 안에 링크나 특수 파일({rel})이 있어 받지 않았어요.', 'invalid_package')
                 written += member.size
-                if member.size > MAX_FILE_BYTES or written > MAX_PACKAGE_BYTES:
+                count += 1
+                if member.size > MAX_FILE_BYTES or written > MAX_PACKAGE_BYTES or count > MAX_FILES:
                     raise SkillError('스킬 파일이 너무 커요.', 'invalid_package')
                 target = Path(dest, *parts)
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -373,7 +406,8 @@ class SkillLibrary:
     @staticmethod
     def _entry(package, record, revision, licence, source):
         return {'skill': f"{package}/{record['name']}", 'package': package, 'name': record['name'],
-                'description': record['description'], 'digest': record['digest'], 'revision': revision,
+                # One line: a declaration written by hand cannot shape the turn's sections (review P3).
+                'description': ' '.join(str(record['description']).split())[:1024], 'digest': record['digest'], 'revision': revision,
                 'licence': licence, 'source': source, 'status': list(record.get('status') or ())}
 
     def _declared(self, manifest):
@@ -383,16 +417,20 @@ class SkillLibrary:
                 for skill in manifest.get('skills') or ()
                 if set(skill.get('status') or ()) <= ENABLE_STATUSES]
 
-    def catalogue(self):
-        """What a new Work may load now: empty when the switch is off; bounded (#960 section 6)."""
+    def loadable(self):
+        """Every skill a Work may load now, unbounded: empty when the switch is off."""
         if not self.enabled():
             return []
         entries = self.bundled()
         for manifest in self.installed():
             if manifest.get('enabled') is True:
                 entries += self._declared(manifest)
+        return entries
+
+    def catalogue(self):
+        """What a new Work is offered: ``loadable`` bounded (#960 section 6)."""
         bounded, size = [], 0
-        for entry in entries[:CATALOGUE_ENTRIES]:
+        for entry in self.loadable()[:CATALOGUE_ENTRIES]:
             size += len(entry['skill']) + len(entry['description']) + 8
             if size > CATALOGUE_BYTES:
                 break
@@ -413,9 +451,13 @@ class SkillLibrary:
         return self.content / entry['digest'] / entry['name']
 
     def current(self, entry):
-        """Whether ``entry`` (one exact revision) is still loadable by a Work: switch, enablement, digest."""
+        """Whether ``entry`` (one exact revision) is still loadable by a Work: switch, enablement, digest.
+
+        Checked against every loadable skill, not the bounded catalogue, so installing
+        more skills never makes a loaded one look withdrawn (review P3).
+        """
         try:
-            return any(item['skill'] == entry['skill'] and item['digest'] == entry['digest'] for item in self.catalogue())
+            return any(item['skill'] == entry['skill'] and item['digest'] == entry['digest'] for item in self.loadable())
         except Exception:
             return False
 
@@ -457,6 +499,7 @@ class SkillLibrary:
             if package_id == BUNDLED_PACKAGE or package_id in {entry['name'] for entry in self.bundled()}:
                 raise SkillError('AgentOS 기본 스킬과 이름이 같아 추가하지 않았어요.', 'identity_collision')
             existing = self._manifest_path(package_id)
+            enabled = True
             if existing.exists():
                 try:
                     previous = json.loads(existing.read_text())
@@ -466,16 +509,21 @@ class SkillLibrary:
                     previous['source'].get(key) == source[key] for key in ('repo', 'path'))
                 if not same:
                     raise SkillError(f"이미 '{package_id}'라는 다른 패키지가 있어 추가하지 않았어요.", 'identity_collision')
+                # An update keeps the owner's on/off choice for this package (review P3).
+                enabled = previous.get('enabled') is True
+            skill = {key: record[key] for key in ('name', 'description', 'digest', 'licence', 'compatibility', 'status', 'files')}
+            if record['allowed_tools']:
+                skill['allowed_tools'] = record['allowed_tools']  # foreign metadata, never a grant
+            try:
+                manifest = validate_package({'version': 1, 'id': package_id, 'tools': [], 'roles': [], 'enabled': enabled,
+                                             'skills': [skill], 'source': source, 'adaptation': 1,
+                                             'installed_at': time.time()})
+            except ValueError as exc:
+                raise SkillError(f'{exc} 추가하지 않았어요.', 'identity_collision') from None
             target = self.content / record['digest'] / name
             if not target.exists():
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(folder), str(target))
-            skill = {key: record[key] for key in ('name', 'description', 'digest', 'licence', 'compatibility', 'status', 'files')}
-            if record['allowed_tools']:
-                skill['allowed_tools'] = record['allowed_tools']  # foreign metadata, never a grant
-            manifest = validate_package({'version': 1, 'id': package_id, 'tools': [], 'roles': [], 'enabled': True,
-                                         'skills': [skill], 'source': source, 'adaptation': 1,
-                                         'installed_at': time.time()})
             # Written last and atomically: an interrupted install leaves no declaration.
             temporary = existing.with_suffix('.json.tmp')
             temporary.write_text(json.dumps(manifest, ensure_ascii=False))
@@ -527,7 +575,7 @@ class SkillBinding:
     @classmethod
     def from_refs(cls, library, refs):
         """The binding a host handed to a bridge; refs no longer current stay listed and refuse on load."""
-        known = {entry['skill']: entry for entry in library.catalogue()}
+        known = {entry['skill']: entry for entry in library.loadable()}
         entries = []
         for ref in refs or ():
             skill, _sep, digest = str(ref).partition('@')
@@ -540,7 +588,7 @@ class SkillBinding:
         return cls(library, entries) if entries else None
 
     def catalogue_text(self):
-        return '\n'.join(f"- {skill}: {entry['description']}" for skill, entry in sorted(self.entries.items()))
+        return '\n'.join(f"- {skill}: {' '.join(str(entry['description']).split())}" for skill, entry in sorted(self.entries.items()))
 
     def _entry(self, skill):
         entry = self.entries.get(skill if isinstance(skill, str) else '')
@@ -564,12 +612,12 @@ class SkillBinding:
         entry = self._entry(skill)
         if skill not in self.loaded and self.loads >= MAX_LOADS:
             raise SkillError(f'한 작업에서 스킬은 {MAX_LOADS}개까지 읽어요.', 'skill_limit')
-        text, _cut, files = self.library.read(entry, 'SKILL.md', MAX_BODY_BYTES)
+        text, _cut, files = self.library.read(entry, 'SKILL.md', MAX_FILE_BYTES)
         if skill not in self.loaded:
             self.loads += 1
         self.loaded[skill] = entry
         _frontmatter, body = parse_frontmatter(text)
-        return {**self.identity(entry), 'instructions': body.strip(),
+        return {**self.identity(entry), 'instructions': body.strip()[:MAX_BODY_BYTES],
                 'resources': [path for path in files if path != 'SKILL.md' and Path(path).suffix.lower() in TEXT_SUFFIXES][:40],
                 'note': '스킬은 방법 안내일 뿐 권한이 아니에요. 요청과 지금 관찰한 결과가 기준이에요.'}
 

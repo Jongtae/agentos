@@ -118,8 +118,9 @@ SLOW_SETTINGS = frozenset({("judgment_ai", "model"), ("main_ai", "route"), ("mai
                            # #961: adding a skill downloads and inspects one pinned GitHub folder.
                            ("skills", "add")})
 #: #961: what adding a skill does, shown with the draft.
-SKILL_ADD_NOTE = ("고정된 커밋에서 그 폴더만 받아 확인한 뒤 추가해요. 스크립트·훅은 실행하지 않고, "
-                  "라이선스를 확인할 수 없거나 실행 파일이 필요한 스킬은 추가하지 않아요. 스킬은 방법 안내일 뿐 권한이 아니에요.")
+SKILL_ADD_NOTE = ("확인하면 고정된 커밋에서 그 폴더만 받아 라이선스와 내용을 확인한 뒤 추가해요(브랜치 이름은 이 초안을 만들 때 "
+                  "GitHub에 물어 커밋으로 고정했어요). 스크립트·훅은 실행하지 않고, 라이선스를 확인할 수 없거나 실행 파일이 "
+                  "필요한 스킬은 추가하지 않아요. 스킬은 방법 안내일 뿐 권한이 아니에요.")
 #: How long a confirmation waits for another apply of the same category (#814 review).
 APPLY_WAIT_SECONDS = 5
 #: #814 review: a draft left ``applying`` by a restart: its setter may or may not have committed.
@@ -474,7 +475,11 @@ class SettingsOrchestrator:
         elif (category, setting) == ("skills", "add"):
             from .skills import parse_source
             source = parse_source(after)
-            summary = f"스킬을 추가합니다: {source['repo']}의 {source['path']} (커밋 {source['revision'][:7]})"
+            name = source["path"].rstrip("/").split("/")[-1]
+            replacing = any(row["skill"].split("/", 1)[-1] == name and not row["skill"].startswith("agentos/")
+                            for row in self.service.skills_status().get("skills") or ())
+            summary = (f"스킬을 {'이 버전으로 바꿉니다' if replacing else '추가합니다'}: {source['repo']}의 {source['path']} "
+                       f"(커밋 {source['revision'][:7]})")
         elif (category, setting) == ("skills", "remove"):
             summary = f"스킬 '{after}'를 뺍니다"
         elif (category, setting) in FAMILY_SHARE_SETTINGS:

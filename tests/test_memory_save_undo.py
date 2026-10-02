@@ -182,6 +182,39 @@ class SaveAndTell(TelegramHarness):
         self.service.release_memory_saved_notices()
         self.assertEqual(self.notification(job['id'], MEMORY_SAVED_KIND)[0]['state'], 'unknown')
 
+    def test_a_retried_work_that_saves_again_after_its_notice_tells_the_second_fact(self):
+        """Re-review P2: the notice was told, the Work is retried (delivery 'none'), a second save is told too."""
+        job, _notice, row = self.told()
+        self.assertEqual(self.binding(row)['items'][0]['key'], KEY)
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='queued',delivery='none',response=NULL WHERE id=?", (job['id'],))
+        self.plan = [('save_memory', {'memory_key': SECOND_KEY, 'content': SECOND_VALUE})]
+        self.service.run_one()
+        self.assertEqual(sorted(m['content'] for m in self.store.memories()), sorted([VALUE, SECOND_VALUE]))
+        self.assertEqual([r['state'] for r in self.notification(job['id'], MEMORY_SAVED_KIND)], ['sent'], 'one row per Work')
+        sends = len(self.sends())
+        self.service.deliver_one()
+        self.assertEqual(self.store.job(job['id'])['delivery'], 'sent')
+        self.assertEqual(self.edits()[-1]['text'], f'기억했어요\n1. {VALUE}\n2. {SECOND_VALUE}', 'joined into the told notice')
+        self.assertEqual(len(self.binding(row)['items']), 2)
+        self.assertFalse(self.service.deliver_notification(), 'no second message; the edit told it')
+        self.assertEqual(len(self.sends()), sends + 1, 'only the retried reply was sent')
+        self.tap(f"p7u:{row['id']}:2", row['message_id'])
+        self.assertEqual([m['content'] for m in self.store.memories()], [VALUE])
+
+    def test_a_retried_work_after_an_undone_notice_gets_a_separate_notice(self):
+        job, _notice, row = self.told()
+        self.tap(f"p7u:{row['id']}:1", row['message_id'])
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='queued',delivery='none',response=NULL WHERE id=?", (job['id'],))
+        self.plan = [('save_memory', {'memory_key': SECOND_KEY, 'content': SECOND_VALUE})]
+        self.service.run_one()
+        self.service.deliver_one()
+        self.assertTrue(self.service.deliver_notification())
+        self.assertEqual(self.sends()[-1]['text'], f'기억했어요: {SECOND_VALUE}')
+        [upkeep] = self.notification(job['id'], MEMORY_SAVED_UPKEEP_KIND)
+        self.assertEqual(upkeep['state'], 'sent')
+
     def test_an_upkeep_save_after_an_unknown_reply_is_told_too(self):
         job_id = self.saved_turn()
         self.lose_reply = True
@@ -539,6 +572,13 @@ class SecretsNeverEnterMemory(unittest.TestCase):
         for key, content in (('profile.note', 'my token is ' + self.STORED), ('profile.' + self.STORED, '값')):
             with self.subTest(key=key):
                 self.assert_refused(self.caps().execute('save_memory', {'memory_key': key, 'content': content}), self.STORED)
+
+    def test_a_bare_value_under_a_credential_named_key_is_refused(self):
+        """Re-review P3: the joined ``key: content`` passes the gate too."""
+        self.assert_refused(self.caps().execute('save_memory', {'memory_key': 'profile.account.password', 'content': 'hunter2'}),
+                            'hunter2')
+        self.assert_refused(self.caps().execute('save_memory', {'memory_key': 'profile.bank.api_key', 'content': 'abc123'}),
+                            'abc123')
 
     def test_a_third_party_write_with_a_secret_makes_no_candidate(self):
         caps = self.caps(delegated=True, allowed_tools=['save_memory'])

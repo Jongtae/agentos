@@ -308,7 +308,10 @@ def memory_value_has_secret(store, *values):
  hand back.  A failing pass refuses (fail closed).
  """
  from .current_context import redact_known_secrets
- for value in values:
+ # Re-review P3: the joined ``key: content`` is checked too, so a bare value under a credential-named
+ # key (``profile.account.password`` + ``hunter2``) is refused like the inline shape.
+ joined=': '.join(str(value) for value in values if value)
+ for value in (*values,joined):
   text=str(value or '')
   if not text:continue
   try:

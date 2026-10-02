@@ -1483,19 +1483,32 @@ class AgentService:
     MEMORY_SAVED_RETELLS=1
 
     def release_memory_saved(self, job):
-        """Release this Work's held saved-notice after its reply (#918 review): ``held`` -> ``queued``.
+        """The one entry point once this Work's reply is settled: tell what is current and unlisted (#918 review).
 
-        The save held the row in its own transaction; a Work saved before this
-        head (no held row) is queued here as before.
+        ``held`` (the save held the row in its own transaction) or missing (a
+        Work saved before this head): queued, bound at send time to every
+        current row of the Work.  Otherwise - a retried or resumed Work that
+        saved again after its notice was already told (re-review P2): a
+        bound notice still ``sent`` gets the new facts by an edit
+        (``join_memory_saved``); a settled or lost one gives them a notice of
+        their own (``_queue_separate_saved_notice``); one still queued binds
+        them when it is sent.  Caller holds ``self.lock``.
         """
-        row=self.store.notification_of(job['id'],MEMORY_SAVED_KIND)
+        rows=self._saved_notice_rows(job['id'])
+        row=rows.get(MEMORY_SAVED_KIND)
         if row is None:
             self.queue_memory_saved(job);return
-        if row['state']==self.store.NOTICE_HELD:
+        if row['state'] in (self.store.NOTICE_HELD,'cancelled'):
             shown,more=self.work_saved_memories(job['id'])
             if shown:self.store.update_notification(row['id'],'queued',fingerprint=json.dumps(
                 {'items':[[item['id'],item['content_digest']] for item in shown],'more':more}))
-            else:self.store.update_notification(row['id'],'cancelled')
+            elif row['state']==self.store.NOTICE_HELD:self.store.update_notification(row['id'],'cancelled')
+            return
+        if row['state']=='queued':return
+        binding=self.memory_saved_binding(row)
+        if row['state']=='sent' and binding and 'sent' in binding:
+            self.join_memory_saved(row,binding);return
+        self._queue_separate_saved_notice(job,rows)
 
     def release_memory_saved_notices(self, now=None):
         """Release saved-notices a crash or an unknown send left behind (#918 review); at most once a minute.
@@ -1545,20 +1558,7 @@ class AgentService:
         with self.lock:
             job=self.store.job(work_id)
             if not job or job.get('delivery') not in self.DELIVERY_SETTLED:return
-            rows=self._saved_notice_rows(work_id)
-            row=rows.get(MEMORY_SAVED_KIND)
-            if row is None:
-                self.queue_memory_saved(job);return
-            if row['state']=='cancelled':
-                shown,more=self.work_saved_memories(work_id)
-                if shown:self.store.update_notification(row['id'],'queued',fingerprint=json.dumps(
-                    {'items':[[item['id'],item['content_digest']] for item in shown],'more':more}))
-                return
-            if row['state'] in ('queued',self.store.NOTICE_HELD):return
-            binding=self.memory_saved_binding(row)
-            if row['state']=='sent' and binding and 'sent' in binding:
-                self.join_memory_saved(row,binding);return
-            self._queue_separate_saved_notice(job,rows)
+            self.release_memory_saved(job)
 
     def _saved_notice_rows(self, work_id):
         with self.store.db() as db:

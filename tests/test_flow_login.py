@@ -723,6 +723,28 @@ class InFlowLogin(LoginHarness):
         self.service.process_browser_logins()
         self.assertEqual(self.store.job(job_id)['status'], 'partial', 'resumed once only')
 
+    def test_an_explicit_sign_in_on_a_succeeded_work_resumes_once(self):
+        """#986 (live 2026-10-03): the goal judgment marked the Work succeeded, the owner signed in from
+        the phone, and the Work stayed ``not_resumed``.  A sign-in the model asked for resumes it once."""
+        self.scripts = self.sign_in_script()
+        job_id = self.receive('계정 페이지 확인해줘')
+        self.assertTrue(self.service.run_one())
+        self.assertTrue(self.service._browser_login(job_id)['explicit'])
+        self.shown(job_id)
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='succeeded' WHERE id=?", (job_id,))
+        self.owner_closes(job_id)
+        self.assertEqual((self.state(job_id), self.store.job(job_id)['status']), ('resumed', 'queued'))
+
+    def test_an_incidental_login_on_a_succeeded_work_does_not_resume_it(self):
+        """#986: a login page met on the way keeps the earlier rule (#752)."""
+        other, _prompt, _buttons, _notification = self.login_work()
+        self.assertFalse(self.service._browser_login(other).get('explicit'))
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='succeeded' WHERE id=?", (other,))
+        self.owner_closes(other)
+        self.assertEqual((self.state(other), self.store.job(other)['status']), ('not_resumed', 'succeeded'))
+
     def test_an_expired_cookie_dropped_by_an_untouched_close_is_not_a_login(self):
         from personal_agent.browser_jar import JAR_NAME
         jar = self.profile.jar

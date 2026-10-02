@@ -401,10 +401,13 @@ class RevocationAfterLoading(_Store):
     def test_removing_or_switching_off_stops_the_work(self):
         self.library.set_enabled(False)
         self.assert_revoked()
+        # #977 review: switching back on does not revive the stopped Work; a new request starts afresh.
         self.library.set_enabled(True)
-        self.caps_.execute('list_notes', {})
-        self.library.remove('internal-comms')
         self.assert_revoked()
+        fresh = self.caps(skills=self.library.binding())
+        fresh.execute('skill_load', {'skill': 'internal-comms/internal-comms'})
+        self.library.remove('internal-comms')
+        self.assert_revoked(fresh)
 
     def test_an_update_never_swaps_the_revision_under_a_running_work(self):
         unloaded = self.caps(skills=self.library.binding())
@@ -417,12 +420,43 @@ class RevocationAfterLoading(_Store):
         # A Work that had not loaded it yet cannot load the new revision under the old binding either.
         with self.assertRaises(ToolError) as raised:
             unloaded.execute('skill_load', {'skill': 'internal-comms/internal-comms'})
-        self.assertEqual(raised.exception.code, 'skill_revoked')
+        self.assertEqual(raised.exception.code, 'skill_unavailable')
         unloaded.execute('list_notes', {})  # nothing loaded: its other tools are unaffected
         # A new Work gets the new revision.
         fresh = self.library.binding().load('internal-comms/internal-comms')
         self.assertEqual(fresh['revision'], NEWER)
         self.assertIn('New guidance.', fresh['instructions'])
+
+    def test_a_rollback_restores_the_older_revision_without_reviving_a_newer_works_binding(self):
+        """#964 item 8: rolling back is a new install of the older commit; content, not authority, comes back."""
+        changed = upstream_files()
+        changed['skills/internal-comms/SKILL.md'] += b'\nNewer guidance.\n'
+        self.github.archives[NEWER] = tarball(UPSTREAM, NEWER, changed)
+        self.library.install(f'https://github.com/{UPSTREAM}/tree/{NEWER}/skills/internal-comms')
+        newer = self.caps(skills=self.library.binding())
+        newer.execute('skill_load', {'skill': 'internal-comms/internal-comms'})
+        self.assert_revoked()  # the setUp Work loaded COMMIT and saw it withdrawn by the update
+        rolled = self.library.install(ADDRESS)  # back to COMMIT
+        self.assertEqual(rolled['source']['revision'], COMMIT)
+        with self.assertRaises(ToolError) as raised:
+            newer.execute('list_notes', {})
+        self.assertEqual(raised.exception.code, 'skill_revoked', 'the newer revision is no longer current')
+        self.assertNotIn('Newer guidance.', self.library.binding().load('internal-comms/internal-comms')['instructions'])
+        # #977 review P1: the same content coming back never revives a Work that was stopped.
+        self.assert_revoked()
+        with self.assertRaises(ToolError):
+            self.caps_.execute('skill_load', {'skill': 'internal-comms/internal-comms'})
+
+    def test_a_stop_recorded_by_another_process_stays_a_stop(self):
+        """#977 review P1: a bridge process that recorded the stop keeps the Work stopped in any later process."""
+        job = self.store.enqueue('stopped', 'stopped-skill')
+        with self.store.db() as db:
+            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,0)',
+                       (job, 'list_notes', 'failed', json.dumps({'code': 'skill_revoked', 'retry': 'permanent'})))
+        later = Capabilities(self.store, None, CFG, '', job, lambda *a: None, skills=self.library.binding())
+        with self.assertRaises(ToolError) as raised:
+            later.execute('list_notes', {})
+        self.assertEqual(raised.exception.code, 'skill_revoked')
 
     def test_unloaded_skills_never_block_a_work(self):
         other = self.caps(skills=self.library.binding())

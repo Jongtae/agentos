@@ -5,7 +5,7 @@ license: AGPL-3.0-only
 ---
 # Changing a shopping cart
 
-This method works on any shop through the browser tools (`browser_open`, `browser_find`, `browser_click`, `browser_type`, `browser_read`, `browser_sign_in`). A site skill can add where things are on a particular shop. Everything it says is a hint that you check on the page. Nothing here lets you pay. A payment step stays with the owner, and AgentOS refuses it.
+This method works on any shop through the browser tools (`browser_open`, `browser_find`, `browser_click`, `browser_type`, `browser_read`, `browser_sign_in`). A site skill can add where things are on a particular shop. Everything it says is a hint that you check on the page. Nothing here lets you pay. Never start checkout or payment. Paying is the owner's own step, and AgentOS asks for the owner's approval on every payment action.
 
 ## 1. Bind the request
 

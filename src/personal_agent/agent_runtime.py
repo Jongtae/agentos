@@ -1678,7 +1678,7 @@ class Capabilities:
   if self.skills is None:return
   # A load recorded by another process of this Work (a restarted bridge, an earlier attempt) counts too.
   if hasattr(self.store,'db'):self.skills.recall(self.store,self.job_id)
-  if not self.skills.loaded:return
+  if not self.skills.loaded and not self.skills.revoked:return
   from .skills import SkillError
   try:self.skills.check_current()
   except SkillError as exc:raise ToolError(str(exc),exc.code) from None

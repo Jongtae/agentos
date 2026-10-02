@@ -264,3 +264,7 @@ The AgentOS references fill that gap. They are not evidence that a third-party s
 - Withdrawing the method mid-flow stops the next click before it reaches the shop.
 
 No live site, account or model was used. Whether a model follows the method well on the real Emart site is a #964 question that needs a separately capped live run.
+
+## 15. Evidence consolidation (#964)
+
+[SKILL-EVAL-01 coverage](skill-eval-01-coverage.en.md) maps the #964 inventory to the evidence gathered in #961–#963 and #974. It adds three model-free gap checks: a repeat makes no supplier call, a rollback restores only content, and supplied knowledge adds no hidden model call. It also fixes the A / A-off / B protocol and adds one rubric-judged eval scenario. The live, model-dependent questions (method adherence on the real site, drift and concurrency handling, transcript quality) remain pending. Its section 4 holds a capped, cleanup-defined live sample that only the owner can approve.

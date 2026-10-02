@@ -21,6 +21,7 @@ from .current_context import redact_known_secrets
 from .providers import ProviderError
 from .bounded_execution import (AgentOSMcpTools, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, ExecutionError,  # noqa: F401
                                 profile_actions, redact_reason, turn_actions)
+from .skills import SkillBinding, SkillLibrary
 from .cli_browser_relay import (RELAYED_INFORMATION_USE, RELAYED_LOCATION_REQUEST, RELAYED_PREPARATIONS, RELAYED_SETTINGS,
                                 RelayClient, unused_browser_factory)
 from .context_observations import answerable_work
@@ -167,14 +168,16 @@ def unexpected_error_result(exc, action):
 
 
 def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROFILE, browser_relay=None,
-          search_off_reason='', relay_browser=True):
+          search_off_reason='', relay_browser=True, skills=()):
     """Serve one Work's AgentOS tools over stdio for the route profile the host named (#701).
 
     ``profile`` is ``trusted-local`` or ``strict-isolated``; anything else
     serves the strict set.  ``browser_relay`` (trusted-local only) is the
     service's relay directory: the browser tools are then listed and every
     browser call is executed by the service (``cli_browser_relay``); without
-    it no browser tool is offered.
+    it no browser tool is offered.  ``skills`` (trusted-local only, #961) are the
+    ``package/name@digest`` refs of the host Work's skill binding; without any
+    no skill tool is offered.
     """
     profile = profile if profile in HOST_CLI_PROFILES else STRICT_PROFILE
     relay = RelayClient(browser_relay) if browser_relay and profile == BOUNDED_PROFILE else None
@@ -203,6 +206,9 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                                 settings=RELAYED_SETTINGS if relay is not None else None,
                                 # #826: a placeholder that lists information_use; its calls go to the service.
                                 information_use=RELAYED_INFORMATION_USE if relay is not None else None,
+                                # #961: the exact skill revisions the host bound to this Work, read here from the store.
+                                skills=(SkillBinding.from_refs(SkillLibrary(store), skills)
+                                        if skills and profile == BOUNDED_PROFILE else None),
                                 inherited_provenance=_provenance(provenance),
                                 lookup_sources=_lookup_sources(store, job_id),
                                 # #607 AX-10: the same durable attempt count and
@@ -308,7 +314,8 @@ if __name__ == '__main__':
     parser.add_argument('--search-off-reason',default='')
     parser.add_argument('--browser-relay',default=None)
     parser.add_argument('--relay-no-browser',action='store_true')
+    parser.add_argument('--skill',action='append',default=[])
     args=parser.parse_args()
     serve(args.data, args.job, args.provenance, native_search=args.native_search, profile=args.profile,
           browser_relay=args.browser_relay, search_off_reason=args.search_off_reason,
-          relay_browser=not args.relay_no_browser)
+          relay_browser=not args.relay_no_browser, skills=args.skill)

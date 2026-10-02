@@ -86,7 +86,9 @@ class StrictProfileDeclaration(unittest.TestCase):
         """#701/#774/#826: the bridge is told its profile; strict is trusted-local minus every service-relayed
         tool and minus the connected-folder documents and approved pages #826 added to trusted-local only."""
         from personal_agent.agent_runtime import BROWSER_ACTIONS, HOST_RELAYED_ACTIONS
-        owner_files = {'find_files', 'read_file', 'list_roots', 'public_page_read'}
+        owner_files = {'find_files', 'read_file', 'list_roots', 'public_page_read',
+                       # #961: skills are read from the owner store, so strict never serves them either.
+                       'skill_load', 'skill_resource'}
         self.assertEqual(profile_actions(STRICT_PROFILE),
                          tuple(action for action in profile_actions(BOUNDED_PROFILE)
                                if action not in HOST_RELAYED_ACTIONS and action not in owner_files))
@@ -136,7 +138,10 @@ class StrictLaunchArguments(unittest.TestCase):
         self.assertIn('web_search="disabled"', strict, 'provider-hosted search stays off')
         self.assertEqual(CODEX_STRICT_TABLE, 'permissions.agentos-strict-isolated={filesystem={":minimal"="read", '
                                              '":workspace_roots"={"."="read"}}, network={enabled=false}}')
-        self.assertEqual(strict[:3] + strict[3 + len(expected):], trusted[:3] + trusted[8:],
+        # #961: trusted-local also keeps CODEX_HOME skills out; strict's overrides above already include it.
+        self.assertEqual(trusted[8:10], ['-c', 'skills.include_instructions=false'])
+        self.assertIn('skills.include_instructions=false', strict)
+        self.assertEqual(strict[:3] + strict[3 + len(expected):], trusted[:3] + trusted[10:],
                          'everything else is the trusted-local argv')
         self.assertEqual(trusted[3:6], ['--sandbox', 'read-only', '--ignore-rules'],
                          'trusted-local keeps the read-only sandbox and ignores CODEX_HOME exec rules (#636)')
@@ -171,7 +176,9 @@ class StrictLaunchArguments(unittest.TestCase):
                        # #814: the owner settings tools, relayed the same way.
                        'mcp__agentos__settings_read,mcp__agentos__settings_change,'
                        # #826: the information-use audit, relayed the same way.
-                       'mcp__agentos__information_use')
+                       'mcp__agentos__information_use,'
+                       # #961: the Work's pinned skills, read in the bridge.
+                       'mcp__agentos__skill_load,mcp__agentos__skill_resource')
         self.assertEqual(trusted[-2:], [allow[0], trusted_allow + browser + owner_state])
         self.assertEqual(strict[-2:], allow, 'the variadic --allowedTools stays last')
         self.assertEqual(strict[:len(trusted) - 2], trusted[:-2])
@@ -1022,6 +1029,21 @@ class ProcessLevelQualification(unittest.TestCase):
         self.assertIn('fake-store-canary-616', results[0])
         self.assertIn('fake-home-canary-616', results[1])
         self.assertIn('outside AgentOS provenance', CLI_PROFILES[BOUNDED_PROFILE]['limitation'])
+
+    def test_codex_trusted_local_keeps_codex_home_skills_out(self):
+        """#961: a skill in CODEX_HOME never reaches a trusted-local Work turn; AgentOS serves the
+        Work's pinned skills itself.  Counterexample: without the override the canary skill does."""
+        from personal_agent.bounded_execution import CODEX_NO_HOST_SKILLS
+        binary = self._codex(tested=False)
+        model = _ScriptedModel('responses', [{'message': 'done'}])
+        self._run('codex', binary, model, BOUNDED_PROFILE)
+        self.assertIn(CODEX_NO_HOST_SKILLS, self.argv)
+        context = json.dumps([request['body'] for request in model.requests])
+        for canary in ('SKILL-CANARY-616', 'canary-skill-616'):
+            self.assertNotIn(canary, context)
+        model = _ScriptedModel('responses', [{'message': 'done'}])
+        self._run('codex', binary, model, BOUNDED_PROFILE, argv_edit=lambda argv: self._without(argv, ('-c', CODEX_NO_HOST_SKILLS)))
+        self.assertIn('canary-skill-616', json.dumps([request['body'] for request in model.requests]))
 
     def _write_script(self, target):
         shell = lambda cmd: {'name': 'exec_command', 'arguments': {'cmd': cmd, 'login': False}}

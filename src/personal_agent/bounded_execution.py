@@ -114,6 +114,9 @@ _LOCATION = 'owner-telegram-location-request-served-on-trusted-local-route-only'
 _SETTINGS = 'owner-settings-served-on-trusted-local-route-only'
 #: #826: the Work records are held by the service, reached only through its relay.
 _INFORMATION_USE = 'work-information-use-served-on-trusted-local-route-only'
+#: #961: skills are read from the owner store; the isolated profiles never read it (#960 section 3).
+_SKILLS = 'skills-served-on-trusted-local-route-only'
+_SKILL_ACTIONS = ('skill_load', 'skill_resource')
 
 #: The verified limitation of the trusted-local profile (owner decision on
 #: #604).  The CLI's own built-in tools can read local host files that AgentOS
@@ -188,9 +191,11 @@ CLI_PROFILES = {
         # approved public pages are offered here too, within the existing folder grants
         # and page approvals the tools themselves enforce (``Capabilities.roots``,
         # ``resolve_file``, ``page_scope``); they run in the bridge process.
+        # #961: the Work's pinned skills, read in the bridge process from the owner store
+        # (the same content and revisions as the direct route; offered only with a binding).
         'actions': ('bounded_public_research', 'find_files', 'list_notes', 'list_roots', 'propose_current_state',
                     'public_page_read', 'read_file', 'save_note', 'weather', 'web_search',
-                    *_BROWSER_ACTIONS, *_OWNER_STATE_RELAYED),
+                    *_BROWSER_ACTIONS, *_OWNER_STATE_RELAYED, *_SKILL_ACTIONS),
         'unavailable': {
             'list_agents': _SPECIALISTS, 'delegate_agent': _SPECIALISTS,
         },
@@ -213,7 +218,7 @@ CLI_PROFILES = {
             'find_files', 'read_file', 'list_roots', 'calendar_query', 'calendar_draft_create',
             'calendar_draft_update', 'calendar_draft_cancel', 'save_memory', 'list_memory', 'search_memory',
             'list_agents', 'delegate_agent', 'propose_current_state', 'schedule_preparation', 'ask_location',
-            'settings_read', 'settings_change', 'information_use', *_BROWSER_ACTIONS)},
+            'settings_read', 'settings_change', 'information_use', *_BROWSER_ACTIONS, *_SKILL_ACTIONS)},
         # Pinned in Dockerfile.engine; a test keeps the two in step.
         'runtimes': {'codex': {'pinned_version': '0.153.4', 'live_tested_version': None}},
     },
@@ -240,6 +245,7 @@ CLI_PROFILES = {
             'ask_location': _LOCATION,
             'settings_read': _SETTINGS, 'settings_change': _SETTINGS,
             'information_use': _INFORMATION_USE,
+            **{action: _SKILLS for action in _SKILL_ACTIONS},
         },
         # Only these exact CLI versions passed the process-level tests; any
         # other version is refused until requalified (no silent downgrade).
@@ -255,6 +261,18 @@ CLI_PROFILES = {
     },
 }
 BOUNDED_PROFILE, ISOLATED_PROFILE, STRICT_PROFILE = 'trusted-local', 'isolated-agentos-mcp', 'strict-isolated'
+#: #961: Codex's own skill instructions stay out of a trusted-local Work turn; the
+#: same official override the decision route and the strict profile already pass (#580).
+CODEX_NO_HOST_SKILLS = 'skills.include_instructions=false'
+
+
+def skill_refs(capabilities):
+    """The ``package/name@digest`` refs of a Work's skill binding, or () (#961)."""
+    binding = getattr(capabilities, 'skills', None)
+    refs = getattr(binding, 'refs', None)
+    return tuple(refs()) if callable(refs) else ()
+
+
 #: Profiles the owner can choose for the host subscription CLI route.
 HOST_CLI_PROFILES = (BOUNDED_PROFILE, STRICT_PROFILE)
 
@@ -1202,6 +1220,11 @@ class AgentOSMcpTools:
         from .agent_runtime import HOST_RELAYED_ACTIONS
         host_action = ((getattr(self.capabilities, 'tools', {}) or {}).get(name) or {}).get('host_action')
         if host_action in HOST_RELAYED_ACTIONS and self.relay is not None:
+            # #961: a relayed call bypasses this process's ``execute``, where a withdrawn
+            # skill this Work loaded is refused; the same check runs before relaying.
+            check = getattr(self.capabilities, 'check_skills', None)
+            if callable(check):
+                check()
             return self.relay.call(name, arguments)
         # Capabilities is AgentOS-owned and applies its normal validation,
         # document boundary, egress, evidence and idempotency rules.
@@ -1358,9 +1381,12 @@ class BoundedExecutionAdapter:
             # rule cannot run a command outside the read-only sandbox (#636,
             # the #616 review P1 finding); an older CLI rejects the unknown
             # flag and the turn fails instead of running without it.
+            # #961: trusted-local also keeps skills Codex would discover in CODEX_HOME out of the turn
+            # (the decision route's verified override); AgentOS serves the Work's pinned skills itself.
             sandbox = (strict_launch_arguments('codex', disabled_features) if strict
                        else ['--sandbox', 'read-only', '--ignore-rules',
-                             '-c', 'web_search="live"' if native_search else 'web_search="disabled"'])
+                             '-c', 'web_search="live"' if native_search else 'web_search="disabled"',
+                             '-c', CODEX_NO_HOST_SKILLS])
             # --ignore-user-config also drops the owner's config.toml model, so
             # the owner's Main AI model choice is passed explicitly (#679).
             return [binary, 'exec', '--json', *sandbox, '--skip-git-repo-check',
@@ -1383,8 +1409,10 @@ class BoundedExecutionAdapter:
             # #570: stream-json (which requires --verbose with -p) reports the
             # session model and each tool_use; its last line is the same result
             # record that `json` prints, so answer parsing is unchanged.
+            # #961: no Claude Code skill or slash command of its own ("Disable all skills");
+            # AgentOS serves the Work's pinned skills through the bridge.
             argv = [binary, '-p', prompt, '--output-format', 'stream-json', '--verbose',
-                    '--strict-mcp-config', '--mcp-config', str(mcp_config), *model_args]
+                    '--strict-mcp-config', '--mcp-config', str(mcp_config), '--disable-slash-commands', *model_args]
             if instructions:
                 # #569: AgentOS instructions travel as a system-prompt addition,
                 # the conversation and request as the prompt.
@@ -1775,7 +1803,9 @@ class BoundedExecutionAdapter:
                          *([f'--search-off-reason={search_off}'] if search_off else []),
                          *([f'--browser-relay={relay}'] if relay else []),
                          # #774: the relay serves owner-state tools even when no browser is served.
-                         *(['--relay-no-browser'] if relay and not getattr(tools, 'relay_browser', True) else [])],
+                         *(['--relay-no-browser'] if relay and not getattr(tools, 'relay_browser', True) else []),
+                         # #961: the exact skill revisions this Work may load (trusted-local only).
+                         *[f'--skill={ref}' for ref in (skill_refs(tools.capabilities) if profile == BOUNDED_PROFILE else ())]],
             }}}, ensure_ascii=False), encoding='utf-8')
             env = self.environment(engine_id, binary, run_dir)
             disabled = ()

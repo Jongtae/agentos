@@ -78,6 +78,8 @@ TOOL_LABELS = {
     # OWNER-SETTINGS-01 (#814): owner settings, changed only after the owner confirms.
     'settings_read': '설정 확인', 'settings_change': '설정 변경 초안',
     'information_use': '사용한 정보 확인',
+    # SKILL-SUPPLY-02 (#961): an installed skill's know-how read for this request.
+    'skill_load': '스킬 읽기', 'skill_resource': '스킬 자료 읽기',
 }
 #: A tool this catalogue does not name (for example an AgentPackage tool).
 TOOL_LABEL_FALLBACK = '도구 실행'

@@ -147,8 +147,11 @@ def main():
 
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     _require('where = ["src"]' in pyproject, "setuptools src discovery is not configured", failures)
-    _require('personal_agent = ["web/*.html", "web/*.css", "web/*.js"]' in pyproject,
+    _require('personal_agent = ["web/*.html", "web/*.css", "web/*.js"' in pyproject,
              "personal_agent web package data is not configured", failures)
+    # SKILL-SUPPLY-02 (#961): the reviewed bundled skills ship with the package.
+    _require('"bundled_skills/*/SKILL.md"' in pyproject,
+             "personal_agent bundled skills package data is not configured", failures)
     for retired in ("delivery.py", "handoff.py", "delivery-plan.yaml"):
         _require(not (PACKAGE / retired).exists(),
                  f"repository-only {retired} is still shipped in personal_agent", failures)

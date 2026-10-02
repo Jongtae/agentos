@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 from personal_agent import isolated_engine_mcp_bridge
-from personal_agent.agent_runtime import (BROWSER_ACTIONS, BROWSER_SESSION_NOTE, BROWSER_SIGN_IN_DESCRIPTION, BROWSER_SIGN_IN_NOTE, DEFINITIONS, STATUS_ARGUMENT, STATUS_SCHEMA,
+from personal_agent.agent_runtime import (SKILL_ACTIONS, BROWSER_ACTIONS, BROWSER_SESSION_NOTE, BROWSER_SIGN_IN_DESCRIPTION, BROWSER_SIGN_IN_NOTE, DEFINITIONS, STATUS_ARGUMENT, STATUS_SCHEMA,
                                           Capabilities,
                                           check_arguments)
 from personal_agent.bounded_execution import (
@@ -35,6 +35,8 @@ from personal_agent.quickstart_store import QuickStore
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = {definition['function']['name']: definition['function'] for definition in DEFINITIONS}
 FACADES = {BOUNDED_PROFILE: AgentOSMcpTools, ISOLATED_PROFILE: ReadOnlyAgentOSMcpTools}
+#: #961: a wired skill binding for the "everything wired" surface; ``offered_tools`` only checks it is set.
+WIRED_SKILLS = object()
 
 
 class _Network:
@@ -83,7 +85,7 @@ class OneActionSource(_Store):
             # and with its location request wired, ask_location; #814: with its settings, the settings tools.
             listed = facade(self.caps(browser=lambda: None, preparations=lambda *a: None,
                                       location_request=lambda *a: None, settings=lambda *a: None,
-                                      information_use=lambda *a: None)).definitions()
+                                      information_use=lambda *a: None, skills=WIRED_SKILLS)).definitions()
             with self.subTest(profile=profile):
                 self.assertEqual([tool['name'] for tool in listed], sorted(profile_actions(profile)))
                 for tool in listed:
@@ -264,14 +266,15 @@ class EffectiveAvailability(_Store):
         # #701: no registered browser profile hides the browser tools (as on the direct route).
         self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps()).definitions()],
                          sorted(set(profile_actions(BOUNDED_PROFILE)) - CONTEXT_GATED_ACTIONS - BROWSER_ACTIONS
-                                - {'schedule_preparation', 'ask_location', 'settings_read', 'settings_change', 'information_use'}))
+                                - {'schedule_preparation', 'ask_location', 'settings_read', 'settings_change', 'information_use'}
+                                - SKILL_ACTIONS))
         self.enable_context()
         self.assertIn('propose_current_state', [d['function']['name'] for d in self.caps().definitions()])
         self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps(browser=lambda: None,
                                                                        preparations=lambda *a: None,
                                                                        location_request=lambda *a: None,
                                                                        settings=lambda *a: None,
-                                                                       information_use=lambda *a: None)).definitions()],
+                                                                       information_use=lambda *a: None, skills=WIRED_SKILLS)).definitions()],
                          sorted(profile_actions(BOUNDED_PROFILE)))
         self.assertEqual([t['name'] for t in ReadOnlyAgentOSMcpTools(self.caps()).definitions()], ['list_notes'])
 
@@ -364,7 +367,9 @@ class SettingsProjection(_Store):
                                              # #814: owner settings, relayed the same way.
                                              'settings_read', 'settings_change',
                                              # #826: the Work information-use audit, relayed the same way.
-                                             'information_use'],
+                                             'information_use',
+                                             # #961: the Work's pinned skills, read in the bridge (only with a binding).
+                                             'skill_load', 'skill_resource'],
                                    'unavailable': route_unavailable(BOUNDED_PROFILE),
                                    # #616: the owner can choose; nothing is qualified by default.
                                    'selectable': ['trusted-local', 'strict-isolated'], 'qualified': {}})

@@ -432,5 +432,100 @@ class CoreReadsNoSkillFiles(unittest.TestCase):
         self.assertEqual(sorted(text for _module, _line, text in hits), ['BUNDLED_ROOT', 'BUNDLED_ROOT', 'SKILL.md'])
 
 
+
+#: #975 review: installed skills are runtime data, so naming them cannot be enumerated.  Structurally,
+#: core may not compare a skill's identity with a string literal, select one by a literal key, or load
+#: skill text anywhere but the model's own ``skill_load`` / ``skill_resource`` dispatch.
+#: The one allowed literal is the bundled package prefix (bundled versus installed: supply and removal).
+ALLOWED_SKILL_LITERALS = frozenset({'agentos/'})
+SKILL_COLLECTIONS = frozenset({'entries', 'loaded'})
+
+
+def _skill_identity(node):
+    """Whether ``node`` reads a skill's identity: ``x['skill']``, ``x.get('skill')`` or a binding's entries/loaded."""
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Subscript) and isinstance(sub.slice, ast.Constant) and sub.slice.value == 'skill':
+            return True
+        if (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) and sub.func.attr == 'get'
+                and sub.args and isinstance(sub.args[0], ast.Constant) and sub.args[0].value == 'skill'):
+            return True
+        if isinstance(sub, ast.Attribute) and sub.attr in SKILL_COLLECTIONS:
+            return True
+    return False
+
+
+def _string_literals(node):
+    return [sub.value for sub in ast.walk(node) if isinstance(sub, ast.Constant) and isinstance(sub.value, str)]
+
+
+def skill_selections(paths):
+    """``(module, line, literal)`` where core compares, matches or indexes a skill identity by a literal."""
+    hits = []
+    for path in paths:
+        if path.name == 'skills.py':
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'), filename=str(path))):
+            literals = []
+            if isinstance(node, ast.Compare):
+                operands = [node.left, *node.comparators]
+                if any(_skill_identity(item) for item in operands):
+                    literals = [value for item in operands if not _skill_identity(item) for value in _string_literals(item)]
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in MATCH_CALLS
+                  and _skill_identity(node.func.value)):
+                literals = [value for arg in node.args for value in _string_literals(arg)]
+            elif (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute)
+                  and node.value.attr in SKILL_COLLECTIONS):
+                literals = _string_literals(node.slice)
+            hits += [(path.name, node.lineno, value) for value in literals if value not in ALLOWED_SKILL_LITERALS]
+    return hits
+
+
+def skill_text_loads(paths):
+    """``(module, function, line)`` of each call that loads skill text: ``<...skills or binding>.load/resource(...)``."""
+    hits = []
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+        for function in [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+            for node in ast.walk(function):
+                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                        and node.func.attr in ('load', 'resource')):
+                    continue
+                owner = node.func.value
+                label = owner.attr if isinstance(owner, ast.Attribute) else owner.id if isinstance(owner, ast.Name) else ''
+                if 'skill' in label.lower() or 'binding' in label.lower():
+                    hits.append((path.name, function.name, node.lineno))
+    return sorted(set(hits))
+
+
+class CoreSelectsNoSkill(unittest.TestCase):
+    """#974/#975: no core special case for any skill, bundled or installed, and one way in for its text."""
+
+    def test_no_skill_identity_is_compared_with_a_literal(self):
+        self.assertEqual(skill_selections(sorted(SRC.rglob('*.py'))), [])
+
+    def test_skill_text_is_loaded_only_by_the_model_tool_dispatch(self):
+        loads = skill_text_loads(sorted(path for path in SRC.rglob('*.py') if path.name != 'skills.py'))
+        self.assertEqual({(module, function) for module, function, _line in loads}, {('agent_runtime.py', 'execute')})
+
+    def test_guards_catch_planted_selections_and_loads(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'planted.py'
+            path.write_text(textwrap.dedent("""
+                def route(row, binding, request):
+                    if row['skill'] == 'internal-comms/internal-comms':
+                        pass
+                    if row.get('skill', '').startswith('shop-'):
+                        pass
+                    entry = binding.entries['some-pkg/any-skill']
+                    if row['skill'].startswith('agentos/'):
+                        pass  # the bundled package prefix: allowed
+                    return binding.load('some-pkg/any-skill')
+            """))
+            selections = sorted(literal for _module, _line, literal in skill_selections([path]))
+            loads = skill_text_loads([path])
+        self.assertEqual(selections, ['internal-comms/internal-comms', 'shop-', 'some-pkg/any-skill'])
+        self.assertEqual([(module, function) for module, function, _line in loads], [('planted.py', 'route')])
+
+
 if __name__ == '__main__':
     unittest.main()

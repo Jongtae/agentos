@@ -314,8 +314,14 @@ class SkillTextOnlyThroughSkillLoad(_Store):
         binding = library.binding()
         context = turn_context([{'role': 'user', 'content': 'hi'}], 'cli', skills=binding.catalogue_text())
         self.assertNotIn(sentinel, render_turn_prompt(context))
+        caps = self.caps(skills=binding)
+        caps.execute('list_notes', {})  # an ordinary call loads nothing
         self.assertEqual(binding.loaded, {})
-        self.assertIn(sentinel, binding.load('agentos/sentinel')['instructions'])
+        # The real dispatch boundary: the model's skill_load tool call through Capabilities.execute.
+        loaded = caps.execute('skill_load', {'skill': 'agentos/sentinel'})
+        self.assertIn(sentinel, loaded['instructions'])
+        self.assertEqual(list(binding.loaded), ['agentos/sentinel'])
+        # test_no_scenario_code.CoreSelectsNoSkill pins that this dispatch is the only load call site.
 
 
 class LoadingAndBinding(_Store):

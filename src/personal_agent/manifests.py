@@ -1,5 +1,6 @@
 """Validated declarations for AgentOS roles and bounded local tools."""
 import json
+import re
 from pathlib import Path
 
 HOST_ACTIONS={'web_search','public_page_read','bounded_public_research','weather','calendar_query','calendar_draft_create','calendar_draft_update','calendar_draft_cancel','list_roots','find_files','read_file','list_notes','save_note','save_memory','list_memory','search_memory','list_agents','delegate_agent',
@@ -16,7 +17,9 @@ HOST_ACTIONS={'web_search','public_page_read','bounded_public_research','weather
               # #814: owner settings read, and a change drafted for the owner to confirm.
               'settings_read','settings_change',
               # #826: which owner information an earlier answer used and where it went (read-only).
-              'information_use'}
+              'information_use',
+              # #961: read one pinned skill this Work may load, or one of its packaged text files.
+              'skill_load','skill_resource'}
 WRITE_ACTIONS={'save_note','save_memory','delegate_agent','calendar_draft_create','calendar_draft_update','calendar_draft_cancel','browser_click','browser_type','propose_current_state','schedule_preparation','ask_location','settings_change'}
 #: #627: declared host actions ``Capabilities.offered_tools`` offers only while
 #: the owner has current context on.  Off, every route's surface is exactly the
@@ -26,6 +29,13 @@ CONTEXT_GATED_ACTIONS=frozenset({'propose_current_state'})
 ROLE_PERMISSIONS={'read_only','bounded_write'}
 #: Tool ids the agent loop itself owns (#657 `finish`); no package may declare one.
 RESERVED_TOOL_IDS=frozenset({'finish'})
+#: Package ids only AgentOS may use: its tools (#604) and, for skill packages, its bundled skills (#961).
+#: ``agentos`` is reserved only for skill packages, so an existing tool package of that id keeps working.
+RESERVED_PACKAGE_IDS=frozenset({'builtin'})
+RESERVED_SKILL_PACKAGE_IDS=frozenset({'agentos'})
+#: #960 section 5: the compatibility statuses a declared skill may carry.
+SKILL_STATUSES=frozenset({'supported_as_is','adapted','requires_connection','unsupported_environment',
+                          'scripts_or_hooks_required','licence_unknown','invalid_package'})
 
 BUILTIN_MANIFEST={'version':1,'id':'builtin','tools':[{'id':name,'host_action':name,'mode':'bounded_write' if name in WRITE_ACTIONS else 'read_only'} for name in sorted(HOST_ACTIONS)],'roles':[
  {'id':'researcher','name':'조사 에이전트','instructions':'Research the assigned question using read-only tools when needed. Cite evidence and identify gaps. Never invent findings.','permissions':['read_only'],'tools':['web_search','weather','list_roots','find_files','read_file','list_notes','list_agents']},
@@ -54,12 +64,28 @@ def validate(manifest):
   actions={tool['host_action'] for tool in tools if tool['id'] in declared_tools}
   if 'bounded_write' not in permissions and actions & WRITE_ACTIONS:raise ValueError('읽기 전용 역할은 쓰기 도구를 선언할 수 없습니다.')
   role_ids.add(role['id'])
+ _validate_skills(manifest)
  return manifest
 
+def _validate_skills(manifest):
+ """#961: an optional ``skills`` declaration: knowledge only, so its package declares no tools or roles."""
+ skills=manifest.get('skills')
+ if skills is None:return
+ if not isinstance(skills,list) or not 1<=len(skills)<=8 or manifest.get('tools') or manifest.get('roles'):
+  raise ValueError('스킬 패키지는 도구나 역할 없이 스킬 1~8개만 선언할 수 있습니다.')
+ names=set()
+ for skill in skills:
+  if (not isinstance(skill,dict) or not isinstance(skill.get('name'),str) or not re.fullmatch(r'[a-z0-9]+(-[a-z0-9]+)*',skill['name'])
+      or len(skill['name'])>64 or skill['name'] in names or not isinstance(skill.get('digest'),str) or not re.fullmatch(r'[0-9a-f]{64}',skill['digest'])
+      or not isinstance(skill.get('description'),str) or not 0<len(skill['description'])<=1024
+      or not isinstance(skill.get('status'),list) or not skill['status'] or any(code not in SKILL_STATUSES for code in skill['status'])):
+   raise ValueError('허용하지 않은 스킬 선언입니다.')
+  names.add(skill['name'])
+
 def validate_package(manifest):
- """Validate a third-party package: the built-in id is reserved (#604)."""
+ """Validate a third-party package: the built-in ids are reserved (#604, #961)."""
  manifest=validate(manifest)
- if manifest.get('id')==BUILTIN_MANIFEST['id']:raise ValueError('builtin은 AgentOS 기본 패키지 전용 id입니다.')
+ if manifest.get('id') in RESERVED_PACKAGE_IDS or (manifest.get('skills') is not None and manifest.get('id') in RESERVED_SKILL_PACKAGE_IDS):raise ValueError(f"{manifest['id']}은 AgentOS 기본 패키지 전용 id입니다.")
  return manifest
 
 def load(path):return validate(json.loads(Path(path).read_text()))

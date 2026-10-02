@@ -188,4 +188,25 @@ No live model call, account mutation, evaluator or all-profile sweep is part of 
 - [x] Profile mapping with nothing added silently (section 3).
 - [x] Separate identity attributes (section 5).
 - [x] Verification map (section 10); C16 amendment and replacement coverage stated (section 8).
-- [ ] **#961 activation by the owner**, with: PyYAML dependency review recorded in its PR, the Codex host-discovery risk closed or recorded, and preservation tests landing before any default enablement.
+- [x] **#961 activation by the owner** (2026-10-02), with: the PyYAML dependency review in its PR, the Codex host-discovery risk closed (section 12), and the preservation tests landing with the code. Skills stay off by default.
+
+## 12. Implementation record (#961)
+
+[#961](https://github.com/Jongtae/agentos/issues/961) implements sections 1–6 with these concrete choices.
+
+| Decision here | As implemented | Where |
+| --- | --- | --- |
+| Two effect-free host actions | `skill_load` and `skill_resource` in `DEFINITIONS`. They are offered only when the Work has a `SkillBinding` (`Capabilities.offered_tools`). | `agent_runtime.py`, `skills.py` |
+| Skills off, or on with nothing loadable, is the pre-skill path | `SkillLibrary.binding()` returns None in both cases: no catalogue section, no tool, no lookup. The switch is off by default, and PyYAML is imported only when a skill is parsed. | `skills.py`, `quickstart_service.skill_binding` |
+| Work-scoped binding and revocation | The binding pins content digests once per Work. After a skill is loaded, every later tool call checks that it is still current: in `Capabilities.execute`, and in `AgentOSMcpTools.call` before a call is relayed to the service. Disable, remove, update, switch-off and on-disk tampering all refuse with `skill_revoked`. | `agent_runtime.check_skills`, `bounded_execution.py` |
+| Same content on every supported route | The host passes `--skill=<package>/<name>@<digest>` to the trusted-local bridge, which rebuilds the binding from the store. Strict-isolated and isolated declare the actions unavailable. | `mcp_bridge.py`, `CLI_PROFILES` |
+| Native CLI discovery (section 3 risk) | **Closed for Codex.** Trusted-local now passes `-c skills.include_instructions=false`, the same override the judgment route and the strict profile already use. An opt-in process test against the real `codex` 0.153.4 and a loopback fake model shows that a `CODEX_HOME` canary skill reaches the model without the flag and does not reach it with the flag. Claude Code gets `--disable-slash-commands`. | `bounded_execution.py`, `tests/test_strict_isolation.py` |
+| Acquisition when the owner asks | It runs through `settings_change` category `skills` (`enabled`, `add`, `remove`). #918 is still open, so this uses today's confirm-before-apply drafts rather than apply-then-undo. A branch or tag is resolved to its commit while the draft is built, so the owner confirms an exact revision. | `settings_orchestrator.py` |
+| Package identity | `PluginRegistry` declarations carry `skills` (name, description, digest, licence, status, file digests), `source` (repo, commit, path, claimed publisher) and `adaptation`. A skill package declares no tools or roles. `agentos` is reserved for the bundled skills. | `manifests.py` |
+| Bundled reviewed skill | `agentos-skills`: how skills work and how the owner adds, switches or removes them. | `bundled_skills/` |
+
+Evidence classes are named separately:
+- `tests/test_skill_supply.py`: focused unit tests and a model-free run of the real MCP bridge process. A fake GitHub transport serves the byte-identical upstream fixture.
+- The opt-in Codex process test listed in the table above.
+
+No live model, live GitHub download during tests, or owner account was used. Model quality with skills is not claimed.

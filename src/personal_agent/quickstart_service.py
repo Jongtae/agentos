@@ -3058,6 +3058,60 @@ class AgentService:
     def runtime_packages(self):
         return PluginRegistry(self.store.root).runtime_packages()
 
+    # -- #961 SKILL-SUPPLY-02: optional skill know-how -------------------------------------
+    #: #961: the GitHub transport of skill acquisition; tests inject a fake one.
+    skill_transport=None
+
+    def skill_library(self):
+        from .skills import SkillLibrary, http_get
+        return SkillLibrary(self.store, transport=self.skill_transport or http_get)
+
+    def skill_binding(self):
+        """This Work's pinned skills, or None: skills off, none installed, or an unreadable library.
+
+        None is the pre-skill path: no catalogue, no skill tool, no extra call.
+        """
+        try:
+            return self.skill_library().binding()
+        except Exception:
+            LOG.warning('skill library could not be read; the Work runs without skills')
+            return None
+
+    def skills_status(self):
+        library = self.skill_library()
+        return {'enabled': library.enabled(), 'skills': library.summary()}
+
+    def skill_setting_value(self, setting, value):
+        """The canonical draft value of a skills ``add`` (pinned address) or ``remove`` (package id)."""
+        from .skills import SkillError, parse_source, source_address
+        library = self.skill_library()
+        if setting == 'remove':
+            return library.resolve(value)
+        source = parse_source(value, library.transport)
+        for manifest in library.installed():
+            if manifest.get('source', {}).get('revision') == source['revision'] and manifest['source'].get('repo') == source['repo'] \
+                    and manifest['source'].get('path') == source['path']:
+                raise SkillError(f"이 스킬({manifest['id']})은 이미 그 커밋으로 설치되어 있어요.", 'already_installed')
+        return source_address(source)
+
+    def apply_skill_setting(self, setting, value):
+        """Apply one confirmed skills change through ``SkillLibrary``; the owner-facing receipt."""
+        library = self.skill_library()
+        if setting == 'enabled':
+            library.set_enabled(value == 'on')
+            return {'response': '스킬을 켰어요. 다음 요청부터 설치된 스킬을 쓸 수 있어요.' if value == 'on'
+                    else '스킬을 껐어요. 다음 요청부터 스킬 없이 진행해요.'}
+        if setting == 'remove':
+            library.remove(value)
+            return {'response': f"스킬 '{value}'를 뺐어요. 다음 요청부터 쓰지 않아요."}
+        manifest = library.install(value)
+        skill, source = manifest['skills'][0], manifest['source']
+        text = (f"스킬 '{skill['name']}'을(를) 추가했어요. 출처 {source['repo']}의 {source['path']}, 커밋 {source['revision'][:7]}, "
+                f"라이선스 {skill['licence']}.")
+        if not library.enabled():
+            text += ' 스킬은 지금 꺼져 있어요. 켜면 다음 요청부터 써요.'
+        return {'response': text, 'skill': skill['name'], 'digest': skill['digest'], 'revision': source['revision']}
+
     def document_fingerprint(self, model=None):
         model=self.store.config('model',{}) if model is None else model
         roots=self.store.config('file_roots',[])
@@ -8056,6 +8110,11 @@ class AgentService:
                     work_budget=self.work_budget(job['id'])
                     section_values={'profile':self.owner_profile_snapshot(),'current_context':self.current_context_text(job),
                                     'prepared':self.prepared_text(job)}
+                    # #961: the skill revisions this Work may load, captured once for every attempt;
+                    # None (skills off or none installed) is the unchanged pre-skill path.
+                    skill_binding=self.skill_binding()
+                    if skill_binding is not None:
+                        self.record_turn_provenance(job['id'],skills=skill_binding.refs())
                     # #826: what the owner-model sections and splices referred to (keys, refs, labels).
                     owner_information=self.owner_information_refs(section_values,spliced_refs)
                     base_history,base_rows,base_config,base_key=history,history_rows,config,key
@@ -8100,8 +8159,11 @@ class AgentService:
                             cli_browser=(not isolated and facade.PROFILE==BOUNDED_PROFILE)
                             # #795: on trusted-local AgentOS does not confine the CLI's own tools.
                             unmediated_turn=not isolated and facade.PROFILE==BOUNDED_PROFILE
+                            # #961: skills reach a trusted-local CLI through its bridge; the isolated and
+                            # strict profiles never read the owner store, so they get none (#960 section 3).
+                            cli_skills=skill_binding if not isolated and facade.PROFILE==BOUNDED_PROFILE else None
                             capabilities=Capabilities(self.store,None,{},'',job['id'],record,network=self.local_tools,
-                                                      document_access=not isolated,packages=self.runtime_packages(),
+                                                      document_access=not isolated,packages=self.runtime_packages(),skills=cli_skills,
                                                       allowed_tools=allowed_tools,inherited_provenance=set(turn_provenance)|work_private,
                                                       current_packages=self.runtime_packages,budget=work_budget,
                                                       current_context=self.current_state,
@@ -8158,7 +8220,8 @@ class AgentService:
                                 context=turn_context([*history[:-1],{'role':'user','content':current_request}],'cli',
                                                      current_context=section_values['current_context'],
                                                      profile=section_values['profile'],
-                                                     prepared=section_values['prepared'],native_search=native,brief=brief)
+                                                     prepared=section_values['prepared'],native_search=native,brief=brief,
+                                                     skills=cli_skills.catalogue_text() if cli_skills is not None else None)
                                 prompt_text,adapter=render_turn_prompt(context),context
                                 # Bounded Claude Code gets the instructions as a separate
                                 # argv element, so only conversation + request count
@@ -8379,14 +8442,15 @@ class AgentService:
                             api_context=turn_context(history,'api',
                                                      current_context=section_values['current_context'],
                                                      profile=section_values['profile'],
-                                                     prepared=section_values['prepared'],brief=brief)
+                                                     prepared=section_values['prepared'],brief=brief,
+                                                     skills=skill_binding.catalogue_text() if skill_binding is not None else None)
                             # #605: the sources of exactly the earlier messages this
                             # worker is shown replace the file-workspace job-list
                             # flag (`document_context`), which missed an earlier
                             # `/notes`, memory or model-driven read.
                             shown=api_context['conversation']
                             shown_sources=self.shown_history_provenance(history_rows[:-1][-len(shown):] if shown else [],document_jobs)
-                            capabilities=Capabilities(self.store,self.adapter,runtime_config,key,job['id'],record,network=self.local_tools,document_access=not boundary['requires_approval'],packages=self.runtime_packages(),
+                            capabilities=Capabilities(self.store,self.adapter,runtime_config,key,job['id'],record,network=self.local_tools,document_access=not boundary['requires_approval'],packages=self.runtime_packages(),skills=skill_binding,
                                                       # #605 F4: read on every use, so a page approval revoked
                                                       # during this Work refuses a read that starts afterwards.
                                                       public_page_scope=lambda:self.public_page_boundary(config)['urls'],

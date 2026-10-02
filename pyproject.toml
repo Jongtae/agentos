@@ -18,8 +18,10 @@ license = {text = "AGPL-3.0-only"}
 # publicsuffixlist: #716 registrable domain (eTLD+1) of a login host from the
 # bundled Mozilla Public Suffix List (MPL-2.0, ko-zu; 1.0.2.20260925 reviewed).
 # Pure Python, zero mandatory dependencies, never fetches the list at runtime.
+# PyYAML: #961 parses Agent Skills SKILL.md frontmatter with SafeLoader only
+# (MIT, YAML project; 6.0.3 reviewed; #960 decision record section 4).
 dependencies = ["pypdf>=5.0", "python-docx>=1.1", "openpyxl>=3.1", "cryptography>=42.0", "mcp-types>=2.2,<3", "oauthlib>=3.3.1,<4",
-                "pyobjc-framework-WebKit>=12.2,<13; sys_platform == 'darwin'", "publicsuffixlist>=1.0.2,<2"]
+                "pyobjc-framework-WebKit>=12.2,<13; sys_platform == 'darwin'", "publicsuffixlist>=1.0.2,<2", "PyYAML>=6.0.1,<7"]
 
 [project.optional-dependencies]
 schema-validation = ["jsonschema[format]>=4.23"]
@@ -32,4 +34,4 @@ where = ["src"]
 include = ["personal_agent*"]
 
 [tool.setuptools.package-data]
-personal_agent = ["web/*.html", "web/*.css", "web/*.js"]
+personal_agent = ["web/*.html", "web/*.css", "web/*.js", "bundled_skills/*/SKILL.md"]

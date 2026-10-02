@@ -39,13 +39,17 @@ BOUNDED_NAMES = ['ask_location', 'bounded_public_research', 'browser_click', 'br
                  'information_use', 'list_memory', 'list_notes', 'list_roots', 'propose_current_state', 'public_page_read',
                  'read_file', 'save_memory', 'save_note', 'schedule_preparation',
                  'search_memory', 'settings_change', 'settings_read', 'weather', 'web_search']
+# #961: the skill tools join only when the Work has a skill binding (skills on, one installed).
+SKILL_NAMES = ['skill_load', 'skill_resource']
+#: The ungated fixture below lists every declared profile action.
+FIXTURE_NAMES = sorted(BOUNDED_NAMES + SKILL_NAMES)
 
 
 class BoundedExecutionTests(unittest.TestCase):
     def test_mcp_facade_exposes_only_agentos_allowlist(self):
         caps=_Capabilities(); tools=AgentOSMcpTools(caps)
         # Every built-in action is allowed here; the facade still offers only its profile.
-        self.assertEqual([tool['name'] for tool in tools.definitions()], BOUNDED_NAMES)
+        self.assertEqual([tool['name'] for tool in tools.definitions()], FIXTURE_NAMES)
         self.assertEqual(tools.call('web_search', {'query':'public weather'}), {'ok':True})
         with self.assertRaises(ExecutionError): tools.call('read_file', {'path':'/etc/passwd'})
         with self.assertRaises(ExecutionError): tools.call('save_note', {'content':''})
@@ -401,6 +405,7 @@ class SubscriptionServiceTests(unittest.TestCase):
             # tools, which the CLI's search replaces, are not offered (#701).  #826: every
             # private-read bridge tool (notes, Memory, calendar, connected-folder documents)
             # is offered beside it.  The browser tools stay (served through the relay).
+            # #961: skills are off by default, so no skill tool is offered (the pre-skill surface).
             self.assertEqual(adapter.call[2], [name for name in BOUNDED_NAMES if name not in
                                                ('propose_current_state', 'web_search', 'bounded_public_research',
                                                 # #774: a non-Telegram Work could never be answered.
@@ -631,8 +636,10 @@ class BoundedExecutionPreservedBoundaryTests(unittest.TestCase):
                                     codex_home=profile).execute(
                 'codex', 'hello', AgentOSMcpTools(_Capabilities()))
         argv = seen['argv']
-        self.assertEqual(argv[1:9], ['exec', '--json', '--sandbox', 'read-only', '--ignore-rules',
-                                     '-c', 'web_search="disabled"', '--skip-git-repo-check'])
+        # #961: Codex's own skill instructions stay out of the turn (CODEX_HOME skills).
+        self.assertEqual(argv[1:11], ['exec', '--json', '--sandbox', 'read-only', '--ignore-rules',
+                                      '-c', 'web_search="disabled"', '-c', 'skills.include_instructions=false',
+                                      '--skip-git-repo-check'])
         # No generic argv/approval hook: the caller cannot relax these.
         self.assertNotIn('--dangerously-bypass-approvals-and-sandbox', argv)
         self.assertNotIn('workspace-write', argv)
@@ -805,7 +812,7 @@ class BoundedExecutionPreservedBoundaryTests(unittest.TestCase):
         definitions = tools.definitions()
         definitions.append({'name': 'run_shell'})
         definitions[0]['name'] = 'tampered'
-        self.assertEqual([tool['name'] for tool in tools.definitions()], BOUNDED_NAMES)
+        self.assertEqual([tool['name'] for tool in tools.definitions()], FIXTURE_NAMES)
 
     def test_non_object_tool_arguments_are_refused(self):
         tools = AgentOSMcpTools(_Capabilities())

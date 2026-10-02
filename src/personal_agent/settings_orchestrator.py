@@ -88,22 +88,25 @@ def next_action(row):
 
 #: #814: owner-visible names of the categories and settings the conversation may read/change.
 CATEGORY_LABELS = {"connections": "외부 연결", "current_context": "현재 맥락", "judgment_ai": "판단 AI", "main_ai": "기본 AI",
-                   "owner_model": "알아 두기", "family": "가족 비서"}
+                   "owner_model": "알아 두기", "family": "가족 비서", "skills": "스킬"}
 SETTINGS = {"current_context": ("enabled", "timezone"), "judgment_ai": ("mode", "model"), "main_ai": ("route", "model"),
             # #805 owner-model upkeep: its pause switch and rolling 24-hour call cap.
             "owner_model": ("enabled", "daily_calls"),
             # #912: a family member's own agent, created by asking the assistant (FAMILY-02 #897).
             # #934: the owner shares (and stops sharing) one signed-in site with one of them.
-            "family": ("add", "share_site", "unshare_site")}
+            "family": ("add", "share_site", "unshare_site"),
+            # #961: optional skill know-how: the switch, adding one pinned GitHub skill, removing one.
+            "skills": ("enabled", "add", "remove")}
 SETTING_LABELS = {"enabled": "사용", "timezone": "시간대", "mode": "방식", "model": "모델", "route": "경로",
-                  "daily_calls": "하루 판단 횟수", "add": "새로 만들기", "share_site": "로그인 공유", "unshare_site": "공유 그만"}
+                  "daily_calls": "하루 판단 횟수", "add": "새로 만들기", "share_site": "로그인 공유", "unshare_site": "공유 그만",
+                  "remove": "빼기"}
 #: #934: the value of a share is "<family assistant>|<site>"; a stop may name the site alone.
 FAMILY_SHARE_SETTINGS = frozenset({("family", "share_site"), ("family", "unshare_site")})
 FAMILY_SHARE_NOTE = "비밀번호는 넘기지 않고 지금 로그인된 세션만 전달해요. 내 세션이 갱신되면 따라가고, 결제는 계정 주인만 할 수 있어요."
 VALUE_LABELS = {"on": "켜짐", "off": "꺼짐", "follow_main": "기본 AI 따라가기", "explicit": "따로 지정"}
 JUDGMENT_MODE_LABELS = {"off": "사용 안 함"}
 UNKNOWN_SETTING_MESSAGE = ("대화로 바꿀 수 있는 설정이 아닙니다. 현재 맥락(enabled, timezone), 판단 AI(mode, model), "
-                           "기본 AI(route, model), 알아 두기(enabled, daily_calls), 가족 비서(add, share_site, unshare_site)만 바꿀 수 있습니다. API 키, 토큰, 로그인, 엔드포인트는 설정 화면에서 직접 입력하세요.")
+                           "기본 AI(route, model), 알아 두기(enabled, daily_calls), 가족 비서(add, share_site, unshare_site), 스킬(enabled, add, remove)만 바꿀 수 있습니다. API 키, 토큰, 로그인, 엔드포인트는 설정 화면에서 직접 입력하세요.")
 CREDENTIAL_VALUE_MESSAGE = ("자격 증명처럼 보이는 값은 대화로 설정하지 않습니다. API 키, 토큰, 로그인은 설정 화면에서 직접 입력하세요. "
                             "아무것도 바꾸지 않았습니다.")
 UNAVAILABLE_MESSAGE = "이 설정의 현재 상태를 확인하지 못해 바꾸지 않았습니다. 설정 화면에서 확인하세요."
@@ -111,7 +114,13 @@ MAX_VALUE_CHARS = 200
 MAX_REASON_CHARS = 300
 #: #814 review: settings whose setter probes or qualifies an AI (seconds to minutes).
 #: With a follow-up channel they are applied off the caller's thread, one at a time.
-SLOW_SETTINGS = frozenset({("judgment_ai", "model"), ("main_ai", "route"), ("main_ai", "model")})
+SLOW_SETTINGS = frozenset({("judgment_ai", "model"), ("main_ai", "route"), ("main_ai", "model"),
+                           # #961: adding a skill downloads and inspects one pinned GitHub folder.
+                           ("skills", "add")})
+#: #961: what adding a skill does, shown with the draft.
+SKILL_ADD_NOTE = ("확인하면 고정된 커밋에서 그 폴더만 받아 라이선스와 내용을 확인한 뒤 추가해요(브랜치 이름은 이 초안을 만들 때 "
+                  "GitHub에 물어 커밋으로 고정했어요). 스크립트·훅은 실행하지 않고, 라이선스를 확인할 수 없거나 실행 파일이 "
+                  "필요한 스킬은 추가하지 않아요. 스킬은 방법 안내일 뿐 권한이 아니에요.")
 #: How long a confirmation waits for another apply of the same category (#814 review).
 APPLY_WAIT_SECONDS = 5
 #: #814 review: a draft left ``applying`` by a restart: its setter may or may not have committed.
@@ -277,6 +286,19 @@ class SettingsOrchestrator:
                                           format="사이트 주소, 또는 비서 이름|사이트 주소(예: example.com)",
                                           shared=[{"instance": row["instance"], "site": row["site"]} for row in shares])}
 
+    def _skills(self):
+        """#961: the switch, and the installed skills for ``add`` / ``remove`` (names and pinned sources only)."""
+        status = self.service.skills_status()
+        enabled = "on" if status.get("enabled") else "off"
+        rows = status.get("skills") or []
+        listed = ", ".join(f"{row['skill']} ({row['source']}{'' if row.get('enabled') else ', 꺼짐'})" for row in rows) or "없음"
+        removable = [row["skill"].split("/", 1)[1] for row in rows if not row["skill"].startswith("agentos/")]
+        return {"enabled": self._row("enabled", enabled, VALUE_LABELS[enabled], self._options(("on", "off"))),
+                "add": self._row("add", "", listed, None, format="GitHub 스킬 폴더 주소(예: github.com/<owner>/<repo>/tree/<브랜치 또는 커밋>/<폴더>)",
+                                 note=SKILL_ADD_NOTE),
+                "remove": self._row("remove", "", ", ".join(removable) or "없음", None, format="설치된 스킬 이름",
+                                    installed=removable)}
+
     def _signed_in_sites(self):
         """The sites the owner's browser is signed in to, names only, from the profile's non-blocking view."""
         profile = getattr(self.service, "browser_profile", None)
@@ -408,6 +430,12 @@ class SettingsOrchestrator:
             return name, row
         if (category, setting) in FAMILY_SHARE_SETTINGS:
             return self._share_value(setting, value, row), row
+        if (category, setting) in (("skills", "add"), ("skills", "remove")):
+            from .skills import SkillError
+            try:
+                return self.service.skill_setting_value(setting, value), row
+            except SkillError as exc:
+                raise SettingsError(f"{exc} 아무것도 바꾸지 않았습니다.") from None
         if setting == "daily_calls":
             from .owner_model import MAX_DAILY_CALLS
             if not value.isascii() or not value.isdigit() or not 0 <= int(value) <= MAX_DAILY_CALLS:
@@ -444,6 +472,16 @@ class SettingsOrchestrator:
                                 f"{self._describe(category, setting, after, row)}입니다. 바꿀 것이 없습니다.")
         if (category, setting) == ("family", "add"):
             summary = f"가족 비서 '{after}'를 만듭니다"
+        elif (category, setting) == ("skills", "add"):
+            from .skills import parse_source
+            source = parse_source(after)
+            name = source["path"].rstrip("/").split("/")[-1]
+            replacing = any(row["skill"].split("/", 1)[-1] == name and not row["skill"].startswith("agentos/")
+                            for row in self.service.skills_status().get("skills") or ())
+            summary = (f"스킬을 {'이 버전으로 바꿉니다' if replacing else '추가합니다'}: {source['repo']}의 {source['path']} "
+                       f"(커밋 {source['revision'][:7]})")
+        elif (category, setting) == ("skills", "remove"):
+            summary = f"스킬 '{after}'를 뺍니다"
         elif (category, setting) in FAMILY_SHARE_SETTINGS:
             from . import family_share
             instance, _sep, site = after.partition("|")
@@ -491,6 +529,10 @@ class SettingsOrchestrator:
             notify = self.__dict__.get("_family_notify", {}).pop(row["id"], None)
             self.service.start_family_setup(after, notify=notify)
             return "requested"
+        elif category == "skills":
+            # #961: the service's own setters; adding returns the installed identity as the answer.
+            receipt = self.service.apply_skill_setting(setting, after)
+            self.__dict__.setdefault("_apply_text", {})[row["id"]] = (receipt or {}).get("response")
         elif category == "owner_model":
             self.service.owner_model_request({"operation": "set", **({"enabled": after == "on"} if setting == "enabled"
                                                                       else {"daily_calls": int(after)})})

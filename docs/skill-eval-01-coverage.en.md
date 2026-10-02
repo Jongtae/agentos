@@ -2,7 +2,7 @@
 
 **Issue:** [#964](https://github.com/Jongtae/agentos/issues/964) (child of [SKILL-SUPPLY-01 #959](https://github.com/Jongtae/agentos/issues/959))
 **Date:** 2026-10-02
-**Status:** coverage map, gap checks and protocol. **No live run has been made.** The live budget stays zero until the owner approves the sample in section 4.
+**Status:** coverage map, gap checks and protocol. The owner approved the live sample in section 4 on 2026-10-02. Run 1 stopped at its first case (section 5), and no other live run has been made.
 **Code covered:** `main` after #976 (`efb5977`). Upstream fixture `anthropics/skills@8a1541c`. Reference skills `skills/shopping-cart` and `skills/emart-ssg` at that head.
 
 This is not a second test project. Each implementing child already checked its own boundary. This document maps that evidence to the #964 inventory, adds only the checks that were really missing, and states what remains unproven.
@@ -13,7 +13,7 @@ This is not a second test project. Each implementing child already checked its o
 - **I:** model-free integration through a real boundary (MCP bridge process, CLI process with a loopback fake model).
 - **P:** live public read, no account.
 - **S:** static or structural check.
-- **L:** live model or live account. None yet.
+- **L:** live model or live account. Only run 1 of section 5 so far.
 
 ## 1. Coverage map
 

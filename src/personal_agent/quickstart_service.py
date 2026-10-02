@@ -6096,9 +6096,13 @@ class AgentService:
                 final=shown='expired'
             self._put_browser_login(work_id,{**row,'state':final,'cause':shown,'closed_at':time.time()})
         if final=='resuming':
+            # #986: a sign-in the model asked for itself (#978) was offered on a Work the goal judgment
+            # marked succeeded; that Work resumes too, once, by the same compare-and-set.
+            statuses=('failed','partial','succeeded') if row.get('explicit') else ('failed','partial')
             with self.store.db() as db:
                 db.execute('BEGIN IMMEDIATE')
-                resumed=db.execute("UPDATE jobs SET status='queued',error=NULL,delivery='none' WHERE id=? AND status IN ('failed','partial')",(work_id,)).rowcount==1
+                resumed=db.execute("UPDATE jobs SET status='queued',error=NULL,delivery='none' WHERE id=? AND status IN "
+                                   f"({','.join('?'*len(statuses))})",(work_id,*statuses)).rowcount==1
             final=shown='resumed' if resumed else 'not_resumed'
             self._put_browser_login(work_id,{**row,'state':final,'cause':shown,'closed_at':time.time()})
             # #749/#765: the site(s) the owner signed in to through the window, each by its own evidence.

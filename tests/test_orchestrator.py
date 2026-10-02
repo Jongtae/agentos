@@ -1388,6 +1388,23 @@ class GoalDecidesOutcome(Harness):
         offer.assert_not_called()
 
 
+    def test_a_sign_in_the_ai_asked_for_is_offered_even_when_the_goal_was_reached(self):
+        """#978 (live 2026-10-02): the AI called browser_sign_in and told the owner to sign in; the
+        goal judgment said reached, and no window or phone link ever came.  An explicit request is offered."""
+        from personal_agent.quickstart_service import BROWSER_LOGINS_KEY
+        def work(tools):
+            self.step(tools, 'browser_sign_in', 'succeeded', evidence={'state': 'login_required'})
+            self.store.put(BROWSER_LOGINS_KEY, {tools.capabilities.job_id: {
+                'work_id': tools.capabilities.job_id, 'url': 'https://login.test/', 'host': 'login.test',
+                'state': 'requested', 'requested_at': 1.0, 'explicit': True}})
+        self.engine.before = work
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        with mock.patch.object(self.service, 'offer_browser_login') as offer:
+            job, row = self.run_work('아내 장바구니에 넣어줘')
+        self.assertEqual(row['status'], 'succeeded')
+        offer.assert_called_once()
+        self.assertEqual(offer.call_args[0][0]['id'], job)
+
 class OwnerStateOnTheCliRoute(Harness):
     """#774: the trusted-local CLI turn reaches Memory, preparations and the calendar through the service."""
 

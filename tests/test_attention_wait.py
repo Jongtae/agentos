@@ -82,10 +82,10 @@ class AttentionWaitTests(NativePresenceTestCase):
         job, _ = self.turn('오늘 저녁 뭐 먹지?')
         self.assertEqual(job['status'], 'succeeded')
         drafts = self.drafts()
-        self.assertEqual(len(drafts), 2)
-        # Dots first, the "참, …" line under them; the same line on every frame of this Work, never empty.
+        # #978: sent once, not re-sent unchanged, so the client finishes revealing the line.
+        self.assertEqual(len(drafts), 1)
+        # Dots first, the "참, …" line under them, never empty.
         self.assertEqual(drafts[0], draft_frame('', 0, attention_line(ATTENTION_PREPARED, row['goal_text'])))
-        self.assertEqual(drafts[1].split('\n')[0], DOTS[1])
         self.assertTrue(all(line.startswith(ATTENTION_PREFIX) and row['goal_text'] in line for line in self.attention_lines()))
         self.assertNotIn(SECRET, '\n'.join(drafts))
         # The durable surfaces are unchanged: one reply, no extra message, the preparation row untouched.
@@ -97,7 +97,7 @@ class AttentionWaitTests(NativePresenceTestCase):
         self.prepared(delivered=True)
         self.turn('질문')
         self.assertEqual(self.attention_lines(), [])
-        self.assertEqual(self.drafts(), [DOTS[0], DOTS[1]])
+        self.assertEqual(self.drafts(), [DOTS[0]])
 
     def test_a_when_needed_watch_is_never_surfaced(self):
         # #719: its judgment already decided what the owner hears (notified, or deliberately quiet).

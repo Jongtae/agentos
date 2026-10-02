@@ -662,5 +662,51 @@ class ReviewRemediations(_Store):
             parse_source('https://github.com/소유자/repo/tree/main/skills/x', self.github)
 
 
+class CodexReviewRemediations(_Store):
+    """#971 automated review (P2 x3), each with its counterexample."""
+
+    def test_owner_state_export_carries_skill_content(self):
+        from personal_agent.portable_state import export_owner_state, restore_owner_state
+        self.library.install(ADDRESS)
+        self.library.set_enabled(True)
+        archive = export_owner_state(self.store.root, self.root / 'owner-state.tar.gz')
+        restored = restore_owner_state(archive, self.root / 'restored')
+        library = SkillLibrary(QuickStore(restored), transport=self.github)
+        loaded = library.binding().load('internal-comms/internal-comms')
+        self.assertEqual(loaded['revision'], COMMIT)
+
+    def test_a_restarted_bridge_remembers_what_the_work_loaded(self):
+        self.library.install(ADDRESS)
+        self.library.set_enabled(True)
+        job = self.store.enqueue('restart', 'restart-skill')
+        first = self.caps(skills=self.library.binding())
+        first.job_id = job
+        loaded = first.execute('skill_load', {'skill': 'internal-comms/internal-comms'})
+        with self.store.db() as db:  # what the first bridge process recorded for this Work
+            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,0)',
+                       (job, 'skill_load', 'succeeded', json.dumps({'evidence': evidence_summary('skill_load', loaded)})))
+        second = Capabilities(self.store, None, CFG, '', job, lambda *a: None,
+                              skills=SkillBinding.from_refs(self.library, self.library.binding().refs()))
+        self.assertEqual(second.skills.loaded, {}, 'a fresh process starts empty')
+        second.execute('list_notes', {})
+        self.library.set_enabled(False)
+        with self.assertRaises(ToolError) as raised:
+            second.execute('list_notes', {})
+        self.assertEqual(raised.exception.code, 'skill_revoked')
+
+    def test_the_catalogue_bound_counts_utf8_bytes(self):
+        from personal_agent import skills
+        description = '한국어 설명 ' * 150  # about 1,000 characters, about 2.5 KB in UTF-8
+        for index in range(7):
+            name = f'ko{index}'
+            manifest = {'version': 1, 'id': name, 'tools': [], 'roles': [], 'enabled': True,
+                        'skills': [{'name': name, 'digest': 'f' * 64, 'status': ['supported_as_is'],
+                                    'description': description.strip()}]}
+            (Path(self.store.root) / 'plugins' / f'{name}.json').write_text(json.dumps(manifest, ensure_ascii=False))
+        self.library.set_enabled(True)
+        text = self.library.binding().catalogue_text()
+        self.assertLessEqual(len(text.encode()), skills.CATALOGUE_BYTES)
+
+
 if __name__ == '__main__':
     unittest.main()

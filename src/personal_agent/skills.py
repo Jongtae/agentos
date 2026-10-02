@@ -431,7 +431,7 @@ class SkillLibrary:
         """What a new Work is offered: ``loadable`` bounded (#960 section 6)."""
         bounded, size = [], 0
         for entry in self.loadable()[:CATALOGUE_ENTRIES]:
-            size += len(entry['skill']) + len(entry['description']) + 8
+            size += len(f"- {entry['skill']}: {entry['description']}\n".encode())  # UTF-8 bytes, as turn_context counts
             if size > CATALOGUE_BYTES:
                 break
             bounded.append(entry)
@@ -597,6 +597,27 @@ class SkillBinding:
         if not self.library.current(entry):
             raise SkillError(REVOKED_TEXT.format(skill=entry['skill']), 'skill_revoked')
         return entry
+
+    def recall(self, store, job_id):
+        """Add the skills this Work loaded in any process, from its recorded tool events (#961 review).
+
+        A restarted CLI bridge, or a later attempt on another route, starts with an
+        empty ``loaded`` set while the worker may still hold the earlier text.
+        """
+        try:
+            with store.db() as db:
+                rows = db.execute("SELECT detail FROM tool_events WHERE job_id=? AND tool='skill_load' AND status='succeeded'",
+                                  (job_id,)).fetchall()
+        except Exception:
+            return
+        for (detail,) in rows:
+            try:
+                evidence = json.loads(detail).get('evidence') or {}
+            except (TypeError, ValueError, AttributeError):
+                continue
+            entry = self.entries.get(evidence.get('skill'))
+            if entry is not None and entry['digest'] == evidence.get('digest'):
+                self.loaded.setdefault(entry['skill'], entry)
 
     def check_current(self):
         """Refuse when a skill this Work loaded is no longer current (every later tool call)."""

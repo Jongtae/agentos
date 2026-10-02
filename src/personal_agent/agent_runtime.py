@@ -1675,7 +1675,10 @@ class Capabilities:
   through untagged tools.  Every later call of the Work is refused instead
   (``skill_revoked``); a new request starts from the current settings.
   """
-  if self.skills is None or not self.skills.loaded:return
+  if self.skills is None:return
+  # A load recorded by another process of this Work (a restarted bridge, an earlier attempt) counts too.
+  if hasattr(self.store,'db'):self.skills.recall(self.store,self.job_id)
+  if not self.skills.loaded:return
   from .skills import SkillError
   try:self.skills.check_current()
   except SkillError as exc:raise ToolError(str(exc),exc.code) from None

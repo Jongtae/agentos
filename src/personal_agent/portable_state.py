@@ -114,9 +114,20 @@ def export_owner_state(data, archive):
         plugins = data / "plugins"
         if plugins.is_dir():
             for source in sorted(plugins.glob("*.json")):
-                validate(json.loads(source.read_text()))
+                manifest = validate(json.loads(source.read_text()))
                 relative = "plugins/" + source.name;target = staging / relative;target.parent.mkdir(mode=0o700, exist_ok=True)
                 shutil.copyfile(source, target);target.chmod(0o600);files[relative] = _sha256(target)
+                # #961: a skill declaration travels with its pinned content (plugins/skills/<digest>/<name>/),
+                # read through the same link/size checks a Work's read uses.
+                for skill in manifest.get("skills") or ():
+                    from .skills import SkillError, _walk
+                    folder = plugins / "skills" / skill["digest"] / skill["name"]
+                    try: content = _walk(folder)
+                    except SkillError: continue  # missing content: the declaration restores as unloadable, as it was
+                    for name, body in content.items():
+                        relative = f"plugins/skills/{skill['digest']}/{skill['name']}/{name}";target = staging / relative
+                        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                        target.write_bytes(body);target.chmod(0o600);files[relative] = _sha256(target)
         manifest = {"format": FORMAT, "files": files, "connections_included": False,
                     "restore_notice": "Claim this runtime and reconnect engines, Telegram, models, and local folders."}
         (staging / "manifest.json").write_text(json.dumps(manifest, sort_keys=True))
@@ -152,7 +163,8 @@ def restore_owner_state(archive, data):
         for name, digest in files.items():
             path = staged / name
             if Path(name).is_absolute() or ".." in Path(name).parts or _sha256(path) != digest: raise ValueError("Owner-state archive integrity check failed.")
-            if name.startswith("plugins/"): validate(json.loads(path.read_text()))
+            # Declarations are the direct plugins/*.json; skill content below plugins/skills/ is data (#961).
+            if name.startswith("plugins/") and name.count("/") == 1: validate(json.loads(path.read_text()))
         with sqlite3.connect(staged / DB_RELATIVE) as db:
             if not db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='config'").fetchone(): raise ValueError("Invalid owner-state database.")
         if data.exists():

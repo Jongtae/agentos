@@ -34,4 +34,4 @@ where = ["src"]
 include = ["personal_agent*"]
 
 [tool.setuptools.package-data]
-personal_agent = ["web/*.html", "web/*.css", "web/*.js", "bundled_skills/*/SKILL.md"]
+personal_agent = ["web/*.html", "web/*.css", "web/*.js", "bundled_skills/*/SKILL.md", "bundled_skills/*/references/*.md"]

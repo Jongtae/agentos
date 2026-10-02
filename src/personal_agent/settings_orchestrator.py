@@ -427,6 +427,15 @@ class SettingsOrchestrator:
             name = " ".join(value.split())
             if not name or len(name) > 64 or any(ord(char) < 32 for char in value):
                 raise SettingsError("가족 비서 이름을 1~64자로 주세요. 아무것도 만들지 않았습니다.")
+            # SKILL-MANAGE-01 (#962): a repeated request never makes a second assistant of the same name.
+            # Only an already paired one blocks; an unfinished setup is reused by the setter itself.
+            from . import family_share
+            same = [(instance, item) for instance, item in (row["share_site"].get("assistants") or {}).items()
+                    if " ".join(str(item.get("name") or "").split()).lower() == name.lower() and item.get("state") == "paired"]
+            if same:
+                listed = ", ".join(family_share.describe(instance, item) for instance, item in same)
+                raise SettingsError(f"'{name}' 비서는 이미 있어요: {listed}. 새로 만들지 않았어요. "
+                                    "다른 가족의 비서라면 다른 이름으로 다시 요청해 주세요.")
             return name, row
         if (category, setting) in FAMILY_SHARE_SETTINGS:
             return self._share_value(setting, value, row), row

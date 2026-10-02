@@ -210,3 +210,15 @@ Evidence classes are named separately:
 - The opt-in Codex process test listed in the table above.
 
 No live model, live GitHub download during tests, or owner account was used. Model quality with skills is not claimed.
+
+## 13. Management content (#962)
+
+[#962](https://github.com/Jongtae/agentos/issues/962) adds the bundled skill `agentos/agentos-management`: a `SKILL.md` plus three references, one each for the Main AI, family assistants and site sharing.
+
+- **Content only.** It directs the worker to the existing `settings_read` and `settings_change` tools and their owning services. It adds no tool, setter or confirmation of its own.
+- **Not blocked by C16.** It names no owner task, site or provider. It describes AgentOS's own settings, so it does not need the section 8 amendment that site and task know-how waits for.
+- **One bounded service change.** Repeating a request to create a family assistant (`family add`) is now refused when a paired assistant on this Mac already has that name, the owner's own assistant included. An unfinished setup can still be requested again; the existing setter reuses it. The change only narrows what a draft may do.
+- **Existing semantics are kept and cited, not changed:**
+  - Main AI continuity: a running Work keeps its route snapshot (`test_ai_route_selection`).
+  - The #814 draft contract: a Work that drafted a change reports that change as waiting for the owner.
+  - Family setup states and sharing receipts.

@@ -90,6 +90,11 @@ class FamilyAssistantConversation(_Case):
         super().setUp()
         self.started = []
         self.service.start_family_setup = lambda display_name, name=None, notify=None: self.started.append(display_name) or {'state': 'requested'}
+        # #962: no other assistant on "this Mac" unless a test adds one (never the real machine's).
+        from unittest import mock
+        patcher = mock.patch('personal_agent.family_share.instances', return_value={})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_a_family_assistant_is_drafted_then_started_only_after_confirmation(self):
         draft = self.draft('family', 'add', ' 아내   비서 ')

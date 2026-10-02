@@ -220,7 +220,7 @@ class OffAndEmptyPreserveThePreSkillPath(_Store):
         (Path(self.store.root) / 'plugins' / 'broken.json').write_text('{not json')
         service = AgentService(self.store)
         binding = service.skill_binding()
-        self.assertEqual([entry for entry in binding.entries], ['agentos/agentos-skills'], 'the bundled skill still loads')
+        self.assertEqual(sorted(binding.entries), ['agentos/agentos-management', 'agentos/agentos-skills'], 'the bundled skills still load')
         service.skill_library = lambda: (_ for _ in ()).throw(OSError('disk'))
         self.assertIsNone(service.skill_binding())
 
@@ -309,7 +309,7 @@ class LoadingAndBinding(_Store):
 
     def test_catalogue_lists_descriptions_only(self):
         binding = self.library.binding()
-        self.assertEqual(sorted(binding.entries), ['agentos/agentos-skills', 'internal-comms/internal-comms'])
+        self.assertEqual(sorted(binding.entries), ['agentos/agentos-management', 'agentos/agentos-skills', 'internal-comms/internal-comms'])
         text = binding.catalogue_text()
         self.assertIn('- internal-comms/internal-comms: A set of resources', text)
         self.assertNotIn('3P updates', text.split('internal-comms:')[0])

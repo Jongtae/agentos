@@ -150,7 +150,7 @@ def main():
     _require('personal_agent = ["web/*.html", "web/*.css", "web/*.js"' in pyproject,
              "personal_agent web package data is not configured", failures)
     # SKILL-SUPPLY-02 (#961): the reviewed bundled skills ship with the package.
-    _require('"bundled_skills/*/SKILL.md"' in pyproject,
+    _require('"bundled_skills/*/SKILL.md"' in pyproject and '"bundled_skills/*/references/*.md"' in pyproject,
              "personal_agent bundled skills package data is not configured", failures)
     for retired in ("delivery.py", "handoff.py", "delivery-plan.yaml"):
         _require(not (PACKAGE / retired).exists(),

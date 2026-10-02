@@ -72,6 +72,9 @@ LICENCE_TEXTS = (('Apache-2.0', ('apache license', 'version 2.0')), ('MIT', ('mi
 #: The reviewed skills shipped with AgentOS, under one reserved package id.
 BUNDLED_PACKAGE = 'agentos'
 BUNDLED_ROOT = Path(__file__).with_name('bundled_skills')
+#: #963: the reference skills AgentOS publishes, as data (``[{name, description, address}]``), so the
+#: owner can add one by name even while skills are off; no code names a particular skill.
+REFERENCES_FILE = Path(__file__).with_name('skill_references.json')
 #: The owner's switch: ``{"enabled": bool}``; absent means off.
 SETTINGS_KEY = 'skills'
 #: The one supported acquisition source (#960 section 6): a GitHub folder at one commit.
@@ -303,6 +306,18 @@ def parse_source(value, transport=http_get):
             raise SkillError('브랜치나 태그의 커밋을 확인하지 못했어요. 커밋 주소로 다시 주세요.', 'source_unavailable')
     return {'kind': 'github', 'repo': f'{owner}/{repo}', 'revision': revision, 'path': path,
             'uri': f'https://github.com/{owner}/{repo}', 'publisher_claim': owner}
+
+
+def reference_skills(path=REFERENCES_FILE):
+    """AgentOS's published reference skills, validated; an unreadable or malformed list is empty."""
+    try:
+        rows = json.loads(Path(path).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return []
+    return [{'name': row['name'], 'description': ' '.join(str(row['description']).split())[:300], 'address': row['address']}
+            for row in rows if isinstance(row, dict) and isinstance(row.get('name'), str) and NAME.match(row['name'])
+            and isinstance(row.get('description'), str) and isinstance(row.get('address'), str)
+            and GITHUB_TREE.match(row['address'])] if isinstance(rows, list) else []
 
 
 def source_address(source):

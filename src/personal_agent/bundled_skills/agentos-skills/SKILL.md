@@ -1,6 +1,6 @@
 ---
 name: agentos-skills
-description: How skills work in this AgentOS - what a skill is, how to add one from a public GitHub folder, turn skills on or off and remove one, all through settings_change. Use when the owner asks about skills or wants one added, removed or switched.
+description: How skills work in this AgentOS - what a skill is, how to add one from a public GitHub folder, turn skills on or off and remove one, all through settings_change, and which reviewed reference skills (such as shopping) can be added. Use when the owner asks about skills, or a request needs a skill that is not installed.
 license: AGPL-3.0-only
 ---
 # Skills in AgentOS
@@ -16,6 +16,13 @@ All changes go through `settings_change` with category `skills`. AgentOS then as
 - **Remove a skill:** setting `remove`, value is the skill's name.
 
 Read the current list with `settings_read` category `skills`.
+
+## Reference skills AgentOS publishes
+
+These are reviewed reference skills in the AgentOS repository. They are added like any other skill, pinned to the commit current when the owner confirms, and each can be removed on its own. Offer to add one when the owner's request needs it and it is not installed yet.
+
+- **Shopping cart method:** `https://github.com/Jongtae/agentos/tree/main/skills/shopping-cart`. Changing an online cart safely: exact product, quantity meaning, read-back.
+- **Emart mall on SSG.COM:** `https://github.com/Jongtae/agentos/tree/main/skills/emart-ssg`. Site know-how. Use it with the shopping cart method.
 
 ## What AgentOS refuses
 

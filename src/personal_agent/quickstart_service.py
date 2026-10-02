@@ -3078,15 +3078,21 @@ class AgentService:
             return None
 
     def skills_status(self):
+        from .skills import reference_skills
         library = self.skill_library()
-        return {'enabled': library.enabled(), 'skills': library.summary()}
+        installed = {manifest['id'] for manifest in library.installed()}
+        return {'enabled': library.enabled(), 'skills': library.summary(),
+                'available': [{**row, 'installed': row['name'] in installed} for row in reference_skills()]}
 
     def skill_setting_value(self, setting, value):
         """The canonical draft value of a skills ``add`` (pinned address) or ``remove`` (package id)."""
-        from .skills import SkillError, parse_source, source_address
+        from .skills import SkillError, parse_source, reference_skills, source_address
         library = self.skill_library()
         if setting == 'remove':
             return library.resolve(value)
+        # #963: an AgentOS reference skill may be named instead of addressed (the address comes from data).
+        published = {row['name']: row['address'] for row in reference_skills()}
+        value = published.get(' '.join(str(value or '').split()).lower(), value)
         source = parse_source(value, library.transport)
         for manifest in library.installed():
             if manifest.get('source', {}).get('revision') == source['revision'] and manifest['source'].get('repo') == source['repo'] \
@@ -3109,7 +3115,9 @@ class AgentService:
         text = (f"스킬 '{skill['name']}'을(를) 추가했어요. 출처 {source['repo']}의 {source['path']}, 커밋 {source['revision'][:7]}, "
                 f"라이선스 {skill['licence']}.")
         if not library.enabled():
-            text += ' 스킬은 지금 꺼져 있어요. 켜면 다음 요청부터 써요.'
+            # #963 review P1: adding a skill is asking to use it; the draft said skills are switched on with it.
+            library.set_enabled(True)
+            text += ' 스킬 사용도 켰어요. 다음 요청부터 써요.'
         return {'response': text, 'skill': skill['name'], 'digest': skill['digest'], 'revision': source['revision']}
 
     def document_fingerprint(self, model=None):

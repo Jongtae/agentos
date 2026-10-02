@@ -293,9 +293,14 @@ class SettingsOrchestrator:
         rows = status.get("skills") or []
         listed = ", ".join(f"{row['skill']} ({row['source']}{'' if row.get('enabled') else ', 꺼짐'})" for row in rows) or "없음"
         removable = [row["skill"].split("/", 1)[1] for row in rows if not row["skill"].startswith("agentos/")]
+        # #963: AgentOS's published reference skills, listed even while skills are off, addable by name.
+        available = [{key: row[key] for key in ("name", "description", "address", "installed")}
+                     for row in status.get("available") or ()]
         return {"enabled": self._row("enabled", enabled, VALUE_LABELS[enabled], self._options(("on", "off"))),
-                "add": self._row("add", "", listed, None, format="GitHub 스킬 폴더 주소(예: github.com/<owner>/<repo>/tree/<브랜치 또는 커밋>/<폴더>)",
-                                 note=SKILL_ADD_NOTE),
+                "add": self._row("add", "", listed, None,
+                                 format="GitHub 스킬 폴더 주소(예: github.com/<owner>/<repo>/tree/<브랜치 또는 커밋>/<폴더>), "
+                                        "또는 available에 있는 AgentOS 참고 스킬 이름",
+                                 note=SKILL_ADD_NOTE, available=available),
                 "remove": self._row("remove", "", ", ".join(removable) or "없음", None, format="설치된 스킬 이름",
                                     installed=removable)}
 
@@ -494,6 +499,9 @@ class SettingsOrchestrator:
                             for row in self.service.skills_status().get("skills") or ())
             summary = (f"스킬을 {'이 버전으로 바꿉니다' if replacing else '추가합니다'}: {source['repo']}의 {source['path']} "
                        f"(커밋 {source['revision'][:7]})")
+            if not self.service.skills_status().get("enabled"):
+                summary += ". 스킬 사용이 꺼져 있어 함께 켭니다"
+
         elif (category, setting) == ("skills", "remove"):
             summary = f"스킬 '{after}'를 뺍니다"
         elif (category, setting) in FAMILY_SHARE_SETTINGS:

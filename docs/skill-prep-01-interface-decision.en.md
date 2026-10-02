@@ -230,3 +230,37 @@ No live model, live GitHub download during tests, or owner account was used. Mod
   - Main AI continuity: a running Work keeps its route snapshot (`test_ai_route_selection`).
   - The #814 draft contract: a Work that drafted a change reports that change as waiting for the owner.
   - Family setup states and sharing receipts.
+
+## 14. Shopping and site content (#963)
+
+[#963](https://github.com/Jongtae/agentos/issues/963) adds content only.
+
+**Packaging.** The skills are published in this repository's `skills/` folder and installed through the #961 pinned-GitHub path. They are not bundled. The amended C16 (#974) requires an AgentOS-authored site skill to get the same review as an external one and to be individually removable by the owner. Installed packages already meet both requirements, with no change to the common loader. The bundled `agentos-skills` guide lists their addresses, so the AI can offer to add one, and the owner confirms as for any skill.
+
+Owners start with skills off, so the AI cannot see that guide on a fresh install. The reference list is therefore also kept as data (`skill_references.json`, read only by `skills.py`). `settings_read skills` lists it even while skills are off, and `skills add` accepts a reference skill's name. Adding a skill while skills are off switches them on in the same confirmed draft, and the draft says so. No code names a particular skill.
+
+**Supply review first.** On 2026-10-02 a public code search found no Emart or SSG skill. Three generic shopping candidates were rejected:
+
+| Candidate | Licence | Why rejected |
+| --- | --- | --- |
+| `MassLab-SII/open-agent-skills` `skills/shopping` | Apache-2.0 | Needs Python scripts and Playwright (`scripts_or_hooks_required`) |
+| `martinwheeler/skills` `syncing-shopping-cart` | None | Woolworths only, Playwright MCP with injected JavaScript |
+| `martparve/selver-mcp` `selver-cart` | None | Needs its own MCP servers |
+
+The AgentOS references fill that gap. They are not evidence that a third-party skill was imported; #961's `internal-comms` remains that evidence.
+
+**What each package holds.**
+
+- `shopping-cart` is the site-independent method: quantity semantics (add, set, ensure), exact matching, a single change, cart read-back, reconcile-before-retry, and truthful reporting.
+- `emart-ssg` holds only site facts, each with its provenance: home, search results, cart and category addresses, and page titles seen in redacted AgentOS browser records. It also states the account and cart scope and the delivery-type caution.
+- The search query parameter was not recorded, and an anonymous request cannot confirm it because the page is rendered by JavaScript. The skill therefore names no query parameter.
+
+**Evidence.** `tests/test_skill_shop.py` runs model-free scripted flows on the deterministic fixture shop:
+
+- First use on a fresh store, with the method plus a second site package (`tests/fixtures/skills/fixture-mart`).
+- Exactly one change, with the claim resting on the cart read afterwards.
+- The published site package installed and loaded with no core edits.
+- Each package removable on its own.
+- Withdrawing the method mid-flow stops the next click before it reaches the shop.
+
+No live site, account or model was used. Whether a model follows the method well on the real Emart site is a #964 question that needs a separately capped live run.

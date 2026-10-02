@@ -403,7 +403,7 @@ class Upkeep:
         are read again; a pause stops the run, a spent cap or the deadline
         (``cancelled()``) stops further calls, and ``stopped`` says which.
         """
-        from .agent_runtime import MEMORY_OWNER
+        from .agent_runtime import MEMORY_OWNER, SECRET_SHAPED_VALUE, memory_value_has_secret
         stop = cancelled or (lambda: False)
         request = str(job.get('message') or '')
         noted_keys, noted = self.work_noted(job['id'])
@@ -431,6 +431,10 @@ class Upkeep:
                 dropped.extend({'key_digest': key_digest(rest['memory_key']), 'reason': STOPPED_PAUSED}
                                for rest in kept[index:])
                 break
+            if memory_value_has_secret(self.store, key, content):
+                # #918 review P1: a stored secret or a credential-shaped value never enters Memory; only a key digest is kept.
+                dropped.append({'key_digest': key_digest(key), 'reason': SECRET_SHAPED_VALUE})
+                continue
             row = {'memory_key': key, 'category': item['category'], 'kind': item['kind'],
                    'content_chars': len(content), 'supersedes_key': item['supersedes_key'] or None}
             # #918 slice (a), owner decision 2026-09-30: the owner's own Judgment AI saves at once as

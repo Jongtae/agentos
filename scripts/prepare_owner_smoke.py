@@ -215,9 +215,9 @@ def _work_private_values(store, job_id):
     with store.db() as db:
         values.extend(row["content"] for row in db.execute(
             "SELECT content FROM memory_candidates WHERE work_key=?", (store._work_binding(job_id),)))
-        # #918: a non-profile value the owner's worker saved at once, as the pending candidate it used to be.
+        # #918: a non-profile value the owner's worker saved at once, as the pending candidate it used to be (every state).
         values.extend(row["content"] for row in db.execute(
-            "SELECT content,memory_key FROM memories WHERE work_key=? AND state='current'", (store._work_binding(job_id),))
+            "SELECT content,memory_key FROM memories WHERE work_key=?", (store._work_binding(job_id),))
             if not str(row["memory_key"] or "").startswith("profile."))
         for row in db.execute("SELECT id,content FROM notes"):
             if row["id"] == job_id or row["id"] == hashlib.sha256((job_id + str(row["content"])).encode()).hexdigest():

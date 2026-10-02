@@ -235,6 +235,21 @@ class Apply(Upkeep):
         from personal_agent.agent_runtime import work_written_values
         self.assertNotIn('판교', work_written_values(self.store, job))
 
+    def test_a_credential_shaped_or_stored_secret_value_is_never_saved(self):
+        """#918 review P1: the upkeep write passes the same secret gate as the worker's save."""
+        self.store.secret('telegram_token', 'LEAKYSECRET0918VALUE')
+        job = self.finished('나는 판교에서 일해')
+        self.answers = [[proposal('profile.api', 'sk-proj-abcdefghijklmnopqrstuvwxyz123456', category='preference'),
+                         proposal('profile.note', 'token LEAKYSECRET0918VALUE', category='preference'),
+                         proposal('profile.place.work', '판교')]]
+        self.service.run_owner_model_upkeep()
+        self.assertEqual([row['content'] for row in self.store.memories(MEMORY_OWNER)], ['판교'])
+        [(_status, detail)] = self.evidence(job)
+        self.assertEqual([item['reason'] for item in detail['dropped']], ['secret-shaped-value', 'secret-shaped-value'])
+        text = json.dumps(detail, ensure_ascii=False)
+        for raw in ('sk-proj', 'LEAKYSECRET0918VALUE', 'profile.api'):
+            self.assertNotIn(raw, text)
+
     def test_a_stated_value_the_owner_did_not_say_is_saved_too(self):
         """#918: the value-coverage gate is off this path; the owner's notice with undo is the correction."""
         job = self.finished('나는 판교에서 일해')

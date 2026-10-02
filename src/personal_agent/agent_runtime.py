@@ -293,7 +293,29 @@ MEMORY_REFUSALS={
  'replaces-a-memory-the-request-did-not-name':'요청에 없던 기존 기억을 대체하는 값이라 저장하지 않고 기억 후보로 보관했습니다. 개인 공간에서 확인 후 승인할 수 있습니다.',
  # #918 slice (a): a write by a package tool or a delegated specialist stays a MemoryCandidate (C5).
  'third-party-write':'소유자 확인이 필요해 기억 후보로 보관했습니다. 승인 후 저장할 수 있습니다.',
+ # #918 review P1: a stored secret or a credential-shaped value never enters Memory (pilot invariant a).
+ 'secret-shaped-value':'자격 증명으로 보이는 값이라 기억으로 저장하지 않았습니다.',
 }
+SECRET_SHAPED_VALUE='secret-shaped-value'
+
+def memory_value_has_secret(store, *values):
+ """Whether any of ``values`` carries a stored secret's literal value or a credential shape (#918 review P1).
+
+ The same deterministic pass as ``current_context.redact_known_secrets``
+ (stored secret values, then ``bounded_execution.SECRET_PATTERN``): a value
+ the pass would change is refused before any Memory write, so a worker or
+ the upkeep cannot persist a credential that a later ``list_memory`` would
+ hand back.  A failing pass refuses (fail closed).
+ """
+ from .current_context import redact_known_secrets
+ for value in values:
+  text=str(value or '')
+  if not text:continue
+  try:
+   if redact_known_secrets(store,text)!=text:return True
+  except Exception:
+   return True
+ return False
 #: #918 slice (a): why a ``save_memory`` call is not the owner's own worker writing.  A package-declared
 #: tool (its id is not the built-in one) or a delegated specialist is a third party under C5: its write
 #: stays a pending MemoryCandidate with the owner's ask.  The owner's own worker saves directly, with undo.
@@ -1156,8 +1178,10 @@ def work_written_values(store, job_id, tools=None):
   # #804: a ``profile.`` fact the owner stated and #597 accepted is not a lookup exclusion (see save_memory).
   written=[row['content'] for row in db.execute('SELECT content,memory_key,state FROM memory_candidates WHERE work_key=?',(store._work_binding(job_id),))
            if not (row['state']=='accepted' and str(row['memory_key'] or '').startswith(PROFILE_PREFIX))]
-  # #918: a non-``profile.`` value the owner's worker saved at once is excluded like the pending candidate it used to be.
-  written.extend(row['content'] for row in db.execute("SELECT content,memory_key FROM memories WHERE work_key=? AND state='current'",(store._work_binding(job_id),))
+  # #918: a non-``profile.`` value the owner's worker saved at once is excluded like the pending candidate it
+  # used to be - in every state (review P2: a superseded or retracted row's value still stands in the Work's
+  # tool conversation, so it stays in the redaction set as the former candidate query kept every state).
+  written.extend(row['content'] for row in db.execute("SELECT content,memory_key FROM memories WHERE work_key=?",(store._work_binding(job_id),))
                  if not str(row['memory_key'] or '').startswith(PROFILE_PREFIX))
   # A note this Work saved: `/note` stores it under the Work id, `save_note`
   # under sha256(Work id + content).  Survives a restarted bridge (#605 N2).
@@ -1833,6 +1857,18 @@ class Capabilities:
       hits.append({'root_id':root['id'],'path':path,'kind':result['kind'],'location':location,'match':'filename' if query.casefold() in name.casefold() else 'content'})
      if len(hits)>=20:return {'files':hits,'truncated':True}
   return {'files':hits,'truncated':False}
+ def _redact_memory_rows(self,rows):
+  """Memory rows as the model may read them: key and content through the stored-secret redactor and the credential-shape filter (#918 review P1)."""
+  from .bounded_execution import SECRET_PATTERN
+  for row in rows if isinstance(rows,list) else []:
+   if not isinstance(row,dict):continue
+   for field in ('memory_key','content'):
+    if isinstance(row.get(field),str):
+     try:
+      text=str(self.secret_redactor(row[field])) if callable(self.secret_redactor) else row[field]
+      row[field]=SECRET_PATTERN.sub('[redacted]',text)
+     except Exception:row[field]='[redacted]'
+  return rows
  def third_party_memory_write(self,tool_id):
   """Whether a ``save_memory`` call is a third party's, not the owner's own worker's (#918 slice a).
 
@@ -2307,6 +2343,10 @@ class Capabilities:
     # #846: the owner's request sentence is the task, not a fact about the owner; no candidate is made of it
     # (an equality check on the value's shape, the same as owner_model.validate; no intent detection).
     return {'saved':False,'state':'refused','memory_key':args.get('memory_key'),'refused_because':'value-is-the-request'}
+   if memory_value_has_secret(self.store,args.get('memory_key'),args.get('content')):
+    # #918 review P1: a stored secret or a credential-shaped value is refused before any write - Memory,
+    # candidate or notice - and the refusal never echoes the value (the key is not returned either).
+    return {'saved':False,'state':'refused','refused_because':SECRET_SHAPED_VALUE}
    self.written_labels.add('owner-memory')
    if self.third_party_memory_write(tool_id):
     # C5: a package tool or a delegated specialist proposes; its write stays a pending
@@ -2340,15 +2380,12 @@ class Capabilities:
      result['query_terms']=re.findall(r"[^\W_]+",safe_query.casefold(),flags=re.UNICODE)[:12]
     except Exception:
      result['query_terms']=[]
-    for row in result.get('memories',[]):
-     if not isinstance(row,dict):continue
-     for field in ('memory_key','content'):
-      if isinstance(row.get(field),str):
-       try:row[field]=self.secret_redactor(row[field])
-       except Exception:row[field]='[redacted]'
+    self._redact_memory_rows(result.get('memories',[]))
    self.evidence.append({'tool':name,'result':result}); return result
   if name=='list_memory':
-   result={'memories':self.with_memory_sources(self.store.memories())}; self.evidence.append({'tool':name,'result':result}); return result
+   # #918 review P1: stored rows pass the same secret filter as a search result before the model reads them.
+   result={'memories':self._redact_memory_rows(self.with_memory_sources(self.store.memories()))}
+   self.evidence.append({'tool':name,'result':result}); return result
   if name=='list_agents':return {'agents':[{'id':role_id,'name':role['name'],'permissions':role['permissions'],'package_id':role['package_id']} for role_id,role in self.roles.items()]}
   if name=='delegate_agent':
    agent=self.roles.get(args['agent_id'])

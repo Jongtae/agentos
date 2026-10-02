@@ -1613,21 +1613,16 @@ class AgentService:
         the Work as a ``memory_undo`` event for its information-use audit and
         Evidence.  Returns ``(status, restored_id)``.
         """
+        # #918 review P2: the retraction and its Evidence row are one transaction (``record``), so an
+        # undo is never durable without the event the audit promises.
+        record={'job_id':job_id,'tool':MEMORY_UNDO_TOOL,'status':'recorded',
+                'detail':{'host_action':MEMORY_UNDO_TOOL,'evidence':{'id':item['id'],'memory_key':item.get('key'),'auto_saved':True}}}
         try:
-            receipt=self.store.retract_memory(MEMORY_OWNER,item['id'],item['digest'])
+            receipt=self.store.retract_memory(MEMORY_OWNER,item['id'],item['digest'],record=record)
         except ValueError as exc:
             LOG.info('memory undo refused work=%s kind=%s',job_id,type(exc).__name__)
             return 'outdated',None
-        restored=(receipt.get('restored') or {}).get('id')
-        try:
-            detail={'host_action':MEMORY_UNDO_TOOL,'evidence':{'id':item['id'],'memory_key':receipt.get('memory_key'),
-                                                               'restored_id':restored,'auto_saved':True}}
-            with self.store.db() as db:
-                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
-                           (job_id,MEMORY_UNDO_TOOL,'recorded',json.dumps(detail,ensure_ascii=False),time.time()))
-        except Exception as exc:  # the record is best-effort; the undo itself is durable
-            LOG.warning('memory undo record failed work=%s kind=%s',job_id,type(exc).__name__)
-        return 'retracted',restored
+        return 'retracted',(receipt.get('restored') or {}).get('id')
 
     def undo_memory_saved(self, job_id, binding, targets):
         """Apply one tap to the open ``targets`` (1-based) of a bound notice; returns the ids it decided (#918)."""

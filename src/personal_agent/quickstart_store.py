@@ -861,7 +861,7 @@ class QuickStore:
             db.execute("UPDATE memory_approvals SET state='consumed',result_id=? WHERE token_hash=? AND state='issued'",(result['id'],approval['token_hash']))
             return result
 
-    def retract_memory(self, owner_id, memory_id, content_digest, now=None):
+    def retract_memory(self, owner_id, memory_id, content_digest, now=None, record=None):
         """Undo one direct save (#918 slice a): retract exactly that current row, restore what it superseded.
 
         Bound to the owner, the row id and its content digest, so a stale undo
@@ -871,6 +871,12 @@ class QuickStore:
         approvals against the key are revoked, as every canonical write does.
         Fails closed with ``ValueError`` when the row is not current with that
         content (already undone, superseded, corrected or deleted since).
+
+        ``record`` (#918 review P2): ``{'job_id', 'tool', 'status', 'detail'}``
+        of the Evidence event the caller promises for this undo; it is
+        inserted into ``tool_events`` in the same transaction, so a retraction
+        is never durable without its record (``detail`` may name the restored
+        row through ``{restored_id}``).
         """
         if not isinstance(memory_id,str) or not memory_id:raise ValueError('되돌릴 기억을 확인하세요.')
         if not isinstance(content_digest,str) or len(content_digest)!=64:raise ValueError('되돌릴 내용을 확인하세요.')
@@ -891,6 +897,13 @@ class QuickStore:
             if row['candidate_id']:
                 db.execute("UPDATE memory_candidates SET state='retracted',decided=? WHERE id=? AND owner_key=? AND state='accepted'",
                            (time.time() if now is None else float(now),row['candidate_id'],owner_key))
+            if record is not None:
+                detail=dict(record['detail']) if isinstance(record.get('detail'),dict) else {}
+                evidence=dict(detail.get('evidence') or {});evidence['restored_id']=restored['id'] if restored else None
+                detail['evidence']=evidence
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           (record['job_id'],record['tool'],record['status'],json.dumps(detail,ensure_ascii=False),
+                            time.time() if now is None else float(now)))
         return {'retracted':True,'id':memory_id,'memory_key':row['memory_key'],'content':row['content'],
                 'content_digest':row['content_digest'],'restored':restored}
 

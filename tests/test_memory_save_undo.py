@@ -24,8 +24,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from personal_agent.agent_runtime import (CORE_INSTRUCTIONS, DEFINITIONS, MEMORY_OWNER, THIRD_PARTY_MEMORY_WRITE,
-                                          Capabilities, evidence_summary, worker_result)
+from personal_agent.agent_runtime import (CORE_INSTRUCTIONS, DEFINITIONS, MEMORY_OWNER, MEMORY_REFUSALS,
+                                          SECRET_SHAPED_VALUE, THIRD_PARTY_MEMORY_WRITE, Capabilities, evidence_summary,
+                                          work_written_values, worker_result)
 from personal_agent.decision import OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, fixture_confidence
 from personal_agent.manifests import runtime_packages
 from personal_agent.quickstart_service import (MEMORY_CANDIDATES_KIND, MEMORY_PENDING_WEB_NOTE, MEMORY_SAVED_EXPIRED_TEXT,
@@ -134,6 +135,21 @@ class SaveAndTell(TelegramHarness):
         self.service.queue_memory_saved(self.store.job(job_id))
         self.assertEqual(self.notification(job_id, MEMORY_SAVED_KIND), [])
         self.assertEqual([m['content'] for m in self.store.memories()], [VALUE])
+
+    def test_a_credential_shaped_value_leaves_no_memory_and_no_notice(self):
+        secret = 'sk-proj-abcdefghijklmnopqrstuvwxyz123456'
+        job_id = self.saved_turn(plan=[('save_memory', {'memory_key': 'profile.api', 'content': secret})])
+        self.assertEqual(self.store.memories(), [])
+        self.assertEqual(self.store.memory_candidates(include_decided=True), [])
+        self.service.deliver_one()
+        self.assertFalse(self.service.deliver_notification(), 'nothing was remembered, so nothing is told')
+        self.assertEqual(self.notification(job_id, MEMORY_SAVED_KIND), [])
+        tool_messages = [body['content'] for body in self.bodies[-1]['messages'] if body.get('role') == 'tool']
+        self.assertTrue(any(SECRET_SHAPED_VALUE in content for content in tool_messages), tool_messages)
+        for content in tool_messages:
+            self.assertNotIn(secret, content, 'the worker\'s refusal never echoes the value')
+        [event] = [row for row in self.store.task_events(job_id) if row['tool'] == 'save_memory' and row['status'] != 'running']
+        self.assertNotIn(secret, json.dumps(event, ensure_ascii=False))
 
     # --- undo -----------------------------------------------------------------------
 
@@ -360,6 +376,104 @@ class SaveAndTell(TelegramHarness):
         self.assertNotIn('content', summary)
         held = evidence_summary('save_memory', {'id': 'c1', 'state': 'pending', 'refused_because': THIRD_PARTY_MEMORY_WRITE})
         self.assertEqual((held['saved'], held['auto_saved'], held['refused_because']), (False, False, THIRD_PARTY_MEMORY_WRITE))
+
+
+    # --- review P2: the undo and its record are one transaction; the redaction set keeps every state ---
+
+    def test_the_undo_and_its_record_are_one_transaction(self):
+        job, _notice, row = self.told()
+        [memory] = self.store.memories()
+        [item] = self.binding(row)['items']
+        broken = {'job_id': job['id'], 'tool': MEMORY_UNDO_TOOL, 'status': 'recorded',
+                  'detail': {'host_action': MEMORY_UNDO_TOOL, 'evidence': {'id': item['id'], 'unserializable': object()}}}
+        with self.assertRaises(TypeError):
+            self.store.retract_memory(MEMORY_OWNER, item['id'], item['digest'], record=broken)
+        self.assertEqual([(m['id'], m['state']) for m in self.store.memories()], [(memory['id'], 'current')],
+                         'a record that cannot be written leaves the Memory current')
+        self.assertEqual([row for row in self.store.task_events(job['id']) if row['tool'] == MEMORY_UNDO_TOOL], [])
+        self.tap(f"p7u:{row['id']}:1", row['message_id'])
+        self.assertEqual(self.store.memories(), [])
+        [undo] = [row for row in self.store.task_events(job['id']) if row['tool'] == MEMORY_UNDO_TOOL]
+        self.assertEqual((undo['status'], undo['trace']['evidence']['id'], undo['trace']['evidence']['restored_id']),
+                         ('recorded', memory['id'], None))
+
+    def test_the_undo_record_names_the_restored_row(self):
+        kept = self.store.save_memory(KEY, '서울 역삼 오피스')
+        job, _notice, row = self.told()
+        self.tap(f"p7u:{row['id']}:1", row['message_id'])
+        [undo] = [row for row in self.store.task_events(job['id']) if row['tool'] == MEMORY_UNDO_TOOL]
+        self.assertEqual(undo['trace']['evidence']['restored_id'], kept['id'])
+
+    def test_the_redaction_set_keeps_superseded_and_retracted_values_of_the_work(self):
+        job, _notice, row = self.told(plan=[('save_memory', {'memory_key': 'passport', 'content': 'M1234567'}),
+                                            ('save_memory', {'memory_key': 'passport', 'content': 'M7654321'})])
+        self.assertEqual(self.memory_states(), [('M1234567', 'superseded'), ('M7654321', 'current')])
+        written = work_written_values(self.store, job['id'])
+        self.assertIn('M1234567', written, 'the superseded value still stands in the Work\'s tool conversation')
+        self.assertIn('M7654321', written)
+        self.tap(f"p7u:{row['id']}:1", row['message_id'])
+        self.assertEqual(self.memory_states(), [('M1234567', 'current'), ('M7654321', 'retracted')])
+        written = work_written_values(self.store, job['id'])
+        self.assertIn('M7654321', written, 'a retracted value stays in the redaction set')
+        self.assertIn('M1234567', written)
+
+
+class SecretsNeverEnterMemory(unittest.TestCase):
+    """#918 review P1: a stored secret or a credential-shaped value is refused before any Memory write."""
+
+    CREDENTIAL = 'sk-proj-abcdefghijklmnopqrstuvwxyz123456'
+    STORED = 'LEAKYSECRET0918VALUE'
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.store = QuickStore(Path(self.temp.name) / 'data')
+        self.store.secret('telegram_token', self.STORED)
+        self.job = self.store.enqueue('내 토큰 좀 기억해 둬', 'secret-save')
+
+    def caps(self, **kwargs):
+        return Capabilities(self.store, None, {}, '', self.job, lambda *a, **k: None, **kwargs)
+
+    def assert_refused(self, result, value):
+        self.assertEqual((result['saved'], result['state'], result['refused_because']), (False, 'refused', SECRET_SHAPED_VALUE))
+        self.assertNotIn(value, json.dumps(result, ensure_ascii=False), 'the refusal never echoes the value')
+        self.assertNotIn('content', result)
+        self.assertNotIn(value, json.dumps(worker_result('save_memory', result), ensure_ascii=False))
+        self.assertNotIn(value, MEMORY_REFUSALS[SECRET_SHAPED_VALUE])
+        self.assertEqual(self.store.memories(), [])
+        self.assertEqual(self.store.memory_candidates(include_decided=True), [])
+
+    def test_a_credential_shaped_value_is_refused_by_the_owner_worker(self):
+        self.assert_refused(self.caps().execute('save_memory', {'memory_key': 'profile.api', 'content': self.CREDENTIAL}),
+                            self.CREDENTIAL)
+
+    def test_a_stored_secret_value_is_refused_wherever_it_stands(self):
+        for key, content in (('profile.note', 'my token is ' + self.STORED), ('profile.' + self.STORED, '값')):
+            with self.subTest(key=key):
+                self.assert_refused(self.caps().execute('save_memory', {'memory_key': key, 'content': content}), self.STORED)
+
+    def test_a_third_party_write_with_a_secret_makes_no_candidate(self):
+        caps = self.caps(delegated=True, allowed_tools=['save_memory'])
+        self.assert_refused(caps.execute('save_memory', {'memory_key': 'profile.api', 'content': self.CREDENTIAL}), self.CREDENTIAL)
+
+    def test_an_ordinary_value_still_saves(self):
+        result = self.caps().execute('save_memory', {'memory_key': KEY, 'content': VALUE})
+        self.assertEqual((result['state'], result['auto_saved']), ('current', True))
+
+    def test_list_memory_passes_the_secret_filter(self):
+        # A row that entered the store another way (older data, a direct owner write) still never reaches the model raw.
+        self.store.save_memory('profile.note.' + self.STORED, 'token ' + self.STORED + ' and ' + self.CREDENTIAL)
+        from personal_agent.current_context import redact_known_secrets
+        caps = self.caps(secret_redactor=lambda text: redact_known_secrets(self.store, text))
+        result = caps.execute('list_memory', {})
+        serialized = json.dumps(result, ensure_ascii=False) + json.dumps(caps.evidence, ensure_ascii=False)
+        self.assertNotIn(self.STORED, serialized)
+        self.assertNotIn(self.CREDENTIAL, serialized)
+        [row] = result['memories']
+        self.assertEqual((row['memory_key'], row['content']), ('profile.note.[redacted]', 'token [redacted] and [redacted]'))
+        # The credential-shape filter applies even without a stored-secret redactor.
+        [row] = self.caps().execute('list_memory', {})['memories']
+        self.assertNotIn(self.CREDENTIAL, row['content'])
 
 
 class ThirdPartyWrites(unittest.TestCase):

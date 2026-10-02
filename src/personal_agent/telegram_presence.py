@@ -509,18 +509,21 @@ class PresenceTiming:
     never delay a ready answer.  ``chat_action_refresh`` stays under the
     documented 5-second typing lifetime, and ``typing…`` is refreshed at that
     cadence for as long as the Work runs, a draft shown or not (#835).
-    ``dots_refresh`` stays far under the documented 30-second draft preview
+    ``draft_keepalive`` stays under the documented 30-second draft preview
     lifetime.
     """
 
     chat_action_after: float = 1.0
     draft_after: float = 5.0
     chat_action_refresh: float = 4.0
-    #: #835: one draft edit per this many seconds, each advancing the dots
-    #: (DOTS_FRAMES) and showing the latest observed step line (#718), never
-    #: a queued old one.  With ``typing…`` every 4 s this stays under
-    #: Telegram's guidance of about one message per second in one chat.
+    #: #835: the draft is checked this often for the latest observed step
+    #: line (#718), never a queued old one.  With ``typing…`` every 4 s this
+    #: stays under Telegram's guidance of about one message per second in one chat.
     dots_refresh: float = 1.5
+    #: #978: an unchanged draft is re-sent only this often, to outlive the
+    #: draft preview; a re-sent identical text restarts the client's text
+    #: reveal, so a long attention line (#839) never finished appearing.
+    draft_keepalive: float = 20.0
 
     def wait_surface(self, elapsed, *, draft_available=True):
         """The one wait surface for Work that has been waiting ``elapsed`` seconds.
@@ -562,6 +565,9 @@ class WaitState:
     #: #858: the rich (thinking-block) draft was refused for this Work, so
     #: the plain dots draft is used instead; ``draft_failed`` then covers that.
     rich_draft_failed: bool = False
+    #: #978: the last edit fell back to the plain draft after a rich-draft
+    #: timeout (#908), so the next check re-sends even an unchanged text.
+    rich_draft_retry: bool = False
     stopped: bool = False
     shown: set = field(default_factory=set)
     #: #718/#835: the text the draft last showed (step line and dots), the

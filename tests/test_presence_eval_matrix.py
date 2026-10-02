@@ -577,11 +577,11 @@ class G_LongResearch(PresenceEval):
         self.assertEqual(self.reactions(), [RECEIVED_REACTION, DONE_REACTION])
         self.assertEqual(len(self.bubbles()), 1, 'progress never becomes a durable bubble')
         drafts = [body for method, body in self.wire if method == 'sendRichMessageDraft']
-        # #835: one draft edited in place, the dots advancing at 6s, 9s, 14s and
-        # 27s; #858: as Telegram's animated thinking block, no label.
+        # #835: one draft edited in place from 6s; #978: the unchanged text is re-sent only at 27s,
+        # to outlive the draft preview.  #858: as Telegram's animated thinking block, no label.
         self.assertEqual(drafts, [{'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'can_stop': True,
                                    'rich_message': {'blocks': [{'type': 'thinking', 'text': frame}]}}
-                                  for frame in DOTS])
+                                  for frame in DOTS[:2]])
         self.assertNotIn('sendMessageDraft', methods)
         self.assertEqual(self.bubbles()[0]['reply_parameters']['message_id'], message_id)
         self.assertIsNone(self.store.task_card(job['id']))

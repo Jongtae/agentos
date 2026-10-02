@@ -1113,15 +1113,16 @@ class LoginAndBudgetTests(unittest.TestCase):
                 super().__init__()
                 self.offers = []
 
-            def login_required(self, url):
-                self.offers.append(url)
+            def login_required(self, url, explicit=False):
+                self.offers.append((url, explicit))
                 return '소유자에게 로그인을 요청했습니다.'
         approvals = OfferingApprovals()
         sess, driver = session(approvals=approvals)
         result = sess.run('browser_sign_in', {'url': ORIGIN + '/account?next=%2Fcart#top'})
         self.assertEqual(result, {'state': 'login_required', 'url': ORIGIN + '/account', 'title': None, 'needs_setup': True,
                                   'requires': 'browser-login', 'next_step': '소유자에게 로그인을 요청했습니다.'})
-        self.assertEqual(approvals.offers, [ORIGIN + '/account'], 'the login row gets the site reference, no query or fragment')
+        self.assertEqual(approvals.offers, [(ORIGIN + '/account', True)],
+                         'the login row gets the site reference, no query or fragment, marked explicit (#978)')
         self.assertEqual(driver.log, [], 'nothing was loaded, typed or read')
         self.assertIsNone(sess.driver, 'no page driver was even created')
         self.assertEqual(sess.steps_used, 1, 'a browser step for the budget')

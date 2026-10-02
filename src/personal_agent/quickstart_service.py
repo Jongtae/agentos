@@ -4839,18 +4839,21 @@ class AgentService:
                         if state.attention is None:
                             state.attention=self.waiting_attention(job,now) or {}
                         text=draft_frame(line,state.dots_frame,state.attention.get('line'))
-                        if self._send_draft(job,state,draft_frame(line,state.dots_frame),state.attention.get('line')):
-                            state.draft_at=now
-                            state.draft_text=text
-                            state.dots_frame+=1
-                            state.shown.add(WAIT_DRAFT)
-                            shown.append((job['id'],WAIT_DRAFT))
-                            if state.attention and not state.attention_shown:
-                                state.attention_shown=True
-                                self._record_attention(job,state.attention,now)
-                            continue
-                        # Unsupported/rejected draft: fall back to typing for this Work.
-                        state.draft_failed=True
+                        # #978: the same text again only to outlive the draft preview; a re-send
+                        # restarts the client's reveal of the text.
+                        if text!=state.draft_text or now-state.draft_at>=timing.draft_keepalive:
+                            if self._send_draft(job,state,draft_frame(line,state.dots_frame),state.attention.get('line')):
+                                state.draft_at=now
+                                state.draft_text=None if state.rich_draft_retry else text
+                                state.dots_frame+=1
+                                state.shown.add(WAIT_DRAFT)
+                                shown.append((job['id'],WAIT_DRAFT))
+                                if state.attention and not state.attention_shown:
+                                    state.attention_shown=True
+                                    self._record_attention(job,state.attention,now)
+                                continue
+                            # Unsupported/rejected draft: fall back to typing for this Work.
+                            state.draft_failed=True
                 if state.chat_action_at is None or now-state.chat_action_at>=timing.chat_action_refresh:
                     state.chat_action_at=now
                     if self._presence_call('send_chat_action',job['chat_id'],'typing'):
@@ -4969,6 +4972,7 @@ class AgentService:
         draft_id=draft_id_for(job['id'])
         if not state.rich_draft_failed:
             sent,refused=self._presence_attempt('send_rich_message_draft',job['chat_id'],draft_id,rich_draft_blocks(text,note),can_stop=True)
+            state.rich_draft_retry=not sent and not refused
             if sent:
                 return True
             # #908 (live 2026-09-30 22:58): the first draft after a restart timed out and the
@@ -5569,7 +5573,7 @@ class AgentService:
             def consume(self,binding):return service._consume_browser_step(job,binding)
             def request(self,binding,description):return service._request_browser_step(job,binding,description)
             # #709: a login page during this Work asks the owner in-flow.
-            def login_required(self,url):return service._request_browser_login(job,url)
+            def login_required(self,url,explicit=False):return service._request_browser_login(job,url,explicit)
             # #934: on a site received from the owner, a payment step is refused outright (no request, no approval).
             def refuse(self,host):
                 from .family_share import payment_refusal
@@ -5736,12 +5740,14 @@ class AgentService:
             else:rows[work_id]=row
             self.store.put(BROWSER_LOGINS_KEY,rows)
 
-    def _request_browser_login(self, job, url):
+    def _request_browser_login(self, job, url, explicit=False):
         """Record that this Work needs the owner's login at ``url``; returns the model-facing text or None.
 
         A Work is asked again only after its last login expired or its window
         could not open; one that is waiting, was resumed or was skipped is not.
         Nothing is recorded when this computer cannot show the window.
+        ``explicit`` (#978): the model asked for the sign-in itself
+        (``browser_sign_in``); the row is then offered however the Work ends.
         """
         try:
             parts=urlsplit(str(url or ''))
@@ -5757,10 +5763,13 @@ class AgentService:
         if refused:return refused
         with self.lock:
             existing=self._browser_login(job['id'])
-            if existing is not None and existing.get('state') not in BROWSER_LOGIN_REASK_STATES:return None
+            if existing is not None and existing.get('state') not in BROWSER_LOGIN_REASK_STATES:
+                if explicit and existing.get('state')=='requested' and not existing.get('explicit'):
+                    self._put_browser_login(job['id'],{**existing,'explicit':True})
+                return None
             self._put_browser_login(job['id'],{'work_id':job['id'],'url':target,'host':host,
                                                'state':'requested','requested_at':time.time(),
-                                               'nonce':secrets.token_hex(16)})
+                                               'nonce':secrets.token_hex(16),'explicit':bool(explicit)})
         return BROWSER_LOGIN_OFFERED_TEXT
 
     def offer_browser_login(self, job):
@@ -8702,8 +8711,9 @@ class AgentService:
             self.update_task_card(job,outcome)
             # #709: a login page during this run: show the window now that the
             # run released the profile, and ask the owner to log in.  #752: only
-            # when the Work did not succeed; a reached goal did not need it.
-            if outcome!='succeeded':self.offer_browser_login(job)
+            # when the Work did not succeed; a reached goal did not need it.  #978: a sign-in
+            # the model asked for itself is offered either way - its answer told the owner to sign in.
+            if outcome!='succeeded' or (self._browser_login(job['id']) or {}).get('explicit'):self.offer_browser_login(job)
             if outcome in ('failed','partial') and not self.photo_work_has_pending_resume(job['id']):
                 self.store.remove_telegram_photo(job['id'])
             if resolved_blocker:

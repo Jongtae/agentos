@@ -439,16 +439,17 @@ class WaitSurfaceTests(NativePresenceTestCase):
         self.during_model = think
         job, message_id = self.turn('제주 여행 준비 자료 조사해줘')
         drafts = [body for method, body in self.calls if method == 'sendRichMessageDraft']
-        # #835: a draft edit at 6s, 12s and 27s, each the next dots frame.  #858:
-        # each is Telegram's animated thinking block holding the dots and no
-        # "생각" label; the plain draft is only the fallback.
+        # #835: a draft at 6s.  #978: the unchanged text is not re-sent at 12s, only at 27s to
+        # outlive the draft preview.  #858: each is Telegram's animated thinking block holding the
+        # dots and no "생각" label; the plain draft is only the fallback.
         self.assertEqual(drafts, [{'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'can_stop': True,
                                    'rich_message': {'blocks': [{'type': 'thinking', 'text': frame}]}}
-                                  for frame in DOTS])
+                                  for frame in DOTS[:2]])
         self.assertNotIn('sendMessageDraft', self.methods())
         self.assertFalse(any('생각' in draft_body_text(body) for body in drafts))
-        # 7s: no draft edit due yet, so typing… (never sent before) is refreshed.
-        self.assertEqual(self.methods().count('sendChatAction'), 1)
+        # 7s: no draft edit due yet, so typing… (never sent before) is refreshed; 12s (#978: no
+        # draft re-send) refreshes it again.
+        self.assertEqual(self.methods().count('sendChatAction'), 2)
         self.assertEqual(self.after_answer(), ['setMessageReaction'])
         [reply] = self.sends()
         self.assertEqual(reply['reply_parameters'], {'message_id': message_id, 'allow_sending_without_reply': True})
@@ -477,7 +478,7 @@ class WaitSurfaceTests(NativePresenceTestCase):
         self.service.run_one()
         self.service.deliver_one()
         self.assertEqual(self.emojis(), [RECEIVED_REACTION, DONE_REACTION])
-        self.assertEqual(len(self.draft_methods()), 2, 'a queued then running Work gets its draft')
+        self.assertEqual(len(self.draft_methods()), 1, 'a queued then running Work gets its draft (#978: sent once)')
         self.assertEqual([body['text'] for body in self.sends()], [self.text])
         self.assertNotIn('deleteMessage', self.methods())
         self.assertNotIn('editMessageText', self.methods())
@@ -562,13 +563,13 @@ class PresentationFailureTests(NativePresenceTestCase):
         # #858: a client/API without the rich draft still gets the dots, as text.
         self.connect_model()
         self.failing = {'sendRichMessageDraft': TelegramRejected(400, 'Bad Request: method not found')}
-        self.during_model = lambda job: [self.service.acknowledge_long_work(now=job['created'] + t) for t in (6, 8, 10)]
+        self.during_model = lambda job: [self.service.acknowledge_long_work(now=job['created'] + t) for t in (6, 8, 27)]
         job, _ = self.turn('긴 요청')
-        self.assertEqual(self.draft_methods(), ['sendRichMessageDraft', 'sendMessageDraft', 'sendMessageDraft',
-                                                'sendMessageDraft'])
+        # #978: the unchanged plain draft is re-sent only to outlive the preview (27s), not at 8s.
+        self.assertEqual(self.draft_methods(), ['sendRichMessageDraft', 'sendMessageDraft', 'sendMessageDraft'])
         plain = [body for method, body in self.calls if method == 'sendMessageDraft']
         self.assertEqual(plain, [{'chat_id': CHAT, 'draft_id': draft_id_for(job['id']), 'text': frame, 'can_stop': True}
-                                 for frame in DOTS])
+                                 for frame in DOTS[:2]])
         self.assertEqual(len(self.sends()), 1)
 
     def test_a_timed_out_thinking_block_is_tried_again_on_the_next_edit(self):
@@ -589,7 +590,8 @@ class PresentationFailureTests(NativePresenceTestCase):
         self.turn('긴 요청')
         methods = self.draft_methods()
         self.assertEqual(methods[:2], ['sendRichMessageDraft', 'sendMessageDraft'], 'this edit falls back once')
-        self.assertEqual(methods[2:], ['sendRichMessageDraft', 'sendRichMessageDraft'], 'the next edits use the thinking block again')
+        # #978: the fallback text is unchanged, yet the next check retries the thinking block; then nothing repeats.
+        self.assertEqual(methods[2:], ['sendRichMessageDraft'], 'the next edit uses the thinking block again')
 
     def test_uncertain_final_send_is_not_resent(self):
         self.connect_model()
@@ -1327,13 +1329,32 @@ class LiveWaitTests(NativePresenceTestCase):
         # From the first typing… to the end, never a gap the 5 s typing lifetime could expire in.
         gaps = [later - earlier for earlier, later in zip(typing, typing[1:])] + [20 - typing[-1]]
         self.assertLessEqual(max(gaps), 4.25, typing)
-        # One draft edit per dots_refresh at most, each the next frame, never empty.
-        self.assertTrue(all(later - earlier >= 1.5 for earlier, later in zip(drafted, drafted[1:])), drafted)
-        self.assertEqual(self.drafts()[:4], [*DOTS, DOTS[0]])
+        # #978: the unchanged dots are sent once within the draft preview's lifetime, never empty.
+        self.assertEqual(drafted, [5], drafted)
+        self.assertEqual(self.drafts(), [DOTS[0]])
         self.assertTrue(all(self.drafts()))
         # At most one presence call per Work per tick.
         self.assertTrue(all(len(methods) <= 1 for _offset, methods in ticks))
         self.assertEqual(job['status'], 'succeeded')
+
+    def test_an_unchanged_draft_is_kept_alive_and_a_changed_one_is_sent_at_once(self):
+        """#978: a re-sent identical draft restarts the client's text reveal, so it is not re-sent
+        before ``draft_keepalive``; a new step line goes out on the next check."""
+        self.connect_model()
+        ticks = []
+
+        def during(job):
+            ticks.extend(self.tick_every(job, 0, 10))
+            self.service._observe_cli_step(job['id'], {'state': 'running', 'id': 's1', 'query': '환율'})
+            ticks.extend(self.tick_every(job, 10.25, 32))
+        self.during_model = during
+        self.turn('긴 조사 부탁해')
+        drafted = [offset for offset, methods in ticks if 'sendRichMessageDraft' in methods]
+        self.assertEqual(drafted, [5, 10.25, 30.25], drafted)
+        texts = self.drafts()
+        self.assertEqual(texts[0], DOTS[0])
+        self.assertIn('환율', texts[1])
+        self.assertEqual(texts[2], texts[1], 'the keep-alive repeats the same text')
 
     def test_nothing_is_sent_after_the_final_answer(self):
         self.connect_model()

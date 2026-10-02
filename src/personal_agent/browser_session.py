@@ -867,20 +867,22 @@ class BrowserSession:
                     'next_step': self._offer_login(snapshot['url']) or LOGIN_REQUIRED_TEXT}
         return {'state': 'page', **public_view(snapshot)}
 
-    def _offer_login(self, url):
+    def _offer_login(self, url, explicit=False):
         """Ask the owner to log in during this Work (#709), when the approvals surface can.
 
         ``approvals.login_required(url)`` records the request; the service
         shows the login window and asks the owner once this Work's run has
         released the profile.  It returns the text the model reads instead
         of the Settings pointer, or None.  Nothing is typed and nothing is
-        read from the login page.
+        read from the login page.  ``explicit`` (#978): the model asked for
+        this sign-in itself (``browser_sign_in``), so its answer depends on
+        it and the login is offered however the Work ends.
         """
         offer = getattr(self.approvals, 'login_required', None)
         if not callable(offer):
             return None
         try:
-            text = offer(url)
+            text = offer(url, explicit=True) if explicit else offer(url)
         except Exception:
             return None
         return text if isinstance(text, str) and text else None
@@ -1025,7 +1027,7 @@ class BrowserSession:
         reference = page_reference(url)
         return {'state': 'login_required', 'url': reference, 'title': None,
                 'needs_setup': True, 'requires': 'browser-login',
-                'next_step': self._offer_login(reference) or LOGIN_REQUIRED_TEXT}
+                'next_step': self._offer_login(reference, explicit=True) or LOGIN_REQUIRED_TEXT}
 
     def open(self, args):
         effect = self._effect(args)

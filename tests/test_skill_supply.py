@@ -301,6 +301,23 @@ class ExternalAcquisition(_Store):
         self.assertEqual(len(self.github.urls), 1, 'a repeat reuses the installed revision; no market lookup')
 
 
+class SkillTextOnlyThroughSkillLoad(_Store):
+    """C16 amendment #974: core never injects skill text; only the model's own skill_load brings it in."""
+
+    def test_skill_text_reaches_a_work_only_through_skill_load(self):
+        sentinel = 'SENTINEL-BODY-974'
+        folder = self.root / 'bundled' / 'sentinel'
+        folder.mkdir(parents=True)
+        (folder / 'SKILL.md').write_text(f'---\nname: sentinel\ndescription: A test skill.\nlicense: MIT\n---\n{sentinel}\n')
+        library = SkillLibrary(self.store, bundled_root=folder.parent, transport=self.github)
+        library.set_enabled(True)
+        binding = library.binding()
+        context = turn_context([{'role': 'user', 'content': 'hi'}], 'cli', skills=binding.catalogue_text())
+        self.assertNotIn(sentinel, render_turn_prompt(context))
+        self.assertEqual(binding.loaded, {})
+        self.assertIn(sentinel, binding.load('agentos/sentinel')['instructions'])
+
+
 class LoadingAndBinding(_Store):
     def setUp(self):
         super().setUp()

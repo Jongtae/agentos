@@ -212,7 +212,7 @@ Three scenarios exercise the loop during development. They are **probes**, not t
 
 A **fourth, held-out scenario** is chosen by the owner at closeout, must not have been used during development, and is run on the closeout head. If the loop fails it for a reason that would have required scenario-specific code, completion is rejected.
 
-**No scenario-specific code.** Decision and runtime code must not branch on a named site, provider, product category or question type. The runtime exposes generic capabilities and grant checks; the model chooses among them. A PR that makes a probe pass by naming that probe's site or provider in code is rejected. Every PR under this program states in its description whether it generalizes the loop or only makes a scenario pass.
+**No scenario-specific code.** Decision and runtime code must not branch on a named site, provider, product category or question type. The runtime exposes generic capabilities and grant checks; the model chooses among them. A PR that makes a probe pass by naming that probe's site or provider in code is rejected. Every PR under this program states in its description whether it generalizes the loop or only makes a scenario pass. Since the C16 amendment (#974), site know-how may also exist as explicit, versioned skill content that the model chooses to load. Core code still never branches on it or injects it, and skill content written only to make a probe pass is rejected like such code.
 
 ## Capabilities
 

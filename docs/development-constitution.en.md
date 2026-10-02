@@ -111,8 +111,10 @@ Owner direction 2026-09-27 (#712). An AI is always the engine. The owner's chose
 - **Domain know-how lives in skill content, not in code.** Amended 2026-10-02 (#974). Domain and site know-how may ship only as explicit, inspectable, versioned skill content in an AgentPackage, with pinned identity and licence (#959–#961).
   - The owner's AI chooses whether to load it, and uses it through the same host capabilities and the same Work, authority and evidence paths.
   - Skill content cannot grant authority, change host behavior or certify an unobserved effect.
-  - Core code treats every skill alike and never names a particular one.
+  - Core code never special-cases a particular skill by name or content. Bundled and installed skills differ only in how they are supplied and removed.
+  - Only the model's own `skill_load` brings a skill's text into a Work. Core code never injects or selects skill text on its own.
   - Moving scripted behavior into another core module, or into text that core code injects on its own, is not compliance.
+  - A site or domain skill that AgentOS itself authors and bundles gets the same review as an external one. Its content must be a reusable method, not the script of one probe or evaluation scenario. Its PR states whether it generalizes or only makes a probe pass. The owner must be able to switch it off or remove it on its own before it ships.
 - **Prefer known, public code.** Adopt maintained public implementations and official tools (C15) over self-implementation. A custom Build needs a concrete unsupported contract.
 - **Do not make the owner operate the machinery.** No context-reset commands, setup rituals or manual steps that an AI or AgentOS could handle.
 

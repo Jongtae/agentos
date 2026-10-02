@@ -346,7 +346,9 @@ def test_ai_is_the_engine_principle_is_pinned_in_governance() -> None:
         # #974: know-how is skill content, never core code, never authority.
         "Domain know-how lives in skill content, not in code",
         "Skill content cannot grant authority, change host behavior or certify an unobserved effect",
-        "Core code treats every skill alike and never names a particular one",
+        "Core code never special-cases a particular skill by name or content",
+        "Only the model's own `skill_load` brings a skill's text into a Work",
+        "not the script of one probe or evaluation scenario",
         "remove blockers",
         "Prefer known, public code",
         "Do not make the owner operate the machinery",

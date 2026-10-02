@@ -359,14 +359,18 @@ def skill_names():
 
 
 def skill_name_literals(paths, names):
-    """``(module, line, literal)`` of each string literal that names one of ``names``."""
+    """``(module, line, literal)`` of each string literal that names one of ``names``, anywhere in it.
+
+    Bounded by word characters and hyphens, so ``personal-agentos-skills`` (a User-Agent) does not
+    name ``agentos-skills``.  Installed skills are runtime data and cannot be scanned statically.
+    """
     hits = []
     for path in paths:
         tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 literal = node.value
-                if any(literal == name or literal.endswith('/' + name) or f'/{name}/' in literal for name in names):
+                if any(re.search(rf'(?<![\w-]){re.escape(name)}(?![\w-])', literal) for name in names):
                     hits.append((path.name, node.lineno, literal))
     return hits
 
@@ -384,6 +388,7 @@ class CoreNamesNoSkill(unittest.TestCase):
             path = Path(folder) / 'planted.py'
             path.write_text(textwrap.dedent("""
                 SPECIAL = 'bundled_skills/agentos-management/SKILL.md'
+                HINT = 'For settings, first skill_load agentos/agentos-management.'
                 def pick(entry):
                     if entry['name'] == 'agentos-management':
                         return 'special'
@@ -391,7 +396,40 @@ class CoreNamesNoSkill(unittest.TestCase):
             """))
             hits = skill_name_literals([path], ['agentos-management', 'agentos-skills'])
         self.assertEqual(sorted(literal for _module, _line, literal in hits),
-                         ['agentos-management', 'bundled_skills/agentos-management/SKILL.md'])
+                         ['For settings, first skill_load agentos/agentos-management.', 'agentos-management',
+                          'bundled_skills/agentos-management/SKILL.md'])
+
+
+#: #974 review: only the skill-supply glue reads skill files; core never opens one on its own.
+SKILL_FILE_LITERALS = ('SKILL.md', 'bundled_skills')
+SKILL_FILE_NAMES = ('BUNDLED_ROOT',)
+
+
+def skill_file_references(paths):
+    hits = []
+    for path in paths:
+        if path.name == 'skills.py':
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'), filename=str(path))):
+            text = (node.value if isinstance(node, ast.Constant) and isinstance(node.value, str)
+                    else node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute)
+                    else node.name if isinstance(node, ast.alias) else None)
+            if text is not None and (any(item in text for item in SKILL_FILE_LITERALS) if isinstance(node, ast.Constant)
+                                     else text in SKILL_FILE_NAMES):
+                hits.append((path.name, node.lineno, text))
+    return hits
+
+
+class CoreReadsNoSkillFiles(unittest.TestCase):
+    def test_only_the_skill_supply_glue_refers_to_skill_files(self):
+        self.assertEqual(skill_file_references(sorted(SRC.rglob('*.py'))), [])
+
+    def test_guard_catches_a_planted_read(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'planted.py'
+            path.write_text("from personal_agent.skills import BUNDLED_ROOT\nTEXT = (BUNDLED_ROOT / 'x' / 'SKILL.md').read_text()\n")
+            hits = skill_file_references([path])
+        self.assertEqual(sorted(text for _module, _line, text in hits), ['BUNDLED_ROOT', 'BUNDLED_ROOT', 'SKILL.md'])
 
 
 if __name__ == '__main__':

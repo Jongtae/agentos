@@ -3897,6 +3897,29 @@ class AgentService:
         return [row for row in (rows or [])[:-1]
                 if row.get('role') in ('user','assistant') and row.get('job_id') not in document_jobs]
 
+    def continued_exchange(self, job):
+        """The owner message and final reply of the Work this one follows up, or '' (#980).
+
+        Only the link the follow-up judgment already recorded (``relation_kind``,
+        ``related_job_id``) is read; nothing is judged here.  A cancel link
+        continues nothing.
+        """
+        try:
+            current=self.store.job(job['id']) or job
+            related=current.get('related_job_id')
+            if current.get('relation_kind') not in ('reference','retry','correction') or not related:return ''
+            earlier=self.store.job(related)
+            if not earlier:return ''
+            with self.store.db() as db:
+                reply=db.execute("SELECT content FROM messages WHERE job_id=? AND role='assistant' ORDER BY id DESC LIMIT 1",
+                                 (related,)).fetchone()
+            lines=[f"[owner] {earlier.get('message') or ''}"]
+            if reply and reply['content']:lines.append(f"[assistant] {reply['content']}")
+            return '\n'.join(lines)
+        except Exception:
+            LOG.info('continued exchange unavailable job=%s',job.get('id'))
+            return ''
+
     def work_orchestration(self, job, request, rows, sections, budget, document_jobs=()):
         """The ``Orchestration`` of one Work, or None when no default Main AI exists.
 
@@ -3919,6 +3942,7 @@ class AgentService:
                            (job['id'],ORCHESTRATION_EVENT,status,json.dumps(detail,ensure_ascii=False),time.time()))
         state=(lambda:self.store.config(self.ORCHESTRATION_STATE,{}),lambda value:self.store.put(self.ORCHESTRATION_STATE,value))
         return Orchestration(self.decision_judge,catalogue,request=request,conversation=conversation,
+                             continues=self.continued_exchange(job),
                              sections={**sections,'history':len(earlier)},budget=budget,record=event,state=state,
                              work_id=job['id'])
 

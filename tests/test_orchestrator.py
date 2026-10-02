@@ -881,6 +881,44 @@ class PlannerHistory(Harness):
         self.assertIn('never ask it to ask the owner for something', QUESTION)
 
 
+class ContinuedExchange(Harness):
+    """#980 (live 2026-10-02): "어디 열렸어?" right after a sign-in reply was answered from a Memory that
+    shared a word.  The exchange the follow-up judgment linked is given to the plan and the goal judgment."""
+
+    def test_the_linked_exchange_reaches_the_plan_and_the_goal_judgment(self):
+        self.engine.answers = ['SIGN-IN-REPLY: 이 Mac에 로그인 창을 열게요.']
+        earlier, _row = self.run_work('EARLIER-REQUEST 장바구니 확인해줘')
+        self.engine.answers = ['로그인 창은 이 Mac에 열려요.']
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        job = self.store.enqueue('어디 열렸어?', 'continued-1')
+        self.store.link_work_relation(job, earlier, 'reference')
+        self.assertTrue(self.service.run_one())
+        for continues in (self.asked_plans[-1][0].facts['continues'], self.asked_goals[-1].facts['continues']):
+            self.assertIn('[owner] EARLIER-REQUEST', continues)
+            self.assertIn('[assistant] SIGN-IN-REPLY', continues)
+
+    def test_an_unlinked_or_cancelled_message_continues_nothing(self):
+        self.engine.answers = ['first']
+        earlier, _row = self.run_work('예전 질문')
+        self.script([plan('codex', 'Answer.')], goals=[True])
+        self.run_work('새 질문')
+        self.assertEqual(self.asked_plans[-1][0].facts['continues'], 'none')
+        self.assertEqual(self.asked_goals[-1].facts['continues'], 'none')
+        job = self.store.enqueue('취소해줘', 'continued-cancel')
+        self.store.link_work_relation(job, earlier, 'cancel')
+        self.assertEqual(self.service.continued_exchange(self.store.job(job)), '')
+
+    def test_the_conversation_decides_the_referent_and_a_shared_word_does_not(self):
+        """Generic wording only (C16): no request, site or category is named."""
+        from personal_agent.agent_runtime import CORE_INSTRUCTIONS
+        from personal_agent.conversation_handoff import GOAL_REACHED_PROPOSITION
+        for text in (QUESTION, GOAL_REACHED_PROPOSITION):
+            self.assertIn('continues', text)
+            self.assertIn('merely shares words with the message is not its subject', text)
+        self.assertIn('never point the worker at a profile or Memory fact as the answer', QUESTION)
+        self.assertIn('never treat a saved fact as the subject of a request only because it shares words with it',
+                      CORE_INSTRUCTIONS)
+
 class OwnerQuestion(Harness):
     """#740, #820: a worker's question the owner must answer is judged by the one outcome judgment."""
 

@@ -73,7 +73,7 @@ class ReferencePackages(unittest.TestCase):
 
     def test_the_method_carries_the_contract_and_the_site_carries_only_site_facts(self):
         method = '\n'.join(path.read_text() for path in sorted((ROOT / 'skills' / SHOPPING).rglob('*.md')))
-        for phrase in ('Read the cart back', 'click once per unit, and read the quantity after each click', 'read the cart before doing anything else', '**Add** N',
+        for phrase in ('Never guess whose account the browser is signed in to', 'Read the cart back', 'click once per unit, and read the quantity after each click', 'read the cart before doing anything else', '**Add** N',
                        '**Set** the total to N', '**Ensure** at least N', 'do not pick a substitute silently',
                        'Do not send a cart link as proof', 'Never start checkout or payment'):
             self.assertIn(phrase, method)

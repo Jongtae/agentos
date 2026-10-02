@@ -81,6 +81,7 @@ site, person or bot name is written into code.
   itself (review P2-2): ``share`` refuses its own data directory, and
   ``main`` without a store there.
 """
+import hashlib
 import hmac
 import json
 import logging
@@ -137,6 +138,13 @@ STATE_LABELS = {'paired': '연결됨', 'setting_up': '설정 중', 'not_connecte
 #: Review P2-2: every read-modify-write of one store's grant list or received marks, and the
 #: delivery in between, runs under that store's lock, so a push can never land after a remove.
 _LOCKS, _LOCKS_GUARD = {}, threading.Lock()
+#: #984: (instance, site) -> fingerprint of the rows this process last delivered there.  Process memory
+#: only (never persisted, logged or returned), so a login window's 15 s saves of unchanged rows push nothing.
+_DELIVERED, _DELIVERED_GUARD = {}, threading.Lock()
+
+
+def _fingerprint(rows):
+    return hashlib.sha256(json.dumps(rows, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
 
 
 def store_lock(store):
@@ -426,8 +434,11 @@ def _grant_index(rows, instance, site):
     return next((index for index, row in enumerate(rows) if row.get('instance') == instance and row.get('site') == site), None)
 
 
-def _deliver(row, jar, locate, opener, now):
+def _deliver(row, jar, locate, opener, now, skip_unchanged=False):
     """Run the push (or the revocation) one grant row is waiting for; True when the family instance confirmed it.
+
+    ``skip_unchanged`` (#984, a save's push): rows identical to the ones this process last
+    delivered to that instance are not sent again; the grant stays delivered.
 
     Content-free: the log names the instance, the site and a count or an
     error class, never a row.
@@ -441,13 +452,26 @@ def _deliver(row, jar, locate, opener, now):
             return True
         if port is None:
             raise RuntimeError('not installed')
-        secret = ensure_link_secret(data_dir)
+        key = (row['instance'], row['site'])
         if row.get('state') == 'revoking':
+            secret = ensure_link_secret(data_dir)
+            with _DELIVERED_GUARD:
+                _DELIVERED.pop(key, None)
             revoke(port, secret, row['site'], opener)
             LOG.info('family share: %s removed from %s', row['site'], row['instance'])
         else:
             rows = jar.site_rows(row['site'])
+            mark = _fingerprint(rows)
+            with _DELIVERED_GUARD:
+                unchanged = _DELIVERED.get(key) == mark
+            if skip_unchanged and unchanged and row.get('synced') is not None and not row.get('error'):
+                return True   # #984: the receiver already holds exactly these rows
+            secret = ensure_link_secret(data_dir)
+            with _DELIVERED_GUARD:
+                _DELIVERED.pop(key, None)
             push(port, secret, row['site'], rows, opener)
+            with _DELIVERED_GUARD:
+                _DELIVERED[key] = mark
             LOG.info('family share: %s -> %s (%d cookies)', row['site'], row['instance'], len(rows))
     except Exception as exc:
         # Review P2-3: a failed delivery is due again (``synced`` cleared, ``error`` set) until it lands.
@@ -567,7 +591,7 @@ def sync(store, jar, touched=None, *, locate=locate_instance, opener=None, now=N
                    or touched is None or row['site'] in touched)
             if not due or (row.get('error') and now - float(row.get('attempted') or 0) < retry_after):
                 continue
-            if not _deliver(row, jar, locate, opener, now):
+            if not _deliver(row, jar, locate, opener, now, skip_unchanged=touched is not None):
                 continue
             delivered += 1
             if row.get('state') == 'revoking':

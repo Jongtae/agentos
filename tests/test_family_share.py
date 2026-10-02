@@ -158,6 +158,8 @@ class OwnerSide(unittest.TestCase):
                               'news.test': [cookie('news.test', value=OTHER_VALUE)]})
         self.opener = Opener()
         self.located = []
+        family_share._DELIVERED.clear()
+        self.addCleanup(family_share._DELIVERED.clear)
 
     def locate(self, instance):
         self.located.append(instance)
@@ -214,6 +216,20 @@ class OwnerSide(unittest.TestCase):
         body = self.opener.bodies()[-1]
         self.assertEqual([row['value'] for row in body['cookies']], ['rotated-value-77'], 'the refreshed session follows')
         self.assertEqual(family_share.grants(self.store)[0]['synced'], 3000.0)
+
+    def test_a_save_of_unchanged_rows_pushes_nothing_and_a_change_still_does(self):
+        """#984: a login window saves every 15 s; rows the receiver already holds are not re-sent."""
+        self.share()
+        self.opener.requests.clear()
+        for _ in range(3):
+            self.assertEqual(self.sync({'shop.test'}), 1, 'the grant stays delivered')
+        self.assertEqual(self.opener.requests, [], 'no push for rows already delivered')
+        self.jar.save_export({'shop.test': [cookie('.shop.test', value='signed-in-88')]}, imported={'shop.test'})
+        self.assertEqual(self.sync({'shop.test'}), 1)
+        self.assertEqual([row['value'] for row in self.opener.bodies()[-1]['cookies']], ['signed-in-88'])
+        before = len(self.opener.requests)
+        self.assertEqual(self.sync(None, now=3100.0), 1)
+        self.assertEqual(len(self.opener.requests), before + 1, 'owner start still re-pushes every grant')
 
     def test_signing_out_on_the_owner_side_empties_the_family_copy_but_keeps_the_grant(self):
         self.share()
@@ -331,6 +347,8 @@ class OwnerSide(unittest.TestCase):
         # push is followed by a remove and the row is dropped.
         self.share()
         self.opener.requests.clear()
+        # #984: a changed row, so this save's push is really sent.
+        self.jar.save_export({'shop.test': [cookie('.shop.test', value='rotated-race')]}, imported={'shop.test'})
         inner = self.opener.__call__
 
         def racing(request, timeout=None):

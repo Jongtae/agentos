@@ -139,6 +139,8 @@ class FirstUseOnAFreshStore(_Shop):
         reads = [json.loads(d)['evidence'] for t, s, d in self.events if t == 'browser_open' and s == 'succeeded']
         self.assertEqual(reads[-1]['url'], ORIGIN + '/cart', 'the claim rests on the cart read after the change')
         self.assertEqual([e for e in self.events if e[1] == 'failed'], [])
+        # #964 item 10: supplied knowledge adds no planner, translator or verifier model call.
+        self.assertEqual(len(script.bodies), 8, 'one model call per scripted step, nothing more')
         caps.close_browser()
 
     def test_the_same_method_works_with_the_published_site_package_without_core_edits(self):
@@ -147,6 +149,18 @@ class FirstUseOnAFreshStore(_Shop):
                                                    f'{SITE}/{SITE}', f'{SHOPPING}/{SHOPPING}'])
         loaded = self.caps(Script(), FakeDriver(), skills=binding).execute('skill_load', {'skill': f'{SITE}/{SITE}'})
         self.assertIn('pay.ssg.com/cart/dmsShpp.ssg', loaded['instructions'])
+
+
+class RepeatUsesTheInstalledRevision(_Shop):
+    def test_a_later_request_reuses_the_pinned_revision_without_fetching(self):
+        """#964 item 3: a repeat reuses the method; the next Work's facts are read again from the page."""
+        first = self.install(f'skills/{SHOPPING}')
+        fetches = []
+        self.library.transport = lambda url, **kwargs: fetches.append(url) or b''
+        second = self.library.binding()
+        self.assertEqual(second.entries[f'{SHOPPING}/{SHOPPING}']['digest'], first.entries[f'{SHOPPING}/{SHOPPING}']['digest'])
+        self.assertTrue(second.load(f'{SHOPPING}/{SHOPPING}')['instructions'])
+        self.assertEqual(fetches, [], 'no supplier call on repeat')
 
 
 class BrowserPortIsPreserved(_Shop):

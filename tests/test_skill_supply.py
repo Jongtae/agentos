@@ -424,6 +424,21 @@ class RevocationAfterLoading(_Store):
         self.assertEqual(fresh['revision'], NEWER)
         self.assertIn('New guidance.', fresh['instructions'])
 
+    def test_a_rollback_restores_the_older_revision_without_reviving_a_newer_works_binding(self):
+        """#964 item 8: rolling back is a new install of the older commit; content, not authority, comes back."""
+        changed = upstream_files()
+        changed['skills/internal-comms/SKILL.md'] += b'\nNewer guidance.\n'
+        self.github.archives[NEWER] = tarball(UPSTREAM, NEWER, changed)
+        self.library.install(f'https://github.com/{UPSTREAM}/tree/{NEWER}/skills/internal-comms')
+        newer = self.caps(skills=self.library.binding())
+        newer.execute('skill_load', {'skill': 'internal-comms/internal-comms'})
+        rolled = self.library.install(ADDRESS)  # back to COMMIT
+        self.assertEqual(rolled['source']['revision'], COMMIT)
+        with self.assertRaises(ToolError) as raised:
+            newer.execute('list_notes', {})
+        self.assertEqual(raised.exception.code, 'skill_revoked', 'the newer revision is no longer current')
+        self.assertNotIn('Newer guidance.', self.library.binding().load('internal-comms/internal-comms')['instructions'])
+
     def test_unloaded_skills_never_block_a_work(self):
         other = self.caps(skills=self.library.binding())
         self.library.remove('internal-comms')

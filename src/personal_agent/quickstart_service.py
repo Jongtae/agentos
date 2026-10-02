@@ -3858,9 +3858,21 @@ class AgentService:
         when a state-changing action fell short: the verdict never outranks it.
         """
         from .agent_runtime import state_change_short
-        if (self._browser_request(job_id) or {}).get('state')=='requested':
+        if (self._browser_request(job_id) or {}).get('state')=='requested' or self.sign_in_requested(job_id):
             return False
         return not state_change_short(self.work_trail(job_id))
+
+    def sign_in_requested(self, job_id, since=0):
+        """Whether this Work's worker itself asked for the owner's sign-in and it is still to be shown (#981).
+
+        The ``explicit`` login row #978 records for a ``browser_sign_in``: the worker
+        said the request waits for the owner.  Such an attempt is neither judged,
+        re-delegated nor upgraded to succeeded, so it stays unfinished while
+        ``offer_browser_login`` shows the window.  A login page met in passing is
+        not this: #752 lets a reached goal stand.
+        """
+        row=self._browser_login(job_id) or {}
+        return row.get('state')=='requested' and bool(row.get('explicit'))
 
     def cli_work_outcome(self, job_id, tools, since=0):
         """``(outcome, refusals)`` of a CLI Work from its own tool events (#606 T3).
@@ -8266,6 +8278,8 @@ class AgentService:
                         attempt_start=self.last_event_id(job['id'])
                         # #795: whether this attempt's CLI ran with its own tools unconfined, and what it reported.
                         unmediated_turn,engine_meta=False,None
+                        # #981: set by a CLI attempt whose worker asked for the owner's sign-in.
+                        waits_for_sign_in=False
                         # #710 review P2-1: what earlier attempts of this Work read from a private
                         # store stays with the Work's provenance: it keeps the local envelope to size
                         # and digest and is part of the Work's information-use record (#826).
@@ -8553,6 +8567,9 @@ class AgentService:
                             # request was satisfied; the Work's own events decide.
                             outcome,cli_refusals=self.cli_work_outcome(job['id'],capabilities.tools,since=attempt_start)
                             refusals.extend(cli_refusals)
+                            # #981: the worker asked for the owner's sign-in, so this attempt waits for the owner:
+                            # no goal judgment can call it reached, and #709 below keeps it unfinished.
+                            waits_for_sign_in=self.sign_in_requested(job['id'],since=attempt_start)
                             # #774 review: a relayed calendar read with no connection parks the Work
                             # for the connector handoff and resumes it once, as on the direct route.
                             connector_need=self.connector_read_need(capabilities,job['id']) if cli_browser else None
@@ -8708,7 +8725,8 @@ class AgentService:
                         # effect in this attempt).  A fallback run is never re-delegated.
                         following=self.orchestration_step(orchestration,attempt,job['id'],attempt_start,
                                                           result=None if subscription.get('id') else result,answer=response,
-                                                          outcome=outcome,owner_needed=approval_needed[0] or context_approval_needed[0],
+                                                          outcome=outcome,owner_needed=(approval_needed[0] or context_approval_needed[0]
+                                                                                        or waits_for_sign_in),
                                                           unmediated=unmediated_turn,engine_meta=engine_meta)
                         if following is None:break
                         attempt=following

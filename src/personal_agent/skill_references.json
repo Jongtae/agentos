@@ -1,0 +1,8 @@
+[
+  {"name": "shopping-cart",
+   "description": "A method for changing an online shopping cart safely: exact product and quantity, change only what was asked, read the cart back.",
+   "address": "github.com/Jongtae/agentos/tree/main/skills/shopping-cart"},
+  {"name": "emart-ssg",
+   "description": "Site know-how for Emart mall on SSG.COM (이마트몰). Use with shopping-cart.",
+   "address": "github.com/Jongtae/agentos/tree/main/skills/emart-ssg"}
+]

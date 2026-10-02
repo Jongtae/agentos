@@ -237,6 +237,8 @@ No live model, live GitHub download during tests, or owner account was used. Mod
 
 **Packaging.** The skills are published in this repository's `skills/` folder and installed through the #961 pinned-GitHub path. They are not bundled. The amended C16 (#974) requires an AgentOS-authored site skill to get the same review as an external one and to be individually removable by the owner. Installed packages already meet both requirements, with no change to the common loader. The bundled `agentos-skills` guide lists their addresses, so the AI can offer to add one, and the owner confirms as for any skill.
 
+Owners start with skills off, so the AI cannot see that guide on a fresh install. The reference list is therefore also kept as data (`skill_references.json`, read only by `skills.py`). `settings_read skills` lists it even while skills are off, and `skills add` accepts a reference skill's name. Adding a skill while skills are off switches them on in the same confirmed draft, and the draft says so. No code names a particular skill.
+
 **Supply review first.** On 2026-10-02 a public code search found no Emart or SSG skill. Three generic shopping candidates were rejected:
 
 | Candidate | Licence | Why rejected |

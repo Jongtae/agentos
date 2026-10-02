@@ -73,7 +73,7 @@ class ReferencePackages(unittest.TestCase):
 
     def test_the_method_carries_the_contract_and_the_site_carries_only_site_facts(self):
         method = '\n'.join(path.read_text() for path in sorted((ROOT / 'skills' / SHOPPING).rglob('*.md')))
-        for phrase in ('Read the cart back', 'read the cart before doing anything else', '**Add** N',
+        for phrase in ('Read the cart back', 'click once per unit, and read the quantity after each click', 'read the cart before doing anything else', '**Add** N',
                        '**Set** the total to N', '**Ensure** at least N', 'do not pick a substitute silently',
                        'Do not send a cart link as proof', 'AgentOS refuses it'):
             self.assertIn(phrase, method)
@@ -181,6 +181,42 @@ class BrowserPortIsPreserved(_Shop):
         for skill in (f'{SHOPPING}/{SHOPPING}', f'{SITE}/{SITE}'):
             text = json.dumps(caps.execute('skill_load', {'skill': skill}), ensure_ascii=False)
             self.assertIsNone(re.search(r'(?i)set-cookie|sessionid|bearer ', text))
+
+
+
+class OwnerAddsAReferenceSkillByName(_Shop):
+    """#976 review P1: on a fresh install (skills off) the owner can still say "장보기 스킬 추가해줘"."""
+
+    def setUp(self):
+        super().setUp()
+        from personal_agent.quickstart_service import AgentService
+        from personal_agent.settings_orchestrator import SettingsOrchestrator
+        self.service = AgentService(self.store)
+        self.service.skill_transport = GitHub()
+        self.settings = SettingsOrchestrator(self.store, service=self.service)
+
+    def test_the_reference_skills_are_listed_while_skills_are_off(self):
+        self.assertIsNone(self.service.skill_binding(), 'fresh install: skills off')
+        read = self.settings.read('owner', 'skills')
+        available = read['settings']['skills']['add']['available']
+        self.assertEqual([(row['name'], row['installed']) for row in available], [(SHOPPING, False), (SITE, False)])
+        self.assertNotIn('https://', json.dumps(read, ensure_ascii=False), 'no endpoint is reported')
+
+    def test_adding_by_name_pins_the_commit_and_switches_skills_on_once_confirmed(self):
+        draft = self.settings.propose('owner', 'web', 'skills', 'add', SHOPPING)
+        self.assertEqual(draft['after'], f'https://github.com/{REPO}/tree/{COMMIT}/skills/{SHOPPING}')
+        self.assertIn('함께 켭니다', draft['summary'])
+        self.assertIsNone(self.service.skill_binding(), 'nothing changes before the owner confirms')
+        applied = self.settings.confirm('owner', 'web', draft['draft_id'], draft['digest'])
+        self.assertIn('스킬 사용도 켰어요', applied['response'])
+        self.assertIn(f'{SHOPPING}/{SHOPPING}', self.service.skill_binding().entries)
+        listed = self.settings.read('owner', 'skills')['settings']['skills']['add']['available']
+        self.assertEqual([(row['name'], row['installed']) for row in listed], [(SHOPPING, True), (SITE, False)])
+
+    def test_an_unknown_name_is_not_guessed(self):
+        from personal_agent.settings_orchestrator import SettingsError
+        with self.assertRaises(SettingsError):
+            self.settings.propose('owner', 'web', 'skills', 'add', 'groceries')
 
 
 if __name__ == '__main__':

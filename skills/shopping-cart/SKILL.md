@@ -27,10 +27,11 @@ Search on the shop, then match before you act. See `references/matching.md`.
 - Check that it is in stock, and note the price shown.
 - If several items fit equally, or none fits exactly, do not pick a substitute silently. Name the closest options with their pack size and price, and ask once.
 
-## 4. Change only what was asked
+## 4. Change only what was asked, one step at a time
 
 - Use `browser_find` with the product's own name to reach the add or quantity control in that product's own block. Click with `effect` `mutate`. Never click a control whose nearby text names a different product.
-- One requested change, one action. If a hinted label or button is missing or moved, read the page again (`browser_read` / `browser_find`) and look for it. Never click a guessed position.
+- Reach the intended quantity with the fewest actions. If the shop has a quantity field, set it. If it only has +/- buttons, click once per unit, and read the quantity after each click before the next. Stop and re-read if a step does not change the quantity as expected.
+- If a hinted label or button is missing or moved, read the page again (`browser_read` / `browser_find`) and look for it. Never click a guessed position.
 
 ## 5. Read the cart back
 

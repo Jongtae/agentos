@@ -63,6 +63,8 @@ MAX_REASON_CHARS = 200
 #: Bounds of the facts the orchestrator is asked over, besides the owner's
 #: request and the catalogue, which are never cut.
 CONVERSATION_CHARS = 1500
+#: #980: the earlier exchange the follow-up judgment linked this message to.
+CONTINUES_CHARS = 1200
 ATTEMPTS_CHARS = 1800
 ANSWER_EXCERPT_CHARS = 600
 OBSERVATION_CHARS = 3800
@@ -149,11 +151,16 @@ QUESTION = (
     'Plan which of the AI workers listed handles the owner\'s message. You orchestrate: you choose the worker and '
     'model; you do not do the work yourself and you do not rewrite the owner\'s message. The worker always receives '
     'the owner\'s message verbatim together with recent_conversation, owner_profile, current_context and any '
-    'prepared answers, and it decides for itself what the message needs. Choose an available worker whose '
+    'prepared answers, and it decides for itself what the message needs. What the message refers to is read from '
+    'recent_conversation and continues (the earlier exchange this message was judged to follow up) first; '
+    'owner_profile and current_context are background that settle it only when the conversation does not, and a '
+    'saved fact that merely shares words with the message is not its subject. Choose an available worker whose '
     'capabilities and tools fit the message; when several fit, prefer lower cost and latency. model is "" for the '
     'worker\'s default or one of the models listed for it. brief.notes is optional ("" for none): short factual notes '
     'the worker may find useful that it would not otherwise have (for example what an earlier attempt of this Work '
-    'tried and why it fell short). Notes never restate, replace, narrow or extend the owner\'s message, never tell '
+    'tried and why it fell short). Notes never restate, replace, narrow or extend the owner\'s message, never point '
+    'the worker at a profile or Memory fact as the answer when the conversation already settles what the message '
+    'refers to, never tell '
     'the worker to skip looking something up or to skip a tool, and never ask it to ask the owner for something. '
     'The worker keeps its full offered toolset; the tool_descriptions fact says what each tool does. On a worker '
     'with its own web search, web_search means that search. When earlier attempts are listed, their replies were '
@@ -519,10 +526,13 @@ class Orchestration:
     the once-said fallback notice.
     """
 
-    def __init__(self, judgments, catalogue, *, request, conversation='', sections=None, budget=None, record=None,
-                 state=None, work_id=None, policy=None):
+    def __init__(self, judgments, catalogue, *, request, conversation='', continues='', sections=None, budget=None,
+                 record=None, state=None, work_id=None, policy=None):
         self.judgments, self.catalogue = judgments, catalogue
         self.request, self.conversation = str(request or ''), str(conversation or '')
+        #: #980: the owner message and reply of the Work this one follows up, when the
+        #: follow-up judgment linked them ('' otherwise).  Read first for what the message refers to.
+        self.continues = str(continues or '')
         self.sections = dict(sections or {})
         self.budget, self.record = budget, record or (lambda status, detail: None)
         self.state, self.work_id = state, work_id
@@ -618,6 +628,7 @@ class Orchestration:
                  'current_context': current,
                  # Redacted before it is cut, so a cut never leaves part of a secret (#740 review).
                  'recent_conversation': self._redact(self.conversation)[-CONVERSATION_CHARS:] or 'none',
+                 'continues': self._continues_text(),
                  'context_sections': self._sections_text(),
                  'workers': workers,
                  'tool_descriptions': tools_text,
@@ -789,11 +800,15 @@ class Orchestration:
         try:
             judged = goal_reached(self.request, observed, str(failed or '')[:FAILURE_CHARS], work_id=self.work_id,
                                   answer=reply, conversation=self._redact(self.conversation)[-CONVERSATION_CHARS:],
-                                  owner_context=self._owner_context())
+                                  owner_context=self._owner_context(), continues=self._continues_text())
         except Exception:
             return UNJUDGED
         verdict = getattr(judged, 'outcome', None)
         return REACHED if verdict == 'yes' else NOT_REACHED if verdict == 'no' else UNJUDGED
+
+    def _continues_text(self):
+        """The linked earlier exchange (#980), redacted and bounded from its end, or 'none'."""
+        return self._redact(self.continues)[-CONTINUES_CHARS:] or 'none'
 
     def may_judge(self):
         """Whether a judgment that can only end the Work may still be asked: not stopped, deadline not passed.

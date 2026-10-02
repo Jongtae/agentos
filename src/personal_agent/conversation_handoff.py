@@ -649,7 +649,10 @@ WATCH_NOTIFY_PROPOSITION = ('The owner accepted a standing watch with the goal s
 #: did the reply serve the owner's message, given the conversation?  Step
 #: bookkeeping is evidence for it, never a verdict of its own.
 GOAL_REACHED_PROPOSITION = ('The reply serves the owner\'s message, read in the light of the recent conversation and '
-                            'what AgentOS knows about the owner (owner_context): it answers what the message asks, does '
+                            'what AgentOS knows about the owner (owner_context). What the message refers to is read '
+                            'from the recent conversation and continues (the earlier exchange it follows up) first; '
+                            'owner_context settles it only when the conversation does not, and a saved fact that '
+                            'merely shares words with the message is not its subject. The reply answers what the message asks, does '
                             'what it asks, or - when the owner tells something rather than asks - responds to it the way '
                             'a capable personal secretary would. A reply that asks the owner for information or a '
                             'decision the message needs, which neither the message, the recent conversation nor the owner '
@@ -889,7 +892,7 @@ class ConversationJudgments:
         return Judgment(JUDGMENT_UNAVAILABLE, source=decision.outcome)
 
     def goal_reached(self, request, observations, failed_steps='', work_id=None, answer='', conversation='',
-                     owner_context=''):
+                     owner_context='', continues=''):
         """Did the reply serve the owner's ``request`` (#657, #820)?  The one outcome judgment.
 
         One ``judge`` call over the owner's message (never cut), the recent
@@ -901,11 +904,13 @@ class ConversationJudgments:
         """
         request = str(request or '')
         facts = {'owner_request': request, 'recent_conversation': conversation or 'none',
+                 # #980: the earlier exchange this message was judged to follow up, when linked.
+                 'continues': continues or 'none',
                  'owner_context': owner_context or 'none',
                  'reply': answer or 'none (only the observations are known)',
                  'observations': observations, 'failed_steps': failed_steps or 'none'}
         context = self._context('goal-reached', facts, work_id=work_id,
-                                uncut=('owner_request', 'reply', 'recent_conversation', 'owner_context'))
+                                uncut=('owner_request', 'reply', 'recent_conversation', 'continues', 'owner_context'))
         decision = self.engine.judge(context, GOAL_REACHED_PROPOSITION)
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,

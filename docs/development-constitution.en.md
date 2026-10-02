@@ -107,7 +107,12 @@ Owner direction 2026-09-27 (#712). An AI is always the engine. The owner's chose
 
 - **The decision model orchestrates.** Per request, it chooses which AI tool and model to use. It writes or adjusts the brief (goal, relevant owner context, completion criteria), evaluates the result, and re-delegates with an adjusted brief or a different worker when the goal is not met. It does not execute the task itself, and it is not a rule engine.
 - **AgentOS code keeps only what an AI must not own.** That is canonical owner state, Grants and approvals, secrets, payment and consequential-action approval, budgets, Work/Event/Evidence, and recovery. Its other job is to **remove blockers** that stop the AI tools: approval layers that duplicate AgentOS's own, login friction, rendering robustness, missing tool exposure, and wrong routing.
-- **Never implement a specific owner request in code.** No per-task features (directions, carts, lookups of a particular kind), no site-, provider-, category- or task-named branches, and no request-specific guidance text. When a request fails, fix the blocker or the orchestration decision, not the task.
+- **Never implement a specific owner request in code.** No per-task features (directions, carts, lookups of a particular kind), no site-, provider-, category- or task-named branches, and no request-specific guidance text in AgentOS runtime code. When a request fails, fix the blocker or the orchestration decision, not the task.
+- **Domain know-how lives in skill content, not in code.** Amended 2026-10-02 (#974). Domain and site know-how may ship only as explicit, inspectable, versioned skill content in an AgentPackage, with pinned identity and licence (#959–#961).
+  - The owner's AI chooses whether to load it, and uses it through the same host capabilities and the same Work, authority and evidence paths.
+  - Skill content cannot grant authority, change host behavior or certify an unobserved effect.
+  - Core code treats every skill alike and never names a particular one.
+  - Moving scripted behavior into another core module, or into text that core code injects on its own, is not compliance.
 - **Prefer known, public code.** Adopt maintained public implementations and official tools (C15) over self-implementation. A custom Build needs a concrete unsupported contract.
 - **Do not make the owner operate the machinery.** No context-reset commands, setup rituals or manual steps that an AI or AgentOS could handle.
 

@@ -152,7 +152,9 @@ The upstream skill's `examples/*.md` mention Slack, Google Drive and Calendar as
 
 **Not demonstrated** (stated, not hidden): loading through a real route, catalogue token cost, any model's use of the content, and the Codex host-discovery behavior in section 3. Those belong to #961.
 
-## 8. C16 amendment — proposed, not applied
+## 8. C16 amendment — proposed here, applied by #974
+
+**Status update:** [#974](https://github.com/Jongtae/agentos/issues/974) applies this amendment to the constitution and AGENTS.md. The replacement coverage below is `CoreNamesNoSkill` in `tests/test_no_scenario_code.py`, plus the existing scan, which `skills.py` joined in #961. The rest of this section is the original proposal, kept as written.
 
 C16 currently forbids "request-specific guidance text" and task-named branches. #963's site know-how would violate the first unless C16 distinguishes core code from declared package content. Proposed replacement for C16's third bullet, for a separately activated governance change with independent review (it changes a declared invariant):
 

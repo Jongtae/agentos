@@ -346,5 +346,53 @@ class NoScenarioCodeTests(unittest.TestCase):
         self.assertTrue(all((path.name, literal) not in CLASSIFIED for literal in by_literal))
 
 
+
+#: C16 amendment (#974): skill content may carry domain and site know-how, so core code must
+#: treat every skill alike.  A string literal anywhere in core that names one skill (exactly,
+#: or as a path to it) would let core special-case that skill's content.
+SKILL_ROOT = SRC / 'bundled_skills'
+
+
+def skill_names():
+    """The bundled skills' names: the skills core could most easily special-case."""
+    return sorted(path.name for path in SKILL_ROOT.iterdir() if (path / 'SKILL.md').is_file())
+
+
+def skill_name_literals(paths, names):
+    """``(module, line, literal)`` of each string literal that names one of ``names``."""
+    hits = []
+    for path in paths:
+        tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                literal = node.value
+                if any(literal == name or literal.endswith('/' + name) or f'/{name}/' in literal for name in names):
+                    hits.append((path.name, node.lineno, literal))
+    return hits
+
+
+class CoreNamesNoSkill(unittest.TestCase):
+    """#974: know-how lives in skill content; core code never names a particular skill."""
+
+    def test_no_core_module_names_a_skill(self):
+        names = skill_names()
+        self.assertTrue(names, 'the bundled skills exist')
+        self.assertEqual(skill_name_literals(sorted(SRC.rglob('*.py')), names), [])
+
+    def test_guard_catches_a_planted_skill_branch(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'planted.py'
+            path.write_text(textwrap.dedent("""
+                SPECIAL = 'bundled_skills/agentos-management/SKILL.md'
+                def pick(entry):
+                    if entry['name'] == 'agentos-management':
+                        return 'special'
+                    return 'personal-agentos-skills'  # a substring is not a name
+            """))
+            hits = skill_name_literals([path], ['agentos-management', 'agentos-skills'])
+        self.assertEqual(sorted(literal for _module, _line, literal in hits),
+                         ['agentos-management', 'bundled_skills/agentos-management/SKILL.md'])
+
+
 if __name__ == '__main__':
     unittest.main()

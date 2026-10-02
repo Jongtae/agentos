@@ -278,16 +278,17 @@ class DeliveredAnswerTests(TerminalResultTestCase):
         # Nothing was saved: the failure stays the Work's truthful outcome.
         self.assertEqual(self.store.memories(), [])
 
-    def test_a_memory_proposal_does_not_withhold_the_answer(self):
-        """#818: a pending MemoryCandidate is a proposal the owner confirms next, not a failed action."""
+    def test_a_direct_memory_save_does_not_withhold_the_answer(self):
+        """#918: the owner's worker saves at once; the answer is delivered as said and the notice follows it."""
         self.plan = [('save_memory', {'memory_key': 'inferred-preference', 'content': '모델이 추론한 값'})]
         self.text = '정리해 드릴게요.'
+        self.claim_completion()
         job, bubble = self.ask('이건 기억하지 마. 그냥 방금 이야기만 정리해 줘', card=True)
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
-        self.assertEqual(bubble, self.text, '#836: the answer as said; the ask below it is the ask')
+        self.assertEqual(bubble, self.text, 'the answer as said; the notice below it tells what was remembered')
         self.assertTrue(self.card(job)['result_available'])
-        self.assertEqual(self.store.memories(), [])
-        self.assertEqual([row['state'] for row in self.store.memory_candidates()], ['pending'])
+        self.assertEqual([row['content'] for row in self.store.memories()], ['모델이 추론한 값'])
+        self.assertEqual(self.store.memory_candidates(include_decided=True), [])
 
     def test_the_same_failed_status_with_only_a_failed_read_is_delivered(self):
         self.plan = [('calendar_query', {'start': '2026-09-24T00:00:00+09:00',

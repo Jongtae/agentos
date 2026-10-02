@@ -45,7 +45,7 @@ Packages, runtimes, tools, connectors and nested agents receive only task-requir
 
 ### C5. Context is not automatic Memory
 
-Task Context is bounded and attributable. Complete conversation history or package-local state does not automatically become canonical owner Memory. Third-party durable-memory writes are candidate/review based unless a separately reviewed policy explicitly permits more.
+Task Context is bounded and attributable. Complete conversation history or package-local state does not automatically become canonical owner Memory. Third-party durable-memory writes are candidate/review based unless a separately reviewed policy explicitly permits more. One such policy is recorded: by owner decision 2026-09-30 (GOV-ASK-LESS-01, [#918](https://github.com/Jongtae/agentos/issues/918) slice a), the owner's own chosen AI (the Work's worker and the owner-model upkeep) saves a fact directly as current Memory and the owner is told afterwards with a bounded, exact undo; package tools, delegated specialists and other third parties still write candidates.
 
 ### C6. Evidence before capability claims
 

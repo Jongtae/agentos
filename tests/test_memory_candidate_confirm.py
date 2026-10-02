@@ -8,6 +8,13 @@ Work's pending candidates with [👍] [👎] (#881; formerly [기억하기] [아
 preparation-acceptance buttons (exact notification, chat, message and digest;
 consume once).  A yes is the existing owner approval path.
 
+GOV-ASK-LESS-01 slice (a) (#918, owner decision 2026-09-30): the owner's own
+worker no longer proposes - it saves at once and the owner is told with an
+undo (``tests/test_memory_save_undo.py``).  The ask below therefore belongs
+to third-party writers (package tools, delegated specialists), whose writes
+stay pending MemoryCandidates under C5; ``turn`` seeds one as such a writer
+would, after an ordinary worker reply.
+
 Evidence class: unit and model-free service tests with a scripted model and
 an injected Telegram transport.
 """
@@ -67,7 +74,7 @@ class TrailTests(unittest.TestCase):
         self.assertEqual(outcome_from_events([errored])[0], 'failed')
 
 
-class TelegramConfirmTests(unittest.TestCase):
+class TelegramHarness(unittest.TestCase):
     """One Telegram owner, one scripted model, every outbound Telegram call recorded."""
 
     def setUp(self):
@@ -92,6 +99,10 @@ class TelegramConfirmTests(unittest.TestCase):
             return {'ok': True, 'result': True}
 
         self.bodies = []
+        # #657/#918: when set, the model ends a tool-using turn with a finish claim citing every
+        # result it was shown (a direct save is a real write, which needs the claim a held
+        # candidate never did); the judgment finds the goal reached.
+        self.claim = False
 
         def model(url, body, headers=None, timeout=60):
             self.bodies.append(json.loads(json.dumps(body)))
@@ -103,6 +114,17 @@ class TelegramConfirmTests(unittest.TestCase):
                 name, arguments = self.plan.pop(0)
                 return {'message': {'content': '', 'tool_calls': [
                     {'id': f'call-{len(self.plan)}', 'function': {'name': name, 'arguments': arguments}}]}}
+            refs = []
+            for message in body.get('messages', []):
+                if message.get('role') == 'tool' and str(message.get('content', '')).startswith('{'):
+                    try:
+                        refs.append(json.loads(message['content']).get('ref'))
+                    except ValueError:
+                        pass
+            if self.claim and 'finish' in tools and any(refs):
+                return {'message': {'content': '', 'tool_calls': [
+                    {'id': 'finish', 'function': {'name': 'finish', 'arguments': {
+                        'status': 'done', 'evidence_refs': [ref for ref in refs if ref], 'summary': self.text}}}]}}
             return {'message': {'content': self.text}}
 
         self.service = AgentService(self.store, ModelAdapter(model), transport)
@@ -126,14 +148,37 @@ class TelegramConfirmTests(unittest.TestCase):
                               (job_id, kind)).fetchall()
         return [dict(row) for row in rows]
 
-    def turn(self, message='난 오늘 내 직장인 판교 카카오뱅크로 출근했어.', channel=True):
-        self.plan = [('save_memory', {'memory_key': KEY, 'content': VALUE})]
+    def claim_completion(self, engine=None):
+        """#657: the model claims completion and the judgment finds it shown (as a direct save needs)."""
+        from personal_agent.decision import OUTCOME_DECIDED, BinaryDecision, FixtureDecisionEngine, fixture_confidence
+        self.claim = True
+        self.service.use_decision_engine(engine or FixtureDecisionEngine(judge=lambda context, proposition: BinaryDecision(
+            OUTCOME_DECIDED, True, fixture_confidence()) if context.purpose == 'goal-reached' else None))
+
+    def enqueue(self, message, channel=True):
         if channel:
-            job_id = self.store.enqueue(message, f'ask-{len(self.calls)}', channel=f'telegram:{GENERATION}', chat_id=CHAT)
-        else:
-            job_id = self.store.enqueue(message, f'web-{len(self.calls)}')
+            return self.store.enqueue(message, f'ask-{len(self.calls)}', channel=f'telegram:{GENERATION}', chat_id=CHAT)
+        return self.store.enqueue(message, f'web-{len(self.calls)}')
+
+    def turn(self, message='난 오늘 내 직장인 판교 카카오뱅크로 출근했어.', channel=True):
+        """A plain worker reply, then one pending candidate a third-party writer left on the Work (#918)."""
+        self.plan = []
+        job_id = self.enqueue(message, channel)
         self.service.run_one()
+        self.store.save_memory_candidate(job_id, KEY, VALUE)
         return job_id
+
+    def tap(self, data, message_id, sender=CHAT, chat=None):
+        self.service.ingest_callback({'id': 'cb', 'from': {'id': sender}, 'data': data,
+                                      'message': {'message_id': message_id,
+                                                  'chat': {'id': chat or sender, 'type': 'private'}}}, GENERATION)
+
+    def binding(self, row):
+        return json.loads(self.store.notification(row['id'])['fingerprint'])
+
+
+class TelegramConfirmTests(TelegramHarness):
+    """The #818/#836 ask, now for third-party candidates only (#918)."""
 
     def offered(self):
         """Run, deliver the reply, deliver the confirm prompt; return (job, prompt, notification)."""
@@ -146,16 +191,8 @@ class TelegramConfirmTests(unittest.TestCase):
         [row] = self.notification(job_id)
         return self.store.job(job_id), self.sends()[-1], row
 
-    def tap(self, data, message_id, sender=CHAT, chat=None):
-        self.service.ingest_callback({'id': 'cb', 'from': {'id': sender}, 'data': data,
-                                      'message': {'message_id': message_id,
-                                                  'chat': {'id': chat or sender, 'type': 'private'}}}, GENERATION)
-
     def open_candidates(self, job_id):
         return [row for row in self.store.memory_candidates() if row['state'] == 'pending']
-
-    def binding(self, row):
-        return json.loads(self.store.notification(row['id'])['fingerprint'])
 
     def test_the_owner_gets_the_answer_then_one_confirm_prompt(self):
         job, prompt, row = self.offered()
@@ -171,16 +208,6 @@ class TelegramConfirmTests(unittest.TestCase):
         self.service.queue_memory_candidates(job)
         self.assertFalse(self.service.deliver_notification())
         self.assertEqual(len(self.notification(job['id'])), 1)
-
-    def test_the_worker_is_told_only_that_the_owner_will_be_asked(self):
-        """#836: the tool message the worker reads after a held save_memory."""
-        self.turn()
-        [tool] = [message['content'] for message in self.bodies[-1]['messages'] if message.get('role') == 'tool']
-        result = json.loads(tool)
-        self.assertEqual(result['remembered'], False)
-        self.assertEqual(result['content'], VALUE)
-        for word in ('AgentOS', '승인', 'candidate', 'approval', 'refused_because', 'content_digest', KEY):
-            self.assertNotIn(word, tool)
 
     def test_accept_writes_canonical_memory_through_the_approval_path(self):
         job, _prompt, row = self.offered()
@@ -562,7 +589,8 @@ class TelegramConfirmTests(unittest.TestCase):
 
     # --- P3: the in-process outcome agrees with the event-derived one --------------
 
-    def test_a_proposal_does_not_lift_a_failed_turn_to_partial(self):
+    def test_the_in_process_outcome_agrees_with_the_event_derived_one(self):
+        """P3, kept under #918: a direct save beside a failed read is settled the same way in both places."""
         self.plan = [('calendar_query', {'start': '2026-09-24T00:00:00+09:00', 'end': '2026-09-25T00:00:00+09:00',
                                          'timezone': 'Asia/Seoul'}),
                      ('save_memory', {'memory_key': KEY, 'content': VALUE})]
@@ -572,8 +600,8 @@ class TelegramConfirmTests(unittest.TestCase):
         with self.store.db() as db:
             rows = [tuple(row) for row in db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? ORDER BY id',
                                                      (job_id,))]
-        self.assertEqual(outcome_from_events(rows)[0], 'failed')
-        self.assertEqual(job['status'], 'failed', job.get('error'))
+        self.assertEqual(outcome_from_events(rows)[0], job['status'], job.get('error'))
+        self.assertEqual([m['content'] for m in self.store.memories()], [VALUE], '#918: saved at once')
 
 
 class GuidanceTests(unittest.TestCase):
@@ -611,7 +639,9 @@ class GuidanceTests(unittest.TestCase):
         self.assertIn("Speak as the owner's secretary: never narrate AgentOS, tools, approvals", CORE_INSTRUCTIONS)
         [save_memory] = [tool['function'] for tool in DEFINITIONS if tool['function']['name'] == 'save_memory']
         self.assertNotIn('candidate', save_memory['description'])
-        self.assertIn('asked with one tap', save_memory['description'])
+        # #918: the owner's worker saves at once; nothing is asked.
+        self.assertIn('remembered at once and the owner is told afterwards with an undo', save_memory['description'])
+        self.assertNotIn('asked with one tap', save_memory['description'])
 
 
 if __name__ == '__main__':

@@ -861,6 +861,47 @@ class QuickStore:
             db.execute("UPDATE memory_approvals SET state='consumed',result_id=? WHERE token_hash=? AND state='issued'",(result['id'],approval['token_hash']))
             return result
 
+    def retract_memory(self, owner_id, memory_id, content_digest, now=None):
+        """Undo one direct save (#918 slice a): retract exactly that current row, restore what it superseded.
+
+        Bound to the owner, the row id and its content digest, so a stale undo
+        never retracts a value the owner was not shown.  The row becomes
+        ``retracted`` (kept as history, never current again); the row it
+        superseded, if still ``superseded``, becomes current again.  Issued
+        approvals against the key are revoked, as every canonical write does.
+        Fails closed with ``ValueError`` when the row is not current with that
+        content (already undone, superseded, corrected or deleted since).
+        """
+        if not isinstance(memory_id,str) or not memory_id:raise ValueError('되돌릴 기억을 확인하세요.')
+        if not isinstance(content_digest,str) or len(content_digest)!=64:raise ValueError('되돌릴 내용을 확인하세요.')
+        owner_key=self._memory_binding(owner_id)
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute("SELECT * FROM memories WHERE id=? AND owner_key=? AND state='current'",(memory_id,owner_key)).fetchone()
+            if not row or not hmac.compare_digest(str(row['content_digest']),content_digest):raise ValueError('되돌릴 기억을 다시 확인하세요.')
+            db.execute("UPDATE memories SET state='retracted' WHERE id=? AND owner_key=?",(memory_id,owner_key))
+            restored=None
+            if row['supersedes']:
+                previous=db.execute("SELECT * FROM memories WHERE id=? AND owner_key=? AND state='superseded'",(row['supersedes'],owner_key)).fetchone()
+                if previous:
+                    db.execute("UPDATE memories SET state='current' WHERE id=? AND owner_key=?",(previous['id'],owner_key))
+                    restored=self._memory_row(db.execute('SELECT * FROM memories WHERE id=?',(previous['id'],)).fetchone())
+            db.execute("""UPDATE memory_approvals SET state='revoked',memory_key=''
+                          WHERE owner_key=? AND memory_key=? AND state='issued'""",(owner_key,row['memory_key']))
+            if row['candidate_id']:
+                db.execute("UPDATE memory_candidates SET state='retracted',decided=? WHERE id=? AND owner_key=? AND state='accepted'",
+                           (time.time() if now is None else float(now),row['candidate_id'],owner_key))
+        return {'retracted':True,'id':memory_id,'memory_key':row['memory_key'],'content':row['content'],
+                'content_digest':row['content_digest'],'restored':restored}
+
+    def work_memories(self, owner_id, work_id, limit=101):
+        """The current Memory rows one Work wrote, oldest first (#918: what its notice shows)."""
+        if isinstance(limit,bool) or not isinstance(limit,int) or not 1<=limit<=101:raise ValueError('기억 조회 범위를 확인하세요.')
+        with self.db() as db:
+            rows=db.execute("SELECT * FROM memories WHERE owner_key=? AND work_key=? AND state='current' ORDER BY created,id LIMIT ?",
+                            (self._memory_binding(owner_id),self._work_binding(work_id),limit)).fetchall()
+            return [self._memory_row(row) for row in rows]
+
     def _delete_memory_chain(self, owner_key, memory_id):
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')

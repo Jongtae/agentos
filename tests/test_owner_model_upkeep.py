@@ -1,10 +1,14 @@
 """OWNER-MODEL-03 (#805 phase 1): asynchronous, minimised post-Work owner-model upkeep.
 
+#918 slice (a) (owner decision 2026-09-30): a kept proposal is saved at once
+as current Memory attributed to the Work, and the owner is told with an undo
+(``test_memory_save_undo``); the per-fact #597 judgment and the candidate
+ask are no longer on this path.
+
 Evidence class: model-free unit and service tests.  A scripted
 ``FixtureDecisionEngine`` plays the Judgment AI (the proposal ``structured``
-call and the #597 ``explicit_memory_request`` judgment); the real
-``AgentService`` tick, ``QuickStore`` Memory/candidate paths and the Work
-loop of ``tests/test_orchestrator.Harness`` run unchanged.  No live model.
+call); the real ``AgentService`` tick, ``QuickStore`` Memory paths and the
+Work loop of ``tests/test_orchestrator.Harness`` run unchanged.  No live model.
 """
 import json
 import threading
@@ -176,7 +180,7 @@ class Tick(Upkeep):
         self.assertEqual(item['category']['enum'], list(om.CATEGORIES))
         self.assertEqual(item['kind']['enum'], ['stated', 'inferred'])
         self.assertIn('model-stated', question)
-        self.assertIn('never asserted', question)
+        self.assertIn('never assert it as fact', question)
 
     def test_a_stored_secret_never_reaches_the_judgment_facts(self):
         self.store.secret('telegram_token', SECRET)
@@ -209,61 +213,47 @@ class Tick(Upkeep):
 
 
 class Apply(Upkeep):
-    def test_a_stated_fact_the_owner_asked_to_keep_becomes_memory_linked_to_the_work(self):
+    def test_a_stated_fact_becomes_memory_linked_to_the_work_without_a_judgment(self):
         job = self.finished('나는 판교에서 일해')
         self.answers = [[proposal('profile.place.work', '판교')]]
-        self.explicit = [True]
         self.service.run_owner_model_upkeep()
         [memory] = self.store.memories(MEMORY_OWNER, key_prefix='profile.')
         self.assertEqual((memory['memory_key'], memory['content']), ('profile.place.work', '판교'))
         with self.store.db() as db:
             row = db.execute('SELECT work_key,candidate_id FROM memories WHERE id=?', (memory['id'],)).fetchone()
-            candidate = db.execute('SELECT state,work_key FROM memory_candidates WHERE id=?',
-                                   (row['candidate_id'],)).fetchone()
         self.assertEqual(row['work_key'], self.store._work_binding(job), 'provenance links back to the Work')
-        self.assertEqual(dict(candidate), {'state': 'accepted', 'work_key': self.store._work_binding(job)})
+        self.assertIsNone(row['candidate_id'], '#918: no candidate row')
+        self.assertEqual(self.store.memory_candidates(MEMORY_OWNER, include_decided=True), [])
+        self.assertEqual(self.judged, [], '#918: no per-fact #597 judgment call')
         [(status, detail)] = self.evidence(job)
         self.assertEqual(status, om.EVENT_RECORDED)
-        self.assertEqual(detail['memory_requests'], ['yes'])
-        self.assertEqual([(item['memory_key'], item['kind'], item['outcome'], item['memory_id'])
+        self.assertNotIn('memory_requests', detail)
+        self.assertEqual([(item['memory_key'], item['kind'], item['outcome'], item['memory_id'], item['auto_saved'])
                           for item in detail['applied']],
-                         [('profile.place.work', 'stated', 'memory', memory['id'])])
-        # #804: an accepted, owner-stated profile fact is not a lookup exclusion.
+                         [('profile.place.work', 'stated', 'memory', memory['id'], True)])
+        # #804: a saved profile fact is not a lookup exclusion.
         from personal_agent.agent_runtime import work_written_values
         self.assertNotIn('판교', work_written_values(self.store, job))
 
-    def test_a_stated_fact_without_an_explicit_request_stays_a_candidate(self):
-        job = self.finished('나는 판교에서 일해')
-        self.answers = [[proposal('profile.place.work', '판교')]]
-        self.explicit = [False]
-        self.service.run_owner_model_upkeep()
-        self.assertEqual(self.store.memories(MEMORY_OWNER), [])
-        [candidate] = self.store.memory_candidates(MEMORY_OWNER, work_id=job)
-        self.assertEqual((candidate['memory_key'], candidate['state']), ('profile.place.work', 'pending'))
-        [(_status, detail)] = self.evidence(job)
-        self.assertEqual(detail['applied'][0]['refused_because'], 'no-owner-memory-request')
-
-    def test_a_stated_value_the_owner_did_not_say_stays_a_candidate(self):
+    def test_a_stated_value_the_owner_did_not_say_is_saved_too(self):
+        """#918: the value-coverage gate is off this path; the owner's notice with undo is the correction."""
         job = self.finished('나는 판교에서 일해')
         self.answers = [[proposal('profile.place.work', '서울 강남')]]
-        self.explicit = [True]
         self.service.run_owner_model_upkeep()
-        self.assertEqual(self.store.memories(MEMORY_OWNER), [])
+        self.assertEqual([row['content'] for row in self.store.memories(MEMORY_OWNER)], ['서울 강남'])
         [(_status, detail)] = self.evidence(job)
-        self.assertEqual(detail['applied'][0]['refused_because'], 'value-not-in-owner-request')
+        self.assertEqual((detail['applied'][0]['outcome'], detail['applied'][0].get('refused_because')), ('memory', None))
 
-    def test_an_inference_is_only_ever_a_candidate(self):
+    def test_an_inference_is_saved_with_its_kind_recorded(self):
         job = self.finished('나는 판교에서 일해')
         self.answers = [[proposal('profile.routine.commute', '평일 판교 출근', kind='inferred', category='routine')]]
-        self.explicit = [True]
         self.service.run_owner_model_upkeep()
-        self.assertEqual(self.store.memories(MEMORY_OWNER), [])
-        [candidate] = self.store.memory_candidates(MEMORY_OWNER, work_id=job)
-        self.assertEqual(candidate['memory_key'], 'profile.routine.commute')
-        self.assertEqual(self.judged, [], 'no #597 judgment is asked for an inference')
+        [memory] = self.store.memories(MEMORY_OWNER)
+        self.assertEqual(memory['memory_key'], 'profile.routine.commute')
+        self.assertEqual(self.store.memory_candidates(MEMORY_OWNER, work_id=job), [])
+        self.assertEqual(self.judged, [], 'no #597 judgment is asked')
         [(_status, detail)] = self.evidence(job)
-        self.assertEqual(detail['applied'][0]['refused_because'], om.REFUSED_INFERRED)
-        self.assertEqual(detail['memory_requests'], [])
+        self.assertEqual((detail['applied'][0]['kind'], detail['applied'][0]['outcome']), ('inferred', 'memory'))
 
     def test_out_of_enum_oversized_and_non_profile_proposals_are_dropped(self):
         job = self.finished('나는 판교에서 일해')
@@ -338,8 +328,9 @@ class Apply(Upkeep):
         self.assertIn('already_noted', om.QUESTION)
         [(_status, detail)] = self.evidence(job)
         self.assertEqual(detail['dropped'], [{'key_digest': om.key_digest('profile.preference.sushi'), 'reason': 'duplicate'}])
-        self.assertEqual(sorted(row['memory_key'] for row in self.store.memory_candidates()),
-                         ['profile.preference.sushi', 'profile.routine.dinner'])
+        self.assertEqual([row['memory_key'] for row in self.store.memory_candidates()], ['profile.preference.sushi'])
+        self.assertEqual([row['memory_key'] for row in self.store.memories(MEMORY_OWNER)], ['profile.routine.dinner'],
+                         '#918: the kept proposal is saved at once')
 
     def test_nothing_noted_is_said_as_none(self):
         self.finished('나는 판교에서 일해')
@@ -347,17 +338,20 @@ class Apply(Upkeep):
         self.service.run_owner_model_upkeep()
         self.assertEqual(self.facts[0][0].facts['already_noted'], 'none')
 
-    def test_a_contradiction_of_an_unnamed_memory_is_not_silently_superseded(self):
-        self.store.save_memory('profile.place.work', '서울역', work_id='w0')
+    def test_a_contradiction_supersedes_and_keeps_the_previous_value_for_undo(self):
+        """#918: a replacement is never silent - the notice says 전에는 and the undo restores it."""
+        kept = self.store.save_memory('profile.place.work', '서울역', work_id='w0')
         job = self.finished('나는 판교에서 일해')
         self.answers = [[proposal('profile.place.work', '판교', supersedes='profile.place.work')]]
-        self.explicit = [True]
         self.service.run_owner_model_upkeep()
         [memory] = self.store.memories(MEMORY_OWNER)
-        self.assertEqual(memory['content'], '서울역')
+        self.assertEqual((memory['content'], memory['supersedes']), ('판교', kept['id']))
         [(_status, detail)] = self.evidence(job)
-        self.assertEqual(detail['applied'][0]['refused_because'], 'replaces-a-memory-the-request-did-not-name')
-        self.assertEqual(detail['applied'][0]['supersedes_key'], 'profile.place.work')
+        self.assertEqual((detail['applied'][0]['outcome'], detail['applied'][0]['superseded'],
+                          detail['applied'][0]['supersedes_key']), ('memory', True, 'profile.place.work'))
+        receipt = self.store.retract_memory(MEMORY_OWNER, memory['id'], memory['content_digest'])
+        self.assertEqual(receipt['restored']['id'], kept['id'])
+        self.assertEqual([row['content'] for row in self.store.memories(MEMORY_OWNER)], ['서울역'])
 
 
 class Budget(Upkeep):
@@ -383,27 +377,25 @@ class Budget(Upkeep):
         status = self.service.owner_model_request({'operation': 'set', 'enabled': True})
         self.assertEqual((status['enabled'], status['pending'], status['daily_calls']), (True, 1, om.DEFAULT_DAILY_CALLS))
 
-    def test_every_model_call_counts_against_the_cap(self):
+    def test_only_the_proposal_call_counts_against_the_cap(self):
         job = self.finished('나는 판교에서 일해')
         self.answers = [[proposal('profile.place.work', '판교'), proposal('profile.place.home', '판교 근처')]]
-        self.explicit = [False, False]
         self.service.run_owner_model_upkeep()
-        self.assertEqual(len(self.judged), 2, 'one #597 judgment per stated fact')
-        self.assertEqual(self.upkeep_rows()[job]['calls'], 3)
-        self.assertEqual(self.service.owner_model_request()['calls_last_24h'], 3)
+        self.assertEqual(self.judged, [], '#918: no per-fact judgment calls')
+        self.assertEqual(self.upkeep_rows()[job]['calls'], 1)
+        self.assertEqual(self.service.owner_model_request()['calls_last_24h'], 1)
 
-    def test_the_remaining_budget_is_checked_before_each_call(self):
-        # #805 review P3a: with two calls left, the proposal and one judgment run; the next fact stays a candidate.
-        self.service.owner_model_request({'operation': 'set', 'daily_calls': 2})
+    def test_a_write_is_not_a_call_so_the_cap_does_not_hold_it(self):
+        # #805 review P3a, under #918: with one call left the proposal runs; both facts are saved (writes are free).
+        self.service.owner_model_request({'operation': 'set', 'daily_calls': 1})
         job = self.finished('나는 판교에서 일하고 분당에 살아')
         self.answers = [[proposal('profile.place.work', '판교'), proposal('profile.place.home', '분당')]]
-        self.explicit = [True, True]
         self.service.run_owner_model_upkeep()
-        self.assertEqual(len(self.judged), 1)
+        self.assertEqual(self.judged, [])
         [(_status, detail)] = self.evidence(job)
         self.assertEqual([(item['outcome'], item.get('refused_because')) for item in detail['applied']],
-                         [('memory', None), ('candidate', om.REFUSED_BUDGET)])
-        self.assertEqual(self.service.owner_model_request()['calls_last_24h'], 2)
+                         [('memory', None), ('memory', None)])
+        self.assertEqual(self.service.owner_model_request()['calls_last_24h'], 1)
 
     def test_controls_are_validated(self):
         for body in ({'operation': 'set', 'enabled': 'no'}, {'operation': 'set', 'daily_calls': -1},
@@ -454,31 +446,30 @@ class Review(Upkeep):
         self.assertIsNone(memory_write_refusal(self.store, named, approval, 'profile.preference.drink', 'cold brew'),
                           'the fact word still names the key')
 
-    def test_the_upkeep_cannot_supersede_through_a_category_word(self):
-        self.store.save_memory('profile.preference.drink', 'oat latte', work_id='w0')
+    def test_a_supersede_under_its_own_key_keeps_the_previous_value_for_undo(self):
+        # P1 of #805 made "prefer" unable to name every preference key; under #918 the key-replacement
+        # gate is off this path, and the superseded value is kept so the owner's undo restores it.
+        kept = self.store.save_memory('profile.preference.drink', 'oat latte', work_id='w0')
         job = self.finished('Remember I prefer quiet cafes for work')
         self.answers = [[proposal('profile.preference.drink', 'quiet cafes', category='preference',
                                   supersedes='profile.preference.drink')]]
-        self.explicit = [True]
         self.service.run_owner_model_upkeep()
-        self.assertEqual([row['content'] for row in self.store.memories(MEMORY_OWNER)], ['oat latte'])
+        [memory] = self.store.memories(MEMORY_OWNER)
+        self.assertEqual((memory['content'], memory['supersedes']), ('quiet cafes', kept['id']))
         [(_status, detail)] = self.evidence(job)
-        self.assertEqual(detail['applied'][0]['refused_because'], 'replaces-a-memory-the-request-did-not-name')
+        self.assertTrue(detail['applied'][0]['superseded'])
 
-    def test_the_memory_judgment_is_asked_per_fact(self):
-        # P2-2: one yes never covers another stated proposal.
+    def test_no_per_fact_judgment_is_asked_and_every_kept_fact_is_saved(self):
+        # P2-2 under #918: nothing per fact is asked; each kept proposal is saved on its own.
         job = self.finished('나는 판교에서 일하고 분당에 살아')
         self.answers = [[proposal('profile.place.work', '판교'), proposal('profile.place.home', '분당')]]
-        self.explicit = [True, False]
         self.service.run_owner_model_upkeep()
-        self.assertEqual([context.facts['proposed_memory'] for context in self.judged],
-                         ['profile.place.work = 판교', 'profile.place.home = 분당'])
-        self.assertTrue(all(context.facts['owner_message'] == '나는 판교에서 일하고 분당에 살아' for context in self.judged))
-        self.assertEqual([row['memory_key'] for row in self.store.memories(MEMORY_OWNER)], ['profile.place.work'])
-        [candidate] = self.store.memory_candidates(MEMORY_OWNER, work_id=job)
-        self.assertEqual(candidate['memory_key'], 'profile.place.home')
+        self.assertEqual(self.judged, [])
+        self.assertEqual(sorted(row['memory_key'] for row in self.store.memories(MEMORY_OWNER)),
+                         ['profile.place.home', 'profile.place.work'])
+        self.assertEqual(self.store.memory_candidates(MEMORY_OWNER, work_id=job), [])
         [(_status, detail)] = self.evidence(job)
-        self.assertEqual(detail['memory_requests'], ['yes', 'no'])
+        self.assertEqual([item['memory_key'] for item in detail['applied']], ['profile.place.work', 'profile.place.home'])
 
     def test_supersedes_only_its_own_key(self):
         # P3e.
@@ -550,8 +541,9 @@ class Review(Upkeep):
         self.service.use_decision_engine(FixtureDecisionEngine(structured=late,
                                                                judge=lambda c, p: seen.append(c) or None))
         self.service.run_owner_model_upkeep()
-        self.assertEqual(seen, [], 'the per-fact judgment is not started past the deadline')
-        self.assertEqual(self.store.memories(MEMORY_OWNER), [])
+        self.assertEqual(seen, [], 'no further call is started past the deadline')
+        self.assertEqual([row['content'] for row in self.store.memories(MEMORY_OWNER)], ['판교'],
+                         '#918: the write is not a call, so the kept proposal is still saved')
 
 
 class PrReview(Upkeep):
@@ -635,8 +627,10 @@ class PrReview(Upkeep):
         self.service.run_owner_model_upkeep()
         self.assertEqual(judged, [])
         [(_status, detail)] = self.evidence(job)
-        self.assertEqual(detail['stopped'], om.STOPPED_CAP)
-        self.assertEqual(detail['applied'][0]['refused_because'], om.REFUSED_BUDGET)
+        # #918: no further call is made; the write is not a call, so the kept proposal is saved.
+        self.assertIsNone(detail['stopped'])
+        self.assertEqual(detail['applied'][0]['outcome'], 'memory')
+        self.assertEqual([row['content'] for row in self.store.memories(MEMORY_OWNER)], ['판교'])
 
     def test_judgment_audit_rows_carry_the_source_work(self):
         # Thread 3: record_decision links the background run's judgments to their Work.

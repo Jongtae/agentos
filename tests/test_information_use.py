@@ -460,8 +460,8 @@ class JudgmentSeesOwnerValues(Harness):
         job, row = self.run_work('회사 근처 점심 추천해줘')
         self.assertEqual(row['status'], 'succeeded')
         with self.store.db() as db:
-            pending = [r['content'] for r in db.execute("SELECT content FROM memory_candidates WHERE state='pending'")]
-        self.assertEqual(pending, ['판교 사무실'], 'the value is a value this Work saved (the #605 exclusion set)')
+            saved = [r['content'] for r in db.execute("SELECT content FROM memories WHERE state='current'")]
+        self.assertEqual(saved, ['판교 사무실'], 'the value is a value this Work saved at once (#918)')
         [judged] = self.asked_goals
         self.assertIn('판교 사무실', judged.facts['reply'], 'no longer masked from the owner\'s Judgment AI')
         self.assertNotIn(STORED_SECRET, json.dumps(judged.facts, ensure_ascii=False), 'secrets never reach a judgment')

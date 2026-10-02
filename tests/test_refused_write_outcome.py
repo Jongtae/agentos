@@ -152,37 +152,39 @@ class RefusedWriteTestCase(unittest.TestCase):
         return [(row['tool'], row['status']) for row in self.store.task_events(job_id)]
 
 
-class RefusedMemoryWriteTests(RefusedWriteTestCase):
-    """The owner never asked for a memory, so the write is held as a candidate.
+class DirectMemoryWriteTests(RefusedWriteTestCase):
+    """The owner never asked for a memory; the owner's worker saves it at once (#918 slice a).
 
-    #818 (owner feedback 2026-09-28): a held candidate is a recorded proposal
-    awaiting the owner, not a failed state-changing action.  The owner gets
-    the answer, then one message to confirm the candidate
-    (`test_memory_candidate_confirm`).  A write that errored still fails.
+    #818 (owner feedback 2026-09-28) made a held candidate a recorded
+    proposal, not a failure; #918 (owner decision 2026-09-30) removes the
+    ask itself for the owner's own worker: the write is current, the owner
+    gets the answer, then one notice with undo (`test_memory_save_undo`).
+    A write that errored still fails.
     """
 
     UNASKED = ('point-of-contact', '땅콩 알레르기가 있습니다')
 
-    def test_a_memory_proposal_alone_does_not_fail_the_turn(self):
+    def test_a_direct_save_alone_does_not_fail_the_turn(self):
         self.plan = [('save_memory', {'memory_key': self.UNASKED[0],
                                       'content': self.UNASKED[1]})]
         self.text = '알겠어요. 땅콩은 피해서 추천할게요.'
+        self.claim_completion()
         job, bubble = self.ask('오늘 점심 뭐 먹을까?')
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
-        self.assertEqual(bubble, self.text, '#836: the answer as said; the ask below it is the ask')
+        self.assertEqual(bubble, self.text, 'the answer as said; the notice below it tells what was remembered')
 
-    def test_the_owner_is_asked_to_confirm_in_owner_words(self):
-        """Not a machine slug: the confirm prompt names the key and the value."""
+    def test_the_owner_is_told_in_owner_words_with_undo(self):
+        """Not a machine slug and not an ask: the notice names the value, never the key, and offers 되돌리기."""
         self.plan = [('save_memory', {'memory_key': self.UNASKED[0],
                                       'content': self.UNASKED[1]})]
         self.text = '알겠어요.'
+        self.claim_completion()
         self.ask('오늘 점심 뭐 먹을까?')
         self.assertTrue(self.service.deliver_notification())
-        prompt = self.sent[-1]
-        self.assertTrue(prompt.startswith('기억해 둘까요?'), prompt)
-        self.assertIn(f'• {self.UNASKED[1]}', prompt)
-        self.assertNotIn(self.UNASKED[0], prompt, '#836: never a memory key')
-        self.assertNotIn('no-owner-memory-request', prompt)
+        notice = self.sent[-1]
+        self.assertEqual(notice, f'기억했어요: {self.UNASKED[1]}')
+        self.assertNotIn(self.UNASKED[0], notice, '#836: never a memory key')
+        self.assertNotIn('기억해 둘까요', notice)
 
     def test_a_proposal_beside_other_work_does_not_hold_the_work_down(self):
         """A done claim rests on the other work; the proposal is not evidence and not a failure."""
@@ -199,25 +201,19 @@ class RefusedMemoryWriteTests(RefusedWriteTestCase):
         self.assertEqual(job['status'], 'succeeded', job.get('error'))
         self.assertEqual(bubble, self.text, '#836: the answer as said; the ask below it is the ask')
 
-    def test_the_candidate_is_preserved_as_pending_for_the_owner(self):
-        """A refusal must not become a discarded write.
-
-        Named for what it checks: the end-to-end approve/reject path is
-        `test_pa1_memory_candidate_owner_path`, which builds on exactly this
-        state. Review pointed out the old name promised an approval this
-        never performed.
-        """
+    def test_the_fact_is_current_at_once_with_no_candidate(self):
+        """The owner's worker's write is canonical Memory attributed to the Work; the undo is the correction."""
         self.plan = [('save_memory', {'memory_key': self.UNASKED[0],
                                       'content': self.UNASKED[1]})]
         self.text = '기억했습니다.'
-        self.ask('오늘 점심 뭐 먹을까?')
-        self.assertEqual(self.store.memories(), [], 'nothing may enter canonical Memory')
-        pending = self.store.memory_candidates()
-        self.assertEqual([row['content'] for row in pending], [self.UNASKED[1]])
-        self.assertEqual(pending[0]['state'], 'pending')
+        job, _bubble = self.ask('오늘 점심 뭐 먹을까?')
+        [memory] = self.store.memories()
+        self.assertEqual((memory['memory_key'], memory['content'], memory['state']), (*self.UNASKED, 'current'))
+        self.assertEqual(self.store.memory_candidates(include_decided=True), [])
+        self.assertEqual([row['id'] for row in self.store.work_memories('local-owner', job['id'])], [memory['id']])
 
-    def test_the_durable_tool_event_records_a_pending_proposal(self):
-        """The web record says what happened: a candidate, not a saved Memory."""
+    def test_the_durable_tool_event_records_the_direct_save(self):
+        """The web record says what happened: saved at once, never a proposal."""
         self.plan = [('save_memory', {'memory_key': self.UNASKED[0],
                                       'content': self.UNASKED[1]})]
         self.text = '알겠어요.'
@@ -225,8 +221,8 @@ class RefusedMemoryWriteTests(RefusedWriteTestCase):
         [event] = [row for row in self.store.task_events(job['id'])
                    if row['tool'] == 'save_memory' and row['status'] == 'succeeded']
         evidence = event['trace']['evidence']
-        self.assertEqual((evidence['saved'], evidence['state'], evidence['refused_because']),
-                         (False, 'pending', 'no-owner-memory-request'))
+        self.assertEqual((evidence['saved'], evidence['state'], evidence['auto_saved'], evidence['refused_because']),
+                         (True, 'current', True, None))
 
     def test_a_silent_model_still_gets_the_useful_pending_message(self):
         """The fix must not replace a helpful answer with a provider error.
@@ -238,8 +234,9 @@ class RefusedMemoryWriteTests(RefusedWriteTestCase):
         self.plan = [('save_memory', {'memory_key': self.UNASKED[0],
                                       'content': self.UNASKED[1]})]
         self.text = ''
+        self.claim_completion()
         job, bubble = self.ask('오늘 점심 뭐 먹을까?')
-        self.assertIn('기억해 둘지 여쭤볼게요', bubble, '#836: said as the secretary, still not "saved"')
+        self.assertIn('기억했어요', bubble, '#918: said as the secretary; it was saved')
         self.assertNotIn('후보', bubble)
         self.assertNotIn('모델이 답변을 반환하지 않았습니다', bubble)
         self.assertNotIn('모델이 답변을 반환하지 않았습니다', job['error'] or '')

@@ -178,17 +178,19 @@ class _OwnerSurface(unittest.TestCase):
         return job_id
 
     def pending_candidate(self):
-        """Produce one model-originated, unapproved MemoryCandidate."""
-        self.model_plan = [('save_memory', json.dumps(
-            {'memory_key': CANDIDATE_KEY, 'content': CANDIDATE_CONTENT},
-            ensure_ascii=False))]
+        """Produce one unapproved MemoryCandidate on a Work, as a third-party writer leaves it.
+
+        #918 slice (a): the owner's own worker no longer proposes (it saves at
+        once, told with undo; ``test_memory_save_undo``).  A package tool or a
+        delegated specialist still writes a pending candidate through the same
+        store row, which is what the owner path below decides.
+        """
+        self.model_plan = []
         self.model_text = MODEL_ANSWER
         job_id = self.ask(NO_SAVE_PROMPT)
-        self.model_plan = []
-        # #818: the held write is a recorded proposal the owner confirms, not a
-        # failed action (#488 still holds for a write that errored).
+        self.store.save_memory_candidate(job_id, CANDIDATE_KEY, CANDIDATE_CONTENT)
         self.assertEqual(self.store.job(job_id)['status'], 'succeeded')
-        # C5: the model's write did not become canonical Memory.
+        # C5: a third party's write did not become canonical Memory.
         self.assertEqual(self.store.memories(), [])
         self.assertEqual(self.web('/api/personal-space')['memory_candidate_count'], 1)
         return job_id

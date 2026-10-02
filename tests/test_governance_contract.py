@@ -343,6 +343,12 @@ def test_ai_is_the_engine_principle_is_pinned_in_governance() -> None:
         "### C16. AI is the engine; AgentOS orchestrates, it does not implement requests",
         "The decision model orchestrates",
         "Never implement a specific owner request in code",
+        # #974: know-how is skill content, never core code, never authority.
+        "Domain know-how lives in skill content, not in code",
+        "Skill content cannot grant authority, change host behavior or certify an unobserved effect",
+        "Core code never special-cases a particular skill by name or content",
+        "Only the model's own `skill_load` brings a skill's text into a Work",
+        "not the script of one probe or evaluation scenario",
         "remove blockers",
         "Prefer known, public code",
         "Do not make the owner operate the machinery",
@@ -355,6 +361,8 @@ def test_ai_is_the_engine_principle_is_pinned_in_governance() -> None:
         "AgentOS code never implements a specific owner request",
         "removes blockers",
         "am I removing a blocker or scripting the task?",
+        "explicit, versioned skill content",
+        "core code never names a particular skill",
     )
     assert agents.index("## AI is the engine") < agents.index("## Unit-test-first verification"), "C16 must stay near the top of AGENTS.md"
     _assert_all(_read("CLAUDE.md"), "C16 AI is the engine", "never implements a specific owner request")

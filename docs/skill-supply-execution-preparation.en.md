@@ -100,6 +100,8 @@ This is a responsibility diagram, not a mandate for new classes, stores or model
 
 ## 6. C16 reconciliation — proposed, not yet amended
 
+**Superseded:** [#974](https://github.com/Jongtae/agentos/issues/974) amended C16 on 2026-10-02 (constitution C16 and AGENTS.md). The rest of this section is kept as the original proposal.
+
 Current [AGENTS.md](../AGENTS.md) prohibits task-named guidance as well as site/provider/category code branches. Therefore, saying that a site skill already complies without qualification would be inaccurate.
 
 Proposed amendment for #960:

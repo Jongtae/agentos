@@ -7803,6 +7803,9 @@ class AgentService:
             provider='builtin'
             model='notes'
             outcome='succeeded'
+            # #981: a CLI attempt may ask the owner to sign in; other routes
+            # still reach the shared completion path without entering that branch.
+            waits_for_sign_in=False
             resolved_blocker=False
             approval_needed=[False]
             context_approval_needed=[False]

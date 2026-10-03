@@ -32,6 +32,22 @@ Bounded by docs/secretary-agency-contract.en.md ("Amendment - #805 phase 1"):
   outcomes and the deciding route - never the input texts, and a dropped
   proposal's key only as a digest.
 
+**Self-review (SELF-REVIEW-01, #998).** The same rows, tick, cap and pause
+carry a second kind of run, ``self-review``: like a secretary who notices
+she fell short, the assistant reviews a Work from its own records and keeps
+what it learned.  Typed markers enqueue it - a Work a worker AI answered
+that ended ``failed``, a Work the next owner turn's continuity judgment
+linked as a ``correction`` or ``retry``, or an owner reaction another change
+observes (``enqueue_self_review``) - one row per Work.  The Judgment AI reads
+the owner's request, the answer excerpt, the orchestrator's evaluation
+verdicts and the owner's follow-up (or the observation), every fact redacted
+first, and returns at most one **lesson** (how to serve this owner; saved as
+current Memory under ``profile.working.`` by the #918 slice (a) rule, so
+later briefs carry it and the owner is told with an undo) and one
+**blocker** (a cause only AgentOS code can fix; kept as Evidence on the
+reviewed Work, redacted, and never filed anywhere).  No text rule reads the
+owner's wording; nothing names a site, task or category.
+
 Nothing here names a site, provider, task or request category.
 """
 import hashlib
@@ -42,6 +58,24 @@ import time
 EVENT_TOOL = 'owner_model'
 #: The DecisionContext purpose of the proposal judgment.
 PURPOSE = 'owner-model-upkeep'
+#: #998: the two kinds of run one row may be; the row key is ``(job_id, kind)``.
+KIND_UPKEEP, KIND_SELF_REVIEW = 'upkeep', 'self-review'
+RUN_KINDS = (KIND_UPKEEP, KIND_SELF_REVIEW)
+#: The reviewed Work's tool-event name of every self-review run.
+REVIEW_EVENT_TOOL = 'self_review'
+#: The DecisionContext purpose of the self-review judgment.
+REVIEW_PURPOSE = 'self-review'
+#: Why a self-review was enqueued (typed markers, never text rules).
+REVIEW_FAILED, REVIEW_CORRECTION, REVIEW_RETRY, REVIEW_REACTION = 'failed', 'correction', 'retry', 'reaction'
+REVIEW_REASONS = (REVIEW_FAILED, REVIEW_CORRECTION, REVIEW_RETRY, REVIEW_REACTION)
+#: A lesson is a ``profile.`` fact under its own namespace, so it shows and is removed like other Memory.
+LESSON_PREFIX = 'profile.working.'
+#: Bounds of the self-review facts and of a stored observation.
+EVALUATION_CHARS = 1500
+FOLLOWUP_CHARS = 1500
+MAX_OBSERVATION_CHARS = 500
+#: A reviewed Work must have settled; a queued or running one is not reviewed.
+REVIEWABLE_STATUSES = ('succeeded', 'partial', 'failed', 'unknown')
 #: The owner's controls: ``{'enabled': bool, 'daily_calls': int}``.
 CONFIG_KEY = 'owner_model_upkeep'
 DEFAULT_DAILY_CALLS = 20
@@ -98,11 +132,110 @@ def call_sent(decision):
 STRUCTURED_UNSUPPORTED_ENGINE = 'structured-unsupported'
 
 TABLE_SQL = '''
-CREATE TABLE IF NOT EXISTS owner_model_upkeep(job_id TEXT PRIMARY KEY, state TEXT NOT NULL, created REAL NOT NULL,
-    claimed REAL, calls INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS owner_model_upkeep(job_id TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'upkeep',
+    state TEXT NOT NULL, created REAL NOT NULL, claimed REAL, calls INTEGER NOT NULL DEFAULT 0,
+    reason TEXT, observation TEXT, PRIMARY KEY(job_id, kind));
 CREATE INDEX IF NOT EXISTS owner_model_upkeep_state ON owner_model_upkeep(state, created);
 CREATE INDEX IF NOT EXISTS owner_model_upkeep_claimed ON owner_model_upkeep(claimed);
 '''
+
+
+def migrate(db):
+    """Give a pre-#998 ``owner_model_upkeep`` table its ``kind`` key; returns whether it was rebuilt.
+
+    SQLite cannot widen a primary key in place, so the old rows (all upkeep)
+    are copied into the new shape once.  Idempotent: a table that already has
+    ``kind`` is left alone.
+    """
+    columns = {row['name'] for row in db.execute('PRAGMA table_info(owner_model_upkeep)')}
+    if not columns or 'kind' in columns:
+        return False
+    db.executescript('''
+DROP INDEX IF EXISTS owner_model_upkeep_state;
+DROP INDEX IF EXISTS owner_model_upkeep_claimed;
+ALTER TABLE owner_model_upkeep RENAME TO owner_model_upkeep_v1;
+''' + TABLE_SQL + '''
+INSERT INTO owner_model_upkeep(job_id,kind,state,created,claimed,calls)
+    SELECT job_id,'upkeep',state,created,claimed,calls FROM owner_model_upkeep_v1;
+DROP TABLE owner_model_upkeep_v1;
+''')
+    return True
+
+
+REVIEW_QUESTION = (
+    'The assistant fell short on this one finished request, or the owner reacted to it: review_reason says '
+    'which (failed: the request ended failed; correction: the owner\'s next message corrected it; retry: the '
+    'owner asked for it again; reaction: the owner reacted to the answer, see owner_followup). From the '
+    'assistant\'s own records - owner_request (the owner\'s own words), final_answer_excerpt (what the '
+    'assistant answered, model-stated), work_outcome, evaluation (the orchestrator\'s verdicts on each '
+    'attempt) and owner_followup (the owner\'s next message, or the observation) - work out why, as a '
+    'careful secretary would. Return at most two notes. lesson: one short durable note about how to serve '
+    'this owner better next time, for example how they refer to things, what they take for granted, what '
+    'they expect done without being asked, or what they do not want; written as a reusable rule for later '
+    'requests, never as the story of this one, and never repeating what owner_profile already says. '
+    'lesson_key names the lesson, not the request, and starts with "' + LESSON_PREFIX + '" '
+    '(' + LESSON_PREFIX + '<topic>); reuse an owner_profile key under that prefix when the lesson refines it. '
+    'blocker: one short note only when the cause is something the assistant\'s software must change - '
+    'context it was not given, a tool or capability it lacked, a wrong routing - said generally, so a '
+    'developer can act on it; empty when the cause was the assistant\'s own judgment or the request itself. '
+    'Each note is at most 200 characters. Never include health, finances, relationships, beliefs, '
+    'credentials or other people, and never a secret. Use an empty string for a note you do not have; '
+    'when nothing durable can be learned, return both empty. This judgment writes nothing.')
+
+REVIEW_SCHEMA = {'type': 'object', 'additionalProperties': False,
+                 'properties': {'lesson_key': {'type': 'string'}, 'lesson': {'type': 'string'},
+                                'blocker': {'type': 'string'}},
+                 'required': ['lesson_key', 'lesson', 'blocker']}
+
+
+def review_shape(data):
+    """Types only; each note's meaning is ``validate_review``'s."""
+    return all(isinstance(data.get(name), str) for name in ('lesson_key', 'lesson', 'blocker'))
+
+
+def lesson_key(key):
+    """Whether ``key`` is a well-formed lesson key (a ``profile.working.`` Memory key)."""
+    return profile_key(key) and key.startswith(LESSON_PREFIX) and len(key) > len(LESSON_PREFIX)
+
+
+def validate_review(data, known, request=''):
+    """``(lesson, blocker, dropped)``: what AgentOS may keep of one self-review answer (deterministic).
+
+    ``lesson`` is ``{'memory_key', 'content'}`` or None; ``blocker`` a short
+    text or None.  ``known`` and ``request`` are as in ``validate``: a lesson
+    that repeats a current ``profile.`` value, or is the request sentence
+    itself, is dropped.  ``dropped`` lists each refused note with its reason
+    (a model-chosen key only as a digest).
+    """
+    data = data if isinstance(data, dict) else {}
+    dropped, lesson, blocker = [], None, None
+    key, content = data.get('lesson_key'), data.get('lesson')
+    content = content.strip() if isinstance(content, str) else ''
+    key = key.strip() if isinstance(key, str) else ''
+    if content or key:
+        reason = None
+        if not content:
+            reason = 'content'
+        elif len(content) > MAX_TEXT_CHARS:
+            reason = 'content'
+        elif not lesson_key(key):
+            reason = 'key'
+        elif normalized(request) and normalized(content) == normalized(request):
+            reason = 'request'
+        elif normalized(content) in known:
+            reason = 'duplicate'
+        if reason is None:
+            lesson = {'memory_key': key, 'content': content}
+        else:
+            dropped.append({'note': 'lesson', 'reason': reason, **({'key_digest': key_digest(key)} if key else {})})
+    note = data.get('blocker')
+    note = ' '.join(note.split()) if isinstance(note, str) else ''
+    if note:
+        if len(note) > MAX_TEXT_CHARS:
+            dropped.append({'note': 'blocker', 'reason': 'content'})
+        else:
+            blocker = note
+    return lesson, blocker, dropped
 
 QUESTION = ('From this one finished request, propose durable facts about the owner that would help the assistant '
             'serve them in later requests. owner_request holds the owner\'s own words; final_answer_excerpt is '
@@ -290,21 +423,36 @@ class Upkeep:
         return {**self.settings(), 'pending': int(pending), 'running': int(running), 'calls_last_24h': used}
 
     # -- the queue ----------------------------------------------------------
-    def enqueue(self, db, job_id, now=None):
-        """One pending upkeep for ``job_id`` inside the caller's transaction; idempotent per Work."""
+    def enqueue(self, db, job_id, now=None, *, kind=KIND_UPKEEP, reason=None, observation=None):
+        """One pending run of ``kind`` for ``job_id``; idempotent per ``(Work, kind)``.
+
+        Inside the caller's transaction when ``db`` is given, else its own.
+        ``reason`` and ``observation`` belong to a self-review row (#998);
+        the observation is a short typed note (an owner reaction) that the
+        judgment reads redacted, bounded here.
+        """
+        if kind not in RUN_KINDS:
+            raise ValueError('upkeep kind')
+        if db is None:
+            with self.store.db() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                return self.enqueue(conn, job_id, now, kind=kind, reason=reason, observation=observation)
         if not self.settings(db)['enabled']:
             return False
-        return db.execute('INSERT OR IGNORE INTO owner_model_upkeep(job_id,state,created) VALUES (?,?,?)',
-                          (job_id, STATE_PENDING, self.clock() if now is None else now)).rowcount == 1
+        if observation is not None:
+            observation = ' '.join(str(observation).split())[:MAX_OBSERVATION_CHARS] or None
+        return db.execute('INSERT OR IGNORE INTO owner_model_upkeep(job_id,kind,state,created,reason,observation) '
+                          'VALUES (?,?,?,?,?,?)',
+                          (job_id, kind, STATE_PENDING, self.clock() if now is None else now, reason, observation)).rowcount == 1
 
     def expire_interrupted(self, now):
         """Claimed rows a crash left behind: expired with an ``interrupted`` event (call only with no run in flight)."""
         with self.store.db() as db:
-            rows = [row['job_id'] for row in db.execute(
-                'SELECT job_id FROM owner_model_upkeep WHERE state=? AND claimed<?',
+            rows = [(row['job_id'], row['kind']) for row in db.execute(
+                'SELECT job_id,kind FROM owner_model_upkeep WHERE state=? AND claimed<?',
                 (STATE_CLAIMED, now - CLAIM_STALE_SECONDS))]
-        for job_id in rows:
-            self.finish(job_id, STATE_EXPIRED, None, EVENT_EXPIRED, {'reason': 'interrupted'}, now)
+        for job_id, kind in rows:
+            self.finish(job_id, STATE_EXPIRED, None, EVENT_EXPIRED, {'reason': 'interrupted'}, now, kind=kind)
         return len(rows)
 
     def claim_due(self, now):
@@ -318,14 +466,14 @@ class Upkeep:
         budget at claim time, for the record: the run re-reads it before each
         later call (``allowance``).
         """
+        select = ('SELECT job_id,kind,created,reason,observation FROM owner_model_upkeep WHERE state=? '
+                  'ORDER BY created DESC LIMIT 1')
         with self.store.db() as db:
-            row = db.execute('SELECT job_id,created FROM owner_model_upkeep WHERE state=? ORDER BY created DESC LIMIT 1',
-                             (STATE_PENDING,)).fetchone()
+            row = db.execute(select, (STATE_PENDING,)).fetchone()
             if row is None:
                 return None
             db.execute('BEGIN IMMEDIATE')
-            row = db.execute('SELECT job_id,created FROM owner_model_upkeep WHERE state=? ORDER BY created DESC LIMIT 1',
-                             (STATE_PENDING,)).fetchone()
+            row = db.execute(select, (STATE_PENDING,)).fetchone()
             settings = self.settings(db)
             if row is None or not settings['enabled']:
                 return None
@@ -335,24 +483,53 @@ class Upkeep:
             remaining = settings['daily_calls'] - self.calls_used(now, db)
             if not expired and remaining < 1:
                 return None
-            db.execute('UPDATE owner_model_upkeep SET state=?,claimed=?,calls=? WHERE job_id=?',
-                       (STATE_CLAIMED, now, 0 if expired else 1, row['job_id']))
-            return {'job_id': row['job_id'], 'created': row['created'], 'expired': expired, 'remaining': remaining}
+            db.execute('UPDATE owner_model_upkeep SET state=?,claimed=?,calls=? WHERE job_id=? AND kind=?',
+                       (STATE_CLAIMED, now, 0 if expired else 1, row['job_id'], row['kind']))
+            return {'job_id': row['job_id'], 'kind': row['kind'], 'created': row['created'], 'expired': expired,
+                    'remaining': remaining, 'reason': row['reason'], 'observation': row['observation']}
 
-    def count(self, job_id, calls):
+    def count(self, job_id, calls, kind=KIND_UPKEEP):
         """Record the calls a run has made so far (the cap sees them at once)."""
         with self.store.db() as db:
-            db.execute('UPDATE owner_model_upkeep SET calls=? WHERE job_id=?', (int(calls), job_id))
+            db.execute('UPDATE owner_model_upkeep SET calls=? WHERE job_id=? AND kind=?', (int(calls), job_id, kind))
 
-    def finish(self, job_id, state, calls, event_status, detail, now):
-        """Settle a claimed row and record its one tool event on the source Work."""
+    def finish(self, job_id, state, calls, event_status, detail, now, kind=KIND_UPKEEP):
+        """Settle a claimed row and record its one tool event on the source Work (``self_review`` for a review)."""
+        tool = REVIEW_EVENT_TOOL if kind == KIND_SELF_REVIEW else EVENT_TOOL
         with self.store.db() as db:
             if calls is None:
-                db.execute('UPDATE owner_model_upkeep SET state=? WHERE job_id=?', (state, job_id))
+                db.execute('UPDATE owner_model_upkeep SET state=? WHERE job_id=? AND kind=?', (state, job_id, kind))
             else:
-                db.execute('UPDATE owner_model_upkeep SET state=?,calls=? WHERE job_id=?', (state, int(calls), job_id))
+                db.execute('UPDATE owner_model_upkeep SET state=?,calls=? WHERE job_id=? AND kind=?',
+                           (state, int(calls), job_id, kind))
             db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
-                       (job_id, EVENT_TOOL, event_status, json.dumps(detail, ensure_ascii=False), now))
+                       (job_id, tool, event_status, json.dumps(detail, ensure_ascii=False), now))
+
+    def followups(self, job_id, limit=3):
+        """The owner's later messages the continuity judgment linked to ``job_id`` as a correction or retry (#998).
+
+        Read, not judged: only the stored ``relation_kind`` / ``related_job_id``
+        link is used, oldest first.
+        """
+        with self.store.db() as db:
+            rows = db.execute("SELECT message FROM jobs WHERE related_job_id=? AND relation_kind IN (?,?) AND id!=? "
+                              'ORDER BY created LIMIT ?', (job_id, REVIEW_CORRECTION, REVIEW_RETRY, job_id, limit)).fetchall()
+        return [str(row['message'] or '') for row in rows if row['message']]
+
+    def evaluations(self, job_id, limit=6):
+        """The orchestrator's recorded verdict texts on ``job_id``'s attempts, oldest first (#710 Evidence)."""
+        with self.store.db() as db:
+            rows = db.execute("SELECT detail FROM tool_events WHERE job_id=? AND tool='orchestrator' AND status='evaluated' "
+                              'ORDER BY id LIMIT ?', (job_id, limit)).fetchall()
+        texts = []
+        for row in rows:
+            try:
+                trace = json.loads(row['detail'])
+            except (TypeError, ValueError):
+                continue
+            if isinstance(trace, dict) and isinstance(trace.get('text'), str) and trace['text'].strip():
+                texts.append(trace['text'].strip())
+        return texts
 
     # -- known values -------------------------------------------------------
     def known_values(self, owner, job_id):
@@ -452,3 +629,81 @@ class Upkeep:
             applied.append(row)
         detail.update(proposed=len(data.get('proposals') or []), applied=applied, dropped=dropped, stopped=stopped)
         return STATE_DONE, calls, EVENT_RECORDED, detail
+
+    # -- one self-review (#998) ---------------------------------------------
+    def run_review(self, job, row, judgments, *, answer, profile, clock, cancelled=None):
+        """Review one settled Work from its own records; returns ``(state, calls, event_status, detail)``.
+
+        One ``structured`` judgment (``ConversationJudgments.self_review``)
+        over the owner's request, the answer excerpt, the Work's outcome, the
+        orchestrator's verdicts, and the owner's follow-up (or the row's
+        observation), all redacted by ``judgments``.  The kept lesson is
+        saved at once as current ``profile.working.`` Memory attributed to
+        the reviewed Work (#918 slice a: the owner's own AI writes, the owner
+        is told with an undo); the blocker is kept in the event detail,
+        redacted, and nowhere else.  The pause switch is read again before
+        the write; a write is not a call.
+        """
+        from .agent_runtime import MEMORY_OWNER, SECRET_SHAPED_VALUE, memory_value_has_secret
+        request = str(job.get('message') or '')
+        reason = row.get('reason') or ''
+        followups = self.followups(job['id'])
+        followup = '\n'.join(followups) if followups else (row.get('observation') or '')
+        evaluation = '\n'.join(self.evaluations(job['id']))
+        data, decision = judgments.self_review(request, answer, str(job.get('status') or ''), evaluation, followup,
+                                               profile, reason, work_id=job['id'], cancelled=cancelled)
+        confidence = decision.confidence
+        calls = 1 if call_sent(decision) else 0
+        self.count(job['id'], calls, KIND_SELF_REVIEW)
+        detail = {'reason': reason, 'decision': decision.outcome, 'route': confidence.route or None,
+                  'provider': confidence.provider or None, 'model': confidence.model or None,
+                  'observed_model': confidence.observed_model or None, 'confidence': confidence.probability,
+                  'sent': bool(calls),
+                  'inputs': {'owner_request_chars': len(request), 'answer_chars': len(answer or ''),
+                             'evaluations': len(self.evaluations(job['id'])), 'followups': len(followups),
+                             'observation': bool(row.get('observation')), 'profile_chars': len(profile or ''),
+                             'clock': bool(clock)}}
+        if data is None:
+            return STATE_UNAVAILABLE, calls, EVENT_UNAVAILABLE, detail
+        known, _pending = self.known_values(MEMORY_OWNER, job['id'])
+        lesson, blocker, dropped = validate_review(data, known, request=request)
+        detail.update(lesson=None, blocker=None, dropped=dropped, stopped=None)
+        if blocker:
+            # Evidence on the reviewed Work only: redacted like every fact, never filed anywhere.
+            detail['blocker'] = judgments.redact(blocker)[:MAX_TEXT_CHARS]
+        if lesson:
+            key, content = lesson['memory_key'], lesson['content']
+            _left, why = self.allowance(self.clock())
+            if why == STOPPED_PAUSED:
+                detail['stopped'] = STOPPED_PAUSED
+                dropped.append({'note': 'lesson', 'key_digest': key_digest(key), 'reason': STOPPED_PAUSED})
+            elif memory_value_has_secret(self.store, key, content):
+                dropped.append({'note': 'lesson', 'key_digest': key_digest(key), 'reason': SECRET_SHAPED_VALUE})
+            else:
+                try:
+                    memory = self.store.save_memory(key, content, MEMORY_OWNER, work_id=job['id'], notice=True)
+                except ValueError:
+                    dropped.append({'note': 'lesson', 'key_digest': key_digest(key), 'reason': 'store-refused'})
+                else:
+                    detail['lesson'] = {'memory_key': key, 'content_chars': len(content), 'outcome': APPLIED_MEMORY,
+                                        'memory_id': memory['id'], 'superseded': bool(memory.get('supersedes')),
+                                        'auto_saved': True}
+        return STATE_DONE, calls, EVENT_RECORDED, detail
+
+
+def enqueue_self_review(store, work_id, reason, observation=None, *, db=None, now=None, clock=time.time):
+    """One pending self-review of ``work_id`` (#998); returns whether a row was added.
+
+    The API another trigger uses (for example an owner reaction, #996):
+    ``reason`` is one of ``REVIEW_REASONS``; ``observation`` is an optional
+    short typed note the judgment reads as the owner's follow-up when no
+    later message is linked to the Work.  Idempotent per Work: a second
+    self-review of the same Work is not added.  Nothing runs here; the
+    existing idle tick claims the row under the owner's pause switch and
+    the rolling call cap.  With ``db`` it joins the caller's transaction.
+    """
+    if reason not in REVIEW_REASONS:
+        raise ValueError('self-review reason')
+    if not isinstance(work_id, str) or not work_id:
+        raise ValueError('self-review work')
+    return Upkeep(store, clock).enqueue(db, work_id, now, kind=KIND_SELF_REVIEW, reason=reason, observation=observation)

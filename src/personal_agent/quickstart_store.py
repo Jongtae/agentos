@@ -15,7 +15,7 @@ import uuid
 
 from .conversation_projection import qualify_transcript, turn_qualifier
 from .preparations import TABLE_SQL as PREPARATIONS_TABLE_SQL, migrate as migrate_preparations
-from .owner_model import TABLE_SQL as OWNER_MODEL_TABLE_SQL
+from .owner_model import TABLE_SQL as OWNER_MODEL_TABLE_SQL, migrate as owner_model_migrate
 
 
 _SECRET_STATE_LOCK = threading.RLock()
@@ -123,7 +123,8 @@ class QuickStore:
             db.executescript(PREPARATIONS_TABLE_SQL)
             # #719: the watch window and silent-unless-needed columns, among others.
             migrate_preparations(db)
-            # #805: the durable post-Work owner-model upkeep queue.
+            # #805: the durable post-Work owner-model upkeep queue; #998: keyed by (Work, kind).
+            owner_model_migrate(db)
             db.executescript(OWNER_MODEL_TABLE_SQL)
             columns={row['name'] for row in db.execute('PRAGMA table_info(messages)')}
             if 'workspace_id' not in columns: db.execute('ALTER TABLE messages ADD COLUMN workspace_id TEXT')

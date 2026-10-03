@@ -1001,6 +1001,19 @@ class AgentService:
         return (outcome in ('succeeded','partial') and provider!='builtin'
                 and prep.preparation_of(key) is None and continuation_request(key) is None)
 
+    @staticmethod
+    def self_review_eligible(job, outcome, provider):
+        """Whether a settled Work gets one self-review for having failed (#998); typed markers only.
+
+        A Work a worker AI answered that ended ``failed``: not a rule/command
+        reply, not a preparation's run and not a location continuation, as
+        for upkeep.  The caller on the exception path checks separately that
+        a worker attempt was recorded, since no provider is settled there.
+        """
+        key=job.get('request_key')
+        return (outcome=='failed' and provider!='builtin'
+                and prep.preparation_of(key) is None and continuation_request(key) is None)
+
     def run_owner_model_upkeep(self, now=None):
         """One work-loop tick of the #805 upkeep: claim at most one pending Work and run it off-thread.
 
@@ -1034,16 +1047,18 @@ class AgentService:
         """One claimed upkeep, off the work thread; it releases the single-flight lock."""
         upkeep=self.owner_model
         work_id=row['job_id']
+        kind=row.get('kind') or om.KIND_UPKEEP
+        review=kind==om.KIND_SELF_REVIEW
         # #805 review: the judgments' audit rows (``record_decision``) belong to the
         # source Work; ``current_work_id`` is per thread, so the work loop's is untouched.
         self.current_work_id=work_id
         try:
             job=self.store.job(work_id)
             if row['expired']:
-                upkeep.finish(work_id,om.STATE_EXPIRED,0,om.EVENT_EXPIRED,{'reason':'expired'},now)
+                upkeep.finish(work_id,om.STATE_EXPIRED,0,om.EVENT_EXPIRED,{'reason':'expired'},now,kind=kind)
                 return
-            if not job or job.get('status') not in ('succeeded','partial'):
-                upkeep.finish(work_id,om.STATE_GONE,0,om.EVENT_UNAVAILABLE,{'reason':'work-not-finished'},now)
+            if not job or job.get('status') not in (om.REVIEWABLE_STATUSES if review else ('succeeded','partial')):
+                upkeep.finish(work_id,om.STATE_GONE,0,om.EVENT_UNAVAILABLE,{'reason':'work-not-finished'},now,kind=kind)
                 return
             # Every fact is redacted by the judgment redaction scoped to the source Work:
             # stored secrets and credential shapes always, and its saved private values
@@ -1059,6 +1074,18 @@ class AgentService:
             # The hard deadline: no model call starts after it (each call has its adapter's own timeout).
             deadline=upkeep.clock()+om.RUN_SECONDS
             cancelled=lambda:self.stop.is_set() or upkeep.clock()>deadline
+            if review:
+                # #998: the secretary reviews its own miss from its records; the lesson is Memory (told
+                # with undo), the blocker stays Evidence on this Work.  The log line carries no text.
+                state,calls,status,detail=upkeep.run_review(job,row,judgments,answer=job.get('response') or '',
+                                                            profile=self.owner_profile_snapshot(),clock=clock,
+                                                            cancelled=cancelled)
+                upkeep.finish(work_id,state,calls,status,detail,upkeep.clock(),kind=kind)
+                LOG.info('self-review work=%s reason=%s state=%s calls=%s lesson=%s blocker=%s',work_id,detail.get('reason'),
+                         state,calls,bool(detail.get('lesson')),bool(detail.get('blocker')))
+                if (detail.get('lesson') or {}).get('memory_id'):
+                    self.queue_upkeep_memory_saved(work_id)
+                return
             state,calls,status,detail=upkeep.run(job,judgments,answer=job.get('response') or '',
                                                  profile=self.owner_profile_snapshot(),clock=clock,
                                                  cancelled=cancelled)
@@ -1072,7 +1099,7 @@ class AgentService:
                 self.queue_upkeep_memory_saved(work_id)
         except Exception as exc:  # noqa: BLE001 - a background run never raises
             LOG.warning('owner-model upkeep run failed work=%s kind=%s',work_id,type(exc).__name__)
-            try:upkeep.finish(work_id,om.STATE_UNAVAILABLE,None,om.EVENT_UNAVAILABLE,{'reason':'run-failed'},upkeep.clock())
+            try:upkeep.finish(work_id,om.STATE_UNAVAILABLE,None,om.EVENT_UNAVAILABLE,{'reason':'run-failed'},upkeep.clock(),kind=kind)
             except Exception:pass
         finally:
             self.current_work_id=None
@@ -2621,9 +2648,14 @@ class AgentService:
                 conn.execute('BEGIN IMMEDIATE')
                 return self.record_continuity(job_id,previous_id,relation,executed=executed,reason=reason,
                                               source_work_id=source_work_id,db=conn,link_kind=link_kind)
-        self.store.link_work_relation(job_id,previous_id,link_kind or relation,db=db)
+        stored=link_kind or relation
+        self.store.link_work_relation(job_id,previous_id,stored,db=db)
         db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
                    (job_id,'conversation_continuity','succeeded',json.dumps(detail,ensure_ascii=False),time.time()))
+        # #998: a correction or retry the continuity judgment linked is a typed miss of the earlier Work;
+        # one self-review of it joins this transaction (idempotent per Work, under the same pause switch).
+        if stored in (FOLLOWUP_CORRECTION,FOLLOWUP_RETRY):
+            om.enqueue_self_review(self.store,previous_id,stored,db=db)
 
     def cancel_focused_work(self, previous, connector_owner):
         """Cancel only the focused Work through an existing safe boundary."""
@@ -4532,7 +4564,8 @@ class AgentService:
 
     #: Records that are AgentOS's own bookkeeping, not tool attempts.
     #: #710: ``orchestrator`` events record the plan and its evaluation, never a tool attempt.
-    LOCAL_NON_TOOL_EVENTS=frozenset({'model','local_authority','conversation_continuity',ORCHESTRATION_EVENT,om.EVENT_TOOL,MEMORY_UNDO_TOOL})
+    LOCAL_NON_TOOL_EVENTS=frozenset({'model','local_authority','conversation_continuity',ORCHESTRATION_EVENT,om.EVENT_TOOL,
+                                     om.REVIEW_EVENT_TOOL,MEMORY_UNDO_TOOL})
 
     def attempted_only_reads(self, job_id):
         """True only when every tool this Work attempted is a declared read.
@@ -9128,6 +9161,9 @@ class AgentService:
                                (outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',spoken,observed,note,job['id']))
                     # #805: one pending owner-model upkeep, settled with the Work.
                     if self.owner_model_eligible(job,outcome,provider):self.owner_model.enqueue(db,job['id'])
+                    # #998: a Work a worker AI answered that failed gets one self-review instead.
+                    elif self.self_review_eligible(job,outcome,provider):
+                        om.enqueue_self_review(self.store,job['id'],om.REVIEW_FAILED,db=db)
                 self.record_turn_provenance(job['id'],goal=self.work_goal(job['id'],work_capabilities[0],outcome))
             except (ValueError,ProviderError,ExecutionError,OSError) as exc:
                 resolved_blocker=False
@@ -9176,6 +9212,12 @@ class AgentService:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id,delivery_projection) VALUES (?,?,?,?,?,?,?)',('assistant',transcript,job['channel'],time.time(),job.get('workspace_id'),job['id'],'blocked-turn' if isinstance(exc,BlockedTurn) else None))
                     db.execute("UPDATE jobs SET status=?,error=?,delivery=?,owner_cause=COALESCE(?,owner_cause) WHERE id=?",
                                (outcome,response,'pending' if job['chat_id'] else 'none',report,job['id']))
+                    # #998: a worker attempt failed and nothing followed: one self-review, settled with the Work.
+                    # A blocker the owner resolves (BlockedTurn) is a setup need, not a miss.
+                    if (outcome=='failed' and not isinstance(exc,BlockedTurn) and self.self_review_eligible(job,outcome,None)
+                            and db.execute("SELECT 1 FROM tool_events WHERE job_id=? AND tool IN ('subscription_engine','model') LIMIT 1",
+                                           (job['id'],)).fetchone()):
+                        om.enqueue_self_review(self.store,job['id'],om.REVIEW_FAILED,db=db)
                 self.record_turn_provenance(job['id'],goal=self.work_goal(job['id'],work_capabilities[0],outcome))
             self.update_task_card(job,outcome)
             # #709: a login page during this run: show the window now that the

@@ -66,9 +66,9 @@ class Upkeep(Harness):
             self.service.owner_model.enqueue(db, job)
         return job
 
-    def upkeep_rows(self):
+    def upkeep_rows(self, kind=om.KIND_UPKEEP):
         with self.store.db() as db:
-            return {row['job_id']: dict(row) for row in db.execute('SELECT * FROM owner_model_upkeep')}
+            return {row['job_id']: dict(row) for row in db.execute('SELECT * FROM owner_model_upkeep WHERE kind=?', (kind,))}
 
     def evidence(self, job):
         with self.store.db() as db:
@@ -107,9 +107,11 @@ class Trigger(Upkeep):
     def test_a_command_and_a_failed_work_leave_no_upkeep(self):
         self.run_work('/note 판교 사무실 주소 메모')
         self.engine.fail = [ValueError('worker failed')] * 3
-        _job, row = self.run_work('나는 판교에서 일해')
+        job, row = self.run_work('나는 판교에서 일해')
         self.assertEqual(row['status'], 'failed')
         self.assertEqual(self.upkeep_rows(), {})
+        # #998: a failed Work a worker AI answered gets a self-review row instead (test_self_review).
+        self.assertEqual(list(self.upkeep_rows(om.KIND_SELF_REVIEW)), [job])
 
     def test_paused_upkeep_enqueues_nothing(self):
         self.service.owner_model_request({'operation': 'set', 'enabled': False})

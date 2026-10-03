@@ -219,6 +219,22 @@ class Continuation(_LocationCase):
         self.assertIn(self.REQUEST, seen[0])
         self.assertEqual(self.store.job(row['id'])['status'], 'succeeded')
 
+    def test_the_location_keyboard_is_removed_by_the_first_answer_after_the_request_ended(self):
+        """#992 (live 2026-10-03): a keyboard never removed let a tap answer yesterday's prompt."""
+        self.ask()
+        while self.service.deliver_one():
+            pass
+        removals = lambda: [body for body in self.sends() if (body.get('reply_markup') or {}).get('remove_keyboard')]
+        self.assertEqual(removals(), [], 'the asking Work\'s own reply keeps the button while the request waits')
+        self.now += 30
+        self.location()
+        self.assertTrue(self.service.run_one())
+        while self.service.deliver_one():
+            pass
+        [removal] = removals()
+        self.assertEqual(removal['reply_markup'], {'remove_keyboard': True}, 'the continuation\'s answer removes it')
+        self.assertIsNone(self.service.location_keyboard_removal(CHAT), 'removed once; later answers carry nothing')
+
     # --- review: a typed place (the keyboard offers it) continues the request once --
 
     def test_a_typed_reply_is_an_ordinary_work_and_the_request_still_waits(self):

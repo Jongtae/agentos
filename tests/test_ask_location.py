@@ -235,6 +235,18 @@ class Continuation(_LocationCase):
         self.assertEqual(removal['reply_markup'], {'remove_keyboard': True}, 'the continuation\'s answer removes it')
         self.assertIsNone(self.service.location_keyboard_removal(CHAT), 'removed once; later answers carry nothing')
 
+    def test_a_keyboard_from_before_the_record_existed_is_removed_once(self):
+        """#992 (live 2026-10-03): a keyboard sent before the deploy left no record and stayed."""
+        self.assertIsNone(self.service.location_keyboard_removal(CHAT), 'never asked here: nothing to remove')
+        self.ask()
+        with self.store.db() as db:
+            db.execute("DELETE FROM config WHERE key=?", (self.service.LOCATION_KEYBOARD_KEY,))
+            db.execute("UPDATE context_location_requests SET state='expired'")
+        self.assertEqual(self.service.location_keyboard_removal(CHAT), {'remove_keyboard': True})
+        self.assertIsNone(self.service.location_keyboard_removal(CHAT + 1), 'only a chat that was asked')
+        self.store.put(self.service.LOCATION_KEYBOARD_KEY, {})
+        self.assertIsNone(self.service.location_keyboard_removal(CHAT), 'once removed, never again')
+
     # --- review: a typed place (the keyboard offers it) continues the request once --
 
     def test_a_typed_reply_is_an_ordinary_work_and_the_request_still_waits(self):

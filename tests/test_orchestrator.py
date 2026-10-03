@@ -1439,9 +1439,53 @@ class GoalDecidesOutcome(Harness):
         self.script([plan('codex', 'Answer.')], goals=[True])
         with mock.patch.object(self.service, 'offer_browser_login') as offer:
             job, row = self.run_work('아내 장바구니에 넣어줘')
-        self.assertEqual(row['status'], 'succeeded')
+        # #981: a Work waiting for the sign-in it asked for is not finished; it stays partial.
+        self.assertEqual(row['status'], 'partial')
         offer.assert_called_once()
         self.assertEqual(offer.call_args[0][0]['id'], job)
+
+
+class SignInWaitsForTheOwner(Harness):
+    """#981 (live 2026-10-03): a CLI Work that asked for the owner's sign-in is not finished by a "reached" verdict."""
+
+    def test_a_reached_verdict_never_finishes_a_work_waiting_for_a_sign_in(self):
+        def work(tools):
+            # As the live run recorded them: a declared read, then the relayed sign-in request.
+            GoalDecidesOutcome.step(tools, 'browser_open', 'succeeded', declared_effect='read', evidence={'state': 'page'})
+            GoalDecidesOutcome.step(tools, 'browser_sign_in', 'succeeded',
+                                    evidence={'state': 'login_required', 'url': 'https://shop.example/cart'})
+            # What the relayed browser_sign_in records in the service (``_request_browser_login``).
+            with self.service.lock:
+                self.service._put_browser_login(tools.capabilities.job_id, {
+                    'work_id': tools.capabilities.job_id, 'url': 'https://shop.example/cart', 'host': 'shop.example',
+                    'state': 'requested', 'requested_at': 0, 'nonce': 'n', 'explicit': True})
+        self.engine.before = work
+        self.engine.answers = ['로그인이 필요해 아직 담지 못했어요. 로그인 창을 열어 둘게요.']
+        self.script([plan('codex', 'Add it.'), plan('openai', 'Other path.')], goals=[True])
+        job, row = self.run_work('장바구니에 우유 담아줘')
+        self.assertEqual(len(self.engine.turns), 1, 'no re-delegation while the owner is asked to sign in')
+        self.assertEqual(self.asked_goals, [], 'no goal judgment can declare it reached')
+        self.assertIn(row['status'], ('failed', 'partial'))
+        self.assertNotEqual((self.service._browser_login(job) or {}).get('state'), 'requested',
+                            'the login was taken up after the run instead of expiring unseen')
+
+
+class SignInRefusedStillWaits(Harness):
+    """#995 review: a sign-in the worker asked for on a site AgentOS may not sign in to (no login row)."""
+
+    def test_a_refused_sign_in_is_still_not_a_reached_goal(self):
+        def work(tools):
+            GoalDecidesOutcome.step(tools, 'browser_sign_in', 'succeeded',
+                                    evidence={'state': 'login_required', 'url': 'https://shared.example/cart'})
+        self.engine.before = work
+        self.engine.answers = ['이 사이트는 로그인할 수 없어 아직 담지 못했어요.']
+        self.script([plan('codex', 'Add it.'), plan('openai', 'Other path.')], goals=[True])
+        job, row = self.run_work('장바구니에 우유 담아줘')
+        self.assertIsNone(self.service._browser_login(job), 'no login row was made')
+        self.assertEqual(self.asked_goals, [])
+        self.assertEqual(len(self.engine.turns), 1)
+        self.assertIn(row['status'], ('failed', 'partial'))
+
 
 class OwnerStateOnTheCliRoute(Harness):
     """#774: the trusted-local CLI turn reaches Memory, preparations and the calendar through the service."""

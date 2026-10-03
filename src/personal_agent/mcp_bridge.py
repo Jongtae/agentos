@@ -15,7 +15,7 @@ from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, LATEST_HANDSHAKE_VERS
 
 from .agent_runtime import (ENGINE_UNMEDIATED, OWNER_STATE_ACTIONS, TRANSIENT_FAILURE_TEXT,
                             Capabilities, ToolError, WorkBudget, WorkLedger, classify_failure, declared_effect,
-                            evidence_summary, lookup_sources, progress_step, worker_result, recorded_private_sources, split_status, work_source_records,
+                            claim_owner_steers, evidence_summary, lookup_sources, progress_step, worker_result, recorded_private_sources, split_status, work_source_records,
                             work_stop_requested)
 from .current_context import redact_known_secrets
 from .providers import ProviderError
@@ -167,6 +167,14 @@ def unexpected_error_result(exc, action):
     return {'content': [{'type': 'text', 'text': TOOL_FAILED_TEXT}], 'structuredContent': typed, 'isError': True}, typed
 
 
+def _with_steer(result, store, job_id, record):
+    """#999: an owner message for this running Work rides on the tool result the worker reads next."""
+    steer = claim_owner_steers(store, job_id, record)
+    if steer and isinstance(result, dict) and isinstance(result.get('content'), list):
+        result['content'].append({'type':'text','text':steer})
+    return result
+
+
 def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROFILE, browser_relay=None,
           search_off_reason='', relay_browser=True, skills=()):
     """Serve one Work's AgentOS tools over stdio for the route profile the host named (#701).
@@ -270,6 +278,7 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                     record(listed, 'failed',
                            json.dumps({'scope':'subscription-mcp-bridge', **({'host_action':action} if action else {}), **typed,
                                        'error':redact_reason(str(exc)), **declared}, ensure_ascii=False))
+                    _with_steer(result, store, job_id, record)
                     if ident is not None:
                         _send({'jsonrpc':'2.0','id':ident,'result':result})
                     continue
@@ -283,6 +292,7 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                     record(listed, 'failed',
                            json.dumps({'scope':'subscription-mcp-bridge', **({'host_action':action} if action else {}), **typed,
                                        'error':redact_reason(TOOL_FAILED_TEXT), **declared}, ensure_ascii=False))
+                    _with_steer(result, store, job_id, record)
                     if ident is not None:
                         _send({'jsonrpc':'2.0','id':ident,'result':result})
                     continue
@@ -294,6 +304,7 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
                                                       ensure_ascii=False))
                 # #836: the worker reads a held memory write as the owner's one-tap ask, nothing more.
                 result = {'content':[{'type':'text','text':json.dumps(worker_result(host_action, value), ensure_ascii=False)}]}
+                _with_steer(result, store, job_id, record)
             elif method == 'notifications/initialized': continue
             else: raise _Rejected(-32601, 'Method not found.')
             if ident is not None: _send({'jsonrpc':'2.0','id':ident,'result':result})

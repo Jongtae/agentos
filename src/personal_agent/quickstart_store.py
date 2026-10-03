@@ -52,6 +52,8 @@ class QuickStore:
             CREATE TABLE IF NOT EXISTS memory_approvals(token_hash TEXT PRIMARY KEY, owner_key TEXT NOT NULL, work_key TEXT NOT NULL, action TEXT NOT NULL, subject_id TEXT NOT NULL, memory_key TEXT NOT NULL, source_digest TEXT NOT NULL, content_digest TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, state TEXT NOT NULL DEFAULT 'issued', result_id TEXT, expected_memory_id TEXT, expected_memory_digest TEXT);
             CREATE TABLE IF NOT EXISTS telegram_task_cards(job_id TEXT PRIMARY KEY, chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL, state TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS telegram_photo_attachments(job_id TEXT PRIMARY KEY, file_id TEXT NOT NULL, created REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS work_steers(source_job_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, content TEXT NOT NULL, created REAL NOT NULL, delivered_at REAL);
+            CREATE INDEX IF NOT EXISTS work_steers_job ON work_steers(job_id, delivered_at);
             CREATE TABLE IF NOT EXISTS telegram_photo_albums(job_id TEXT PRIMARY KEY, generation TEXT NOT NULL, chat_id INTEGER NOT NULL, media_group_id TEXT NOT NULL, last_received REAL NOT NULL, caption TEXT NOT NULL DEFAULT '', UNIQUE(generation,chat_id,media_group_id));
             CREATE TABLE IF NOT EXISTS telegram_notifications(id TEXT PRIMARY KEY, job_id TEXT NOT NULL, chat_id INTEGER NOT NULL, generation TEXT NOT NULL, kind TEXT NOT NULL, fingerprint TEXT, state TEXT NOT NULL, message_id INTEGER, created REAL NOT NULL, UNIQUE(job_id, kind));
             CREATE TABLE IF NOT EXISTS context_events(id TEXT PRIMARY KEY, captured_at REAL NOT NULL, source_kind TEXT NOT NULL, content TEXT NOT NULL, content_hash TEXT NOT NULL, expires_at REAL NOT NULL, sharing_state TEXT NOT NULL, source_app TEXT NOT NULL, source_domain TEXT NOT NULL);
@@ -329,6 +331,42 @@ class QuickStore:
         db.execute('INSERT INTO jobs(id,request_key,message,channel,chat_id,status,response,error,delivery,provider,model,created,workspace_id,owner_typed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',(task_id,request_key,message,channel,chat_id,'queued',None,None,'none',None,None,time.time(),workspace_id,1 if owner_typed is True else None))
         return task_id
 
+    def add_steer(self, job_id, source_job_id, content, db=None):
+        """Hand a queued owner message to the running Work it steers (#999).
+
+        Only while ``job_id`` is still running and ``source_job_id`` is still
+        queued behind it; otherwise nothing changes and the message runs as its
+        own Work.  Returns True when the steer was recorded.
+        """
+        if db is None:
+            with self.db() as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                return self.add_steer(job_id,source_job_id,content,db=conn)
+        running=db.execute("SELECT 1 FROM jobs WHERE id=? AND status='running'",(job_id,)).fetchone()
+        queued=db.execute("SELECT 1 FROM jobs WHERE id=? AND status='queued'",(source_job_id,)).fetchone()
+        if not running or not queued or not isinstance(content,str) or not content.strip():return False
+        db.execute('INSERT OR IGNORE INTO work_steers(source_job_id,job_id,content,created) VALUES (?,?,?,?)',
+                   (source_job_id,job_id,content,time.time()))
+        self.link_work_relation(source_job_id,job_id,'steer',db=db)
+        return True
+
+    def claim_steers(self, job_id):
+        """The owner messages for running Work ``job_id`` not yet handed to its worker, marked handed (#999)."""
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            rows=db.execute('SELECT source_job_id,content FROM work_steers WHERE job_id=? AND delivered_at IS NULL ORDER BY created',
+                            (job_id,)).fetchall()
+            if rows:
+                db.execute('UPDATE work_steers SET delivered_at=? WHERE job_id=? AND delivered_at IS NULL',(time.time(),job_id))
+        return [row['content'] for row in rows]
+
+    def steer_delivered(self, source_job_id, db=None):
+        """True when this queued message already reached the Work it steered (#999)."""
+        if db is None:
+            with self.db() as conn:return self.steer_delivered(source_job_id,db=conn)
+        row=db.execute('SELECT delivered_at FROM work_steers WHERE source_job_id=?',(source_job_id,)).fetchone()
+        return bool(row and row['delivered_at'] is not None)
+
     #: Stored turns joined with the outcome of the Work that produced them, so
     #: every reader can qualify unverified text (#494).  Read-time only: the
     #: stored message text and schema are unchanged.
@@ -365,7 +403,7 @@ class QuickStore:
 
         With ``db`` the link joins the caller's transaction (#607).
         """
-        if relation_kind not in {'retry','reference','cancel','correction'}:
+        if relation_kind not in {'retry','reference','cancel','correction','steer'}:
             raise ValueError('작업 관계를 확인하세요.')
         if not isinstance(job_id,str) or not isinstance(related_job_id,str) or job_id==related_job_id:
             raise ValueError('연결할 작업을 확인하세요.')

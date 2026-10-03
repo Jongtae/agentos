@@ -550,6 +550,12 @@ FOLLOWUP_QUESTION = (
     'This judgment does not authorize any action.'
 )
 
+#: #999: a message that arrives while an earlier request is still being worked on.
+STEER_PROPOSITION = ('The assistant is still working on the owner\'s earlier request (given). The owner\'s latest '
+                     'message is meant for that running task: a remark, preference, constraint, choice or correction '
+                     'the work in progress should take into account now. It is false when the message is a new, '
+                     'separate request, a question to be answered on its own, a request to stop, or when it is '
+                     'unclear. This judgment does not authorize any action.')
 WITHDRAWAL_PROPOSITION = ('The owner\'s latest message withdraws or cancels the request that is waiting for '
                           'the listed connection (rather than acknowledging it, changing topic, or asking '
                           'something unrelated).')
@@ -750,6 +756,20 @@ class ConversationJudgments:
         context = self._context('parked-work-withdrawal',
                                   {'waiting_connection': labels, 'owner_message': utterance})
         decision = self.engine.judge(context, WITHDRAWAL_PROPOSITION)
+        verdict = self.policy.binary(decision)
+        return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
+                        source=decision.confidence.provider or decision.outcome)
+
+    def steers_running_work(self, running_request, utterance):
+        """Is ``utterance`` meant for the Work still running on ``running_request`` (#999)?
+
+        Both texts are the owner's own words.  Unavailable or unknown leaves the
+        message to run as its own Work afterwards, as before.
+        """
+        context = self._context('running-work-steer',
+                                {'running_request': running_request, 'owner_message': utterance},
+                                uncut='owner_message')
+        decision = self.engine.judge(context, STEER_PROPOSITION)
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
                         source=decision.confidence.provider or decision.outcome)

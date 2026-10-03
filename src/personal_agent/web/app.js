@@ -172,7 +172,7 @@ function eventTone(status){return {succeeded:'ok',failed:'danger',running:'run',
 function taskTone(task){if(task.status_kind==='active')return 'run';if(['failed','interrupted'].includes(task.status))return 'danger';if(task.status==='cancelled')return 'neutral';if(task.status==='partial')return 'attention';if(task.delivery==='unknown')return 'unknown';if(task.status_kind==='finished')return 'ok';return 'attention';}
 function outcomeTone(task,outcome){if(task.status==='cancelled')return 'neutral';if(outcome.kind==='attention')return ['failed','interrupted'].includes(task.status)?'danger':task.delivery==='unknown'&&task.status_kind!=='active'?'unknown':'attention';return task.status_kind==='active'?'run':'ok';}
 // Relations come only from the task API (#557 continuity). Nothing is inferred here.
-const RELATION_TEXT={retry:'다시 시도한 요청',reference:'이전 요청을 참조',cancel:'이전 요청을 취소',correction:'이전 요청을 정정'};
+const RELATION_TEXT={retry:'다시 시도한 요청',reference:'이전 요청을 참조',cancel:'이전 요청을 취소',correction:'이전 요청을 정정',steer:'진행 중이던 작업에 전달'};
 function relationText(kind){return t(RELATION_TEXT[kind]||'이전 요청과 연결됨');}
 // #559: the same recorded relation, read from the earlier turn.
 const RELATION_LATER_TEXT={retry:'이후 다시 시도함',reference:'이후 요청에서 참조함',cancel:'이후 요청에서 취소를 요청함',correction:'이후 요청에서 정정함'};

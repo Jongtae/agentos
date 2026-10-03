@@ -4,9 +4,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from personal_agent.agent_runtime import (CLI_TOOL_GUIDANCE, CONTEXT_BUDGET_BYTES, CORE_INSTRUCTIONS, MESSAGE_CAP_CHARS,
-                                          POLICY, PROFILE_HEADING, profile_section, render_turn_prompt, turn_context,
-                                          work_sources)
+from personal_agent.agent_runtime import (ATTACHMENT_NONE_NOTE, ATTACHMENTS_HEADING, CLI_TOOL_GUIDANCE, CONTEXT_BUDGET_BYTES,
+                                          CORE_INSTRUCTIONS, MESSAGE_CAP_CHARS, POLICY, PROFILE_HEADING, attachment_facts,
+                                          attachments_section, context_sections, profile_section, render_turn_prompt,
+                                          turn_context, work_sources)
+from personal_agent.conversation_projection import TELEGRAM_PREVIEW_NOTE, context_message, previewed_link, qualify_transcript
 from personal_agent.bounded_execution import AgentOSMcpTools, BoundedExecutionAdapter, ExecutionResult
 from personal_agent.memory_service import MemoryService
 from personal_agent.providers import ModelAdapter
@@ -712,6 +714,98 @@ class PriorAssistantEgressDecision(_RouteFixture):
         self.assertTrue(self.requests, 'the scripted model was consulted')
         self.assertEqual(len(self._outbound('web_search')), 1)
         self.assertIn('personal-space', work_sources(self.store, self.store.jobs()[0]['id']))
+
+
+class ReferentContext(unittest.TestCase):
+    """#997 (REFERENT-01): a worker is told what the owner saw and what the request carries.
+
+    Both are facts AgentOS already holds (the delivered text and channel, the
+    Work's attachment data); neither reads the owner's wording.
+    """
+
+    def test_attachment_facts_count_what_the_work_holds(self):
+        self.assertEqual(attachment_facts(), 'none')
+        self.assertEqual(attachment_facts(images=1), '1 photo')
+        self.assertEqual(attachment_facts(images=3), '3 photos')
+        self.assertEqual(attachment_facts(documents=1), '1 document')
+        self.assertEqual(attachment_facts(images=2, documents=1), '2 photos and 1 document')
+
+    def test_the_attachments_section_sits_next_to_the_request_on_every_route(self):
+        history = [{'role': 'assistant', 'content': 'earlier'}, {'role': 'user', 'content': 'this one'}]
+        section = ATTACHMENTS_HEADING + '\n' + ATTACHMENT_NONE_NOTE
+        for route in ('api', 'cli'):
+            context = turn_context(history, route, attachments='none')
+            self.assertEqual(context['request'], 'this one', 'the owner\'s words stay verbatim')
+            self.assertEqual(context['attachments'], ATTACHMENT_NONE_NOTE)
+            self.assertEqual(attachments_section(context), section)
+            self.assertTrue(render_turn_prompt(context).endswith(section + '\n\n# Current request\nthis one'),
+                            'the CLI reads it as the last section before the request')
+            self.assertTrue(context_sections(context).endswith(section), 'the direct route reads it in its system sections')
+            with_photos = turn_context(history, route, attachments=attachment_facts(images=2))
+            self.assertEqual(attachments_section(with_photos), ATTACHMENTS_HEADING + '\n2 photos.')
+            self.assertEqual(with_photos['conversation'], [{'role': 'assistant', 'content': 'earlier'}])
+        self.assertNotIn('attachments', turn_context(history, 'api'), 'None changes nothing')
+        self.assertEqual(attachments_section(turn_context(history, 'cli', attachments='')), '')
+
+    def test_the_none_line_never_claims_content(self):
+        self.assertNotIn('photo', ATTACHMENT_NONE_NOTE)
+        self.assertIn('none', ATTACHMENT_NONE_NOTE)
+
+    def test_the_previewed_link_is_the_first_url_in_text_order(self):
+        self.assertIsNone(previewed_link('no link here'))
+        self.assertEqual(previewed_link('see https://a.example/x.'), 'https://a.example/x')
+        self.assertEqual(previewed_link('1. [Item](https://a.example/one) 2. [Other](https://b.example/two)'),
+                         'https://a.example/one')
+        self.assertEqual(previewed_link('bare https://c.example/first then [md](https://a.example/second)'),
+                         'https://c.example/first')
+
+    def rows(self, channel, delivery='sent', content='1. [Item](https://a.example/one)\n2. https://b.example/two'):
+        return qualify_transcript([
+            {'role': 'user', 'content': 'find it', 'channel': channel, 'work_outcome': 'succeeded'},
+            {'role': 'assistant', 'content': content, 'channel': channel, 'work_outcome': 'succeeded',
+             'work_delivery': delivery},
+            {'role': 'user', 'content': 'this one', 'channel': channel}])
+
+    def test_a_telegram_delivered_reply_is_annotated_with_its_preview_card(self):
+        messages = [context_message(row) for row in self.rows('telegram:3')]
+        note = TELEGRAM_PREVIEW_NOTE.format(url='https://a.example/one')
+        self.assertTrue(messages[1]['content'].startswith(note + '\n1. [Item]'), messages[1])
+        self.assertEqual(messages[0]['content'], 'find it', 'owner turns are never annotated')
+        self.assertEqual(messages[2]['content'], 'this one')
+        context = turn_context(messages, 'cli', attachments='none')
+        self.assertIn(note, context['conversation'][-1]['content'])
+
+    def test_web_undelivered_and_linkless_replies_carry_no_card_note(self):
+        self.assertNotIn('[The owner saw', context_message(self.rows('web')[1])['content'])
+        self.assertNotIn('[The owner saw', context_message(self.rows('telegram:3', delivery='cancelled')[1])['content'])
+        self.assertNotIn('[The owner saw', context_message(self.rows('telegram:3', content='plain text')[1])['content'])
+        unknown = context_message(self.rows('telegram:3', delivery='unknown')[1])['content']
+        self.assertIn('https://a.example/one', unknown, 'a reply whose send may have reached the owner is annotated')
+
+    def test_the_card_note_follows_the_outcome_qualifier(self):
+        rows = qualify_transcript([{'role': 'assistant', 'content': 'x https://a.example/one', 'channel': 'telegram:1',
+                                    'work_outcome': 'partial', 'work_delivery': 'sent'}])
+        content = context_message(rows[0])['content']
+        self.assertTrue(content.startswith('[AgentOS record:'))
+        self.assertIn('[The owner saw this message on Telegram', content.split('\n')[1])
+
+    def test_the_store_history_carries_the_delivery_state(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        store = QuickStore(Path(tmp.name) / 'state')
+        job = store.enqueue('find it', 'r1', channel='telegram:7', chat_id=5)
+        with store.db() as db:
+            db.execute("UPDATE jobs SET status='succeeded',response=?,delivery='sent' WHERE id=?",
+                       ('[Item](https://a.example/one)', job))
+            db.execute('INSERT INTO messages(role,content,channel,created,job_id) VALUES (?,?,?,?,?)',
+                       ('user', 'find it', 'telegram:7', 1.0, job))
+            db.execute('INSERT INTO messages(role,content,channel,created,job_id) VALUES (?,?,?,?,?)',
+                       ('assistant', '[Item](https://a.example/one)', 'telegram:7', 2.0, job))
+        rows = store.history()
+        self.assertEqual(rows[-1]['delivery'], 'sent')
+        self.assertNotIn('work_delivery', rows[-1])
+        self.assertIn(TELEGRAM_PREVIEW_NOTE.format(url='https://a.example/one'), context_message(rows[-1])['content'])
+
 
 if __name__ == '__main__':
     unittest.main()

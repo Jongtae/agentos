@@ -464,6 +464,40 @@ TRANSCRIPT_NOTICE = '확인된 결과가 아니므로 그대로 신뢰하지 마
 #: what the route already receives.
 CONTEXT_QUALIFIER = ('[AgentOS record: the Work behind this earlier assistant reply ended "{outcome}". '
                      'Any result, action or completion it states is unverified and is not an observed fact.]')
+#: #997 (REFERENT-01): what the owner was shown beyond an earlier reply's text.
+#: A reply delivered to Telegram renders a link preview card for the first URL
+#: in its text (Bot API default when ``link_preview_options`` is not sent, which
+#: ``deliver_one`` never does); that card is the most visible thing on the
+#: owner's screen and a later short reference often points at it.  Web chat
+#: shows no card, so only a Telegram-delivered reply carries this note.
+TELEGRAM_PREVIEW_NOTE = '[The owner saw this message on Telegram with a link preview card for: {url}]'
+#: The same URL characters ``telegram_presence._LINK`` accepts; a Markdown link's
+#: target and a bare URL are both found at their position in the text, so the
+#: first match is the first link Telegram renders.
+_URL = re.compile(r'https?://[^\s()"<>]+')
+#: Delivery states under which the owner did not receive the reply on Telegram.
+_UNDELIVERED = ('cancelled', 'none')
+
+
+def previewed_link(text):
+    """The URL Telegram previews for a message with this text, or None (#997)."""
+    match = _URL.search(str(text or ''))
+    return match.group(0).rstrip('.,;:!?') if match else None
+
+
+def shown_note(row):
+    """What the owner saw beyond this stored reply's text, or None.
+
+    Derived only from delivery facts AgentOS already holds: the row's channel,
+    its Work's delivery state and the delivered text itself.  Never from the
+    wording of a later owner message.
+    """
+    if row.get('role') != 'assistant' or not str(row.get('channel') or '').startswith('telegram'):
+        return None
+    if row.get('delivery') in _UNDELIVERED:
+        return None
+    url = previewed_link(row.get('content'))
+    return TELEGRAM_PREVIEW_NOTE.format(url=url) if url else None
 
 
 def turn_qualifier(outcome, cause=None):
@@ -487,6 +521,9 @@ def qualify_transcript(rows):
         row = dict(row)
         outcome, cause = row.pop('work_outcome', None), row.pop('work_error', None)
         row['qualifier'] = turn_qualifier(outcome, cause) if row.get('role') == 'assistant' else None
+        # #997: the Work's delivery state, consumed here so ``shown_note`` reads one field.
+        if 'work_delivery' in row:
+            row['delivery'] = row.pop('work_delivery')
         projected.append(row)
     return projected
 
@@ -497,8 +534,16 @@ def context_message(row):
     A qualified assistant reply keeps its full text - the owner may refer to
     it ("try that again") - but is preceded by its outcome, so an unobserved
     claim cannot re-enter the model's own context as an established fact.
+
+    A reply delivered to Telegram is also preceded by what the owner saw
+    beyond its text (#997: the link preview card), so a later short reference
+    can resolve to it.  Both notes lead, because ``turn_context`` caps a long
+    earlier turn from its end.
     """
     content = str(row.get('content') or '')
+    shown = shown_note(row)
+    if shown:
+        content = shown + '\n' + content
     qualifier = row.get('qualifier')
     if (row.get('role') == 'assistant' and isinstance(qualifier, dict)
             and qualifier.get('outcome') in UNVERIFIED_OUTCOMES):

@@ -165,7 +165,11 @@ QUESTION = (
     'The worker keeps its full offered toolset; the tool_descriptions fact says what each tool does. On a worker '
     'with its own web search, web_search means that search. When earlier attempts are listed, their replies were '
     'judged not to serve the owner\'s message: read what each one called, what failed or never completed and why, '
-    'then change the worker or the model. A combination of worker and model that already fell short is refused. '
+    'then change the worker or the model. A reply that asked the owner for something recent_conversation already '
+    'contains, or that claimed the message carried an attachment the message states it does not have, fell short of the '
+    'goal; the notes for the next attempt then name the likely referent from recent_conversation (what the earlier reply '
+    'showed or named) as a fact, so the same misreading is not repeated. '
+    'A combination of worker and model that already fell short is refused. '
     'reason is one short line saying why this worker fits. account_change is true when the owner\'s message may change '
     'something in an account the browser is signed in to (adding to or removing from a cart, a booking or reservation, '
     'a saved item, a submitted form), else false; such work never runs on the lowest-cost model.')

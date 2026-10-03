@@ -2558,13 +2558,42 @@ def skills_section(context):
  skills=context.get('skills') if isinstance(context,dict) else None
  return SKILLS_HEADING+'\n'+skills if skills else ''
 
+#: #997 (REFERENT-01): the one factual section about what the current request carries
+#: besides its words, given on every route next to the request (the CLI prompt's last
+#: section before it; the direct route's system sections) so a worker never invents an
+#: attachment (or overlooks one).  It is a fact from the Work's own attachment data,
+#: never a reading of the owner's wording; the request itself stays verbatim.
+ATTACHMENTS_HEADING='# Attachments on the current request'
+ATTACHMENT_NOTE='{facts}.'
+ATTACHMENT_NONE_NOTE=('none. Anything the request refers to beyond its own words is in the recent conversation or the '
+                      'owner context, not in a file.')
+
+def attachment_facts(images=0,documents=0):
+ """The short attachment statement for ``ATTACHMENT_NOTE``: 'none', '2 photos', '1 document', ... (#997)."""
+ parts=[]
+ if images:parts.append(f"{images} photo{'s' if images!=1 else ''}")
+ if documents:parts.append(f"{documents} document{'s' if documents!=1 else ''}")
+ return ' and '.join(parts) or 'none'
+
+def attachment_note(facts):
+ """The attachments section text for ``facts`` from ``attachment_facts``; '' for None."""
+ facts=str(facts or '').strip()
+ if not facts:return ''
+ return ATTACHMENT_NONE_NOTE if facts=='none' else ATTACHMENT_NOTE.format(facts=facts)
+
+def attachments_section(context):
+ """The rendered attachments section of a turn context, or '' (#997)."""
+ note=context.get('attachments') if isinstance(context,dict) else None
+ return ATTACHMENTS_HEADING+'\n'+note if note else ''
+
 def context_sections(context):
- """The profile, current-context, prepared, skills and brief sections the direct-API
+ """The profile, current-context, prepared, skills, brief and attachments sections the direct-API
  route appends to its system text: the same sections ``render_turn_prompt`` gives a CLI."""
  return '\n\n'.join(part for part in (profile_section(context),current_context_section(context),prepared_section(context),
-                                     skills_section(context),brief_section(context)) if part)
+                                     skills_section(context),brief_section(context),attachments_section(context)) if part)
 
-def turn_context(history,route,current_context=None,profile=None,prepared=None,native_search=False,brief=None,skills=None):
+def turn_context(history,route,current_context=None,profile=None,prepared=None,native_search=False,brief=None,skills=None,
+                 attachments=None):
  """The one Work-scoped turn context every route receives (#569).
 
  ``history`` is the prepared transcript whose last item is the current
@@ -2598,15 +2627,24 @@ def turn_context(history,route,current_context=None,profile=None,prepared=None,n
  ``skills`` (#961) is the Work's installed-skills catalogue
  (``SkillBinding.catalogue_text``), counted against the same budget; None or
  empty (skills off or none installed) sends nothing and changes nothing.
+
+ ``attachments`` (#997) is the attachment statement for the current request
+ (``attachment_facts``: 'none', '2 photos', ...).  Its one section
+ (``context['attachments']``, ``attachments_section``) sits next to the
+ request on every route, counted against the same budget, so a worker never
+ claims an attachment the request does not carry; ``request`` itself stays
+ the owner's words verbatim.  None or empty sends nothing and changes nothing.
  """
  items=[{'role':m['role'],'content':str(m.get('content') or '')} for m in (history or []) if m.get('role') in ('user','assistant')]
  if not items or items[-1]['role']!='user':raise ValueError('turn context needs a current user request')
  request=items[-1]['content']
+ note=attachment_note(attachments)
  guidance=CLI_TOOL_GUIDANCE if route=='cli' else API_TOOL_GUIDANCE
  if route=='cli' and native_search:guidance+=' '+CLI_NATIVE_SEARCH_GUIDANCE
  instructions=CORE_INSTRUCTIONS+' '+guidance
  profile=str(profile or '')
  budget=CONTEXT_BUDGET_BYTES-len(instructions.encode())-len(request.encode())
+ if note:budget-=len(ATTACHMENTS_HEADING.encode())+len(note.encode())+2
  if profile:budget-=len(PROFILE_HEADING.encode())+len(profile.encode())+2
  current=str(current_context or '')
  if current:budget-=len(CURRENT_CONTEXT_HEADING.encode())+len(current.encode())+2
@@ -2630,6 +2668,7 @@ def turn_context(history,route,current_context=None,profile=None,prepared=None,n
  if prepared:context['prepared']=prepared
  if skills:context['skills']=skills
  if brief:context['brief']=brief
+ if note:context['attachments']=note
  return context
 
 def render_turn_prompt(context,*,include_instructions=True):
@@ -2644,6 +2683,7 @@ def render_turn_prompt(context,*,include_instructions=True):
  if context.get('prepared'):parts.append(prepared_section(context))
  if context.get('skills'):parts.append(skills_section(context))
  if context.get('brief'):parts.append(brief_section(context))
+ if context.get('attachments'):parts.append(attachments_section(context))
  parts.append('# Current request\n'+context['request'])
  return '\n\n'.join(parts)
 

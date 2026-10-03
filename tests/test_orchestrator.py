@@ -919,6 +919,17 @@ class ContinuedExchange(Harness):
         self.assertIn('never treat a saved fact as the subject of a request only because it shares words with it',
                       CORE_INSTRUCTIONS)
 
+    def test_an_invented_attachment_or_a_question_the_conversation_answers_falls_short(self):
+        """#997 (REFERENT-01): generic wording only; the adjusted brief names the likely referent."""
+        from personal_agent.conversation_handoff import GOAL_REACHED_PROPOSITION
+        self.assertIn('carries an attachment', GOAL_REACHED_PROPOSITION)
+        self.assertIn('the message states it does not have', GOAL_REACHED_PROPOSITION)
+        self.assertIn('asked the owner for something recent_conversation already contains', QUESTION)
+        self.assertIn('name the likely referent from recent_conversation', QUESTION)
+        for text in (QUESTION, GOAL_REACHED_PROPOSITION):
+            for banned in ('product', 'shopping', 'this is the one'):
+                self.assertNotIn(banned, text.lower())
+
 class OwnerQuestion(Harness):
     """#740, #820: a worker's question the owner must answer is judged by the one outcome judgment."""
 

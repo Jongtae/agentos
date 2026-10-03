@@ -372,6 +372,8 @@ class QuickStore:
     #: stored message text and schema are unchanged.
     TRANSCRIPT_COLUMNS=('m.id,m.role,m.content,m.channel,m.created,m.workspace_id,m.job_id,'
                         'j.status AS work_outcome,j.error AS work_error,'
+                        # #997: whether the reply reached the owner's Telegram (what they saw).
+                        'j.delivery AS work_delivery,'
                         # #626: the owner turn's source time, if known.
                         "CASE WHEN m.role='user' THEN j.source_at END AS source_at,"
                         "CASE WHEN m.role='user' THEN j.source_edited_at END AS source_edited_at")

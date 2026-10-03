@@ -16,7 +16,7 @@ Decide what the quantity means before touching anything. Read `references/quanti
 ## 2. Read the current state first
 
 1. Open the shop's cart. If the result is `login_required`, call `browser_sign_in` for that shop and end your turn telling the owner. Do not hunt for a sign-in page.
-   - Never guess whose account the browser is signed in to (the owner's, a family member's, or anyone else's). Name an account holder only when the page itself shows it. Otherwise just say "the account signed in on this assistant".
+   - Never guess whose account the browser is signed in to (the owner's, a family member's, or anyone else's), and never claim an account is signed in unless the page shows it. When asking for a sign-in, just ask the owner to sign in to the shop. Name an account holder only when the page itself shows it.
 2. Note what is already in the cart: product, option and quantity. This is the baseline that you must not disturb.
 3. If the request is already satisfied (for example, "ensure there is milk" and there is), change nothing and say so.
 

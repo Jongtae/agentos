@@ -976,7 +976,7 @@ class ConversationJudgments:
                  'final_answer_excerpt': self.redact(answer)[:ANSWER_CHARS] or 'none',
                  'work_outcome': str(outcome or 'unknown'),
                  'evaluation': self.redact(evaluation)[:EVALUATION_CHARS] or 'none',
-                 'owner_followup': str(followup or '')[:FOLLOWUP_CHARS] or 'none',
+                 'owner_followup': self.redact(str(followup or ''))[:FOLLOWUP_CHARS] or 'none',
                  'owner_profile': self.redact(profile)[:PROFILE_CHARS] or 'none'}
         context = self._context(REVIEW_PURPOSE, facts, work_id=work_id, uncut=('owner_request', 'owner_followup'),
                                 cancelled=cancelled)

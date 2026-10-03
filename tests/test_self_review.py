@@ -158,11 +158,14 @@ class Trigger(SelfReview):
 
     def test_the_reaction_api_enqueues_with_a_bounded_observation(self):
         job = self.settled('그거 찾아줘', status='succeeded')
-        self.assertTrue(om.enqueue_self_review(self.store, job, om.REVIEW_REACTION, '  the owner  reacted\n' + 'x' * 900))
+        self.assertTrue(om.enqueue_self_review(self.store, job, om.REVIEW_REACTION, '  the owner  reacted\n 👍'))
         row = self.rows()[job]
         self.assertEqual(row['reason'], om.REVIEW_REACTION)
-        self.assertTrue(row['observation'].startswith('the owner reacted x'))
-        self.assertEqual(len(row['observation']), om.MAX_OBSERVATION_CHARS)
+        self.assertEqual(row['observation'], 'the owner reacted 👍')
+        # Review P1: never cut (a cut could split a secret past the redactor); too long is not kept.
+        other = self.settled('다른 것', status='succeeded')
+        self.assertTrue(om.enqueue_self_review(self.store, other, om.REVIEW_REACTION, 'x' * (om.MAX_OBSERVATION_CHARS + 1)))
+        self.assertIsNone(self.rows()[other]['observation'])
         with self.assertRaises(ValueError):
             om.enqueue_self_review(self.store, job, 'because')
         with self.assertRaises(ValueError):
@@ -451,3 +454,23 @@ class Unit(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class FollowupRedactedBeforeItIsBounded(unittest.TestCase):
+    """Review P1: a stored secret straddling the follow-up bound is redacted whole, never sent as a prefix."""
+
+    def test_a_secret_across_the_bound_does_not_leak_as_a_prefix(self):
+        from personal_agent.conversation_handoff import ConversationJudgments
+        from personal_agent.decision import FixtureDecisionEngine
+        secret = 'OWNERSTOREDSECRET-0123456789'
+        seen = []
+
+        def structured(context, question, schema, shape=None):
+            seen.append(dict(context.facts))
+            return None
+        judge = ConversationJudgments(FixtureDecisionEngine(structured=structured),
+                                      redactor=lambda text, private=True: text.replace(secret, '[redacted]'))
+        followup = 'a' * (om.FOLLOWUP_CHARS - 10) + secret
+        judge.self_review('요청', '답', 'failed', '', followup, '', om.REVIEW_CORRECTION)
+        self.assertTrue(seen)
+        self.assertNotIn(secret[:10], seen[0]['owner_followup'])

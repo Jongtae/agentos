@@ -440,7 +440,12 @@ class Upkeep:
         if not self.settings(db)['enabled']:
             return False
         if observation is not None:
-            observation = ' '.join(str(observation).split())[:MAX_OBSERVATION_CHARS] or None
+            # Review P1: never cut here - a cut can split a stored secret so the later
+            # redactor no longer recognises it.  The judgment redacts, then bounds.
+            # An observation too long to be a short typed note is not kept at all.
+            observation = ' '.join(str(observation).split()) or None
+            if observation is not None and len(observation) > MAX_OBSERVATION_CHARS:
+                observation = None
         return db.execute('INSERT OR IGNORE INTO owner_model_upkeep(job_id,kind,state,created,reason,observation) '
                           'VALUES (?,?,?,?,?,?)',
                           (job_id, kind, STATE_PENDING, self.clock() if now is None else now, reason, observation)).rowcount == 1

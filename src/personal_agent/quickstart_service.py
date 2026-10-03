@@ -7388,10 +7388,17 @@ class AgentService:
 
         Only once no location request is pending there, so the asking Work's
         own reply never takes away the button the owner is about to press.
+        No row at all, while a location request was ever sent to that chat (an
+        install from before #992 never recorded its keyboard), counts as one
+        that may still show: it is removed once too, after which the row is ``{}``.
         """
-        shown=self.store.config(self.LOCATION_KEYBOARD_KEY,{})
-        if not isinstance(shown,dict) or shown.get('chat_id')!=chat_id:return None
+        shown=self.store.config(self.LOCATION_KEYBOARD_KEY,None)
         cfg=self.store.config('telegram',{})
+        if shown is None:
+            with self.store.db() as db:
+                asked=db.execute('SELECT 1 FROM context_location_requests WHERE chat_id=? LIMIT 1',(chat_id,)).fetchone()
+            shown={'chat_id':chat_id} if asked else {}
+        if not isinstance(shown,dict) or shown.get('chat_id')!=chat_id:return None
         if self.context_observations.pending_location_work_ids(chat_id,cfg.get('generation')):return None
         return {'remove_keyboard':True}
 

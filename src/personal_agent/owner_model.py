@@ -16,12 +16,12 @@ Bounded by docs/secretary-agency-contract.en.md ("Amendment - #805 phase 1"):
   (model-stated), the profile snapshot and the clock, every fact redacted
   first, and proposes at most ``MAX_PROPOSALS`` durable owner facts.
 * **Validation (AgentOS).** Out-of-enum, oversized, non-``profile.`` and
-  duplicate proposals are dropped.  ``stated`` passes its own #597
-  judgment (``explicit_memory_fact``, asked per fact) and the value-coverage
-  and key-replacement rule to become
-  canonical Memory through the candidate -> accept path; otherwise, and
-  always for ``inferred``, it stays a pending MemoryCandidate (C5).  Both are
-  attributed to the source Work.
+  duplicate proposals are dropped.  What is kept is saved at once as current
+  Memory attributed to the source Work (#918 slice a, owner decision
+  2026-09-30: the owner's own AI acts for the owner and the owner is told
+  afterwards with an undo, the Work's ``memory_saved`` notice).  The per-fact
+  #597 judgment and the MemoryCandidate ask are no longer on this path; C5
+  is unchanged for third-party writers.
 * **Minimisation.** An owner pause switch and a rolling 24-hour cap on
   every model call (``CONFIG_KEY``), checked before each call.  The newest
   pending row runs first and one older than ``MAX_PENDING_SECONDS`` expires
@@ -75,6 +75,7 @@ STATE_DONE, STATE_UNAVAILABLE, STATE_EXPIRED, STATE_GONE = 'done', 'unavailable'
 EVENT_RECORDED, EVENT_UNAVAILABLE, EVENT_EXPIRED = 'recorded', 'unavailable', 'expired'
 #: Outcomes of one applied proposal.
 APPLIED_MEMORY, APPLIED_CANDIDATE = 'memory', 'candidate'
+#: Historical refusal reasons of the #597 per-fact gate (Evidence rows written before #918 slice a).
 REFUSED_INFERRED = 'inferred-stays-candidate'
 REFUSED_BUDGET = 'no-call-budget'
 REFUSED_DEADLINE = 'deadline'
@@ -108,7 +109,7 @@ QUESTION = ('From this one finished request, propose durable facts about the own
             'what the assistant answered (model-stated) and is never by itself a fact about the owner. Use kind '
             '"stated" only for what the owner said about themselves in owner_request, and write its content in the '
             'owner\'s own words. Use kind "inferred" for a reasonable inference from what the owner said (for '
-            'example a routine); it is only a proposal the owner confirms, never asserted as fact. category is '
+            'example a routine); it is remembered like a stated fact and the owner is told with an undo (#918: the owner asked for exactly this, for example "배우자가 있음"). category is'
             'one of: ' + ', '.join(CATEGORIES) + '. memory_key starts with "profile." and names the fact, not '
             'the request (profile.<category>.<name>); when the fact updates a key already in owner_profile, use '
             'that key and set supersedes_key to it, otherwise supersedes_key is an empty string. content and '
@@ -402,8 +403,7 @@ class Upkeep:
         are read again; a pause stops the run, a spent cap or the deadline
         (``cancelled()``) stops further calls, and ``stopped`` says which.
         """
-        from .agent_runtime import MEMORY_OWNER, memory_write_refusal
-        from .conversation_handoff import JUDGMENT_YES
+        from .agent_runtime import MEMORY_OWNER, SECRET_SHAPED_VALUE, memory_value_has_secret
         stop = cancelled or (lambda: False)
         request = str(job.get('message') or '')
         noted_keys, noted = self.work_noted(job['id'])
@@ -421,7 +421,7 @@ class Upkeep:
             return STATE_UNAVAILABLE, calls, EVENT_UNAVAILABLE, detail
         known, pending = self.known_values(MEMORY_OWNER, job['id'])
         kept, dropped = validate(data.get('proposals'), known, pending, noted_keys, request=request)
-        applied, verdicts, stopped = [], [], None
+        applied, stopped = [], None
         for index, item in enumerate(kept):
             key, content = item['memory_key'], item['content']
             _left, why = self.allowance(self.clock())
@@ -431,46 +431,24 @@ class Upkeep:
                 dropped.extend({'key_digest': key_digest(rest['memory_key']), 'reason': STOPPED_PAUSED}
                                for rest in kept[index:])
                 break
-            refusal = REFUSED_INFERRED
-            if item['kind'] == KIND_STATED:
-                if stop():
-                    refusal, stopped = REFUSED_DEADLINE, stopped or STOPPED_DEADLINE
-                elif why == STOPPED_CAP:
-                    refusal, stopped = REFUSED_BUDGET, stopped or STOPPED_CAP
-                else:
-                    # #597, asked per fact: one yes never covers another proposal.
-                    judged, fact_decision = judgments.explicit_memory_fact(request, key, content, work_id=job['id'],
-                                                                           cancelled=cancelled)
-                    if call_sent(fact_decision):
-                        calls += 1
-                        self.count(job['id'], calls)
-                    verdict = judged.outcome
-                    verdicts.append(verdict)
-                    approval = (self.store.issue_memory_approval(job['id'], request) if verdict == JUDGMENT_YES
-                                and request.strip() else None)
-                    refusal = memory_write_refusal(self.store, job['id'], approval, key, content)
+            if memory_value_has_secret(self.store, key, content):
+                # #918 review P1: a stored secret or a credential-shaped value never enters Memory; only a key digest is kept.
+                dropped.append({'key_digest': key_digest(key), 'reason': SECRET_SHAPED_VALUE})
+                continue
             row = {'memory_key': key, 'category': item['category'], 'kind': item['kind'],
                    'content_chars': len(content), 'supersedes_key': item['supersedes_key'] or None}
+            # #918 slice (a), owner decision 2026-09-30: the owner's own Judgment AI saves at once as
+            # current Memory, attributed to the source Work (#794); the owner is told afterwards with
+            # an undo (the Work's memory_saved notice) instead of a per-fact #597 judgment and an ask.
+            # A write is not a model call, so the cap and the deadline do not stop it; the pause does.
             try:
-                # Attributed to the source Work, so its provenance links back (#794).
-                candidate = self.store.save_memory_candidate(job['id'], key, content)
+                # Review: the owner notice is held in the same transaction as the row, so a save is never untold.
+                memory = self.store.save_memory(key, content, MEMORY_OWNER, work_id=job['id'], notice=True)
             except ValueError:
                 dropped.append({'key_digest': key_digest(key), 'reason': 'store-refused'})
                 continue
-            row['candidate_id'] = candidate['id']
-            if refusal is None:
-                # The same candidate -> exact approval -> accept path as save_memory (#597).
-                try:
-                    token = self.store.issue_candidate_memory_approval(MEMORY_OWNER, job['id'], candidate['id'],
-                                                                       candidate['content_digest'])
-                    memory = self.store.accept_memory_candidate(MEMORY_OWNER, job['id'], candidate['id'],
-                                                                candidate['content_digest'], token['approval_token'])
-                    row.update(outcome=APPLIED_MEMORY, memory_id=memory['id'])
-                except ValueError:
-                    refusal = 'accept-refused'
-            if refusal is not None:
-                row.update(outcome=APPLIED_CANDIDATE, refused_because=refusal)
+            row.update(outcome=APPLIED_MEMORY, memory_id=memory['id'], superseded=bool(memory.get('supersedes')),
+                       auto_saved=True)
             applied.append(row)
-        detail.update(proposed=len(data.get('proposals') or []), applied=applied, dropped=dropped,
-                      memory_requests=verdicts, stopped=stopped)
+        detail.update(proposed=len(data.get('proposals') or []), applied=applied, dropped=dropped, stopped=stopped)
         return STATE_DONE, calls, EVENT_RECORDED, detail

@@ -4,6 +4,16 @@
 
 The owner resumed SECRETARY-01 / #662 as the current top-level goal on 2026-09-28 (GOV-SECRETARY-04 / #770) after UX-RENEW-01 closed out. This contract remains the owner-facing experience contract; the UX-RENEW-01 presentation below is merged and is regression input.
 
+## Amendment — GOV-ASK-LESS-01 / #918 slice (a) (2026-10-02): remembered, told, undoable
+
+Owner decision 2026-09-30 (#918): "이런건 물어보지 않고 그냥 처리 하는게 좋을 것 같은데, 모든 물어보는 행위는 좋은 사용자 경험이 아니야." For the owner's own AI the #836 ask below is replaced by act-then-tell with undo (the research pattern "기억함: X · 오늘 대화에서 · 되돌리기", `docs/research/owner-model-and-decision-journal-2026-09-28.ko.md`). The rules are canonical in the [Secretary Agency Contract](secretary-agency-contract.en.md) amendment of the same number.
+- **No ask.** The owner's worker and the owner-model upkeep save a fact at once - stated or inferred alike (the owner's own example, "배우자(아내)가 있음", was an inference). Nothing asks 👍/👎 for it, and no judgment call decides it. A credential-shaped value is never saved.
+- **One quiet notice per owner message, never untold.** After the reply, whether it arrived `sent` or its delivery is `unknown`: "기억했어요: <fact>" with [되돌리기]; several facts are one numbered notice with a 되돌리기 per fact and 모두 되돌리기; a replaced value is named ("(전에는 …)"). Values only, never keys; secrets removed; it never re-asks anything. A fact upkeep saves later joins the same notice (and restarts its undo window), or gets its own when the edit fails. A notice lost on the way is told again once; a save never ends without the owner being told.
+- **되돌리기.** Retracts exactly that fact and restores the value it replaced ("되돌렸어요: … (다시 …)"). Exact to the chat, generation, message, Memory id and content digest; one use per fact; valid for seven days, then the button no longer acts. A fact that changed since is left as it is and the notice says so.
+- **The web.** 내 기록 lists the fact as saved with its source; nothing of it waits in the approve/reject list. The web's undo is the existing delete.
+- **Still asked.** Only a third party's write (a package tool or a delegated specialist) keeps the #836 ask below (C5). Per-action payment approval and irreversible effects outside AgentOS stay asks (#918 item 4).
+- **Kept.** Nothing is described as remembered before it is; the worker reads a direct save as remembered and is told not to ask.
+
 ## Amendment — PRESENCE-MEM-01 / #836 (2026-09-28): one memory ask, spoken as the secretary
 
 Owner feedback 2026-09-28 (live Telegram, one message about a discounted-sushi dinner): "두 번 물어봤고, 첫 번째에 답을 하면 그 뒤에 것도 처리가 되어야 함. 그리고 AgentOS가 라면서 시스템 툴을 다루듯이 했는데, 우리의 컨셉은 presence잖아." That one message produced two separate "기억해 둘까요?" asks, raw memory keys, and a reply that narrated AgentOS approval machinery. It amends the #818 rules in the [Secretary Agency Contract](secretary-agency-contract.en.md).
@@ -196,7 +206,7 @@ Presence may change projection, never the underlying truth boundary:
 - unknown consequential effects are not blindly retried;
 - approval is not removed to make conversation smoother;
 - silent provider/paid-route fallback is not allowed;
-- MemoryCandidate is not described as remembered until canonical Memory actually changes;
+- MemoryCandidate is not described as remembered until canonical Memory actually changes (#918: the owner's own AI's save changes it at once and is told as remembered, with undo);
 - owner-visible claims must be supported by observed Evidence;
 - secrets/raw payloads/hidden reasoning do not become “transparency” requirements;
 - projection never moves approval requests, data-destination/provider/route changes, consequential-effect outcomes, blockers or failed/unknown state into on-demand-only detail;

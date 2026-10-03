@@ -80,8 +80,11 @@ class ProfileJudgmentAndGuidance(unittest.TestCase):
         save_memory, list_memory, search_memory = described['save_memory'], described['list_memory'], described['search_memory']
         self.assertIn('When the owner states a durable fact about themselves', save_memory)
         self.assertIn('where they live or work, a preference, an allergy, a routine', save_memory)
-        self.assertIn('unless the owner asked you to remember it, the owner is asked with one tap whether to remember it', save_memory)
-        self.assertIn('Never save an inference as a fact, and never save a credential', save_memory)
+        # #918 slice (a): remembered at once; the owner is told afterwards, with undo.
+        self.assertIn('it is remembered at once and the owner is told afterwards with an undo', save_memory)
+        # #918: an inferred durable fact is saved and told with undo too; a credential never.
+        self.assertIn('as what you inferred', save_memory)
+        self.assertIn('Never save a credential', save_memory)
         for text in (save_memory, list_memory, API_TOOL_GUIDANCE):
             self.assertNotIn('explicit owner request', text)
             self.assertNotIn('explicitly owner-authorized', text)
@@ -117,42 +120,47 @@ class ProfileFactsInConversation(_OwnerSurface):
         snapshot = MemoryService(self.store, private_read_sink=MemoryService.NO_EGRESS_GUARD).profile_snapshot('local-owner')
         self.assertIn('profile.allergy.peanut: 땅콩 알러지 (saved ', snapshot['text'])
 
-    def test_a_hedged_statement_becomes_a_candidate_not_a_profile_row(self):
-        """Judged not explicit: the same proposed write stays a MemoryCandidate."""
+    def test_a_hedged_statement_is_saved_too_and_the_owner_can_undo(self):
+        """#918 slice (a): no explicit-request judgment decides the write; the owner's worker saves, told with undo."""
         self.service.use_decision_engine(judging(False))
+        self.model_claim = True
         self.propose('profile.allergy.peanut', '땅콩 알러지')
         job = self.ask('아마 땅콩 알러지 있을걸')
         self.model_plan = []
-        self.assertEqual(self.store.memories(), [])
-        [pending] = self.store.memory_candidates()
-        self.assertEqual((pending['memory_key'], pending['content'], pending['state']),
-                         ('profile.allergy.peanut', '땅콩 알러지', 'pending'))
-        # #818: a pending candidate is a recorded proposal the owner confirms, not a failed turn.
+        [row] = self.store.memories()
+        self.assertEqual((row['memory_key'], row['content'], row['state']), ('profile.allergy.peanut', '땅콩 알러지', 'current'))
+        self.assertEqual(self.store.memory_candidates(include_decided=True), [])
         self.assertEqual(self.store.job(job)['status'], 'succeeded')
-        self.assertEqual(self.web('/api/personal-space/profile')['memories'], [])
-        self.assertEqual(self.web('/api/personal-space')['memory_candidate_count'], 1)
+        self.assertEqual([item['id'] for item in self.web('/api/personal-space/profile')['memories']], [row['id']])
+        self.assertEqual(self.web('/api/personal-space')['memory_candidate_count'], 0)
+        [event] = [event for event in self.store.task_events(job) if event['tool'] == 'save_memory' and event['status'] == 'succeeded']
+        self.assertTrue(event['trace']['evidence']['auto_saved'], 'the record says it was saved at once')
 
-    def test_an_unavailable_judgment_also_leaves_a_candidate(self):
+    def test_an_unavailable_judgment_does_not_hold_the_save(self):
         self.service.use_decision_engine(judging(None))
+        self.model_claim = True
         self.propose('profile.place.home', '서울 마포구')
         self.ask('집은 서울 마포구야')
         self.model_plan = []
-        self.assertEqual(self.store.memories(), [])
-        self.assertEqual([row['memory_key'] for row in self.store.memory_candidates()], ['profile.place.home'])
+        self.assertEqual([row['memory_key'] for row in self.store.memories()], ['profile.place.home'])
+        self.assertEqual(self.store.memory_candidates(), [])
 
-    def test_a_profile_key_does_not_widen_what_the_model_may_write(self):
-        """Judged explicit, but the value is not the owner's: still a candidate.
+    def test_a_value_the_owner_did_not_say_is_saved_and_undoable_not_held(self):
+        """#918 slice (a): the value-coverage gate is off the owner-worker path; the undo is the correction.
 
-        The ``profile.`` namespace is a key convention, not a second path;
-        the existing value-coverage refusal applies to it unchanged.
+        The ``profile.`` namespace is a key convention, not a second path.
         """
         self.service.use_decision_engine(judging(True))
+        self.model_claim = True
         self.propose('profile.allergy.shrimp', '새우 알러지')
         self.ask('나 땅콩 알러지 있어')
         self.model_plan = []
+        [row] = self.store.memories()
+        self.assertEqual(row['memory_key'], 'profile.allergy.shrimp')
+        self.assertEqual(self.store.memory_candidates(), [])
+        receipt = self.store.retract_memory('local-owner', row['id'], row['content_digest'])
+        self.assertTrue(receipt['retracted'])
         self.assertEqual(self.store.memories(), [])
-        [pending] = self.store.memory_candidates()
-        self.assertEqual(pending['memory_key'], 'profile.allergy.shrimp')
 
 
 class ProfileFactsInSettings(_OwnerSurface):

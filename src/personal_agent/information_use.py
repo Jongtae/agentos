@@ -34,9 +34,11 @@ MAX_ITEMS = 20
 LABEL_CHARS = 120
 QUERY_CHARS = 200
 
+#: #918 slice (a): the owner's undo of a direct memory save, recorded on the Work as its own event.
+MEMORY_UNDO_ACTION = 'memory_undo'
 #: Owner-private reads, by host action, and the category their items belong to.
 READ_CATEGORIES = {
-    'list_memory': 'memory', 'search_memory': 'memory', 'save_memory': 'memory',
+    'list_memory': 'memory', 'search_memory': 'memory', 'save_memory': 'memory', MEMORY_UNDO_ACTION: 'memory',
     'calendar_query': 'calendar', 'calendar_draft_create': 'calendar', 'calendar_draft_update': 'calendar',
     'calendar_draft_cancel': 'calendar',
     'find_files': 'files', 'read_file': 'files', 'list_roots': 'files',
@@ -177,7 +179,12 @@ def _event_items(action, evidence):
         return [f"기억 검색: {query} → {', '.join(refs or keys) if refs or keys else '일치 없음'}"]
     if action == 'save_memory':
         key = _text(evidence.get('memory_key'), 80)
-        state = '저장' if evidence.get('saved') else '제안'
+        # #918 slice (a): the owner's worker saved it at once (undo offered); a third party's stays a proposal.
+        state = ('바로 저장' if evidence.get('auto_saved') else '저장') if evidence.get('saved') else '제안'
+        return [f'{key} ({state})' if key else state]
+    if action == MEMORY_UNDO_ACTION:
+        key = _text(evidence.get('memory_key'), 80)
+        state = '되돌림 · 이전 값 복원' if evidence.get('restored_id') else '되돌림'
         return [f'{key} ({state})' if key else state]
     if action == 'calendar_query':
         events = [f"{_text(row.get('title'), 60)} ({_text(row.get('start'), 25)})".strip()
@@ -291,7 +298,8 @@ def work_information_use(store, job_id, redact=None):
         if action in LOOKUP_ACTIONS and status == 'running':
             # The arguments a lookup started with, for a call that then failed.
             started[(tool, trace.get('call_id'))] = trace
-        if status == 'succeeded' and action in READ_CATEGORIES:
+        # #918: an undo is recorded on the Work after it settled (status ``recorded``, never a step).
+        if (status == 'succeeded' or (action == MEMORY_UNDO_ACTION and status == 'recorded')) and action in READ_CATEGORIES:
             add(READ_CATEGORIES[action], _event_items(action, evidence))
         if action in LOOKUP_ACTIONS and status in ('succeeded', 'failed'):
             # A succeeded lookup's record is what its Evidence says left (``sent``, the CLI's reported

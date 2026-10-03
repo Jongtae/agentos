@@ -1468,17 +1468,18 @@ class OwnerStateOnTheCliRoute(Harness):
             rows = db.execute('SELECT goal_text,state FROM preparations').fetchall()
         self.assertEqual([row['goal_text'] for row in rows], ['출발 시간입니다.'], seen.get('result'))
 
-    def test_a_cli_memory_write_without_an_explicit_request_stays_a_candidate(self):
-        """#597's gate holds on the relayed path: no owner request, so a MemoryCandidate, never canonical Memory."""
+    def test_a_cli_memory_write_is_saved_at_once_on_the_relayed_path(self):
+        """#918 slice (a): the owner's CLI worker saves directly, attributed to the Work; no candidate, no ask."""
         self.engine.before = lambda tools: tools.call('save_memory', {'memory_key': 'profile.place.home',
                                                                       'content': '성남 백현동'})
         self.script([plan('codex', 'Answer.')], goals=[True])
-        self.run_work('백현동에서 출발해')
+        job, _row = self.run_work('백현동에서 출발해')
         with self.store.db() as db:
-            memories = db.execute('SELECT count(*) FROM memories').fetchone()[0]
-            candidates = db.execute("SELECT content FROM memory_candidates WHERE state='pending'").fetchall()
-        self.assertEqual(memories, 0)
-        self.assertEqual([row['content'] for row in candidates], ['성남 백현동'])
+            memories = db.execute("SELECT content,state,work_key FROM memories").fetchall()
+            candidates = db.execute('SELECT count(*) FROM memory_candidates').fetchone()[0]
+        self.assertEqual([(row['content'], row['state']) for row in memories], [('성남 백현동', 'current')])
+        self.assertEqual(memories[0]['work_key'], self.store._work_binding(job))
+        self.assertEqual(candidates, 0)
 
     def test_the_request_sentence_is_refused_at_the_save_boundary(self):
         """#846: a worker that saves the owner's wish sentence as a value makes no candidate at all."""

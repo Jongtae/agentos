@@ -440,12 +440,40 @@ class QuickStore:
                    (memory_id,memory_key,content,time.time(),previous['id'] if previous else None,'current',owner_key,work_key,digest,candidate_id))
         return self._memory_row(db.execute('SELECT * FROM memories WHERE id=?',(memory_id,)).fetchone())
 
-    def save_memory(self, memory_key, content, owner_id='local-owner', work_id=None):
+    #: #918 review: the Telegram notice kind a direct save holds in its own transaction.
+    MEMORY_SAVED_NOTICE_KIND='memory_saved'
+    #: The notice's state while it waits for the Work's reply to be delivered.
+    NOTICE_HELD='held'
+
+    def save_memory(self, memory_key, content, owner_id='local-owner', work_id=None, notice=False):
+        """Write one current Memory row; with ``notice``, hold its owner notice durably in the same transaction (#918).
+
+        A direct save by the owner's own AI must never end without the owner
+        being told.  When the Work is a Telegram Work, a ``memory_saved``
+        notification row is inserted ``held`` here (``INSERT OR IGNORE``: one
+        per Work); the service releases it after the reply, and a sweep
+        releases what a crash or an unknown delivery left behind.
+        """
         memory_key,content=self._memory_value(memory_key,content);owner_key=self._memory_binding(owner_id)
         work_key=self._work_binding(work_id) if work_id is not None else None
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
-            return self._save_memory(db,memory_key,content,owner_key,work_key)
+            row=self._save_memory(db,memory_key,content,owner_key,work_key)
+            if notice and isinstance(work_id,str):
+                job=db.execute('SELECT channel,chat_id FROM jobs WHERE id=?',(work_id,)).fetchone()
+                channel=str(job['channel'] or '') if job else ''
+                if job and channel.startswith('telegram:') and isinstance(job['chat_id'],int):
+                    db.execute('INSERT OR IGNORE INTO telegram_notifications VALUES (?,?,?,?,?,?,?,?,?)',
+                               (str(uuid.uuid4()),work_id,job['chat_id'],channel[len('telegram:'):],self.MEMORY_SAVED_NOTICE_KIND,
+                                json.dumps({'items':[[row['id'],row['content_digest']]],'more':0}),self.NOTICE_HELD,None,time.time()))
+            return row
+
+    def held_notifications(self, kind):
+        """Held notices of ``kind`` with their Work's delivery state, oldest first (#918 review: release sweep)."""
+        with self.db() as db:
+            rows=db.execute('SELECT n.*, j.delivery AS job_delivery FROM telegram_notifications n LEFT JOIN jobs j ON j.id=n.job_id '
+                            'WHERE n.kind=? AND n.state=? ORDER BY n.created',(kind,self.NOTICE_HELD)).fetchall()
+            return [dict(row) for row in rows]
 
     def save_memory_candidate(self, job_id, memory_key, content, owner_id='local-owner', work_id=None):
         memory_key,content=self._memory_value(memory_key,content)
@@ -860,6 +888,60 @@ class QuickStore:
                                      preserve_correction_token=approval['token_hash'])
             db.execute("UPDATE memory_approvals SET state='consumed',result_id=? WHERE token_hash=? AND state='issued'",(result['id'],approval['token_hash']))
             return result
+
+    def retract_memory(self, owner_id, memory_id, content_digest, now=None, record=None):
+        """Undo one direct save (#918 slice a): retract exactly that current row, restore what it superseded.
+
+        Bound to the owner, the row id and its content digest, so a stale undo
+        never retracts a value the owner was not shown.  The row becomes
+        ``retracted`` (kept as history, never current again); the row it
+        superseded, if still ``superseded``, becomes current again.  Issued
+        approvals against the key are revoked, as every canonical write does.
+        Fails closed with ``ValueError`` when the row is not current with that
+        content (already undone, superseded, corrected or deleted since).
+
+        ``record`` (#918 review P2): ``{'job_id', 'tool', 'status', 'detail'}``
+        of the Evidence event the caller promises for this undo; it is
+        inserted into ``tool_events`` in the same transaction, so a retraction
+        is never durable without its record (``detail`` may name the restored
+        row through ``{restored_id}``).
+        """
+        if not isinstance(memory_id,str) or not memory_id:raise ValueError('되돌릴 기억을 확인하세요.')
+        if not isinstance(content_digest,str) or len(content_digest)!=64:raise ValueError('되돌릴 내용을 확인하세요.')
+        owner_key=self._memory_binding(owner_id)
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute("SELECT * FROM memories WHERE id=? AND owner_key=? AND state='current'",(memory_id,owner_key)).fetchone()
+            if not row or not hmac.compare_digest(str(row['content_digest']),content_digest):raise ValueError('되돌릴 기억을 다시 확인하세요.')
+            db.execute("UPDATE memories SET state='retracted' WHERE id=? AND owner_key=?",(memory_id,owner_key))
+            restored=None
+            if row['supersedes']:
+                previous=db.execute("SELECT * FROM memories WHERE id=? AND owner_key=? AND state='superseded'",(row['supersedes'],owner_key)).fetchone()
+                if previous:
+                    db.execute("UPDATE memories SET state='current' WHERE id=? AND owner_key=?",(previous['id'],owner_key))
+                    restored=self._memory_row(db.execute('SELECT * FROM memories WHERE id=?',(previous['id'],)).fetchone())
+            db.execute("""UPDATE memory_approvals SET state='revoked',memory_key=''
+                          WHERE owner_key=? AND memory_key=? AND state='issued'""",(owner_key,row['memory_key']))
+            if row['candidate_id']:
+                db.execute("UPDATE memory_candidates SET state='retracted',decided=? WHERE id=? AND owner_key=? AND state='accepted'",
+                           (time.time() if now is None else float(now),row['candidate_id'],owner_key))
+            if record is not None:
+                detail=dict(record['detail']) if isinstance(record.get('detail'),dict) else {}
+                evidence=dict(detail.get('evidence') or {});evidence['restored_id']=restored['id'] if restored else None
+                detail['evidence']=evidence
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           (record['job_id'],record['tool'],record['status'],json.dumps(detail,ensure_ascii=False),
+                            time.time() if now is None else float(now)))
+        return {'retracted':True,'id':memory_id,'memory_key':row['memory_key'],'content':row['content'],
+                'content_digest':row['content_digest'],'restored':restored}
+
+    def work_memories(self, owner_id, work_id, limit=101):
+        """The current Memory rows one Work wrote, oldest first (#918: what its notice shows)."""
+        if isinstance(limit,bool) or not isinstance(limit,int) or not 1<=limit<=101:raise ValueError('기억 조회 범위를 확인하세요.')
+        with self.db() as db:
+            rows=db.execute("SELECT * FROM memories WHERE owner_key=? AND work_key=? AND state='current' ORDER BY created,id LIMIT ?",
+                            (self._memory_binding(owner_id),self._work_binding(work_id),limit)).fetchall()
+            return [self._memory_row(row) for row in rows]
 
     def _delete_memory_chain(self, owner_key, memory_id):
         with self.db() as db:
@@ -1332,6 +1414,12 @@ class QuickStore:
         with self.db() as db:
             return db.execute('DELETE FROM telegram_task_cards WHERE job_id=? AND message_id=?',
                               (job_id,message_id)).rowcount == 1
+
+    def notification_of(self, job_id, kind):
+        """The one notification of ``kind`` on ``job_id`` (``UNIQUE(job_id, kind)``), or None."""
+        with self.db() as db:
+            row=db.execute('SELECT * FROM telegram_notifications WHERE job_id=? AND kind=?',(job_id,kind)).fetchone()
+            return dict(row) if row else None
 
     def notification(self, notification_id):
         with self.db() as db:

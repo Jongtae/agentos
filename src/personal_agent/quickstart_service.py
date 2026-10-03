@@ -82,7 +82,7 @@ from . import preparations as prep
 from . import owner_model as om
 from . import information_use
 from . import remote_login
-from .browser_session import BrowserProfile, ascii_host, binding_digest, registrable_domain
+from .browser_session import BrowserProfile, ascii_host, binding_digest, keepalive_due_at, registrable_domain
 from .browser_jar import unexpired
 from .cli_browser_relay import BrowserRelay
 from .telegram_presence import (ATTENTION_ACTION, ATTENTION_ASK, ATTENTION_COOLDOWN, ATTENTION_MEMORY_ASK_FRESH, ATTENTION_PREPARED, ATTENTION_REMINDER,
@@ -401,6 +401,12 @@ class AgentService:
     #: #953: a Telegram login prompt is followed by the phone link at once.  The test suite turns this
     #: off (tests/conftest.py) so no test ever starts a real tunnel; a test that wants it injects a fake.
     AUTO_PHONE_LOGIN=True
+    #: #990: keep sites the owner signed in to through AgentOS signed in (tests turn it off by default).
+    SESSION_KEEPALIVE=True
+    #: #990: config row site -> the time its session was last refreshed; and how often the work loop looks.
+    KEEPALIVE_KEY='browser_keepalive'
+    KEEPALIVE_CHECK_SECONDS=60
+    _keepalive_next=0.0
 
     def __init__(self, store, adapter=None, telegram_transport=None, subscription_engines=None, execution_adapter=None,
                  isolated_engine_adapter=None, isolated_mcp_registry=None,
@@ -5901,8 +5907,71 @@ class AgentService:
         with self.lock:
             signins=self.store.config(BROWSER_OWNER_SIGNINS_KEY,{})
             signins=signins if isinstance(signins,dict) else {}
-            signins[site]={'at':time.time(),'marks':sorted(added)}
+            # #990: the host the owner signed in at is where a keep-alive loads a page.
+            signins[site]={'at':time.time(),'marks':sorted(added),'host':ascii_host(host) or site}
             self.store.put(BROWSER_OWNER_SIGNINS_KEY,signins)
+
+    def start_session_keepalive(self, now=None):
+        """Start one ``keep_sessions_alive`` check off the work loop when one is due to be looked at (#990).
+
+        Cheap on the work loop: a clock comparison, and nothing at all while a
+        Work is queued or running.  Returns True when a check was started.
+        """
+        if not self.SESSION_KEEPALIVE:return False
+        now=time.time() if now is None else now
+        if now<self._keepalive_next:return False
+        self._keepalive_next=now+self.KEEPALIVE_CHECK_SECONDS
+        with self.store.db() as db:
+            if db.execute("SELECT 1 FROM jobs WHERE status IN ('queued','running') LIMIT 1").fetchone():return False
+        with self.lock:
+            running=self.__dict__.get('_keepalive_thread')
+            if running is not None and running.is_alive():return False
+            def check():
+                try:self.keep_sessions_alive()
+                except Exception as exc:LOG.warning('session keep-alive skipped (%s)',type(exc).__name__)
+            thread=threading.Thread(target=check,daemon=True,name='agentos-session-keepalive')
+            self._keepalive_thread=thread
+            thread.start()
+        return True
+
+    def keep_sessions_alive(self, now=None):
+        """Refresh at most one signed-in site's session when it is due (#990); the site or None.
+
+        Only sites the owner signed in to through an AgentOS login window
+        (``BROWSER_OWNER_SIGNINS_KEY``) and still stored; never a site this
+        instance received from another (that session is refreshed where it is
+        held, and the refreshed cookies reach this instance by the existing
+        push).  Due by ``keepalive_due_at`` over the site's stored cookie
+        expiries.  Runs on the work loop only while no Work is queued or
+        running.  No
+        model call; the log names the site and the outcome only.  Started off the
+        work loop by ``start_session_keepalive``; a Work that needs the browser
+        meanwhile waits for it (``BrowserProfile._acquire``).
+        """
+        now=time.time() if now is None else now
+        signins=self.store.config(BROWSER_OWNER_SIGNINS_KEY,{})
+        if not isinstance(signins,dict) or not signins or not self.browser_profile.available():return None
+        with self.store.db() as db:
+            if db.execute("SELECT 1 FROM jobs WHERE status IN ('queued','running') LIMIT 1").fetchone():return None
+        from . import family_share
+        held=set(family_share.received(self.store))
+        refreshed=self.store.config(self.KEEPALIVE_KEY,{})
+        refreshed=refreshed if isinstance(refreshed,dict) else {}
+        for site,record in sorted(signins.items()):
+            if site in held or not isinstance(record,dict):continue
+            host=record.get('host') or site
+            read=self.browser_profile.site_cookie_marks(host)
+            if not read or not read[0]:continue   # unreadable, or no stored session left
+            marks,jar_now=read
+            last=max(float(record.get('at') or 0),float(refreshed.get(site) or 0))
+            if keepalive_due_at([mark[1] for mark in marks],last,jar_now)>jar_now:continue
+            result=self.browser_profile.refresh_session(f'https://{host}/')
+            if result.get('state')=='busy':return None   # tried again at the next check
+            refreshed[site]=now
+            self.store.put(self.KEEPALIVE_KEY,refreshed)
+            LOG.info('session keep-alive site=%s state=%s',site,result.get('state'))
+            return site
+        return None
 
     def _record_owner_signins(self, signed):
         """Record each ``(host, before)`` of ``_signed_in_sites`` as a site the owner signed in to."""
@@ -8931,6 +9000,9 @@ class AgentService:
                 self.expire_memory_prompts()
                 # #709: close and settle in-flow logins (decisions, owner closes, timeouts).
                 self.process_browser_logins()
+                # #990: keep signed-in sites signed in while idle; off this thread (the jar read may wait
+                # on the Keychain), one at a time, at most one check a minute.
+                self.start_session_keepalive()
                 now=time.monotonic()
                 if now>=next_document_resume_prune:
                     self.prune_expired_document_resumes()

@@ -1293,7 +1293,32 @@ LOGIN_WINDOWS_KEPT = 16
 #: #709: the longest a ``browser_open``/``browser_read`` waits for a
 #: client-rendered page's content to settle (``browser_worker.op_settle``).
 RENDER_SETTLE_SECONDS = 6.0
-LOGIN_SAVE_SECONDS = 15
+#: #990: a site the owner signed in to through AgentOS is kept signed in by loading one of its
+#: pages in the hidden worker (saving cookies alone extends nothing): at least this often ...
+KEEPALIVE_SECONDS = 3 * 3600
+#: ... and this long before the earliest stored cookie of the site expires,
+KEEPALIVE_LEAD_SECONDS = 600
+#: but never more often than this.  Generic: no site has its own value (Constitution C16).
+KEEPALIVE_MIN_GAP_SECONDS = 3600
+#: #990: the profile holder name of a keep-alive, and how long another holder waits for one to finish.
+KEEPALIVE_HOLDER = 'keepalive'
+KEEPALIVE_YIELD_SECONDS = ACTION_TIMEOUT_SECONDS + 15
+
+
+def keepalive_due_at(expiries, last, now):
+    """When a signed-in site's session should next be refreshed (#990), from its cookies' expiries.
+
+    ``last`` is the later of the sign-in and the last refresh.  A cookie
+    already within ``KEEPALIVE_LEAD_SECONDS`` of expiring (or session-only,
+    ``None``) sets no earlier time.  Pure.
+    """
+    last = float(last or 0)
+    due = last + KEEPALIVE_SECONDS
+    ahead = [float(expires) - KEEPALIVE_LEAD_SECONDS for expires in expiries or ()
+             if isinstance(expires, (int, float)) and float(expires) - now > KEEPALIVE_LEAD_SECONDS]
+    if ahead:
+        due = min(due, min(ahead))
+    return max(due, last + KEEPALIVE_MIN_GAP_SECONDS)
 
 
 def webkit_unavailable_reason(platform=None, find_spec=None):
@@ -1701,6 +1726,8 @@ class BrowserProfile:
         # #680 review (Codex P1): after a delete/clear the running worker could
         # not perform, nothing that worker instance holds is ever saved.
         self._unsavable = None
+        #: #990: the export last written to the jar by this holder; an identical export is not re-written.
+        self._save_mark = None
         # Settings reads the jar through this cache so a locked Keychain never
         # blocks a poll (#680 review P2-7).
         self._view = None
@@ -1825,12 +1852,15 @@ class BrowserProfile:
     # -- holding the profile ---------------------------------------------------
     def _acquire(self, holder):
         if not self._lock.acquire(blocking=False):
-            raise ToolError(BUSY_TEXT, 'browser_busy')
+            # #990: a session keep-alive is one short page load; anyone else waits for it rather than failing.
+            if self._holder != KEEPALIVE_HOLDER or not self._lock.acquire(timeout=KEEPALIVE_YIELD_SECONDS):
+                raise ToolError(BUSY_TEXT, 'browser_busy')
         self._holder = holder
         self._suppressed = set()
         self._imported = set()
         self._import_error = None
         self._unsavable = None
+        self._save_mark = None
 
     def _release(self):
         self._holder = None
@@ -1859,6 +1889,11 @@ class BrowserProfile:
             except Exception:
                 return False
             sites = {site: rows for site, rows in sites.items() if site not in self._suppressed}
+            # #990: cookies that did not change since this holder's last write are not written again
+            # (and nothing is told to on_saved): a close right after the landing save writes nothing.
+            mark = _export_mark(sites, hosts, self._imported)
+            if mark == self._save_mark:
+                return True
             try:
                 self.jar.save_export(sites, hosts, imported=self._imported)
             except JarError as exc:
@@ -1866,6 +1901,7 @@ class BrowserProfile:
                 return False
             except Exception:
                 return False
+            self._save_mark = mark
             self.save_error = None
             # Exported sites were replaced; imported sites missing from the export were dropped.
             touched = set(sites) | set(self._imported)
@@ -1896,6 +1932,7 @@ class BrowserProfile:
         site = str(site or '').strip().lower()
         rows = [row for row in rows or () if isinstance(row, dict) and row.get('name')]
         with self._jar_lock:
+            self._save_mark = None
             self.jar.save_export({site: rows}, imported={site})
             live = self._live
             worker = None
@@ -1954,6 +1991,7 @@ class BrowserProfile:
         if not site:
             raise ValueError('삭제할 사이트를 지정하세요.')
         with self._jar_lock:
+            self._save_mark = None
             live = self._live
             worker = None
             if live is not None and hasattr(live, 'cookies_delete') and _alive(live):
@@ -1982,6 +2020,7 @@ class BrowserProfile:
         the reason; nothing is acknowledged that did not happen.
         """
         with self._jar_lock:
+            self._save_mark = None
             live = self._live
             worker = None
             if live is not None and hasattr(live, 'cookies_clear') and _alive(live):
@@ -2005,12 +2044,48 @@ class BrowserProfile:
         return result
 
     # -- the owner's login window ------------------------------------------------------
+    def refresh_session(self, url):
+        """Load ``url`` once in the hidden worker and save what the site refreshed (#990).
+
+        Keeps a signed-in session alive: a site extends a session when one of
+        its pages is loaded, not when cookies are copied.  The same address
+        rule as ``browser_open`` (http(s) only; never this computer or a
+        private network) and the same jar save; nothing is read, clicked or
+        typed.  Returns ``{'state': refreshed | not_saved | busy | unavailable | failed}``.
+        """
+        if not self.available():
+            return {'state': 'unavailable'}
+        parts = urlsplit(str(url or ''))
+        if parts.scheme not in ('http', 'https') or not parts.netloc or local_destination(url, self._allowed_origins):
+            return {'state': 'failed', 'error': 'blocked_destination'}
+        try:
+            self._acquire(KEEPALIVE_HOLDER)
+        except ToolError:
+            return {'state': 'busy'}
+        driver = None
+        try:
+            self.profile_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            driver = self.launcher(self.profile_dir, self.headless)
+            self._live = driver
+            driver.goto(url, ACTION_TIMEOUT_SECONDS)
+            return {'state': 'refreshed' if self._save(driver) else 'not_saved'}
+        except Exception as exc:
+            return {'state': 'failed', 'error': type(exc).__name__}
+        finally:
+            try:
+                if driver is not None:
+                    driver.close()
+            except Exception:
+                pass
+            finally:
+                self._release()
+
     def open_for_login(self, url, wait=False, seconds=None, on_closed=None, on_opened=None):
         """Show the worker window at ``url`` for the owner to log in by hand.
 
         AgentOS navigates to ``url`` and does nothing else: no typing, no
         reading.  The window's title shows the host it is on.  Cookies are
-        exported into the encrypted jar while it is open and when the owner
+        exported into the encrypted jar once its landing settled and when the owner
         closes it (or after ``seconds``, by default ``LOGIN_WINDOW_SECONDS``,
         or when ``close_login_window`` is called with the returned ``window``).
 
@@ -2085,12 +2160,10 @@ class BrowserProfile:
                     except Exception:
                         pass
                 deadline = self.clock() + lifetime
-                saved = self.clock()
+                # #990: no periodic export while the window is open (it was every 15 s); the cookies are
+                # saved once the landing settled (above) and once when the window closes (below).
                 while driver.is_open() and self.clock() < deadline and not stop.is_set():
                     stop.wait(0.5)
-                    if self.clock() - saved >= LOGIN_SAVE_SECONDS:
-                        self._save(driver)
-                        saved = self.clock()
                 reason = 'closed' if stop.is_set() else 'timeout' if self.clock() >= deadline else 'owner'
             except Exception as exc:
                 failure.append(type(exc).__name__)
@@ -2221,6 +2294,12 @@ class BrowserProfile:
         if not record['done'].wait(timeout):
             return False
         return bool(record['saved'])
+
+
+def _export_mark(sites, hosts, imported):
+    """A fingerprint of one cookie export (#990), compared in memory only and never stored or logged."""
+    return hashlib.sha256(json.dumps([sites, hosts, sorted(imported or ())], sort_keys=True, ensure_ascii=False,
+                                     default=str).encode()).hexdigest()
 
 
 def _generation(driver):

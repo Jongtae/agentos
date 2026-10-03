@@ -7307,7 +7307,24 @@ class AgentService:
         except ProviderError:
             self.context_observations.cancel_location_request(request_id)
             raise
+        # #992: the keyboard stays reopenable until removed; the next answer after the request ends removes it.
+        self.store.put(self.LOCATION_KEYBOARD_KEY,{'chat_id':cfg['user_id']})
         return request_id
+
+    #: #992: config row set while a location keyboard may still be showing in the owner's chat.
+    LOCATION_KEYBOARD_KEY='telegram_location_keyboard'
+
+    def location_keyboard_removal(self, chat_id):
+        """``ReplyKeyboardRemove`` for the next answer to ``chat_id``, or None (#992).
+
+        Only once no location request is pending there, so the asking Work's
+        own reply never takes away the button the owner is about to press.
+        """
+        shown=self.store.config(self.LOCATION_KEYBOARD_KEY,{})
+        if not isinstance(shown,dict) or shown.get('chat_id')!=chat_id:return None
+        cfg=self.store.config('telegram',{})
+        if self.context_observations.pending_location_work_ids(chat_id,cfg.get('generation')):return None
+        return {'remove_keyboard':True}
 
     def location_requester(self, job):
         """The ``ask_location`` handler bound to one Work (#774): one Telegram prompt.
@@ -8813,19 +8830,25 @@ class AgentService:
                 LOG.debug('telegram reply presentation failed: %s',type(exc).__name__)
                 anchor,controls=None,()
             markup=reply_controls_markup(job['id'],controls,route_options=route_options)
+            # #992: a reply without inline controls takes away a location keyboard whose request ended.
+            removal=None
+            if not markup:
+                try:removal=self.location_keyboard_removal(job['chat_id'])
+                except Exception:removal=None
             message_id=None
             try:
                 try:
-                    result=self.telegram.send_message(job['chat_id'],render_telegram_html(text),markup,
+                    result=self.telegram.send_message(job['chat_id'],render_telegram_html(text),markup or removal,
                                                       parse_mode='HTML',reply_to=anchor)
                 except TelegramRejected as exc:
                     # Telegram answered that it could not parse the entities:
                     # a definite non-delivery, so one plain-text send cannot
                     # duplicate anything.  Every other failure stays unknown.
                     if not exc.entity_parse_error:raise
-                    result=self.telegram.send_message(job['chat_id'],text,markup,reply_to=anchor)
+                    result=self.telegram.send_message(job['chat_id'],text,markup or removal,reply_to=anchor)
                 message_id=result.get('message_id') if isinstance(result,dict) else None
                 status='sent'
+                if removal:self.store.put(self.LOCATION_KEYBOARD_KEY,{})
             except ProviderError:
                 status='unknown'
             with self.store.db() as db:

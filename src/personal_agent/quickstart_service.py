@@ -116,6 +116,11 @@ class OwnerLocalRequired(Exception):
 LOG=logging.getLogger('personal_agent.service')
 #: #999: the stored result of a queued message its running Work received as steering.
 STEER_FOLDED_TEXT='진행 중이던 작업에 반영했어요.'
+#: #996: the owner's emoji on an assistant message, recorded on its Work.
+REACTION_EVENT='owner_reaction'
+#: #996: what the worker reads first when the owner's message just withdrew remembered facts.
+MEMORY_WITHDRAWN_NOTE=('Before this turn, at the owner\'s word, AgentOS removed what you had just said you remembered:\n'
+                       '{facts}\nAcknowledge it briefly if the owner\'s message is only about that; do not save it again.')
 
 #: The one owner-authenticated address that starts a Gmail authorization.
 #: It is defined here rather than only inside the HTTP layer so the link the
@@ -1705,6 +1710,16 @@ class AgentService:
 
     @classmethod
     def memory_saved_markup(cls, notification_id, binding):
+        """No buttons (#996): the owner answers a saved notice in words or with a reaction.
+
+        A notice sent before #996 keeps its [되돌리기] taps working
+        (``legacy_memory_saved_markup`` and the ``p7u`` callback), and an
+        edit of such a notice removes its buttons.
+        """
+        return {'inline_keyboard':[]}
+
+    @classmethod
+    def legacy_memory_saved_markup(cls, notification_id, binding):
         """One [되돌리기] per open fact (numbered when several), plus 모두 when more than one is open (#918)."""
         open_=cls.memory_saved_open(binding)
         if len(binding['items'])==1:
@@ -4569,7 +4584,7 @@ class AgentService:
     #: Records that are AgentOS's own bookkeeping, not tool attempts.
     #: #710: ``orchestrator`` events record the plan and its evaluation, never a tool attempt.
     LOCAL_NON_TOOL_EVENTS=frozenset({'model','local_authority','conversation_continuity',ORCHESTRATION_EVENT,om.EVENT_TOOL,
-                                     om.REVIEW_EVENT_TOOL,MEMORY_UNDO_TOOL,STEER_EVENT})
+                                     om.REVIEW_EVENT_TOOL,MEMORY_UNDO_TOOL,STEER_EVENT,REACTION_EVENT})
 
     def attempted_only_reads(self, job_id):
         """True only when every tool this Work attempted is a declared read.
@@ -7668,7 +7683,7 @@ class AgentService:
                         footer=MEMORY_SAVED_OUTDATED_TEXT if outdated else None
                         try:self.telegram.edit_message_text(sender,notification['message_id'],
                                                             self.memory_saved_text(binding,footer),
-                                                            self.memory_saved_markup(notification['id'],binding))
+                                                            self.legacy_memory_saved_markup(notification['id'],binding))
                         except ProviderError:pass
                         if outdated:alert=(MEMORY_SAVED_OUTDATED_TEXT,True)
                         changed=True
@@ -8022,6 +8037,103 @@ class AgentService:
                     and self.is_natural_language(text):
                 self.consider_steer(task_id,text)
 
+    def ingest_reaction(self, reaction, generation):
+        """The owner's emoji on an assistant message (#996): an observation, judged by the Judgment AI.
+
+        On a saved-memory notice, the Judgment AI decides whether it asks not
+        to keep those facts (the same exact undo the old button made).  On an
+        answer, it is recorded on that Work for later turns and self-review.
+        No emoji is mapped to a meaning in code.  Returns what it was applied to.
+        """
+        cfg=self.store.config('telegram',{})
+        chat=reaction.get('chat') if isinstance(reaction.get('chat'),dict) else {}
+        user=(reaction.get('user') or {}).get('id') if isinstance(reaction.get('user'),dict) else None
+        message_id=reaction.get('message_id')
+        if not (cfg.get('enabled') and cfg.get('generation')==generation and chat.get('type')=='private'
+                and isinstance(user,int) and user==cfg.get('user_id') and chat.get('id')==user and isinstance(message_id,int)):
+            return None
+        emoji=[item.get('emoji') for item in reaction.get('new_reaction') or ()
+               if isinstance(item,dict) and isinstance(item.get('emoji'),str)][:3]
+        if not emoji:return None
+        with self.store.db() as db:
+            notice=db.execute('SELECT * FROM telegram_notifications WHERE chat_id=? AND message_id=? AND kind IN (%s) '
+                              'ORDER BY created DESC LIMIT 1'%','.join('?'*len(MEMORY_SAVED_KINDS)),
+                              (user,message_id,*MEMORY_SAVED_KINDS)).fetchone()
+            turn=db.execute('SELECT job_id FROM telegram_turns WHERE chat_id=? AND reply_message_id=? ORDER BY created DESC LIMIT 1',
+                            (user,message_id)).fetchone()
+        target=dict(notice)['job_id'] if notice else (turn['job_id'] if turn else None)
+        if not target:return None
+        with self.store.db() as db:
+            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                       (target,REACTION_EVENT,'observed',
+                        json.dumps({'emoji':emoji,'on':'memory_notice' if notice else 'answer'},ensure_ascii=False),time.time()))
+        LOG.info('owner reaction work=%s on=%s',target,'memory_notice' if notice else 'answer')
+        if notice:
+            notification=dict(notice)
+            self.steer_spawn(lambda:self.withdraw_memory_notice(notification,'reaction: '+' '.join(emoji)))
+            return 'memory_notice'
+        # #998: the answer the owner reacted to gets one self-review in the idle tick, under the
+        # shared cap and pause; the Judgment AI decides whether there is anything to learn.
+        try:om.enqueue_self_review(self.store,target,om.REVIEW_REACTION,'owner reaction on the answer: '+' '.join(emoji))
+        except ValueError as exc:LOG.info('reaction self-review not queued (%s)',type(exc).__name__)
+        return 'answer'
+
+    def open_memory_notice(self, notification):
+        """A saved notice whose facts can still be withdrawn: (notification, binding) or None (#996)."""
+        binding=self.memory_saved_binding(notification) if notification and notification.get('kind') in MEMORY_SAVED_KINDS else None
+        if not binding or 'sent' not in binding or notification.get('state')!='sent':return None
+        if not self.memory_saved_open(binding):return None
+        if time.time()-float(binding['sent'])>MEMORY_SAVED_TTL_SECONDS:return None
+        return notification,binding
+
+    def withdraw_memory_notice(self, notification, response):
+        """Ask the Judgment AI whether ``response`` withdraws a saved notice; undo it when yes (#996).
+
+        Returns the withdrawn facts as text, or None.  The undo is the exact
+        #918 path: each fact re-validated against its bound row and digest.
+        """
+        try:
+            current=self.open_memory_notice(self.store.notification(notification['id']))
+            if not current:return None
+            notification,binding=current
+            open_=self.memory_saved_open(binding)
+            remembered=self.memory_saved_text(binding)
+            if self.decision_judge.memory_withdrawn(remembered,response).outcome!=JUDGMENT_YES:return None
+            decided=self.undo_memory_saved(notification['job_id'],binding,open_)
+            finished=not self.memory_saved_open(binding)
+            self.store.update_notification(notification['id'],'memory_undone' if finished else 'sent',fingerprint=json.dumps(binding))
+            LOG.info('memory undo by owner response work=%s decided=%s',notification['job_id'],len(decided))
+            if isinstance(notification.get('message_id'),int):
+                try:self.telegram.edit_message_text(notification['chat_id'],notification['message_id'],
+                                                    self.memory_saved_text(binding),{'inline_keyboard':[]})
+                except ProviderError:pass
+            return remembered
+        except Exception as exc:
+            LOG.warning('memory withdrawal judgment failed (%s)',type(exc).__name__)
+            return None
+
+    def withdraw_memory_by_reply(self, job, prompt):
+        """The owner's next typed message after a saved notice may withdraw it (#996).
+
+        Only the latest open notice in this chat, and only when this is the
+        first owner message since it was sent.  Returns the note this Work's
+        worker reads first, or None.
+        """
+        if not job.get('chat_id') or not isinstance(prompt,str):return None
+        with self.store.db() as db:
+            row=db.execute("SELECT * FROM telegram_notifications WHERE chat_id=? AND state='sent' AND kind IN (%s) "
+                           "ORDER BY created DESC LIMIT 1"%','.join('?'*len(MEMORY_SAVED_KINDS)),
+                           (job['chat_id'],*MEMORY_SAVED_KINDS)).fetchone()
+        current=self.open_memory_notice(dict(row) if row else None)
+        if not current:return None
+        notification,binding=current
+        with self.store.db() as db:
+            later=db.execute('SELECT count(*) FROM jobs WHERE chat_id=? AND owner_typed=1 AND created>? AND created<? AND id!=?',
+                             (job['chat_id'],float(binding['sent']),float(job.get('created') or time.time()),job['id'])).fetchone()[0]
+        if later:return None
+        withdrawn=self.withdraw_memory_notice(notification,prompt)
+        return MEMORY_WITHDRAWN_NOTE.format(facts=withdrawn) if withdrawn else None
+
     def consider_steer(self, task_id, text):
         """Ask, off the poll thread, whether a message queued behind a running Work steers it (#999).
 
@@ -8100,6 +8212,9 @@ class AgentService:
             elif isinstance(update.get('managed_bot'),dict):
                 # #897: a family member created their bot through this bot's Managed Bots link.
                 control=lambda:self.ingest_managed_bot(update['managed_bot'])
+            elif isinstance(update.get('message_reaction'),dict):
+                # #996: the owner's emoji on an assistant message.
+                control=lambda:self.ingest_reaction(update['message_reaction'],cfg['generation'])
             if control:
                 control()
                 # Callback updates must advance the durable cursor too, or
@@ -8274,6 +8389,9 @@ class AgentService:
                 settings_answer=(None if resumed or continued or job.get('owner_typed')!=1
                                  or self.calendar_conversation.claims(connector_owner,owner_prompt)
                                  else self.settings_draft_answer(job,owner_prompt))
+                # #996: the owner's first typed message after a saved-memory notice may withdraw it.
+                memory_note=(None if resumed or continued or settings_answer or job.get('owner_typed')!=1
+                             else self.withdraw_memory_by_reply(job,owner_prompt))
                 # #969 (PERF-START-01): the routing judgment (`classify_intent`, which may
                 # ask capability-need) and the follow-up judgment below both read only
                 # the owner's message and prior state, and the state between here and
@@ -8581,6 +8699,7 @@ class AgentService:
                         history[-1]={'role':'user','content':prompt}
                     if fallthrough_note and history:
                         history[-1]={'role':'user','content':history[-1]['content']+fallthrough_note}
+                    if memory_note:retry_note=memory_note+('\n\n'+retry_note if retry_note else '')
                     if retry_note and history:
                         history[-1]={'role':'user','content':retry_note+'\n\n'+history[-1]['content']}
                     # Provenance for material this turn splices straight into
@@ -9393,7 +9512,8 @@ class AgentService:
                 status='unknown'
             with self.store.db() as db:
                 db.execute('UPDATE jobs SET delivery=? WHERE id=?',(status,job['id']))
-            if markup and isinstance(message_id,int):
+            # #996: every delivered answer, so an owner reaction on it finds its Work.
+            if isinstance(message_id,int):
                 self.telegram_turns.record_reply(job['id'],job['chat_id'],message_id)
             # #818/#836: after a reply confirmed sent (never 'unknown'), the Work's
             # one ask about its pending memory proposals.

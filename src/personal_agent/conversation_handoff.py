@@ -34,7 +34,11 @@ TELEGRAM_FAILURE_TEXT = 'Telegram 요청이 실패했습니다. 봇 설정을 �
 # #626: edited_message carries live-location updates and owner text edits;
 # an edit is recorded as a source revision, never replayed as a request.
 # 'managed_bot' (#897): a family member created a bot through the owner's Managed Bots link.
-TELEGRAM_POLL_UPDATE_KINDS = ('message', 'edited_message', 'callback_query', 'stopped_message_generation', 'managed_bot')
+#: #996: ``message_reaction`` - the owner's emoji on an assistant message.  Telegram documents
+#: delivery for chats where the bot is an administrator; the bot asks for it anyway and treats
+#: every reaction that does arrive as the owner's signal.
+TELEGRAM_POLL_UPDATE_KINDS = ('message', 'edited_message', 'callback_query', 'stopped_message_generation', 'managed_bot',
+                              'message_reaction')
 #: Presence calls (reaction, chat action, draft) are best-effort decoration
 #: sent while terminal delivery may be waiting on the same lock, so they get a
 #: short budget instead of the full delivery timeout.
@@ -556,6 +560,13 @@ STEER_PROPOSITION = ('The assistant is still working on the owner\'s earlier req
                      'the work in progress should take into account now. It is false when the message is a new, '
                      'separate request, a question to be answered on its own, a request to stop, or when it is '
                      'unclear. This judgment does not authorize any action.')
+#: #996: the owner's answer to "기억했어요: ..." - a typed message or an emoji reaction on that notice.
+MEMORY_WITHDRAWN_PROPOSITION = ('The assistant has just told the owner that it remembered the facts given. The owner\'s '
+                                'response (given: a typed message, or an emoji reaction on that notice) tells the '
+                                'assistant not to keep them - a no, "don\'t remember that", "that\'s wrong", a '
+                                'dismayed, embarrassed or disapproving reaction, or an equivalent in any language. It is '
+                                'false when the response agrees, likes or thanks, is about something else, or is unclear. '
+                                'This judgment does not delete anything.')
 WITHDRAWAL_PROPOSITION = ('The owner\'s latest message withdraws or cancels the request that is waiting for '
                           'the listed connection (rather than acknowledging it, changing topic, or asking '
                           'something unrelated).')
@@ -771,6 +782,19 @@ class ConversationJudgments:
                                 {'running_request': running_request, 'owner_message': utterance},
                                 uncut='owner_message')
         decision = self.engine.judge(context, STEER_PROPOSITION)
+        verdict = self.policy.binary(decision)
+        return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
+                        source=decision.confidence.provider or decision.outcome)
+
+    def memory_withdrawn(self, remembered, response):
+        """Does the owner's ``response`` to a saved-memory notice ask not to keep ``remembered`` (#996)?
+
+        ``response`` is the owner's typed message or a description of their
+        reaction.  Unavailable or unknown keeps the facts.
+        """
+        context = self._context('memory-withdrawal', {'remembered': remembered, 'owner_response': response},
+                                uncut='owner_response')
+        decision = self.engine.judge(context, MEMORY_WITHDRAWN_PROPOSITION)
         verdict = self.policy.binary(decision)
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
                         source=decision.confidence.provider or decision.outcome)

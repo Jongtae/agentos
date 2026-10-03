@@ -8030,8 +8030,14 @@ class AgentService:
         with the next tool result.  Anything else leaves the message queued to
         run as its own Work afterwards, as before.
         """
-        running=self.current_work_id
-        if not isinstance(running,str) or running==task_id:return False
+        # ``current_work_id`` is per thread (#826) and this runs on the poll thread, so the
+        # running Work is read from the store; one conversation worker runs at a time.
+        job=self.store.job(task_id)
+        with self.store.db() as db:
+            row=db.execute("SELECT id FROM jobs WHERE status='running' AND chat_id=? AND id!=? ORDER BY created DESC LIMIT 1",
+                           (job.get('chat_id') if job else None,task_id)).fetchone()
+        if not row:return False
+        running=row['id']
         self.steer_spawn(lambda:self.judge_steer(running,task_id,text))
         return True
 
@@ -8060,6 +8066,10 @@ class AgentService:
         becomes 👌.
         """
         if not self.store.steer_delivered(job['id']):return False
+        # A steered Work that then failed or ended unknown may never have read the steer
+        # (claimed, then the process or provider failed): the message runs as its own Work.
+        steered=self.store.job(job.get('related_job_id')) if job.get('relation_kind')=='steer' else None
+        if not steered or steered.get('status') not in ('succeeded','partial'):return False
         with self.store.db() as db:
             db.execute("UPDATE jobs SET status='succeeded',response=?,delivery='none' WHERE id=?",(STEER_FOLDED_TEXT,job['id']))
         self.presence.pop(job['id'],None)

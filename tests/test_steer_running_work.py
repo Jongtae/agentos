@@ -7,6 +7,7 @@ ingress, ``run_one``), ``run_agent`` and the MCP bridge helper run unchanged.
 No live model or Telegram is contacted, and none is claimed.
 """
 import json
+import threading
 import unittest
 
 from personal_agent import mcp_bridge
@@ -59,9 +60,17 @@ class _SteerCase(_Case):
             return [dict(row) for row in db.execute('SELECT * FROM tool_events WHERE job_id=? AND tool=? ORDER BY id',
                                                     (job_id, tool))]
 
+    def typed_from_poll_thread(self, text):
+        """Ingest on another thread, as the Telegram poll thread does while the work thread runs."""
+        sent = []
+        thread = threading.Thread(target=lambda: sent.append(self.typed(text)))
+        thread.start()
+        thread.join()
+        return sent[0]
+
     def remark_mid_run(self, body):
         """The first model call: the owner sends a remark while this Work runs, then a tool is called."""
-        self.remark_message = self.typed(REMARK)
+        self.remark_message = self.typed_from_poll_thread(REMARK)
         return {'content': None, 'tool_calls': [call('1', 'list_notes')]}
 
     def after_tool(self, body):
@@ -108,7 +117,7 @@ class SteeringReachesTheRunningWork(_SteerCase):
     def test_a_steer_the_worker_never_received_runs_as_its_own_work(self):
         # The worker answers without another tool call, so nothing carries the remark.
         def remark_then_finish(body):
-            self.remark_message = self.typed(REMARK)
+            self.remark_message = self.typed_from_poll_thread(REMARK)
             return {'content': '담았어요.'}
         self.script = [remark_then_finish]
         self.typed(FIRST)
@@ -120,6 +129,21 @@ class SteeringReachesTheRunningWork(_SteerCase):
         remark = self.jobs()[REMARK]
         self.assertNotEqual(remark['response'], STEER_FOLDED_TEXT)
         self.assertGreater(len(self.model_calls), calls, 'the remark ran as its own Work')
+
+
+class SteeredWorkFailed(_SteerCase):
+    def test_a_steer_claimed_by_a_work_that_then_failed_runs_as_its_own_work(self):
+        self.script = [self.remark_mid_run, self.after_tool]
+        self.typed(FIRST)
+        self.assertTrue(self.service.run_one())
+        first = self.jobs()[FIRST]
+        self.assertTrue(self.store.steer_delivered(self.jobs()[REMARK]['id']))
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='failed' WHERE id=?", (first['id'],))
+        calls = len(self.model_calls)
+        self.assertTrue(self.service.run_one())
+        self.assertNotEqual(self.jobs()[REMARK]['response'], STEER_FOLDED_TEXT)
+        self.assertGreater(len(self.model_calls), calls)
 
 
 class NotASteer(_SteerCase):

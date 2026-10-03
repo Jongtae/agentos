@@ -1293,7 +1293,6 @@ LOGIN_WINDOWS_KEPT = 16
 #: #709: the longest a ``browser_open``/``browser_read`` waits for a
 #: client-rendered page's content to settle (``browser_worker.op_settle``).
 RENDER_SETTLE_SECONDS = 6.0
-LOGIN_SAVE_SECONDS = 15
 #: #990: a site the owner signed in to through AgentOS is kept signed in by loading one of its
 #: pages in the hidden worker (saving cookies alone extends nothing): at least this often ...
 KEEPALIVE_SECONDS = 3 * 3600
@@ -1890,8 +1889,8 @@ class BrowserProfile:
             except Exception:
                 return False
             sites = {site: rows for site, rows in sites.items() if site not in self._suppressed}
-            # #990: a login window saves every LOGIN_SAVE_SECONDS; cookies that did not change since this
-            # holder's last write are not written again (and nothing is told to on_saved).
+            # #990: cookies that did not change since this holder's last write are not written again
+            # (and nothing is told to on_saved): a close right after the landing save writes nothing.
             mark = _export_mark(sites, hosts, self._imported)
             if mark == self._save_mark:
                 return True
@@ -2086,7 +2085,7 @@ class BrowserProfile:
 
         AgentOS navigates to ``url`` and does nothing else: no typing, no
         reading.  The window's title shows the host it is on.  Cookies are
-        exported into the encrypted jar while it is open and when the owner
+        exported into the encrypted jar once its landing settled and when the owner
         closes it (or after ``seconds``, by default ``LOGIN_WINDOW_SECONDS``,
         or when ``close_login_window`` is called with the returned ``window``).
 
@@ -2161,12 +2160,10 @@ class BrowserProfile:
                     except Exception:
                         pass
                 deadline = self.clock() + lifetime
-                saved = self.clock()
+                # #990: no periodic export while the window is open (it was every 15 s); the cookies are
+                # saved once the landing settled (above) and once when the window closes (below).
                 while driver.is_open() and self.clock() < deadline and not stop.is_set():
                     stop.wait(0.5)
-                    if self.clock() - saved >= LOGIN_SAVE_SECONDS:
-                        self._save(driver)
-                        saved = self.clock()
                 reason = 'closed' if stop.is_set() else 'timeout' if self.clock() >= deadline else 'owner'
             except Exception as exc:
                 failure.append(type(exc).__name__)

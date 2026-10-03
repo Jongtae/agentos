@@ -1470,6 +1470,23 @@ class SignInWaitsForTheOwner(Harness):
                             'the login was taken up after the run instead of expiring unseen')
 
 
+class SignInRefusedStillWaits(Harness):
+    """#995 review: a sign-in the worker asked for on a site AgentOS may not sign in to (no login row)."""
+
+    def test_a_refused_sign_in_is_still_not_a_reached_goal(self):
+        def work(tools):
+            GoalDecidesOutcome.step(tools, 'browser_sign_in', 'succeeded',
+                                    evidence={'state': 'login_required', 'url': 'https://shared.example/cart'})
+        self.engine.before = work
+        self.engine.answers = ['이 사이트는 로그인할 수 없어 아직 담지 못했어요.']
+        self.script([plan('codex', 'Add it.'), plan('openai', 'Other path.')], goals=[True])
+        job, row = self.run_work('장바구니에 우유 담아줘')
+        self.assertIsNone(self.service._browser_login(job), 'no login row was made')
+        self.assertEqual(self.asked_goals, [])
+        self.assertEqual(len(self.engine.turns), 1)
+        self.assertIn(row['status'], ('failed', 'partial'))
+
+
 class OwnerStateOnTheCliRoute(Harness):
     """#774: the trusted-local CLI turn reaches Memory, preparations and the calendar through the service."""
 

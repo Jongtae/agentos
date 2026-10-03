@@ -3863,16 +3863,25 @@ class AgentService:
         return not state_change_short(self.work_trail(job_id))
 
     def sign_in_requested(self, job_id, since=0):
-        """Whether this Work's worker itself asked for the owner's sign-in and it is still to be shown (#981).
+        """Whether this Work's worker itself asked for the owner's sign-in (#981).
 
-        The ``explicit`` login row #978 records for a ``browser_sign_in``: the worker
+        The ``explicit`` login row #978 records while it is still to be shown, or
+        (#995 review) a ``browser_sign_in`` event after ``since`` that answered
+        ``login_required`` even when no row was made (a refused site): the worker
         said the request waits for the owner.  Such an attempt is neither judged,
-        re-delegated nor upgraded to succeeded, so it stays unfinished while
-        ``offer_browser_login`` shows the window.  A login page met in passing is
+        re-delegated nor upgraded to succeeded.  A login page met in passing is
         not this: #752 lets a reached goal stand.
         """
         row=self._browser_login(job_id) or {}
-        return row.get('state')=='requested' and bool(row.get('explicit'))
+        if row.get('state')=='requested' and row.get('explicit'):return True
+        with self.store.db() as db:
+            rows=db.execute("SELECT detail FROM tool_events WHERE job_id=? AND id>? AND tool='browser_sign_in' AND status='succeeded'",
+                            (job_id,since or 0)).fetchall()
+        for item in rows:
+            try:evidence=json.loads(item['detail'] or '{}').get('evidence') or {}
+            except (TypeError,ValueError,AttributeError):continue
+            if isinstance(evidence,dict) and evidence.get('state')=='login_required':return True
+        return False
 
     def cli_work_outcome(self, job_id, tools, since=0):
         """``(outcome, refusals)`` of a CLI Work from its own tool events (#606 T3).
@@ -8772,7 +8781,7 @@ class AgentService:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',response,job['channel'],time.time(),job.get('workspace_id'),job['id']))
                     # #709: a run that reached a login page did not finish its request -
                     # unless (#752) the goal judgment saw it met another way.
-                    if outcome=='succeeded' and (self._browser_login(job['id']) or {}).get('state')=='requested' \
+                    if outcome=='succeeded' and ((self._browser_login(job['id']) or {}).get('state')=='requested' or waits_for_sign_in) \
                             and not (orchestration is not None and orchestration.terminal==REACHED):
                         outcome='partial';resolved_blocker=False
                         refusals.append(('browser_open','이 페이지는 로그인이 필요합니다.'));owner_steps.append('이 페이지는 로그인이 필요합니다.')

@@ -84,8 +84,8 @@ class SaveAndTell(TelegramHarness):
                          [(KEY, VALUE, 'current')])
         self.assertEqual(self.store.memory_candidates(include_decided=True), [], 'no candidate, pending or decided')
         self.assertEqual(notice['text'], f'기억했어요: {VALUE}')
-        [[button]] = notice['reply_markup']['inline_keyboard']
-        self.assertEqual((button['text'], button['callback_data']), ('되돌리기', f"p7u:{row['id']}:1"))
+        # #996: no buttons; the owner answers in words or with a reaction.
+        self.assertEqual(notice['reply_markup'], {'inline_keyboard': []})
         self.assertEqual(row['state'], 'sent')
         self.assertIsInstance(row['message_id'], int)
         self.assertEqual(self.notification(job['id'], MEMORY_CANDIDATES_KIND), [], 'no ask')
@@ -349,7 +349,7 @@ class SaveAndTell(TelegramHarness):
         self.assertEqual(sorted(m['content'] for m in self.store.memories()), sorted([VALUE, SECOND_VALUE]))
         self.assertEqual(notice['text'], f'기억했어요\n1. {VALUE}\n2. {SECOND_VALUE}')
         self.assertEqual([[button['text'] for button in line] for line in notice['reply_markup']['inline_keyboard']],
-                         [['1 되돌리기'], ['2 되돌리기'], ['모두 되돌리기']])
+                         [])  # #996: no buttons
         self.assertEqual(len([body for body in self.sends() if body['text'].startswith('기억했어요')]), 1, 'one notice')
         self.tap(f"p7u:{row['id']}:2", row['message_id'])
         self.assertEqual([m['content'] for m in self.store.memories()], [VALUE])
@@ -390,7 +390,7 @@ class SaveAndTell(TelegramHarness):
         self.assertEqual(edit['message_id'], row['message_id'])
         self.assertEqual(edit['text'], f'기억했어요\n1. {VALUE}\n2. {SECOND_VALUE}')
         self.assertEqual([[button['text'] for button in line] for line in edit['reply_markup']['inline_keyboard']],
-                         [['1 되돌리기'], ['2 되돌리기'], ['모두 되돌리기']])
+                         [])  # #996: no buttons
         self.assertEqual(len(self.binding(row)['items']), 2, 'bound once the edit was confirmed')
         self.tap(f"p7u:{row['id']}:2", row['message_id'])
         self.assertEqual([m['content'] for m in self.store.memories()], [VALUE])

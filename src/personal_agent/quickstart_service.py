@@ -337,6 +337,10 @@ BROWSER_LOGIN_CLOSE_SECONDS=60
 BROWSER_LOGIN_OFFERED_TEXT=('이 페이지는 로그인이 필요합니다. 이 실행이 끝나면 AgentOS가 이 Mac에 로그인 창을 열고 소유자에게 '
                             '로그인을 요청합니다. 소유자가 로그인하고 창을 닫으면 이 요청을 한 번 이어서 처리합니다. '
                             '비밀번호는 입력하지 말고, 지금까지 확인한 내용으로 이번 답을 마치세요.')
+#: #1006: a second site's login page while this Work's login for another site is still pending.
+BROWSER_LOGIN_OTHER_PENDING_TEXT=('이 페이지는 로그인이 필요합니다. 이 요청은 이미 다른 사이트의 로그인을 기다리고 있어 이 사이트의 로그인은 '
+                                  '지금 요청되지 않습니다. 비밀번호는 입력하지 말고, 지금까지 확인한 내용으로 답을 마치면서 이 사이트에도 '
+                                  '로그인이 필요하다고 말하세요.')
 #: #716: the site (registrable domain) leads the prompt, so a lookalike host
 #: (``example.com.lookalike.io``) reads as the site it is (``lookalike.io``).
 BROWSER_LOGIN_PROMPT=('로그인 요청 사이트: {site}\n'
@@ -6196,9 +6200,11 @@ class AgentService:
             if existing is not None and existing.get('state') not in BROWSER_LOGIN_REASK_STATES:
                 if explicit and existing.get('state')=='requested' and not existing.get('explicit'):
                     self._put_browser_login(job['id'],{**existing,'explicit':True})
-                # #1006: a login still to be shown is the same request: the model reads the same
-                # in-flow text, never the Settings pointer a resumed or skipped login gets.
-                return BROWSER_LOGIN_OFFERED_TEXT if existing.get('state') in BROWSER_LOGIN_PENDING_STATES else None
+                # #1006: a login still to be shown for the same site is the same request: the model reads the
+                # same in-flow text, never the Settings pointer.  Another site waits for its own request.
+                if existing.get('state') not in BROWSER_LOGIN_PENDING_STATES:return None
+                same=registrable_domain(existing.get('host'))==registrable_domain(host)
+                return BROWSER_LOGIN_OFFERED_TEXT if same else BROWSER_LOGIN_OTHER_PENDING_TEXT
             self._put_browser_login(job['id'],{'work_id':job['id'],'url':target,'host':host,
                                                'state':'requested','requested_at':time.time(),
                                                'nonce':secrets.token_hex(16),'explicit':bool(explicit)})

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import hashlib
 from urllib.parse import urlsplit
 from .local_tools import LocalTools, normalize_public_url
-from .agent_runtime import (Capabilities, ToolError, run_agent, AGENTS, STEER_EVENT, evidence_summary, turn_context, render_turn_prompt,
+from .agent_runtime import (Capabilities, ToolError, run_agent, AGENTS, STEER_EVENT, evidence_summary, turn_context, render_turn_prompt, attachment_facts,
                             MEMORY_OWNER, context_sections, ENGINE_UNMEDIATED, OWNER_CONVERSATION, lookup_sources, work_written_values, WORK_SOURCES_KEY, WORK_SOURCES_LIMIT, base_label,
                             history_provenance, WorkBudget, EFFECT_FREE_READS, explicit_search_query, outcome_from_events,
                             WORK_STOP_KEY, WORK_STOP_KEEP, work_stop_requested, WorkLedger, goal_summary, work_source_records,
@@ -8805,7 +8805,9 @@ class AgentService:
                                                      current_context=section_values['current_context'],
                                                      profile=section_values['profile'],
                                                      prepared=section_values['prepared'],native_search=native,brief=brief,
-                                                     skills=cli_skills.catalogue_text() if cli_skills is not None else None)
+                                                     skills=cli_skills.catalogue_text() if cli_skills is not None else None,
+                                                     # #997: what this request carries besides its words, as a fact.
+                                                     attachments=attachment_facts(images=len(image_inputs)))
                                 prompt_text,adapter=render_turn_prompt(context),context
                                 # Bounded Claude Code gets the instructions as a separate
                                 # argv element, so only conversation + request count
@@ -9027,7 +9029,9 @@ class AgentService:
                                                      current_context=section_values['current_context'],
                                                      profile=section_values['profile'],
                                                      prepared=section_values['prepared'],brief=brief,
-                                                     skills=skill_binding.catalogue_text() if skill_binding is not None else None)
+                                                     skills=skill_binding.catalogue_text() if skill_binding is not None else None,
+                                                     # #997: what this request carries besides its words, as a fact.
+                                                     attachments=attachment_facts(images=len(image_inputs)))
                             # #605: the sources of exactly the earlier messages this
                             # worker is shown replace the file-workspace job-list
                             # flag (`document_context`), which missed an earlier

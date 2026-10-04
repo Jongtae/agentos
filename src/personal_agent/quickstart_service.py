@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import hashlib
 from urllib.parse import urlsplit
 from .local_tools import LocalTools, normalize_public_url
-from .agent_runtime import (Capabilities, ToolError, run_agent, AGENTS, evidence_summary, turn_context, render_turn_prompt,
+from .agent_runtime import (Capabilities, ToolError, run_agent, AGENTS, STEER_EVENT, evidence_summary, turn_context, render_turn_prompt,
                             MEMORY_OWNER, context_sections, ENGINE_UNMEDIATED, OWNER_CONVERSATION, lookup_sources, work_written_values, WORK_SOURCES_KEY, WORK_SOURCES_LIMIT, base_label,
                             history_provenance, WorkBudget, EFFECT_FREE_READS, explicit_search_query, outcome_from_events,
                             WORK_STOP_KEY, WORK_STOP_KEEP, work_stop_requested, WorkLedger, goal_summary, work_source_records,
@@ -86,7 +86,7 @@ from .browser_session import BrowserProfile, ascii_host, binding_digest, keepali
 from .browser_jar import unexpired
 from .cli_browser_relay import BrowserRelay
 from .telegram_presence import (ATTENTION_ACTION, ATTENTION_ASK, ATTENTION_COOLDOWN, ATTENTION_MEMORY_ASK_FRESH, ATTENTION_PREPARED, ATTENTION_REMINDER,
-                                ATTENTION_REMINDER_HORIZON, ATTENTION_TOOL, CLEAR_REACTION, CONTROL_DETAILS, CONTROL_RETRY, NO_STEP_LINE,
+                                ATTENTION_REMINDER_HORIZON, ATTENTION_TOOL, CLEAR_REACTION, DONE_REACTION, CONTROL_DETAILS, CONTROL_RETRY, NO_STEP_LINE,
                                 CLOSING_CANDIDATES, DONE_REACTIONS, PROGRESS_CANDIDATES, RECEIVED_CANDIDATES,
                                 RECEIVED_REACTION, WAIT_CHAT_ACTION, WAIT_DRAFT, WROTE_REACTION, PresenceTiming, TelegramTurnAddressing,
                                 WaitState, draft_frame, draft_id_for, draft_step, outcome_reaction, pick_attention,
@@ -114,6 +114,8 @@ class OwnerLocalRequired(Exception):
         super().__init__(SETTINGS_FOLDER_LOCAL_TEXT)
 
 LOG=logging.getLogger('personal_agent.service')
+#: #999: the stored result of a queued message its running Work received as steering.
+STEER_FOLDED_TEXT='진행 중이던 작업에 반영했어요.'
 
 #: The one owner-authenticated address that starts a Gmail authorization.
 #: It is defined here rather than only inside the HTTP layer so the link the
@@ -481,6 +483,8 @@ class AgentService:
         # loop. One in flight globally keeps slow providers from accumulating
         # unbounded best-effort presentation work.
         self.progress_reaction_flight=threading.Lock()
+        # #999: a message that arrives while a Work runs is judged off the poll thread.
+        self.steer_spawn=lambda target:threading.Thread(target=target,name='agentos-steer-judgment',daemon=True).start()
         self.progress_reaction_spawn=lambda target:threading.Thread(
             target=target,name='agentos-telegram-progress-reaction',daemon=True).start()
         # #969 (PERF-START-01): the chosen start emoji is judged off the worker,
@@ -4251,7 +4255,7 @@ class AgentService:
         try:
             current=self.store.job(job['id']) or job
             related=current.get('related_job_id')
-            if current.get('relation_kind') not in ('reference','retry','correction') or not related:return ''
+            if current.get('relation_kind') not in ('reference','retry','correction','steer') or not related:return ''
             earlier=self.store.job(related)
             if not earlier:return ''
             with self.store.db() as db:
@@ -4565,7 +4569,7 @@ class AgentService:
     #: Records that are AgentOS's own bookkeeping, not tool attempts.
     #: #710: ``orchestrator`` events record the plan and its evaluation, never a tool attempt.
     LOCAL_NON_TOOL_EVENTS=frozenset({'model','local_authority','conversation_continuity',ORCHESTRATION_EVENT,om.EVENT_TOOL,
-                                     om.REVIEW_EVENT_TOOL,MEMORY_UNDO_TOOL})
+                                     om.REVIEW_EVENT_TOOL,MEMORY_UNDO_TOOL,STEER_EVENT})
 
     def attempted_only_reads(self, job_id):
         """True only when every tool this Work attempted is a declared read.
@@ -8014,6 +8018,66 @@ class AgentService:
                 # bubble; queued Work shows only the 👀 on the owner's message
                 # and running Work gets native typing/draft presence
                 # (`acknowledge_long_work`, #510/#581/#958).
+            if authorized and task_id and not paired and not guided_context and not has_photo \
+                    and self.is_natural_language(text):
+                self.consider_steer(task_id,text)
+
+    def consider_steer(self, task_id, text):
+        """Ask, off the poll thread, whether a message queued behind a running Work steers it (#999).
+
+        Only the owner's Judgment AI decides (``steers_running_work``); a yes
+        hands the message to that running Work, which passes it to its worker
+        with the next tool result.  Anything else leaves the message queued to
+        run as its own Work afterwards, as before.
+        """
+        # ``current_work_id`` is per thread (#826) and this runs on the poll thread, so the
+        # running Work is read from the store; one conversation worker runs at a time.
+        job=self.store.job(task_id)
+        with self.store.db() as db:
+            row=db.execute("SELECT id FROM jobs WHERE status='running' AND chat_id=? AND id!=? ORDER BY created DESC LIMIT 1",
+                           (job.get('chat_id') if job else None,task_id)).fetchone()
+        if not row:return False
+        running=row['id']
+        self.steer_spawn(lambda:self.judge_steer(running,task_id,text))
+        return True
+
+    def judge_steer(self, running_id, task_id, text):
+        try:
+            job=self.store.job(running_id)
+            if not job or job.get('status')!='running':return False
+            judged=self.decision_judge.steers_running_work(job.get('message') or '',text)
+            if judged.outcome!=JUDGMENT_YES:return False
+            with self.store.db() as db:
+                db.execute('BEGIN IMMEDIATE')
+                if not self.store.add_steer(running_id,task_id,text,db=db):return False
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           (running_id,STEER_EVENT,'received',json.dumps({'source_work_id':task_id}),time.time()))
+            LOG.info('owner steer recorded work=%s source=%s',running_id,task_id)
+            return True
+        except Exception as exc:
+            LOG.warning('owner steer judgment failed (%s)',type(exc).__name__)
+            return False
+
+    def fold_delivered_steer(self, job):
+        """Settle a queued message its running Work already received (#999); True when folded.
+
+        The owner's words stay in the conversation (the caller already stored
+        them); no second answer is made, and the 👀 on the owner's message
+        becomes 👌.
+        """
+        if not self.store.steer_delivered(job['id']):return False
+        # A steered Work that then failed or ended unknown may never have read the steer
+        # (claimed, then the process or provider failed): the message runs as its own Work.
+        steered=self.store.job(job.get('related_job_id')) if job.get('relation_kind')=='steer' else None
+        if not steered or steered.get('status') not in ('succeeded','partial'):return False
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='succeeded',response=?,delivery='none' WHERE id=?",(STEER_FOLDED_TEXT,job['id']))
+        self.presence.pop(job['id'],None)
+        source=self.telegram_turns.source(job['id'])
+        if job.get('chat_id') and isinstance(source,int):
+            self._presence_call('set_message_reaction',job['chat_id'],source,DONE_REACTION)
+        self.update_task_card(job,'succeeded')
+        return True
 
     def poll_telegram(self):
         with self.lock:
@@ -8157,6 +8221,7 @@ class AgentService:
                 if card and (card['message_id']==-1 or card['created']>time.time()-TELEGRAM_CARD_GRACE_SECONDS):return False
                 db.execute("UPDATE jobs SET status='running' WHERE id=?",(job['id'],))
                 db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('user',job['message'],job['channel'],time.time(),job.get('workspace_id'),job['id']))
+            if self.fold_delivered_steer(job):return True
             self.current_work_id=job['id']
             self.update_task_card(job,'running')
             response=''

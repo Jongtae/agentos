@@ -1536,6 +1536,27 @@ MEMORY_ASK_OWNER_TEXT='기억해 둘지 여쭤볼게요.'
 MEMORY_SAVED_WORKER_NOTE=('Remembered. The owner is shown what was remembered and can undo it; '
                           'do not ask whether to remember it and do not describe how remembering works.')
 
+#: #999: owner messages handed to a running Work reach its worker with the next tool result.
+STEER_EVENT='owner_steer'
+STEER_LEAD=('The owner sent this while you are working on the current request. Take it into account '
+            'from here on:')
+
+
+def claim_owner_steers(store, job_id, record=None):
+ """The owner steers this Work's worker has not seen yet, as one message, or None (#999).
+
+ Claiming marks them handed over, so each reaches the worker once; ``record``
+ adds a content-free Evidence event for the handover.
+ """
+ claim=getattr(store,'claim_steers',None)
+ if not callable(claim) or not isinstance(job_id,str):return None
+ try:texts=claim(job_id)
+ except Exception:return None
+ if not texts:return None
+ if record:record(STEER_EVENT,'delivered',json.dumps({'count':len(texts)}))
+ return STEER_LEAD+'\n'+'\n'.join('- '+text for text in texts)
+
+
 def worker_result(action, result):
  """The tool result as the worker reads it (#836, #918).
 
@@ -3521,6 +3542,8 @@ def run_agent(adapter,config,key,history,system,capabilities,record,scope='main'
    encoded=json.dumps({**ref,**shown} if ran and isinstance(shown,dict) else shown,ensure_ascii=False)
    if len(encoded)>24000:encoded=json.dumps({**ref,'truncated':True,'preview':encoded[:22000]},ensure_ascii=False)
    messages.append({'role':'tool','tool_call_id':call['id'],'content':encoded})
+  steer=claim_owner_steers(capabilities.store,capabilities.job_id,record)
+  if steer:messages.append({'role':'user','content':steer})
   if path_failed and budget.spend_nudge():
    nudges+=1
    messages.append({'role':'system','content':ALTERNATIVE_NUDGE})

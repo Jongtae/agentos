@@ -337,6 +337,10 @@ BROWSER_LOGIN_CLOSE_SECONDS=60
 BROWSER_LOGIN_OFFERED_TEXT=('이 페이지는 로그인이 필요합니다. 이 실행이 끝나면 AgentOS가 이 Mac에 로그인 창을 열고 소유자에게 '
                             '로그인을 요청합니다. 소유자가 로그인하고 창을 닫으면 이 요청을 한 번 이어서 처리합니다. '
                             '비밀번호는 입력하지 말고, 지금까지 확인한 내용으로 이번 답을 마치세요.')
+#: #1006: a second site's login page while this Work's login for another site is still pending.
+BROWSER_LOGIN_OTHER_PENDING_TEXT=('이 페이지는 로그인이 필요합니다. 이 요청은 이미 다른 사이트의 로그인을 기다리고 있어 이 사이트의 로그인은 '
+                                  '지금 요청되지 않습니다. 비밀번호는 입력하지 말고, 지금까지 확인한 내용으로 답을 마치면서 이 사이트에도 '
+                                  '로그인이 필요하다고 말하세요.')
 #: #716: the site (registrable domain) leads the prompt, so a lookalike host
 #: (``example.com.lookalike.io``) reads as the site it is (``lookalike.io``).
 BROWSER_LOGIN_PROMPT=('로그인 요청 사이트: {site}\n'
@@ -420,9 +424,17 @@ BROWSER_LOGIN_RESULT_TEXT={'resumed':'로그인 창을 닫고 요청을 한 번 
                                            '않았습니다. 다시 요청하면 필요할 때 로그인을 다시 요청합니다.')}
 #: #709: a Work whose last login ended this way may be asked again at the next login page.
 BROWSER_LOGIN_REASK_STATES=('expired','unavailable','not_logged_in')
+#: #1006: a login not yet settled; another login page in the same Work joins it.
+BROWSER_LOGIN_PENDING_STATES=('requested','opening','offered','closing')
 
 #: #942: at most this many signed-in sites are named in a Work's context.
 BROWSER_SESSION_SITES = 20
+#: #942/#1006: the context line before those sites.  Stored cookies are not a live sign-in: a site
+#: ends a session on its own (live 2026-10-04: every cookie stayed, the cart page showed a guest),
+#: so the page decides.  No colon before the list (``information_use.browser_signin_claims``).
+BROWSER_SIGNINS_LINE=('Browser sign-ins (stored sessions browser_open uses; no password needed. A site can end a session '
+                      'on its own, so when a page shows you signed out or as a guest, the sign-in has ended and the '
+                      'page is not the owner\'s data; call browser_sign_in): ')
 
 
 class AgentService:
@@ -830,9 +842,22 @@ class AgentService:
             shared=family_share.received(self.store)
         except Exception:
             shared={}   # #943 review: an unreadable share row never blocks the turn
-        names=[f"{site} (the owner's sign-in shared with you: you act in the owner's account; reading and cart changes only; "
-               'payment is the owner\'s)' if site in shared else site for site in sites]
-        return 'Browser sign-ins (browser_open uses them; no password needed): '+', '.join(names)
+        try:
+            signins=self.store.config(BROWSER_OWNER_SIGNINS_KEY,{})
+        except Exception:
+            signins={}
+        signins=signins if isinstance(signins,dict) else {}
+
+        def named(site):
+            if site in shared:
+                return (f"{site} (the owner's sign-in shared with you: you act in the owner's account; reading and cart "
+                        'changes only; payment is the owner\'s)')
+            record=signins.get(site)
+            at=record.get('at') if isinstance(record,dict) else None
+            if isinstance(at,(int,float)) and at>0:
+                return f"{site} (owner signed in {time.strftime('%Y-%m-%d %H:%M',time.localtime(at))})"
+            return site
+        return BROWSER_SIGNINS_LINE+', '.join(named(site) for site in sites)
 
     # -- SEC-ATTN-01 (#659): owner-accepted preparations ------------------------
 
@@ -6195,7 +6220,11 @@ class AgentService:
             if existing is not None and existing.get('state') not in BROWSER_LOGIN_REASK_STATES:
                 if explicit and existing.get('state')=='requested' and not existing.get('explicit'):
                     self._put_browser_login(job['id'],{**existing,'explicit':True})
-                return None
+                # #1006: a login still to be shown for the same site is the same request: the model reads the
+                # same in-flow text, never the Settings pointer.  Another site waits for its own request.
+                if existing.get('state') not in BROWSER_LOGIN_PENDING_STATES:return None
+                same=registrable_domain(existing.get('host'))==registrable_domain(host)
+                return BROWSER_LOGIN_OFFERED_TEXT if same else BROWSER_LOGIN_OTHER_PENDING_TEXT
             self._put_browser_login(job['id'],{'work_id':job['id'],'url':target,'host':host,
                                                'state':'requested','requested_at':time.time(),
                                                'nonce':secrets.token_hex(16),'explicit':bool(explicit)})

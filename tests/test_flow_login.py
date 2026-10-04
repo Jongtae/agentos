@@ -44,7 +44,7 @@ from personal_agent.bounded_execution import (AgentOSMcpTools, BoundedExecutionA
 from personal_agent.conversation_projection import TELEGRAM_RESULT_PREVIEW_CHARS, clip_keeping_links, terminal_text
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import (AgentService, BROWSER_LOGIN_CLOSE_SECONDS, BROWSER_LOGIN_MOVED_LINE,
-                                               BROWSER_LOGIN_NO_SESSION_LINE, BROWSER_LOGIN_OFFERED_TEXT,
+                                               BROWSER_LOGIN_NO_SESSION_LINE, BROWSER_LOGIN_OFFERED_TEXT, BROWSER_LOGIN_OTHER_PENDING_TEXT,
                                                BROWSER_LOGIN_PHONE_LABEL, BROWSER_LOGIN_RESULT_TEXT, BROWSER_LOGIN_SECONDS,
                                                BROWSER_LOGIN_SKIP_LABEL, BROWSER_OWNER_SIGNINS_KEY)
 from personal_agent.quickstart_store import QuickStore
@@ -443,6 +443,23 @@ class LoginHarness(unittest.TestCase):
 
 
 class InFlowLogin(LoginHarness):
+    def test_a_second_login_page_while_the_login_is_pending_reads_the_same_in_flow_text(self):
+        """#1006 (live 2026-10-04): a second sign-in request in one Work before its login was shown got the
+        Settings pointer, and the owner was told to open Settings.  Pending, it is the same request."""
+        job = self.store.job(self.store.enqueue('장바구니 보여줘', 'web-login'))
+        self.assertEqual(self.service._request_browser_login(job, ORIGIN + '/cart', explicit=True), BROWSER_LOGIN_OFFERED_TEXT)
+        nonce = self.service._browser_login(job['id'])['nonce']
+        for state in ('requested', 'opening', 'offered', 'closing'):
+            self.service._put_browser_login(job['id'], {**self.service._browser_login(job['id']), 'state': state})
+            self.assertEqual(self.service._request_browser_login(job, ORIGIN + '/cart'), BROWSER_LOGIN_OFFERED_TEXT, state)
+            self.assertEqual(self.service._browser_login(job['id'])['nonce'], nonce, 'the same login, not a new one')
+        other = self.service._request_browser_login(job, 'https://other.test/cart')
+        self.assertEqual(other, BROWSER_LOGIN_OTHER_PENDING_TEXT, 'another site is not promised the pending login')
+        self.assertEqual(self.service._browser_login(job['id'])['host'], 'fixture.test')
+        for state in ('resumed', 'skipped'):
+            self.service._put_browser_login(job['id'], {**self.service._browser_login(job['id']), 'state': state})
+            self.assertIsNone(self.service._request_browser_login(job, ORIGIN + '/cart'), 'asked once (#709)')
+
     def test_closing_the_login_window_resumes_the_work_once(self):
         job_id, prompt, buttons, notification = self.login_work()
         job = self.store.job(job_id)

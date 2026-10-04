@@ -711,7 +711,8 @@ class ConversationJudgments:
     #: Facts that are the owner's own words.
     #: #836: ``already_noted`` is what the owner's own message already gave the Work
     #: (its saved values, #831), so it is treated like the owner's words.
-    OWNER_FACTS = frozenset({'owner_message', 'owner_request', 'terms', 'owner_context', 'already_noted', 'pending_change'})
+    OWNER_FACTS = frozenset({'owner_message', 'owner_request', 'owner_followup', 'terms', 'owner_context', 'already_noted',
+                             'pending_change'})
 
     def __init__(self, engine=None, policy=None, redactor=None):
         self.engine = engine or UnavailableDecisionEngine()
@@ -953,6 +954,34 @@ class ConversationJudgments:
         context = self._context(PURPOSE, facts, work_id=work_id, uncut='owner_request', cancelled=cancelled)
         method = getattr(self.engine, 'structured', None)
         decision = (method(context, QUESTION, SCHEMA, shape) if method is not None
+                    else StructuredDecision(OUTCOME_UNAVAILABLE))
+        return self.policy.structured(decision), decision
+
+    def self_review(self, request, answer, outcome, evaluation, followup, profile, reason, work_id=None, cancelled=None):
+        """``(data, decision)``: one self-review of a Work that fell short (#998).
+
+        One ``structured`` call over the owner's request and follow-up (owner
+        words, never cut), the final answer excerpt (model-stated), the
+        Work's outcome, the orchestrator's verdict texts, the profile
+        snapshot and the typed review reason, each redacted first.  ``data``
+        is the answer only when decided with enough confidence; what may be
+        kept is the caller's deterministic validation.  Judgment only: it
+        writes nothing.
+        """
+        from .decision import OUTCOME_UNAVAILABLE, StructuredDecision
+        from .owner_model import (ANSWER_CHARS, EVALUATION_CHARS, FOLLOWUP_CHARS, PROFILE_CHARS, REVIEW_PURPOSE,
+                                  REVIEW_QUESTION, REVIEW_SCHEMA, review_shape)
+        facts = {'review_reason': str(reason or ''),
+                 'owner_request': str(request or ''),
+                 'final_answer_excerpt': self.redact(answer)[:ANSWER_CHARS] or 'none',
+                 'work_outcome': str(outcome or 'unknown'),
+                 'evaluation': self.redact(evaluation)[:EVALUATION_CHARS] or 'none',
+                 'owner_followup': self.redact(str(followup or ''))[:FOLLOWUP_CHARS] or 'none',
+                 'owner_profile': self.redact(profile)[:PROFILE_CHARS] or 'none'}
+        context = self._context(REVIEW_PURPOSE, facts, work_id=work_id, uncut=('owner_request', 'owner_followup'),
+                                cancelled=cancelled)
+        method = getattr(self.engine, 'structured', None)
+        decision = (method(context, REVIEW_QUESTION, REVIEW_SCHEMA, review_shape) if method is not None
                     else StructuredDecision(OUTCOME_UNAVAILABLE))
         return self.policy.structured(decision), decision
 

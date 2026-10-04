@@ -1,5 +1,6 @@
 """#942: the Work's context names the browser sign-ins, and a shared one says so."""
 import tempfile
+import time
 import types
 import unittest
 from pathlib import Path
@@ -36,6 +37,20 @@ class BrowserSessionsInContext(unittest.TestCase):
         self.assertNotIn("news.test (the owner's", line)
         labels = [claim['label'] for claim in context_claims('legend\n{}\n' + line)]
         self.assertEqual(labels, ['로그인한 사이트: shop.test (공유받은 로그인)', '로그인한 사이트: news.test'])
+
+    def test_a_site_the_owner_signed_in_to_names_when_and_that_a_site_can_end_it(self):
+        """#1006 (live 2026-10-04): stored cookies outlived the site's session; the guest cart read as the owner's."""
+        from personal_agent.quickstart_service import BROWSER_OWNER_SIGNINS_KEY
+        self.view('shop.test', 'news.test')
+        at = time.mktime((2026, 10, 3, 15, 24, 0, 0, 0, -1))
+        self.store.put(BROWSER_OWNER_SIGNINS_KEY, {'shop.test': {'at': at, 'marks': ['m'], 'host': 'shop.test'}})
+        line = self.text()
+        self.assertIn('shop.test (owner signed in 2026-10-03 15:24)', line)
+        self.assertIn('as a guest, the sign-in has ended', line)
+        self.assertIn('call browser_sign_in', line)
+        self.assertTrue(line.endswith(', news.test'))
+        labels = [claim['label'] for claim in context_claims('legend\n{}\n' + line)]
+        self.assertEqual(labels, ['로그인한 사이트: shop.test', '로그인한 사이트: news.test'])
 
     def test_a_broken_view_is_no_line(self):
         def broken():

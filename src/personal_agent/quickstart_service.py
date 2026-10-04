@@ -420,9 +420,17 @@ BROWSER_LOGIN_RESULT_TEXT={'resumed':'로그인 창을 닫고 요청을 한 번 
                                            '않았습니다. 다시 요청하면 필요할 때 로그인을 다시 요청합니다.')}
 #: #709: a Work whose last login ended this way may be asked again at the next login page.
 BROWSER_LOGIN_REASK_STATES=('expired','unavailable','not_logged_in')
+#: #1006: a login not yet settled; another login page in the same Work joins it.
+BROWSER_LOGIN_PENDING_STATES=('requested','opening','offered','closing')
 
 #: #942: at most this many signed-in sites are named in a Work's context.
 BROWSER_SESSION_SITES = 20
+#: #942/#1006: the context line before those sites.  Stored cookies are not a live sign-in: a site
+#: ends a session on its own (live 2026-10-04: every cookie stayed, the cart page showed a guest),
+#: so the page decides.  No colon before the list (``information_use.browser_signin_claims``).
+BROWSER_SIGNINS_LINE=('Browser sign-ins (stored sessions browser_open uses; no password needed. A site can end a session '
+                      'on its own, so when a page shows you signed out or as a guest, the sign-in has ended and the '
+                      'page is not the owner\'s data; call browser_sign_in): ')
 
 
 class AgentService:
@@ -830,9 +838,22 @@ class AgentService:
             shared=family_share.received(self.store)
         except Exception:
             shared={}   # #943 review: an unreadable share row never blocks the turn
-        names=[f"{site} (the owner's sign-in shared with you: you act in the owner's account; reading and cart changes only; "
-               'payment is the owner\'s)' if site in shared else site for site in sites]
-        return 'Browser sign-ins (browser_open uses them; no password needed): '+', '.join(names)
+        try:
+            signins=self.store.config(BROWSER_OWNER_SIGNINS_KEY,{})
+        except Exception:
+            signins={}
+        signins=signins if isinstance(signins,dict) else {}
+
+        def named(site):
+            if site in shared:
+                return (f"{site} (the owner's sign-in shared with you: you act in the owner's account; reading and cart "
+                        'changes only; payment is the owner\'s)')
+            record=signins.get(site)
+            at=record.get('at') if isinstance(record,dict) else None
+            if isinstance(at,(int,float)) and at>0:
+                return f"{site} (owner signed in {time.strftime('%Y-%m-%d %H:%M',time.localtime(at))})"
+            return site
+        return BROWSER_SIGNINS_LINE+', '.join(named(site) for site in sites)
 
     # -- SEC-ATTN-01 (#659): owner-accepted preparations ------------------------
 
@@ -6175,7 +6196,9 @@ class AgentService:
             if existing is not None and existing.get('state') not in BROWSER_LOGIN_REASK_STATES:
                 if explicit and existing.get('state')=='requested' and not existing.get('explicit'):
                     self._put_browser_login(job['id'],{**existing,'explicit':True})
-                return None
+                # #1006: a login still to be shown is the same request: the model reads the same
+                # in-flow text, never the Settings pointer a resumed or skipped login gets.
+                return BROWSER_LOGIN_OFFERED_TEXT if existing.get('state') in BROWSER_LOGIN_PENDING_STATES else None
             self._put_browser_login(job['id'],{'work_id':job['id'],'url':target,'host':host,
                                                'state':'requested','requested_at':time.time(),
                                                'nonce':secrets.token_hex(16),'explicit':bool(explicit)})

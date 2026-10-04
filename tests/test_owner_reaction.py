@@ -149,6 +149,19 @@ class WordsAfterTheNotice(_Answering):
         self.assertEqual([m['content'] for m in self.store.memories()], [VALUE])
 
 
+class QueuedBeforeTheNotice(_Answering):
+    def test_a_message_sent_before_the_notice_is_not_read_as_its_answer(self):
+        job, _notice, row = self.told()
+        follow = self.enqueue('아 그건 기억하지 마')
+        binding = self.binding(row)
+        with self.store.db() as db:
+            db.execute('UPDATE jobs SET owner_typed=1, created=? WHERE id=?', (float(binding['sent']) - 5, follow))
+        self.plan = []
+        self.service.run_one()
+        self.assertEqual(self.asked, [])
+        self.assertEqual([m['content'] for m in self.store.memories()], [VALUE])
+
+
 class WordsKeep(WordsAfterTheNotice.__bases__[0]):
     WITHDRAW = False
 

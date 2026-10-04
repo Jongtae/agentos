@@ -8127,6 +8127,9 @@ class AgentService:
         current=self.open_memory_notice(dict(row) if row else None)
         if not current:return None
         notification,binding=current
+        # Review P1: a message the owner sent before the notice existed cannot answer it.
+        sent_at=float(job.get('source_at') or job.get('created') or 0)
+        if sent_at<=float(binding['sent']):return None
         with self.store.db() as db:
             later=db.execute('SELECT count(*) FROM jobs WHERE chat_id=? AND owner_typed=1 AND created>? AND created<? AND id!=?',
                              (job['chat_id'],float(binding['sent']),float(job.get('created') or time.time()),job['id'])).fetchone()[0]

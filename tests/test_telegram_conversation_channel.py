@@ -153,7 +153,7 @@ class TelegramChannelTests(unittest.TestCase):
         self.assertEqual(log[0]['url'], 'https://api.telegram.org/botBOT:TOKEN/getUpdates')
         self.assertEqual(log[0]['body'], {'offset': 11, 'timeout': 5,
                                           'allowed_updates': ['message', 'edited_message', 'callback_query', 'stopped_message_generation',
-                                                              'managed_bot'],
+                                                              'managed_bot', 'message_reaction'],
                                           'limit': 20})
 
     def test_answer_callback_query_body_is_exact(self):

@@ -34,7 +34,7 @@ def proposal(key, content, *, kind='stated', category='place', evidence='the own
 class Upkeep(Harness):
     def setUp(self):
         super().setUp()
-        self.answers, self.explicit, self.facts, self.judged = [], [], [], []
+        self.answers, self.explicit, self.facts, self.judged, self.situations = [], [], [], [], []
 
         def structured(context, question, schema):
             if context.purpose != om.PURPOSE:
@@ -42,7 +42,10 @@ class Upkeep(Harness):
             self.facts.append((context, question, schema))
             if not self.answers:
                 return None
-            return StructuredDecision(OUTCOME_DECIDED, {'proposals': self.answers.pop(0)}, fixture_confidence(0.9))
+            data = {'proposals': self.answers.pop(0)}
+            if self.situations:
+                data['situation'] = self.situations.pop(0)
+            return StructuredDecision(OUTCOME_DECIDED, data, fixture_confidence(0.9))
 
         def judge(context, proposition):
             if context.purpose == 'goal-reached':
@@ -705,3 +708,92 @@ class Unit(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Situation(Upkeep):
+    """SITUATION-01 (#1004): the same upkeep judgment keeps a running note of the owner's day."""
+
+    def setUp(self):
+        super().setUp()
+        self.service.context_observations.set_controls({'enabled': True, 'timezone': 'Asia/Seoul'})
+
+    def turn(self, text, answer, situation):
+        job = self.finished(text, answer=answer)
+        self.answers, self.situations = [[]], [situation]
+        self.service.run_owner_model_upkeep()
+        return job
+
+    def test_the_evening_survives_beyond_the_sixteen_message_window(self):
+        # The 2026-10-04 evening, shortened: what matters arrives early, then many turns follow.
+        self.turn('[사진 첨부]', '오늘 신라컨트리클럽 라운드 스코어카드네요. 티오프 PM 1:48, 동반자 송한별 97, 이재욱 95, 박종인 93',
+                  '오늘 13:48 신라CC 라운드를 마쳤다. 동반자 송한별·이재욱·박종인.')
+        self.turn('지금 집에 차를 타고 가는 중인데 중간에 저녁 먹을데 찾아줘', '곤지암 쪽 식당입니다',
+                  '신라CC 라운드(송한별·이재욱·박종인) 후 차로 판교 집에 가는 중. 저녁은 아직.')
+        for index in range(10):
+            self.turn(f'식당 질문 {index}', '식당 목록입니다', '')
+        self.turn('도착시간이 9시반이나 될 듯', '9시 30분쯤이군요',
+                  '신라CC 라운드 후 차로 판교 집에 가는 중, 21:30 도착 예정. 저녁은 아직.')
+        self.turn('베일리(송한별)가 차로 데려다 줘서 저녁 식사 대접 해야해', '판교 식당입니다',
+                  '신라CC 라운드 후 베일리(송한별)의 차로 판교 귀가 중, 21:30 도착 예정. 아직 저녁 전이라 송한별에게 저녁을 대접할 예정.')
+        # 14 turns are 28 messages: the scorecard turn is outside the worker's 16-message window.
+        self.assertEqual(len(self.facts), 14)
+        note = self.service.current_state.situation()['value']
+        for part in ('신라CC', '송한별', '21:30', '저녁'):
+            self.assertIn(part, note)
+        later = self.store.enqueue('판교 식당은 전혀 불가능?', 'om-later')
+        self.assertIn('송한별', self.service.current_state.render(later))
+        # Each rewrite read the note before it, so nothing had to be restated by the owner.
+        self.assertEqual(self.facts[0][0].facts['current_situation'], 'none')
+        self.assertIn('저녁은 아직', self.facts[-1][0].facts['current_situation'])
+        self.assertEqual(self.evidence(later), [])
+
+    def test_an_empty_rewrite_keeps_the_note_and_evidence_never_holds_its_text(self):
+        first = self.turn('귀가 중', '네', '차로 판교 집에 가는 중.')
+        second = self.turn('식당', '목록', '')
+        self.assertEqual(self.service.current_state.situation()['value'], '차로 판교 집에 가는 중.')
+        status, detail = self.evidence(first)[0]
+        self.assertEqual(detail['situation']['recorded'], True)
+        self.assertNotIn('판교', json.dumps(detail, ensure_ascii=False))
+        self.assertNotIn('situation', self.evidence(second)[0][1])
+
+    def test_with_current_context_off_no_note_is_read_or_written(self):
+        self.service.context_observations.set_controls({'enabled': False})
+        job = self.turn('귀가 중', '네', '차로 판교 집에 가는 중.')
+        self.assertEqual(self.facts[0][0].facts['current_situation'], 'none')
+        self.assertNotIn('situation', self.evidence(job)[0][1])
+        self.service.context_observations.set_controls({'enabled': True})
+        self.assertIsNone(self.service.current_state.situation())
+
+    def test_the_question_and_schema_ask_for_the_note(self):
+        self.turn('x', 'y', '')
+        _context, question, schema = self.facts[0]
+        self.assertEqual(schema['properties']['situation'], {'type': 'string'})
+        self.assertIn('situation', schema['required'])
+        self.assertIn('running note of the owner\'s day', question)
+        self.assertTrue(om.shape({'proposals': []}), 'an answer without a situation is no note, not a failure')
+        self.assertFalse(om.shape({'proposals': [], 'situation': 3}))
+
+
+class SituationQueue(Upkeep):
+    """#1005 review: Works that finished before the upkeep ran are folded into the newest run."""
+
+    def setUp(self):
+        super().setUp()
+        self.service.context_observations.set_controls({'enabled': True, 'timezone': 'Asia/Seoul'})
+
+    def test_queued_works_are_folded_into_the_newest_run(self):
+        first = self.finished('[사진 첨부]', answer='신라CC 스코어카드, 동반자 송한별')
+        time.sleep(0.01)
+        self.finished('집에 차로 가는 중', answer='곤지암 식당')
+        time.sleep(0.01)
+        self.finished('도착 9시반', answer='알겠습니다')
+        self.answers, self.situations = [[], [], []], ['신라CC 후 송한별 차로 귀가 중, 21:30 도착', 'older', 'oldest']
+        for _ in range(3):
+            self.service.run_owner_model_upkeep()
+        turns = self.facts[0][0].facts['turns_since_situation']
+        self.assertLess(turns.index('[사진 첨부]'), turns.index('집에 차로 가는 중'))
+        self.assertIn('송한별', turns)
+        self.assertEqual(self.service.current_state.situation()['value'], '신라CC 후 송한별 차로 귀가 중, 21:30 도착')
+        self.assertEqual(len(self.service.current_state.situation()['sources']), 3)
+        self.assertEqual(self.evidence(first)[0][1]['situation'], {'recorded': False, 'reason': 'situation_newer',
+                                                                   'chars': None})

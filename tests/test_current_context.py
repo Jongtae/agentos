@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 from personal_agent.agent_runtime import MEMORY_OWNER
 from personal_agent.context_observations import FRESHNESS_SECONDS, RETENTION_SECONDS, ContextObservations
-from personal_agent.current_context import (CLOCK_KEYS, CLOCK_LEGEND, SNAPSHOT_BYTES, SNAPSHOT_ENTRIES, ContextRefusal,
+from personal_agent.current_context import (SITUATION, SITUATION_CHARS, SITUATION_KIND, SITUATION_SECONDS, CLOCK_KEYS, CLOCK_LEGEND, SNAPSHOT_BYTES, SNAPSHOT_ENTRIES, ContextRefusal,
                                             CurrentContext,
                                             PROFILE_OWNER, local_day_end, mark_conflicts, parse_until,
                                             redact_known_secrets, render)
@@ -632,3 +632,106 @@ class HostZoneFallback(unittest.TestCase):
         self.assertNotIn('local_time', body)
         self.assertNotIn('timezone_source', body)
         self.assertIn('as_of', body)
+
+
+class Situation(ContextCase):
+    """SITUATION-01 (#1004): the upkeep's running note of the owner's day."""
+
+    def note(self, job, text):
+        return self.context.note_situation(job, text)
+
+    def test_one_live_note_the_newest_supersedes_and_the_snapshot_carries_it(self):
+        self.enable()
+        first, _ = self.request('[사진 첨부]')
+        self.assertTrue(self.note(first, '오후 13:48 신라CC 라운드, 동반자 송한별·이재욱·박종인.')['recorded'])
+        self.now += 300
+        second, _ = self.request('지금 집에 차를 타고 가는 중')
+        result = self.note(second, '신라CC 라운드 후 차로 판교 집에 가는 중. 저녁 아직.')
+        self.assertTrue(result['recorded'])
+        self.assertEqual(len(result['superseded']), 1)
+        live = [claim for claim in self.context.hypotheses() if claim['predicate'] == SITUATION]
+        self.assertEqual([claim['value'] for claim in live], ['신라CC 라운드 후 차로 판교 집에 가는 중. 저녁 아직.'])
+        self.assertEqual(live[0]['kind'], SITUATION_KIND)
+        later, _ = self.request('판교 식당')
+        text = self.context.render(later)
+        self.assertIn('차로 판교 집에 가는 중', text)
+        self.assertIn('running note of the owner', text)
+
+    def test_an_older_works_note_never_replaces_a_newer_one(self):
+        self.enable()
+        older, _ = self.request('first')
+        self.now += 60
+        newer, _ = self.request('second')
+        self.assertTrue(self.note(newer, 'newer note')['recorded'])
+        self.assertEqual(self.note(older, 'older note'), {'recorded': False, 'reason': 'situation_newer'})
+        self.assertEqual(self.context.situation()['value'], 'newer note')
+
+    def test_paused_cleared_edited_and_expired_notes_are_gone(self):
+        self.enable()
+        job, _ = self.request('귀가 중')
+        self.note(job, '귀가 중')
+        self.obs.set_controls({'enabled': False})
+        self.assertIsNone(self.context.situation())
+        self.assertEqual(self.note(job, '다시')['reason'], 'context_paused')
+        self.now += 60
+        self.obs.set_controls({'enabled': True, 'clear': True})
+        self.assertIsNone(self.context.situation())
+        self.assertEqual(self.note(job, '지우기 전 메시지')['reason'], 'source_unavailable')
+        self.now += 60
+        job, _ = self.request('저녁 먹는 중')
+        self.note(job, '저녁 먹는 중')
+        self.now += SITUATION_SECONDS + 1
+        self.assertIsNone(self.context.situation(), 'a note no later Work refreshed expires')
+        self.now -= SITUATION_SECONDS + 1
+        with self.store.db() as db:
+            db.execute('UPDATE jobs SET source_edited_at=? WHERE id=?', (self.now, job))
+        self.assertIsNone(self.context.situation(), 'editing the source message invalidates the note')
+
+    def test_secrets_are_removed_the_text_is_bounded_and_empty_is_no_note(self):
+        self.enable()
+        self.store.secret('telegram_token', 'plain-stored-secret-1004')
+        job, _ = self.request('x')
+        self.assertEqual(self.note(job, '   ')['reason'], 'situation_empty')
+        self.note(job, 'token plain-stored-secret-1004 ' + '가' * 600)
+        value = self.context.situation()['value']
+        self.assertNotIn('plain-stored-secret-1004', value)
+        self.assertLessEqual(len(value), SITUATION_CHARS)
+
+    def test_the_workers_propose_tool_cannot_write_a_situation(self):
+        self.enable()
+        job, _ = self.request('x')
+        self.assertEqual(self.propose(job, predicate=SITUATION, value='anything')['reason'], 'unsupported_predicate')
+        self.assertIsNone(self.context.situation())
+
+
+class SituationReview(ContextCase):
+    """#1005 review: queued turns are folded in, and every carried detail keeps its source."""
+
+    def test_an_edit_to_a_carried_forward_source_invalidates_the_rewrite(self):
+        self.enable()
+        first, _ = self.request('송한별 차로 가는 중')
+        self.context.note_situation(first, '송한별 차로 귀가 중')
+        self.now += 60
+        second, _ = self.request('21:30 도착')
+        self.context.note_situation(second, '송한별 차로 귀가 중, 21:30 도착')
+        self.assertEqual(len(self.context.situation()['sources']), 2)
+        with self.store.db() as db:
+            db.execute('UPDATE jobs SET source_edited_at=? WHERE id=?', (self.now, first))
+        self.assertIsNone(self.context.situation(), 'the retracted detail does not stay in later context')
+
+    def test_turns_since_the_note_are_given_oldest_first_and_become_sources(self):
+        self.enable()
+        noted, _ = self.request('noted')
+        self.context.note_situation(noted, 'note')
+        jobs = []
+        for text in ('a', 'b', 'c'):
+            self.now += 60
+            job, _ = self.request(text)
+            jobs.append(job)
+        turns = self.context.situation_turns(jobs[-1])
+        self.assertEqual([turn['message'] for turn in turns], ['a', 'b'])
+        self.assertEqual(self.context.note_situation(jobs[-1], 'note a b c', folded=[t['id'] for t in turns])['recorded'],
+                         True)
+        refs = {source['ref'] for source in self.context.situation()['sources']}
+        self.assertEqual(refs, {'request:' + job for job in (noted, *jobs)})
+        self.assertEqual(self.context.note_situation(jobs[0], 'late older run')['reason'], 'situation_newer')

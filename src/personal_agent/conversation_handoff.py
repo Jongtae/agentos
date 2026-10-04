@@ -977,25 +977,31 @@ class ConversationJudgments:
         return Judgment(JUDGMENT_UNAVAILABLE if verdict == 'unknown' else verdict,
                         source=decision.confidence.provider or decision.outcome)
 
-    def owner_model_proposals(self, request, answer, profile, clock, work_id=None, cancelled=None, noted=()):
+    def owner_model_proposals(self, request, answer, profile, clock, work_id=None, cancelled=None, noted=(),
+                              situation=None, situation_turns=''):
         """``(data, decision)``: durable owner-model proposals from one finished Work (#805).
 
         One ``structured`` call over the owner's request (owner words, never
         cut), the final answer excerpt (model-stated), the profile snapshot and
         the clock, each redacted first, plus what the same Work already noted
-        (``noted``, #836) so a fact is asked about once.  ``data`` is the answer only when
+        (``noted``, #836) so a fact is asked about once, and the live running note of
+        the owner's day (``situation``, #1004; None or '' is said as none) with the
+        earlier turns it does not include yet (``situation_turns``).  ``data`` is the answer only when
         decided with enough confidence; what may be stored is the caller's
         deterministic validation.  Judgment only: it writes nothing.
         """
         from .decision import OUTCOME_UNAVAILABLE, StructuredDecision
-        from .owner_model import ANSWER_CHARS, CLOCK_CHARS, PROFILE_CHARS, PURPOSE, QUESTION, SCHEMA, shape
+        from .owner_model import (ANSWER_CHARS, CLOCK_CHARS, PROFILE_CHARS, PURPOSE, QUESTION, SCHEMA, SITUATION_CHARS,
+                                  SITUATION_TURNS_CHARS, shape)
         # Redacted before they are cut, so a cut never leaves part of a secret.
         facts = {'owner_request': str(request or ''),
                  'final_answer_excerpt': self.redact(answer)[:ANSWER_CHARS] or 'none',
                  'owner_profile': self.redact(profile)[:PROFILE_CHARS] or 'none',
                  'clock': self.redact(clock)[:CLOCK_CHARS] or 'unknown',
                  'already_noted': self.redact('\n'.join(str(item) for item in noted or ()),
-                                              private=False)[:PROFILE_CHARS] or 'none'}
+                                              private=False)[:PROFILE_CHARS] or 'none',
+                 'current_situation': self.redact(situation or '')[:SITUATION_CHARS] or 'none',
+                 'turns_since_situation': self.redact(situation_turns or '')[-SITUATION_TURNS_CHARS:] or 'none'}
         context = self._context(PURPOSE, facts, work_id=work_id, uncut='owner_request', cancelled=cancelled)
         method = getattr(self.engine, 'structured', None)
         decision = (method(context, QUESTION, SCHEMA, shape) if method is not None

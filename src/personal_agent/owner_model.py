@@ -102,6 +102,9 @@ MAX_KEY_CHARS = 160
 ANSWER_CHARS = 1500
 PROFILE_CHARS = 1200
 CLOCK_CHARS = 300
+#: SITUATION-01 (#1004): the running note of the owner's day the same judgment returns
+#: (``current_context.SITUATION_CHARS`` bounds what is stored).
+SITUATION_CHARS = 400
 
 STATE_PENDING, STATE_CLAIMED = 'pending', 'claimed'
 STATE_DONE, STATE_UNAVAILABLE, STATE_EXPIRED, STATE_GONE = 'done', 'unavailable', 'expired', 'gone'
@@ -256,7 +259,15 @@ QUESTION = ('From this one finished request, propose durable facts about the own
             'usually think. Do not repeat '
             'what owner_profile already says. A fact is never the request: what the owner asked for, wished for or wanted watched in owner_request is the task of that request, not a durable fact about the owner, so never turn the request sentence into content. Use clock only to turn relative time into an absolute date, or to '
             'leave out what is only about today. Propose at most 5, and an empty list when nothing durable and '
-            'new was said. This judgment writes nothing.')
+            'new was said. '
+            'Separately, situation is a running note of the owner\'s day so far, for the assistant\'s later '
+            'requests today: where the owner is and what they are doing, who they are with, what has happened and '
+            'what is coming next, as far as owner_request, final_answer_excerpt (including what the assistant read '
+            'from an attachment) and current_situation show it. Rewrite current_situation with this request in '
+            'mind: keep what still holds, update what changed, drop what is over or no longer useful, and give '
+            'times from clock as local times. Write plain sentences in the owner\'s language, at most 400 '
+            'characters, with no advice and no guess presented as fact. Leave situation an empty string when '
+            'this request adds nothing to current_situation. This judgment writes nothing.')
 
 SCHEMA = {'type': 'object', 'additionalProperties': False,
           'properties': {'proposals': {'type': 'array', 'items': {
@@ -267,13 +278,14 @@ SCHEMA = {'type': 'object', 'additionalProperties': False,
                              'content': {'type': 'string'},
                              'evidence': {'type': 'string'},
                              'supersedes_key': {'type': 'string'}},
-              'required': ['category', 'kind', 'memory_key', 'content', 'evidence', 'supersedes_key']}}},
-          'required': ['proposals']}
+              'required': ['category', 'kind', 'memory_key', 'content', 'evidence', 'supersedes_key']}},
+                         'situation': {'type': 'string'}},
+          'required': ['proposals', 'situation']}
 
 
 def shape(data):
-    """Types only; each proposal's meaning is ``validate``'s."""
-    return isinstance(data.get('proposals'), list)
+    """Types only; each proposal's meaning is ``validate``'s (an absent situation is no note)."""
+    return isinstance(data.get('proposals'), list) and isinstance(data.get('situation', ''), str)
 
 
 def normalized(text):
@@ -575,7 +587,7 @@ class Upkeep:
         return {key for key, _content in rows}, list(dict.fromkeys(content for _key, content in rows if content))
 
     # -- one run ------------------------------------------------------------
-    def run(self, job, judgments, *, answer, profile, clock, cancelled=None):
+    def run(self, job, judgments, *, answer, profile, clock, cancelled=None, situation=None, note_situation=None):
         """Ask, validate and apply for one finished Work; returns ``(state, calls, event_status, detail)``.
 
         ``judgments`` is a ``ConversationJudgments`` whose redactor is scoped
@@ -584,13 +596,19 @@ class Upkeep:
         and before each write, the owner's pause switch and the rolling cap
         are read again; a pause stops the run, a spent cap or the deadline
         (``cancelled()``) stops further calls, and ``stopped`` says which.
+
+        SITUATION-01 (#1004): ``situation`` is the live running note of the
+        owner's day ('' for none) and ``note_situation(text)`` records the
+        judgment's rewrite of it; both are None while current context is off,
+        and then no note is read or written.  An empty rewrite keeps the note.
         """
         from .agent_runtime import MEMORY_OWNER, SECRET_SHAPED_VALUE, memory_value_has_secret
         stop = cancelled or (lambda: False)
         request = str(job.get('message') or '')
         noted_keys, noted = self.work_noted(job['id'])
         data, decision = judgments.owner_model_proposals(request, answer, profile, clock, work_id=job['id'],
-                                                         cancelled=cancelled, noted=noted)
+                                                         cancelled=cancelled, noted=noted,
+                                                         situation=situation if note_situation else None)
         confidence = decision.confidence
         calls = 1 if call_sent(decision) else 0
         self.count(job['id'], calls)
@@ -633,6 +651,15 @@ class Upkeep:
                        auto_saved=True)
             applied.append(row)
         detail.update(proposed=len(data.get('proposals') or []), applied=applied, dropped=dropped, stopped=stopped)
+        note = data.get('situation')
+        if note_situation is not None and isinstance(note, str) and note.strip() and stopped != STOPPED_PAUSED:
+            # A write, not a call: only the pause holds it.  Evidence keeps the outcome and size, never the text.
+            if self.allowance(self.clock())[1] == STOPPED_PAUSED:
+                detail['situation'] = {'recorded': False, 'reason': STOPPED_PAUSED}
+            else:
+                result = note_situation(note) or {}
+                detail['situation'] = {'recorded': bool(result.get('recorded')), 'reason': result.get('reason'),
+                                       'chars': result.get('chars')}
         return STATE_DONE, calls, EVENT_RECORDED, detail
 
     # -- one self-review (#998) ---------------------------------------------

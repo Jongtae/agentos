@@ -1095,9 +1095,20 @@ class AgentService:
                 if (detail.get('lesson') or {}).get('memory_id'):
                     self.queue_upkeep_memory_saved(work_id)
                 return
+            # SITUATION-01 (#1004): the same judgment rewrites the running note of the owner's day,
+            # only while current context is on; the Work's saved private values never enter it.
+            situation=note_situation=None
+            try:
+                if self.current_state.enabled():
+                    live=self.current_state.situation()
+                    situation=live['value'] if live else ''
+                    note_situation=lambda text:self.current_state.note_situation(work_id,self.scrub_work_text(work_id,text))
+            except Exception:
+                situation=note_situation=None
             state,calls,status,detail=upkeep.run(job,judgments,answer=job.get('response') or '',
                                                  profile=self.owner_profile_snapshot(),clock=clock,
-                                                 cancelled=cancelled)
+                                                 cancelled=cancelled,situation=situation,
+                                                 note_situation=note_situation)
             upkeep.finish(work_id,state,calls,status,detail,upkeep.clock())
             LOG.info('owner-model upkeep work=%s state=%s calls=%s applied=%s',work_id,state,calls,len(detail.get('applied') or ()))
             # #836: candidates this upkeep left pending join the Work's one ask.

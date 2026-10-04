@@ -47,6 +47,16 @@ SNAPSHOT_ENTRIES = USABLE_ENTRY_LIMIT
 PREDICATES = ('current_place', 'work_mode', 'availability_hint')
 WORK_MODES = ('remote', 'office', 'off', 'away', 'unknown')
 KINDS = ('owner_statement_interpretation', 'source_report', 'inferred')
+#: SITUATION-01 (#1004): the running note of the owner's day so far.  The owner-model
+#: upkeep's Judgment AI writes it after each answered Work (``note_situation``); the
+#: worker's ``propose_current_state`` cannot (it is not in ``PREDICATES``).  One note is
+#: live at a time: the newest supersedes the rest.  A model's summary of the
+#: conversation, never the owner's words, a measurement, Memory or a profile fact.
+SITUATION = 'situation'
+SITUATION_KIND = 'conversation_summary'
+SITUATION_CHARS = 400
+#: A note no later Work refreshed is gone after this long (also capped by retention).
+SITUATION_SECONDS = 6 * 3600
 VALUE_CHARS = 80
 ANCHOR_CHARS = 120
 #: Coordinates in the snapshot and in a weather dispatch: two decimals (about
@@ -112,6 +122,8 @@ REFUSALS = {
     'invalid_place_ref': 'place_ref는 현재 맥락의 obs: 위치 참조 또는 저장된 profile:place. 장소여야 합니다.',
     'invalid_supersedes': '고칠 가설(state:)을 찾지 못했거나, 소유자 메시지 근거 없이 다른 가설을 대체하려 했습니다.',
     'source_stale': '근거 위치가 15분 넘게 지난 마지막 위치라 현재 장소로 기록하지 않았습니다. 소유자에게 지금 위치를 한 번 물어보세요.',
+    'situation_empty': '상황 메모가 비어 있어 기록하지 않았습니다.',
+    'situation_newer': '더 나중 메시지에서 쓴 상황 메모가 이미 있어 이 메모로 바꾸지 않았습니다.',
 }
 
 
@@ -450,6 +462,62 @@ class CurrentContext:
                              'end': min(until, expires_at), 'sources': [source]},
                             superseded=[STATE_PREFIX + item for item in superseded])
 
+    # --- the running situation note (SITUATION-01, #1004) ------------------
+
+    def situation(self, now=None):
+        """The live situation note ``{'ref', 'value', 'at'}`` or None (off, cleared, expired or none)."""
+        for claim in self.hypotheses(now):
+            if claim['predicate'] == SITUATION:
+                return {'ref': STATE_PREFIX + claim['id'], 'value': claim['value'],
+                        'at': claim['sources'][0].get('at', 0)}
+        return None
+
+    def note_situation(self, job_id, text, now=None):
+        """Record the upkeep's running note of the owner's day, sourced from Work ``job_id``.
+
+        The source is the Work's own owner message, so an edit invalidates the
+        note and a message sent before the last clear cannot write one.  The
+        note supersedes every live note, except that a note written from a
+        later message is never replaced by one from an earlier message (an
+        older upkeep that ran late).  Stored secrets are removed first; the
+        text is bounded.  Returns a plain result; a refusal never raises.
+        """
+        now = self.now() if now is None else now
+        text = ' '.join(redact_known_secrets(self.store, text or '').split())
+        if len(text) > SITUATION_CHARS:
+            text = text[:SITUATION_CHARS - 1].rstrip() + '…'
+        try:
+            if not text:
+                raise refusal('situation_empty')
+            with self.store.db() as db:
+                db.execute('BEGIN IMMEDIATE')
+                settings = self.observations.settings(db)
+                if not settings['enabled']:
+                    raise refusal('context_paused')
+                scope = _owner_scope(db)
+                source = self._request_source(db, job_id, settings)
+                if source['at'] > now + CLOCK_SKEW_SECONDS:
+                    raise refusal('source_unavailable')
+                live = [claim for claim in self._live_claims(db, scope, settings, now) if claim['predicate'] == SITUATION]
+                if any(claim['sources'][0].get('at', 0) > source['at'] for claim in live):
+                    raise refusal('situation_newer')
+                until = min(now + SITUATION_SECONDS, source['at'] + RETENTION_SECONDS)
+                if until <= now:
+                    raise refusal('invalid_interval')
+                superseded = [claim['id'] for claim in live]
+                for claim_id in superseded:
+                    db.execute("UPDATE current_state_claims SET state='superseded' WHERE id=?", (claim_id,))
+                claim_id = str(uuid.uuid4())
+                db.execute('INSERT INTO current_state_claims VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                           (claim_id, *scope, settings['epoch'], SITUATION, json.dumps({'value': text, 'place_ref': None}),
+                            SITUATION_KIND, json.dumps([source]), min(source['at'], now), until,
+                            source['at'] + RETENTION_SECONDS, 1,
+                            STATE_PREFIX + superseded[0] if superseded else None, 'current', job_id, now))
+        except ContextRefusal as exc:
+            return {'recorded': False, 'reason': exc.code}
+        return {'recorded': True, 'state_ref': STATE_PREFIX + claim_id, 'chars': len(text),
+                'superseded': [STATE_PREFIX + item for item in superseded], 'until': iso(until)}
+
     @staticmethod
     def _result(claim, duplicate=False, superseded=()):
         # ``state_ref`` names the hypothesis; ``ref`` is reserved for the loop's
@@ -684,7 +752,8 @@ LEGEND = ('Refs are opaque. Pass a location ref to weather(location_ref) instead
           'a saved place. status fresh = a recent sender-reported position (not verified GPS); stale = last known, '
           'not current; reference = a place that was shared, not where the owner is. hypotheses are revisable '
           'interpretations for their interval, not Memory; record or correct today\'s situation with '
-          'propose_current_state.')
+          'propose_current_state. A situation hypothesis is the assistant\'s own running note of the owner\'s day '
+          'so far, summarised from earlier messages: background, not the owner\'s words.')
 
 
 #: #804: the legend and keys of a clock-only snapshot (context off: no refs to explain).

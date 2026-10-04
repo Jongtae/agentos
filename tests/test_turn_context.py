@@ -779,8 +779,9 @@ class ReferentContext(unittest.TestCase):
         self.assertNotIn('[The owner saw', context_message(self.rows('web')[1])['content'])
         self.assertNotIn('[The owner saw', context_message(self.rows('telegram:3', delivery='cancelled')[1])['content'])
         self.assertNotIn('[The owner saw', context_message(self.rows('telegram:3', content='plain text')[1])['content'])
-        unknown = context_message(self.rows('telegram:3', delivery='unknown')[1])['content']
-        self.assertIn('https://a.example/one', unknown, 'a reply whose send may have reached the owner is annotated')
+        # Review P1: only a confirmed send says the owner saw it.
+        for state in ('unknown', 'pending', 'sending', 'none'):
+            self.assertNotIn('[The owner saw', context_message(self.rows('telegram:3', delivery=state)[1])['content'], state)
 
     def test_the_card_note_follows_the_outcome_qualifier(self):
         rows = qualify_transcript([{'role': 'assistant', 'content': 'x https://a.example/one', 'channel': 'telegram:1',

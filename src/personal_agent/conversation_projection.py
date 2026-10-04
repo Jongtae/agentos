@@ -475,8 +475,9 @@ TELEGRAM_PREVIEW_NOTE = '[The owner saw this message on Telegram with a link pre
 #: target and a bare URL are both found at their position in the text, so the
 #: first match is the first link Telegram renders.
 _URL = re.compile(r'https?://[^\s()"<>]+')
-#: Delivery states under which the owner did not receive the reply on Telegram.
-_UNDELIVERED = ('cancelled', 'none')
+#: Review P1: only a send Telegram confirmed says the owner saw the reply; pending,
+#: sending, unknown, cancelled and none do not.
+_DELIVERED = ('sent',)
 
 
 def previewed_link(text):
@@ -494,7 +495,7 @@ def shown_note(row):
     """
     if row.get('role') != 'assistant' or not str(row.get('channel') or '').startswith('telegram'):
         return None
-    if row.get('delivery') in _UNDELIVERED:
+    if row.get('delivery') not in _DELIVERED:
         return None
     url = previewed_link(row.get('content'))
     return TELEGRAM_PREVIEW_NOTE.format(url=url) if url else None

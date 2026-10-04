@@ -702,3 +702,36 @@ class Situation(ContextCase):
         job, _ = self.request('x')
         self.assertEqual(self.propose(job, predicate=SITUATION, value='anything')['reason'], 'unsupported_predicate')
         self.assertIsNone(self.context.situation())
+
+
+class SituationReview(ContextCase):
+    """#1005 review: queued turns are folded in, and every carried detail keeps its source."""
+
+    def test_an_edit_to_a_carried_forward_source_invalidates_the_rewrite(self):
+        self.enable()
+        first, _ = self.request('송한별 차로 가는 중')
+        self.context.note_situation(first, '송한별 차로 귀가 중')
+        self.now += 60
+        second, _ = self.request('21:30 도착')
+        self.context.note_situation(second, '송한별 차로 귀가 중, 21:30 도착')
+        self.assertEqual(len(self.context.situation()['sources']), 2)
+        with self.store.db() as db:
+            db.execute('UPDATE jobs SET source_edited_at=? WHERE id=?', (self.now, first))
+        self.assertIsNone(self.context.situation(), 'the retracted detail does not stay in later context')
+
+    def test_turns_since_the_note_are_given_oldest_first_and_become_sources(self):
+        self.enable()
+        noted, _ = self.request('noted')
+        self.context.note_situation(noted, 'note')
+        jobs = []
+        for text in ('a', 'b', 'c'):
+            self.now += 60
+            job, _ = self.request(text)
+            jobs.append(job)
+        turns = self.context.situation_turns(jobs[-1])
+        self.assertEqual([turn['message'] for turn in turns], ['a', 'b'])
+        self.assertEqual(self.context.note_situation(jobs[-1], 'note a b c', folded=[t['id'] for t in turns])['recorded'],
+                         True)
+        refs = {source['ref'] for source in self.context.situation()['sources']}
+        self.assertEqual(refs, {'request:' + job for job in (noted, *jobs)})
+        self.assertEqual(self.context.note_situation(jobs[0], 'late older run')['reason'], 'situation_newer')

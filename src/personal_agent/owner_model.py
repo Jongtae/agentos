@@ -105,6 +105,8 @@ CLOCK_CHARS = 300
 #: SITUATION-01 (#1004): the running note of the owner's day the same judgment returns
 #: (``current_context.SITUATION_CHARS`` bounds what is stored).
 SITUATION_CHARS = 400
+#: The earlier turns a rewrite folds in, as the judgment reads them (#1005 review).
+SITUATION_TURNS_CHARS = 4000
 
 STATE_PENDING, STATE_CLAIMED = 'pending', 'claimed'
 STATE_DONE, STATE_UNAVAILABLE, STATE_EXPIRED, STATE_GONE = 'done', 'unavailable', 'expired', 'gone'
@@ -263,8 +265,9 @@ QUESTION = ('From this one finished request, propose durable facts about the own
             'Separately, situation is a running note of the owner\'s day so far, for the assistant\'s later '
             'requests today: where the owner is and what they are doing, who they are with, what has happened and '
             'what is coming next, as far as owner_request, final_answer_excerpt (including what the assistant read '
-            'from an attachment) and current_situation show it. Rewrite current_situation with this request in '
-            'mind: keep what still holds, update what changed, drop what is over or no longer useful, and give '
+            'from an attachment), current_situation and turns_since_situation show it. turns_since_situation are '
+            'earlier turns of today, oldest first, that current_situation does not include yet; owner_request '
+            'comes after them. Rewrite current_situation with all of them in mind: keep what still holds, update what changed, drop what is over or no longer useful, and give '
             'times from clock as local times. Write plain sentences in the owner\'s language, at most 400 '
             'characters, with no advice and no guess presented as fact. Leave situation an empty string when '
             'this request adds nothing to current_situation. This judgment writes nothing.')
@@ -587,7 +590,8 @@ class Upkeep:
         return {key for key, _content in rows}, list(dict.fromkeys(content for _key, content in rows if content))
 
     # -- one run ------------------------------------------------------------
-    def run(self, job, judgments, *, answer, profile, clock, cancelled=None, situation=None, note_situation=None):
+    def run(self, job, judgments, *, answer, profile, clock, cancelled=None, situation=None, note_situation=None,
+            situation_turns=''):
         """Ask, validate and apply for one finished Work; returns ``(state, calls, event_status, detail)``.
 
         ``judgments`` is a ``ConversationJudgments`` whose redactor is scoped
@@ -601,6 +605,8 @@ class Upkeep:
         owner's day ('' for none) and ``note_situation(text)`` records the
         judgment's rewrite of it; both are None while current context is off,
         and then no note is read or written.  An empty rewrite keeps the note.
+        ``situation_turns`` are the turns since the note that this rewrite
+        folds in (scrubbed by the caller), oldest first.
         """
         from .agent_runtime import MEMORY_OWNER, SECRET_SHAPED_VALUE, memory_value_has_secret
         stop = cancelled or (lambda: False)
@@ -608,7 +614,8 @@ class Upkeep:
         noted_keys, noted = self.work_noted(job['id'])
         data, decision = judgments.owner_model_proposals(request, answer, profile, clock, work_id=job['id'],
                                                          cancelled=cancelled, noted=noted,
-                                                         situation=situation if note_situation else None)
+                                                         situation=situation if note_situation else None,
+                                                         situation_turns=situation_turns if note_situation else '')
         confidence = decision.confidence
         calls = 1 if call_sent(decision) else 0
         self.count(job['id'], calls)

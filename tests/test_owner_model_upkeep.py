@@ -772,3 +772,28 @@ class Situation(Upkeep):
         self.assertIn('running note of the owner\'s day', question)
         self.assertTrue(om.shape({'proposals': []}), 'an answer without a situation is no note, not a failure')
         self.assertFalse(om.shape({'proposals': [], 'situation': 3}))
+
+
+class SituationQueue(Upkeep):
+    """#1005 review: Works that finished before the upkeep ran are folded into the newest run."""
+
+    def setUp(self):
+        super().setUp()
+        self.service.context_observations.set_controls({'enabled': True, 'timezone': 'Asia/Seoul'})
+
+    def test_queued_works_are_folded_into_the_newest_run(self):
+        first = self.finished('[사진 첨부]', answer='신라CC 스코어카드, 동반자 송한별')
+        time.sleep(0.01)
+        self.finished('집에 차로 가는 중', answer='곤지암 식당')
+        time.sleep(0.01)
+        self.finished('도착 9시반', answer='알겠습니다')
+        self.answers, self.situations = [[], [], []], ['신라CC 후 송한별 차로 귀가 중, 21:30 도착', 'older', 'oldest']
+        for _ in range(3):
+            self.service.run_owner_model_upkeep()
+        turns = self.facts[0][0].facts['turns_since_situation']
+        self.assertLess(turns.index('[사진 첨부]'), turns.index('집에 차로 가는 중'))
+        self.assertIn('송한별', turns)
+        self.assertEqual(self.service.current_state.situation()['value'], '신라CC 후 송한별 차로 귀가 중, 21:30 도착')
+        self.assertEqual(len(self.service.current_state.situation()['sources']), 3)
+        self.assertEqual(self.evidence(first)[0][1]['situation'], {'recorded': False, 'reason': 'situation_newer',
+                                                                   'chars': None})

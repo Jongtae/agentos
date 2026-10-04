@@ -57,6 +57,9 @@ SITUATION_KIND = 'conversation_summary'
 SITUATION_CHARS = 400
 #: A note no later Work refreshed is gone after this long (also capped by retention).
 SITUATION_SECONDS = 6 * 3600
+#: The turns a rewrite folds in (#1005 review): the Works since the live note, oldest first.
+SITUATION_TURNS = 8
+SITUATION_TURN_CHARS = 300
 VALUE_CHARS = 80
 ANCHOR_CHARS = 120
 #: Coordinates in the snapshot and in a weather dispatch: two decimals (about
@@ -465,22 +468,63 @@ class CurrentContext:
     # --- the running situation note (SITUATION-01, #1004) ------------------
 
     def situation(self, now=None):
-        """The live situation note ``{'ref', 'value', 'at'}`` or None (off, cleared, expired or none)."""
+        """The live situation note ``{'ref', 'value', 'at', 'sources'}`` or None (off, cleared, expired or none)."""
         for claim in self.hypotheses(now):
             if claim['predicate'] == SITUATION:
                 return {'ref': STATE_PREFIX + claim['id'], 'value': claim['value'],
-                        'at': claim['sources'][0].get('at', 0)}
+                        'at': max(source.get('at', 0) for source in claim['sources']), 'sources': claim['sources']}
         return None
 
-    def note_situation(self, job_id, text, now=None):
+    def situation_turns(self, job_id, now=None):
+        """The Works a rewrite from ``job_id`` folds in: ``[{'id', 'local', 'message', 'response'}]``, oldest first.
+
+        The upkeep runs the newest pending Work first (#876), so the Works that
+        finished since the live note - or, with none, within ``SITUATION_SECONDS``
+        - and before ``job_id`` are given to the same judgment instead of being
+        lost (#1005 review).  At most ``SITUATION_TURNS``; preparation runs and
+        the live note's own sources are left out.  Raw texts: the caller scrubs
+        each with its own Work's private values.
+        """
+        now = self.now() if now is None else now
+        job = self.store.job(job_id) if job_id else None
+        if not job:
+            return []
+        live = self.situation(now)
+        start = live['at'] if live else now - SITUATION_SECONDS
+        noted = {source.get('ref') for source in (live or {}).get('sources', ())}
+        with self.store.db() as db:
+            rows = [dict(row) for row in db.execute(
+                "SELECT id,message,response,created FROM jobs WHERE created>=? AND created<? AND id!=? "
+                "AND request_key NOT LIKE 'preparation:%' ORDER BY created DESC LIMIT ?",
+                (start, job['created'], job_id, SITUATION_TURNS + len(noted)))]
+            settings = self.observations.settings(db)
+        tz = zone(settings['timezone'])
+        if tz is None:
+            try:
+                _name, tz = host_zone(self.store)
+            except Exception:
+                tz = None
+        turns = []
+        for row in reversed(rows):
+            if REQUEST_PREFIX + row['id'] in noted:
+                continue
+            local = datetime.fromtimestamp(row['created'], tz).strftime('%H:%M') if tz else ''
+            turns.append({'id': row['id'], 'local': local, 'message': str(row['message'] or '')[:SITUATION_TURN_CHARS],
+                          'response': str(row['response'] or '')[:SITUATION_TURN_CHARS]})
+        return turns[-SITUATION_TURNS:]
+
+    def note_situation(self, job_id, text, now=None, folded=()):
         """Record the upkeep's running note of the owner's day, sourced from Work ``job_id``.
 
         The source is the Work's own owner message, so an edit invalidates the
         note and a message sent before the last clear cannot write one.  The
         note supersedes every live note, except that a note written from a
         later message is never replaced by one from an earlier message (an
-        older upkeep that ran late).  Stored secrets are removed first; the
-        text is bounded.  Returns a plain result; a refusal never raises.
+        older upkeep that ran late).  A rewrite carries details forward, so its
+        sources are its own message, the live note's still-valid sources and
+        the ``folded`` Works' messages: an edit to any of them invalidates it
+        (#1005 review).  Stored secrets are removed first; the text is bounded.
+        Returns a plain result; a refusal never raises.
         """
         now = self.now() if now is None else now
         text = ' '.join(redact_known_secrets(self.store, text or '').split())
@@ -499,8 +543,17 @@ class CurrentContext:
                 if source['at'] > now + CLOCK_SKEW_SECONDS:
                     raise refusal('source_unavailable')
                 live = [claim for claim in self._live_claims(db, scope, settings, now) if claim['predicate'] == SITUATION]
-                if any(claim['sources'][0].get('at', 0) > source['at'] for claim in live):
+                if any(item.get('at', 0) > source['at'] for claim in live for item in claim['sources']):
                     raise refusal('situation_newer')
+                sources = {source['ref']: source}
+                for claim in live:
+                    sources.update((item['ref'], item) for item in claim['sources'] if item['ref'] not in sources)
+                for other in folded:
+                    try:
+                        item = self._request_source(db, other, settings)
+                    except ContextRefusal:
+                        continue
+                    sources.setdefault(item['ref'], item)
                 until = min(now + SITUATION_SECONDS, source['at'] + RETENTION_SECONDS)
                 if until <= now:
                     raise refusal('invalid_interval')
@@ -510,7 +563,7 @@ class CurrentContext:
                 claim_id = str(uuid.uuid4())
                 db.execute('INSERT INTO current_state_claims VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                            (claim_id, *scope, settings['epoch'], SITUATION, json.dumps({'value': text, 'place_ref': None}),
-                            SITUATION_KIND, json.dumps([source]), min(source['at'], now), until,
+                            SITUATION_KIND, json.dumps(list(sources.values())), min(source['at'], now), until,
                             source['at'] + RETENTION_SECONDS, 1,
                             STATE_PREFIX + superseded[0] if superseded else None, 'current', job_id, now))
         except ContextRefusal as exc:

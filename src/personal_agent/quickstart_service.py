@@ -1097,18 +1097,27 @@ class AgentService:
                 return
             # SITUATION-01 (#1004): the same judgment rewrites the running note of the owner's day,
             # only while current context is on; the Work's saved private values never enter it.
+            # #1005 review: the turns since the note (the newest Work runs first) are folded into the
+            # same rewrite, each scrubbed with its own Work's values, and become the note's sources too.
             situation=note_situation=None
+            turns=''
             try:
                 if self.current_state.enabled():
                     live=self.current_state.situation()
                     situation=live['value'] if live else ''
-                    note_situation=lambda text:self.current_state.note_situation(work_id,self.scrub_work_text(work_id,text))
+                    earlier=self.current_state.situation_turns(work_id)
+                    turns='\n'.join(f"[{turn['local']}] owner: {self.scrub_work_text(turn['id'],turn['message'])}"
+                                     f" | assistant: {self.scrub_work_text(turn['id'],turn['response'])}" for turn in earlier)
+                    folded=[turn['id'] for turn in earlier]
+                    note_situation=lambda text:self.current_state.note_situation(
+                        work_id,self.scrub_work_text(work_id,text),folded=folded)
             except Exception:
                 situation=note_situation=None
+                turns=''
             state,calls,status,detail=upkeep.run(job,judgments,answer=job.get('response') or '',
                                                  profile=self.owner_profile_snapshot(),clock=clock,
                                                  cancelled=cancelled,situation=situation,
-                                                 note_situation=note_situation)
+                                                 note_situation=note_situation,situation_turns=turns)
             upkeep.finish(work_id,state,calls,status,detail,upkeep.clock())
             LOG.info('owner-model upkeep work=%s state=%s calls=%s applied=%s',work_id,state,calls,len(detail.get('applied') or ()))
             # #836: candidates this upkeep left pending join the Work's one ask.

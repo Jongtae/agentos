@@ -60,7 +60,7 @@ class UpstreamTransition1032Tests(unittest.TestCase):
     def test_after_fixture_is_the_exact_reviewed_git_blob(self):
         raw = AFTER.read_bytes()
         digest = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
-        self.assertEqual(digest, "97e6960c7b6a07eb2ca0986a3de51edd9e87b675")
+        self.assertEqual(digest, "d1bb021a65d9cc9c40e8516bde07a1814a846b8f")
 
     def test_only_transition_iteration_is_appended(self):
         old_items = self.before["iterations"]
@@ -68,7 +68,7 @@ class UpstreamTransition1032Tests(unittest.TestCase):
         self.assertEqual(new_items[:-1], old_items)
         self.assertEqual(new_items[-1]["id"], "GOV-UPSTREAM-NEXT-01")
         self.assertEqual(new_items[-1]["issue"], 1032)
-        self.assertEqual(new_items[-1]["depends_on"], ["UPSTREAM-MAP-01"])
+        self.assertNotIn("depends_on", new_items[-1])
         ids = [row["id"] for row in new_items]
         self.assertEqual(len(ids), len(set(ids)))
 

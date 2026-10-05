@@ -135,6 +135,19 @@ class ProfileTests(unittest.TestCase):
         self.addCleanup(self.profile._release)
         self.assertEqual(self.profile.refresh_session('https://www.shop.test/'), {'state': 'busy'})
 
+    def test_an_http_refresh_rewrites_only_that_site_and_pushes_it(self):
+        self.jar.save_export({'shop.test': [cookie('.shop.test', 'FSID', 'old')], 'news.test': [cookie('.news.test')]})
+        writes = self.jar.writes
+        build, _ = HttpRefreshTests().opener(set_cookie='FSID=new; Domain=.shop.test; Path=/')
+        self.assertEqual(self.profile.refresh_session_http('https://www.shop.test/', opener=build), {'state': 'refreshed'})
+        self.assertEqual(self.drivers, [], 'no browser was started')
+        self.assertEqual(self.jar.writes, writes + 1)
+        self.assertEqual([row['value'] for row in self.jar.site_rows('shop.test')], ['new'])
+        self.assertEqual(len(self.jar.site_rows('news.test')), 1, 'another site is untouched')
+        self.assertEqual(self.touched[-1], {'shop.test'})
+        self.assertTrue(self.profile._lock.acquire(blocking=False))
+        self.profile._lock.release()
+
     def test_a_work_waits_for_a_running_keepalive_instead_of_failing(self):
         self.profile._acquire(bs.KEEPALIVE_HOLDER)
         threading.Timer(0.2, self.profile._release).start()
@@ -144,6 +157,56 @@ class ProfileTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 5)
         with self.assertRaises(ToolError):
             self.profile._acquire('work-2')  # any other holder is still refused at once
+
+
+class HttpRefreshTests(unittest.TestCase):
+    """#1015: the request itself (an injected opener; nothing leaves this machine)."""
+
+    def opener(self, set_cookie=None, status=200, error=None):
+        seen = {}
+
+        def build(*handlers):
+            processor = next(h for h in handlers if hasattr(h, 'cookiejar'))
+
+            class Client:
+                def open(self, request, timeout=None):
+                    processor.cookiejar.add_cookie_header(request)
+                    seen['cookie'] = request.get_header('Cookie')
+                    seen['agent'] = request.get_header('User-agent')
+                    if error is not None:
+                        raise error
+                    if set_cookie:
+                        import email.message, io, urllib.response
+                        headers = email.message.Message()
+                        headers['Set-Cookie'] = set_cookie
+                        response = urllib.response.addinfourl(io.BytesIO(b'ok'), headers, request.full_url, status)
+                        processor.cookiejar.extract_cookies(response, request)
+                    import io, urllib.response, email.message
+                    return urllib.response.addinfourl(io.BytesIO(b'ok'), email.message.Message(), request.full_url, status)
+            return Client()
+        return build, seen
+
+    def rows(self):
+        return [cookie('.shop.test', 'FSID', 'old'), cookie('pay.shop.test', 'JSESSIONID', 'pay-only')]
+
+    def test_only_the_hosts_cookies_go_out_and_a_rotated_value_comes_back(self):
+        build, seen = self.opener(set_cookie='FSID=new; Domain=.shop.test; Path=/; HttpOnly')
+        state, after = bs.http_refresh('https://www.shop.test/', self.rows(), opener=build, refusal=lambda url, allowed: None)
+        self.assertEqual(state, 'refreshed')
+        self.assertEqual(seen['cookie'], 'FSID=old', 'a cookie of another host is not sent')
+        self.assertEqual(seen['agent'], bs.KEEPALIVE_HTTP_AGENT)
+        values = {(row['name'], row['domain']): row['value'] for row in after}
+        self.assertEqual(values[('FSID', '.shop.test')], 'new')
+        self.assertEqual(values[('JSESSIONID', 'pay.shop.test')], 'pay-only', 'untouched rows are kept')
+
+    def test_a_refused_request_or_destination_is_not_a_refresh(self):
+        import urllib.error
+        build, _ = self.opener(error=urllib.error.HTTPError('https://www.shop.test/', 403, 'no', {}, None))
+        self.assertEqual(bs.http_refresh('https://www.shop.test/', self.rows(), opener=build,
+                                         refusal=lambda url, allowed: None), ('blocked', None))
+        self.assertEqual(bs.http_refresh('http://127.0.0.1/', self.rows(), opener=build), ('failed', None))
+        self.assertEqual(bs.http_refresh('https://www.shop.test/', self.rows(), opener=build,
+                                         refusal=lambda url, allowed: 'blocked_destination'), ('failed', None))
 
 
 class ServiceTests(unittest.TestCase):
@@ -156,8 +219,9 @@ class ServiceTests(unittest.TestCase):
         self.jar.save_export({'shop.test': [cookie('.shop.test', expires=NOW + 30 * 86400)],
                               'other.test': [cookie('.other.test')]})
         self.profile = bs.BrowserProfile(root / 'profile', launcher=lambda d, h: ExportDriver(), jar=self.jar)
-        self.refreshes = []
-        self.profile.refresh_session = lambda url: self.refreshes.append(url) or {'state': 'refreshed'}
+        self.refreshes, self.browser_loads = [], []
+        self.profile.refresh_session_http = lambda url: self.refreshes.append(url) or {'state': 'refreshed'}
+        self.profile.refresh_session = lambda url: self.browser_loads.append(url) or {'state': 'refreshed'}
         self.service = AgentService(self.store, ModelAdapter(lambda *a, **k: {}), lambda *a, **k: {'ok': True, 'result': []},
                                     browser_profile=self.profile)
         self.store.put(BROWSER_OWNER_SIGNINS_KEY, {'shop.test': {'at': NOW - 4 * 3600, 'marks': ['m'], 'host': 'www.shop.test'}})
@@ -181,7 +245,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.refreshes, [])
 
     def test_a_busy_browser_records_nothing_and_is_tried_again(self):
-        self.profile.refresh_session = lambda url: {'state': 'busy'}
+        self.profile.refresh_session_http = lambda url: {'state': 'busy'}
         self.assertIsNone(self.service.keep_sessions_alive(now=NOW))
         self.assertEqual(self.store.config(self.service.KEEPALIVE_KEY, {}), {})
 
@@ -201,6 +265,28 @@ class ServiceTests(unittest.TestCase):
         self.service._request_browser_login(self.store.job(job['id']), 'https://www.shop.test/login', explicit=True)
         lifetime = self.store.config(self.service.SESSION_LIFETIMES_KEY, {}).get('shop.test')
         self.assertTrue(1700 < lifetime < 1900, lifetime)
+
+    def test_a_refresh_is_one_http_request_first_and_needs_no_browser(self):
+        """#1015: a page in the browser is ~900 MB on this site class; the request carries the cookies alone."""
+        self.assertEqual(self.service.keep_sessions_alive(now=NOW), 'shop.test')
+        self.assertEqual((self.refreshes, self.browser_loads), (['https://www.shop.test/'], []))
+        self.assertEqual(self.store.config(self.service.KEEPALIVE_VIA_KEY, {}), {'shop.test': 'http'})
+
+    def test_a_site_that_refuses_the_request_is_refreshed_by_the_browser_from_then_on(self):
+        self.profile.refresh_session_http = lambda url: self.refreshes.append(url) or {'state': 'blocked'}
+        self.assertEqual(self.service.keep_sessions_alive(now=NOW), 'shop.test')
+        self.assertEqual(self.browser_loads, ['https://www.shop.test/'])
+        self.assertEqual(self.store.config(self.service.KEEPALIVE_BROWSER_ONLY_KEY, []), ['shop.test'])
+        self.store.put(self.service.KEEPALIVE_KEY, {'shop.test': NOW - 4 * 3600})
+        self.service.keep_sessions_alive(now=NOW)
+        self.assertEqual(len(self.refreshes), 1, 'no second HTTP try on a browser-only site')
+        self.assertEqual(len(self.browser_loads), 2)
+
+    def test_a_logout_after_an_http_refresh_moves_the_site_to_the_browser(self):
+        self.service.keep_sessions_alive(now=NOW)
+        self.store.put(self.service.KEEPALIVE_KEY, {'shop.test': NOW - 1800})
+        self.service.note_signed_out('www.shop.test', now=NOW)
+        self.assertEqual(self.store.config(self.service.KEEPALIVE_BROWSER_ONLY_KEY, []), ['shop.test'])
 
     def test_the_work_loop_starts_a_check_only_while_idle_and_at_most_once_a_minute(self):
         self.service.SESSION_KEEPALIVE = True

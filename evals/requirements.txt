@@ -5,4 +5,4 @@
 # openai: OpenAI Python SDK, Apache-2.0; Inspect's provider for an openai/* judge.
 # Install into a separate virtualenv, e.g. ~/.local/share/agentos-evals/venv.
 inspect-ai==0.3.271
-openai==3.19.2
+openai==3.24.0

@@ -172,7 +172,10 @@ QUESTION = (
     'A combination of worker and model that already fell short is refused. '
     'reason is one short line saying why this worker fits. account_change is true when the owner\'s message may change '
     'something in an account the browser is signed in to (adding to or removing from a cart, a booking or reservation, '
-    'a saved item, a submitted form), else false; such work never runs on the lowest-cost model.')
+    'a saved item, a submitted form), else false; such work never runs on the lowest-cost model. owner_situation is '
+    'true when a useful reply depends on the owner\'s own situation - where they are, when or how they will act on '
+    'it, who they are with, what they are trying to get done - and not only on facts that would be the same for '
+    'anyone, else false; such work never runs on the lowest-cost model either.')
 PURPOSE = 'work-orchestration'
 
 
@@ -466,8 +469,9 @@ def plan_schema(workers):
                           'properties': {'notes': {'type': 'string'}},
                           'required': ['notes']},
                 'reason': {'type': 'string'},
-                'account_change': {'type': 'boolean'}},
-            'required': ['worker', 'model', 'brief', 'reason', 'account_change']}
+                'account_change': {'type': 'boolean'},
+                'owner_situation': {'type': 'boolean'}},
+            'required': ['worker', 'model', 'brief', 'reason', 'account_change', 'owner_situation']}
 
 
 def plan_shape(data):
@@ -476,7 +480,8 @@ def plan_shape(data):
     return (isinstance(data.get('worker'), str) and isinstance(data.get('model'), str)
             and isinstance(brief, dict) and isinstance(brief.get('notes'), str) and isinstance(data.get('reason'), str)
             # #948 review: "true" or 1 is a malformed plan, never a silent false.
-            and isinstance(data.get('account_change', False), bool))
+            and isinstance(data.get('account_change', False), bool)
+            and isinstance(data.get('owner_situation', False), bool))
 
 
 # --- one attempt -------------------------------------------------------------
@@ -489,7 +494,7 @@ class Attempt:
     """
 
     __slots__ = ('number', 'worker', 'model', 'notes', 'sections', 'reason', 'planned',
-                 'fallback', 'digest', 'signature', 'account_change', 'lifted_from')
+                 'fallback', 'digest', 'signature', 'account_change', 'owner_situation', 'lifted_from')
 
     def __init__(self, number, worker, *, model='', notes='', reason='', planned=False, fallback=''):
         self.number, self.worker, self.model = number, worker, model
@@ -500,6 +505,8 @@ class Attempt:
         self.digest = digest({'notes': notes}) if planned else ''
         #: #947: the plan judged the message may change a signed-in account; the model a lift replaced.
         self.account_change, self.lifted_from = False, None
+        #: #1008: the plan judged a useful reply depends on the owner's own situation.
+        self.owner_situation = False
 
     def brief(self, adjusted=False):
         """The notes section text a worker receives, or None (#820: supplementary only).
@@ -547,6 +554,8 @@ class Orchestration:
         self.failed = set()
         #: #948 review: whether any plan of this Work judged it account-changing (sticky).
         self.account_change = False
+        #: #1008: whether any plan of this Work judged it to depend on the owner's situation (sticky).
+        self.owner_situation = False
         self.notice = ''
         self.orchestrated = False
         #: The evaluation of the last attempt when no further attempt followed
@@ -660,6 +669,10 @@ class Orchestration:
             # #948 review: once any plan of this Work judged it account-changing, the floor
             # holds for every later attempt, a fallback included, whatever a replan says.
             self.account_change = True
+        if isinstance(data, dict) and data.get('owner_situation') is True:
+            # #1008 (owner decision 2026-10-05): the same sticky floor for a reply that depends
+            # on the owner's own situation.
+            self.owner_situation = True
         if not isinstance(data, dict) or not plan_shape(data):
             return None, 'shape'
         worker = next((row for row in candidates if row['id'] == data['worker']), None)
@@ -673,10 +686,12 @@ class Orchestration:
             # this attempt runs the substitute the catalogue chose, explicitly.
             model = worker['default_model']
         account_change = getattr(self, 'account_change', False)
+        owner_situation = getattr(self, 'owner_situation', False)
         lifted_from = None
-        if account_change:
+        if account_change or owner_situation:
             # #947 (owner decision 2026-10-01): account-changing work never runs on the
-            # lowest-cost model; the decision model judged the message, this only lifts.
+            # lowest-cost model; #1008 (2026-10-05): nor does a reply that depends on the
+            # owner's own situation.  The decision model judged the message; this only lifts.
             lifted = lift_model(worker, model)
             if lifted is not None:
                 lifted_from, model = model or worker.get('default_model') or '', lifted
@@ -690,6 +705,7 @@ class Orchestration:
         attempt = Attempt(number, worker['id'], model=model, notes=notes, reason=one_line(data['reason'], MAX_REASON_CHARS),
                           planned=True)
         attempt.account_change, attempt.lifted_from = account_change, lifted_from
+        attempt.owner_situation = owner_situation
         attempt.signature = self.signature(worker, model)
         return attempt, ''
 
@@ -721,6 +737,7 @@ class Orchestration:
     def _planned(self, attempt):
         self.record(PLANNED, {'attempt': attempt.number, 'worker': attempt.worker, 'model': attempt.model or None,
                               'account_change': getattr(attempt, 'account_change', False),
+                              'owner_situation': getattr(attempt, 'owner_situation', False),
                               'lifted_from': getattr(attempt, 'lifted_from', None),
                               'brief_digest': attempt.digest, 'sections': sorted(attempt.sections),
                               'reason': self._redact(attempt.reason),
@@ -752,13 +769,15 @@ class Orchestration:
             return attempt
         failure = failure or FALLBACK_INVALID
         attempt = Attempt(1, self.catalogue.default, fallback=failure)
-        if getattr(self, 'account_change', False):
-            # #948 review: an invalid plan that still said account_change keeps the floor.
+        if getattr(self, 'account_change', False) or getattr(self, 'owner_situation', False):
+            # #948 review: an invalid plan that still said account_change (or, #1008,
+            # owner_situation) keeps the floor.
             lifted = lift_model(self.catalogue.worker(self.catalogue.default) or {}, '')
             if lifted is not None:
                 default = self.catalogue.worker(self.catalogue.default) or {}
                 attempt.model, attempt.lifted_from = lifted, default.get('default_model') or ''
-            attempt.account_change = True
+            attempt.account_change = getattr(self, 'account_change', False)
+            attempt.owner_situation = getattr(self, 'owner_situation', False)
         self.attempts.append(attempt)
         previous = self._set_state('fallback') if failure == FALLBACK_UNAVAILABLE else {}
         if failure == FALLBACK_UNAVAILABLE and previous.get('state') == 'active':

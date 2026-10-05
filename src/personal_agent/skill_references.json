@@ -4,5 +4,8 @@
    "address": "github.com/Jongtae/agentos/tree/main/skills/shopping-cart"},
   {"name": "emart-ssg",
    "description": "Site know-how for Emart mall on SSG.COM (이마트몰). Use with shopping-cart.",
-   "address": "github.com/Jongtae/agentos/tree/main/skills/emart-ssg"}
+   "address": "github.com/Jongtae/agentos/tree/main/skills/emart-ssg"},
+  {"name": "map-directions",
+   "description": "When the owner will go somewhere: when to leave, how to get there (mode, approximate time, parking) and one route link in the owner's preferred map service.",
+   "address": "github.com/Jongtae/agentos/tree/main/skills/map-directions"}
 ]

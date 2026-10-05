@@ -445,12 +445,8 @@ class AgentService:
     SESSION_KEEPALIVE=True
     #: #990: config row site -> the time its session was last refreshed; and how often the work loop looks.
     KEEPALIVE_KEY='browser_keepalive'
-    #: #1011: config row site -> the shortest session lifetime observed (seconds since its last sign-in or
-    #: refresh when a Work found it signed out).
-    SESSION_LIFETIMES_KEY='browser_session_lifetimes'
-    #: #1015: config row site -> how its last refresh went ('http' or 'browser'), and sites that need the browser.
-    KEEPALIVE_VIA_KEY='browser_keepalive_via'
-    KEEPALIVE_BROWSER_ONLY_KEY='browser_keepalive_browser_only'
+    #: #1041: config row site -> when it refused a refresh; paused until the owner signs in to it again.
+    KEEPALIVE_PAUSED_KEY='browser_keepalive_paused'
     KEEPALIVE_CHECK_SECONDS=60
     _keepalive_next=0.0
 
@@ -6234,9 +6230,6 @@ class AgentService:
             self._put_browser_login(job['id'],{'work_id':job['id'],'url':target,'host':host,
                                                'state':'requested','requested_at':time.time(),
                                                'nonce':secrets.token_hex(16),'explicit':bool(explicit)})
-        # #1011: a site the owner signed in to was found signed out: learn how long its session lasts.
-        try:self.note_signed_out(host)
-        except Exception as exc:LOG.warning('session lifetime not recorded (%s)',type(exc).__name__)
         return BROWSER_LOGIN_OFFERED_TEXT
 
     def offer_browser_login(self, job):
@@ -6371,40 +6364,6 @@ class AgentService:
             thread.start()
         return True
 
-    def note_signed_out(self, host, now=None):
-        """A Work found ``host``'s site signed out (#1011): record an upper bound of its session lifetime.
-
-        Only for a site the owner signed in to through AgentOS: the time since
-        its last sign-in or keep-alive refresh, keeping the shortest seen.  The
-        keep-alive then refreshes that site within half of it
-        (``keepalive_interval``).  Returns the recorded lifetime or None.
-        """
-        site=registrable_domain(host) if host else None
-        signins=self.store.config(BROWSER_OWNER_SIGNINS_KEY,{})
-        record=signins.get(site) if site and isinstance(signins,dict) else None
-        if not isinstance(record,dict):return None
-        now=time.time() if now is None else now
-        refreshed=self.store.config(self.KEEPALIVE_KEY,{})
-        refreshed=refreshed if isinstance(refreshed,dict) else {}
-        last=max(float(record.get('at') or 0),float(refreshed.get(site) or 0))
-        if not last or now<=last:return None
-        # #1015: the session ended although its last refresh was an HTTP request: the browser from now on.
-        vias=self.store.config(self.KEEPALIVE_VIA_KEY,{})
-        if isinstance(vias,dict) and vias.get(site)=='http' and float(refreshed.get(site) or 0)>=float(record.get('at') or 0):
-            browser_only=set(self.store.config(self.KEEPALIVE_BROWSER_ONLY_KEY,[]) or [])
-            if site not in browser_only:
-                self.store.put(self.KEEPALIVE_BROWSER_ONLY_KEY,sorted(browser_only|{site}))
-                LOG.info('session keep-alive site=%s: signed out after an HTTP refresh; the browser from now on',site)
-        with self.lock:
-            lifetimes=self.store.config(self.SESSION_LIFETIMES_KEY,{})
-            lifetimes=lifetimes if isinstance(lifetimes,dict) else {}
-            seen=now-last
-            if isinstance(lifetimes.get(site),(int,float)) and lifetimes[site]<=seen:return lifetimes[site]
-            lifetimes[site]=seen
-            self.store.put(self.SESSION_LIFETIMES_KEY,lifetimes)
-        LOG.info('session lifetime site=%s observed<=%ds interval=%ds',site,int(seen),int(keepalive_interval(seen)))
-        return seen
-
     def keep_sessions_alive(self, now=None):
         """Refresh at most one signed-in site's session when it is due (#990); the site or None.
 
@@ -6412,12 +6371,12 @@ class AgentService:
         (``BROWSER_OWNER_SIGNINS_KEY``) and still stored; never a site this
         instance received from another (that session is refreshed where it is
         held, and the refreshed cookies reach this instance by the existing
-        push).  Due by ``keepalive_due_at`` over the site's stored cookie
-        expiries.  Runs on the work loop only while no Work is queued or
-        running.  No
-        model call; the log names the site and the outcome only.  Started off the
-        work loop by ``start_session_keepalive``; a Work that needs the browser
-        meanwhile waits for it (``BrowserProfile._acquire``).
+        push).  Due about every ``KEEPALIVE_SECONDS``, jittered
+        (``keepalive_interval``), or earlier for a stored cookie's expiry.
+        One HTTP request, never the browser; a refusal pauses the site until
+        the owner's next sign-in to it.  No model call; the log names the site
+        and the outcome only.  Started off the work loop by
+        ``start_session_keepalive`` while no Work is queued or running.
         """
         now=time.time() if now is None else now
         signins=self.store.config(BROWSER_OWNER_SIGNINS_KEY,{})
@@ -6428,37 +6387,29 @@ class AgentService:
         held=set(family_share.received(self.store))
         refreshed=self.store.config(self.KEEPALIVE_KEY,{})
         refreshed=refreshed if isinstance(refreshed,dict) else {}
-        lifetimes=self.store.config(self.SESSION_LIFETIMES_KEY,{})
-        lifetimes=lifetimes if isinstance(lifetimes,dict) else {}
+        paused=self.store.config(self.KEEPALIVE_PAUSED_KEY,{})
+        paused=paused if isinstance(paused,dict) else {}
         for site,record in sorted(signins.items()):
             if site in held or not isinstance(record,dict):continue
+            # #1041: a site that refused a refresh waits for the owner's next sign-in to it.
+            if isinstance(paused.get(site),(int,float)) and paused[site]>=float(record.get('at') or 0):continue
             host=record.get('host') or site
             read=self.browser_profile.site_cookie_marks(host)
             if not read or not read[0]:continue   # unreadable, or no stored session left
             marks,jar_now=read
             last=max(float(record.get('at') or 0),float(refreshed.get(site) or 0))
-            interval=keepalive_interval(lifetimes.get(site))
-            if keepalive_due_at([mark[1] for mark in marks],last,jar_now,interval)>jar_now:continue
-            # #1015: one HTTP request with the stored cookies first (no page, no browser memory); a site
-            # that refused it, or logged out after one, is refreshed with the browser from then on.
-            url=f'https://{host}/'
-            browser_only=set(self.store.config(self.KEEPALIVE_BROWSER_ONLY_KEY,[]) or [])
-            via='http'
-            result={'state':'blocked'} if site in browser_only else self.browser_profile.refresh_session_http(url)
+            if keepalive_due_at([mark[1] for mark in marks],last,jar_now,keepalive_interval(site,last))>jar_now:continue
+            # #1015/#1041: one HTTP request with the stored cookies, never the browser.  A site that
+            # refuses it is paused: pushing past a bot check puts the owner's account at risk.
+            result=self.browser_profile.refresh_session_http(f'https://{host}/')
             if result.get('state')=='busy':return None   # tried again at the next check
             if result.get('state')=='blocked':
-                if site not in browser_only:
-                    self.store.put(self.KEEPALIVE_BROWSER_ONLY_KEY,sorted(browser_only|{site}))
-                via='browser'
-                result=self.browser_profile.refresh_session(url)
-                if result.get('state')=='busy':return None
+                paused[site]=now
+                self.store.put(self.KEEPALIVE_PAUSED_KEY,paused)
             refreshed[site]=now
             self.store.put(self.KEEPALIVE_KEY,refreshed)
-            vias=self.store.config(self.KEEPALIVE_VIA_KEY,{})
-            vias=vias if isinstance(vias,dict) else {}
-            vias[site]=via
-            self.store.put(self.KEEPALIVE_VIA_KEY,vias)
-            LOG.info('session keep-alive site=%s via=%s state=%s',site,via,result.get('state'))
+            LOG.info('session keep-alive site=%s state=%s%s',site,result.get('state'),
+                     ' (paused until the next sign-in)' if result.get('state')=='blocked' else '')
             return site
         return None
 

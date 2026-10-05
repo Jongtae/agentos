@@ -82,7 +82,7 @@ from . import preparations as prep
 from . import owner_model as om
 from . import information_use
 from . import remote_login
-from .browser_session import BrowserProfile, ascii_host, binding_digest, keepalive_due_at, registrable_domain
+from .browser_session import BrowserProfile, ascii_host, binding_digest, keepalive_due_at, keepalive_interval, registrable_domain
 from .browser_jar import unexpired
 from .cli_browser_relay import BrowserRelay
 from .telegram_presence import (ATTENTION_ACTION, ATTENTION_ASK, ATTENTION_COOLDOWN, ATTENTION_MEMORY_ASK_FRESH, ATTENTION_PREPARED, ATTENTION_REMINDER,
@@ -445,6 +445,9 @@ class AgentService:
     SESSION_KEEPALIVE=True
     #: #990: config row site -> the time its session was last refreshed; and how often the work loop looks.
     KEEPALIVE_KEY='browser_keepalive'
+    #: #1011: config row site -> the shortest session lifetime observed (seconds since its last sign-in or
+    #: refresh when a Work found it signed out).
+    SESSION_LIFETIMES_KEY='browser_session_lifetimes'
     KEEPALIVE_CHECK_SECONDS=60
     _keepalive_next=0.0
 
@@ -6228,6 +6231,9 @@ class AgentService:
             self._put_browser_login(job['id'],{'work_id':job['id'],'url':target,'host':host,
                                                'state':'requested','requested_at':time.time(),
                                                'nonce':secrets.token_hex(16),'explicit':bool(explicit)})
+        # #1011: a site the owner signed in to was found signed out: learn how long its session lasts.
+        try:self.note_signed_out(host)
+        except Exception as exc:LOG.warning('session lifetime not recorded (%s)',type(exc).__name__)
         return BROWSER_LOGIN_OFFERED_TEXT
 
     def offer_browser_login(self, job):
@@ -6362,6 +6368,33 @@ class AgentService:
             thread.start()
         return True
 
+    def note_signed_out(self, host, now=None):
+        """A Work found ``host``'s site signed out (#1011): record an upper bound of its session lifetime.
+
+        Only for a site the owner signed in to through AgentOS: the time since
+        its last sign-in or keep-alive refresh, keeping the shortest seen.  The
+        keep-alive then refreshes that site within half of it
+        (``keepalive_interval``).  Returns the recorded lifetime or None.
+        """
+        site=registrable_domain(host) if host else None
+        signins=self.store.config(BROWSER_OWNER_SIGNINS_KEY,{})
+        record=signins.get(site) if site and isinstance(signins,dict) else None
+        if not isinstance(record,dict):return None
+        now=time.time() if now is None else now
+        refreshed=self.store.config(self.KEEPALIVE_KEY,{})
+        refreshed=refreshed if isinstance(refreshed,dict) else {}
+        last=max(float(record.get('at') or 0),float(refreshed.get(site) or 0))
+        if not last or now<=last:return None
+        with self.lock:
+            lifetimes=self.store.config(self.SESSION_LIFETIMES_KEY,{})
+            lifetimes=lifetimes if isinstance(lifetimes,dict) else {}
+            seen=now-last
+            if isinstance(lifetimes.get(site),(int,float)) and lifetimes[site]<=seen:return lifetimes[site]
+            lifetimes[site]=seen
+            self.store.put(self.SESSION_LIFETIMES_KEY,lifetimes)
+        LOG.info('session lifetime site=%s observed<=%ds interval=%ds',site,int(seen),int(keepalive_interval(seen)))
+        return seen
+
     def keep_sessions_alive(self, now=None):
         """Refresh at most one signed-in site's session when it is due (#990); the site or None.
 
@@ -6385,6 +6418,8 @@ class AgentService:
         held=set(family_share.received(self.store))
         refreshed=self.store.config(self.KEEPALIVE_KEY,{})
         refreshed=refreshed if isinstance(refreshed,dict) else {}
+        lifetimes=self.store.config(self.SESSION_LIFETIMES_KEY,{})
+        lifetimes=lifetimes if isinstance(lifetimes,dict) else {}
         for site,record in sorted(signins.items()):
             if site in held or not isinstance(record,dict):continue
             host=record.get('host') or site
@@ -6392,7 +6427,8 @@ class AgentService:
             if not read or not read[0]:continue   # unreadable, or no stored session left
             marks,jar_now=read
             last=max(float(record.get('at') or 0),float(refreshed.get(site) or 0))
-            if keepalive_due_at([mark[1] for mark in marks],last,jar_now)>jar_now:continue
+            interval=keepalive_interval(lifetimes.get(site))
+            if keepalive_due_at([mark[1] for mark in marks],last,jar_now,interval)>jar_now:continue
             result=self.browser_profile.refresh_session(f'https://{host}/')
             if result.get('state')=='busy':return None   # tried again at the next check
             refreshed[site]=now

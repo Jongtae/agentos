@@ -65,6 +65,20 @@ class DueTimeTests(unittest.TestCase):
                          'a cookie about to expire anyway sets no earlier time')
 
 
+class LearnedIntervalTests(unittest.TestCase):
+    """#1011: a site's interval comes from its observed logouts only."""
+
+    def test_half_the_shortest_lifetime_clamped(self):
+        self.assertEqual(bs.keepalive_interval(None), bs.KEEPALIVE_SECONDS)
+        self.assertEqual(bs.keepalive_interval(43 * 60), 43 * 60 / 2)
+        self.assertEqual(bs.keepalive_interval(5 * 60), bs.KEEPALIVE_FLOOR_SECONDS)
+        self.assertEqual(bs.keepalive_interval(30 * 3600), bs.KEEPALIVE_SECONDS)
+
+    def test_the_due_time_follows_the_learned_interval_below_the_default_gap(self):
+        interval = bs.keepalive_interval(43 * 60)
+        self.assertEqual(bs.keepalive_due_at([None], NOW, NOW, interval), NOW + interval)
+
+
 class ProfileTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -170,6 +184,23 @@ class ServiceTests(unittest.TestCase):
         self.profile.refresh_session = lambda url: {'state': 'busy'}
         self.assertIsNone(self.service.keep_sessions_alive(now=NOW))
         self.assertEqual(self.store.config(self.service.KEEPALIVE_KEY, {}), {})
+
+    def test_an_observed_logout_shortens_only_that_sites_interval(self):
+        self.store.put(self.service.KEEPALIVE_KEY, {'shop.test': NOW - 43 * 60})
+        self.assertEqual(self.service.note_signed_out('www.shop.test', now=NOW), 43 * 60)
+        self.assertEqual(self.service.note_signed_out('www.shop.test', now=NOW + 3600 * 5), 43 * 60, 'the shortest stays')
+        self.assertIsNone(self.service.note_signed_out('other.test', now=NOW), 'not a site the owner signed in to here')
+        self.assertEqual(self.store.config(self.service.SESSION_LIFETIMES_KEY, {}), {'shop.test': 43 * 60})
+        # 25 min after that refresh the default 3 h cadence would wait; the learned 21.5 min one is due.
+        self.assertEqual(self.service.keep_sessions_alive(now=NOW - 43 * 60 + 25 * 60), 'shop.test')
+
+    def test_a_requested_sign_in_records_the_observation(self):
+        job = {'id': self.store.enqueue('담아줘', 'k-sign')}
+        self.store.put(self.service.KEEPALIVE_KEY, {'shop.test': time.time() - 1800})
+        self.service.browser_profile.available = lambda: True
+        self.service._request_browser_login(self.store.job(job['id']), 'https://www.shop.test/login', explicit=True)
+        lifetime = self.store.config(self.service.SESSION_LIFETIMES_KEY, {}).get('shop.test')
+        self.assertTrue(1700 < lifetime < 1900, lifetime)
 
     def test_the_work_loop_starts_a_check_only_while_idle_and_at_most_once_a_minute(self):
         self.service.SESSION_KEEPALIVE = True

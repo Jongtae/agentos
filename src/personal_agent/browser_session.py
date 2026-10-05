@@ -1300,25 +1300,41 @@ KEEPALIVE_SECONDS = 3 * 3600
 KEEPALIVE_LEAD_SECONDS = 600
 #: but never more often than this.  Generic: no site has its own value (Constitution C16).
 KEEPALIVE_MIN_GAP_SECONDS = 3600
+#: #1011: a site whose logout was observed is refreshed within half of the shortest lifetime seen,
+#: never more often than this.  Learned per site from observations only, never set per site in code.
+KEEPALIVE_FLOOR_SECONDS = 600
+
+
+def keepalive_interval(lifetime=None):
+    """The refresh interval for a site whose shortest observed session lifetime is ``lifetime`` (#1011).
+
+    Half of it, clamped to [``KEEPALIVE_FLOOR_SECONDS``, ``KEEPALIVE_SECONDS``];
+    ``KEEPALIVE_SECONDS`` when no logout was observed.  Pure.
+    """
+    if not isinstance(lifetime, (int, float)) or lifetime <= 0:
+        return KEEPALIVE_SECONDS
+    return max(KEEPALIVE_FLOOR_SECONDS, min(KEEPALIVE_SECONDS, float(lifetime) / 2))
 #: #990: the profile holder name of a keep-alive, and how long another holder waits for one to finish.
 KEEPALIVE_HOLDER = 'keepalive'
 KEEPALIVE_YIELD_SECONDS = ACTION_TIMEOUT_SECONDS + 15
 
 
-def keepalive_due_at(expiries, last, now):
+def keepalive_due_at(expiries, last, now, interval=KEEPALIVE_SECONDS):
     """When a signed-in site's session should next be refreshed (#990), from its cookies' expiries.
 
     ``last`` is the later of the sign-in and the last refresh.  A cookie
     already within ``KEEPALIVE_LEAD_SECONDS`` of expiring (or session-only,
-    ``None``) sets no earlier time.  Pure.
+    ``None``) sets no earlier time.  ``interval`` (#1011) is the site's own
+    cadence (``keepalive_interval``); the minimum gap never exceeds it.  Pure.
     """
     last = float(last or 0)
-    due = last + KEEPALIVE_SECONDS
+    interval = float(interval or KEEPALIVE_SECONDS)
+    due = last + interval
     ahead = [float(expires) - KEEPALIVE_LEAD_SECONDS for expires in expiries or ()
              if isinstance(expires, (int, float)) and float(expires) - now > KEEPALIVE_LEAD_SECONDS]
     if ahead:
         due = min(due, min(ahead))
-    return max(due, last + KEEPALIVE_MIN_GAP_SECONDS)
+    return max(due, last + min(KEEPALIVE_MIN_GAP_SECONDS, interval))
 
 
 def webkit_unavailable_reason(platform=None, find_spec=None):

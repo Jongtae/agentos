@@ -69,7 +69,7 @@ from urllib.parse import urlsplit, urlunsplit
 from .agent_runtime import BROWSER_ACTIONS, ToolError, lookup_norm, lookup_text_violations, lookup_words
 from .bounded_execution import SECRET_PATTERN
 from .browser_jar import JAR_NAME, SERVICE as JAR_SERVICE, CookieJar, JarError, KeychainKey, store_account
-from .browser_worker import PAYMENT_TOKENS, SECRET_TOKENS
+from .browser_worker import PAYMENT_TOKENS, SECRET_TOKENS, destination_refusal
 
 #: The model's declared effect class of one action.
 EFFECTS = ('read', 'navigate', 'mutate', 'payment')
@@ -1337,6 +1337,78 @@ def keepalive_due_at(expiries, last, now, interval=KEEPALIVE_SECONDS):
     return max(due, last + min(KEEPALIVE_MIN_GAP_SECONDS, interval))
 
 
+#: #1015: a keep-alive is first one plain HTTP request with the site's stored cookies (no page, no
+#: browser memory); it says it is the same WebKit client the worker is (WKWebView's default agent).
+KEEPALIVE_HTTP_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)'
+KEEPALIVE_HTTP_TIMEOUT = 15
+#: Answers that mean the site refused a non-browser request; the refresh falls back to the browser.
+KEEPALIVE_HTTP_BLOCKED = frozenset({401, 403, 429, 503})
+
+
+def _cookie_from_row(row):
+    import http.cookiejar
+    domain = str(row.get('domain') or '')
+    expires = row.get('expires') if isinstance(row.get('expires'), (int, float)) else None
+    return http.cookiejar.Cookie(
+        0, str(row['name']), str(row.get('value') or ''), None, False, domain, domain.startswith('.'),
+        domain.startswith('.'), str(row.get('path') or '/'), True, bool(row.get('secure')),
+        int(expires) if expires is not None else None, expires is None, None, None,
+        {'HttpOnly': None} if row.get('http_only') else {})
+
+
+def _row_from_cookie(cookie, before):
+    old = before.get((cookie.name, cookie.domain, cookie.path)) or {}
+    return {'name': cookie.name, 'value': cookie.value, 'domain': cookie.domain, 'path': cookie.path,
+            'expires': cookie.expires, 'secure': bool(cookie.secure),
+            'http_only': bool(cookie.has_nonstandard_attr('HttpOnly')) or bool(old.get('http_only')),
+            'same_site': old.get('same_site')}
+
+
+def http_refresh(url, rows, *, allowed_origins=(), opener=None, refusal=destination_refusal):
+    """One GET of ``url`` with a site's stored cookie ``rows``, without a browser (#1015).
+
+    Returns ``(state, rows_after)``: ``refreshed`` with every row the site
+    still holds after the answer (rotated values and new cookies included),
+    ``blocked`` when the site refused a non-browser request
+    (``KEEPALIVE_HTTP_BLOCKED``), or ``failed``; ``rows_after`` is None unless
+    refreshed.  ``url`` and every redirect pass ``browser_open``'s address rule
+    after DNS resolution (``destination_refusal``).  Nothing of the page is read.
+    """
+    import http.cookiejar
+    import urllib.error
+    import urllib.request
+    if urlsplit(str(url or '')).scheme not in ('http', 'https') or refusal(url, allowed_origins):
+        return 'failed', None
+    jar = http.cookiejar.CookieJar()
+    before = {}
+    for row in rows or ():
+        if isinstance(row, dict) and row.get('name'):
+            before[(str(row['name']), str(row.get('domain') or ''), str(row.get('path') or '/'))] = row
+            jar.set_cookie(_cookie_from_row(row))
+
+    class Guarded(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            if urlsplit(newurl).scheme not in ('http', 'https') or refusal(newurl, allowed_origins):
+                raise urllib.error.URLError('blocked_destination')
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    build = opener or urllib.request.build_opener
+    client = build(urllib.request.HTTPCookieProcessor(jar), Guarded())
+    request = urllib.request.Request(url, headers={'User-Agent': KEEPALIVE_HTTP_AGENT,
+                                                   'Accept': 'text/html,application/xhtml+xml'})
+    try:
+        with client.open(request, timeout=KEEPALIVE_HTTP_TIMEOUT) as response:
+            response.read(65536)
+            status = getattr(response, 'status', 200)
+    except urllib.error.HTTPError as exc:
+        return ('blocked' if exc.code in KEEPALIVE_HTTP_BLOCKED else 'failed'), None
+    except Exception:
+        return 'failed', None
+    if status in KEEPALIVE_HTTP_BLOCKED:
+        return 'blocked', None
+    return 'refreshed', [_row_from_cookie(cookie, before) for cookie in jar]
+
+
 def webkit_unavailable_reason(platform=None, find_spec=None):
     """None when the embedded macOS WebKit engine can run here, else ``platform`` or ``dependency``.
 
@@ -2060,6 +2132,41 @@ class BrowserProfile:
         return result
 
     # -- the owner's login window ------------------------------------------------------
+    def refresh_session_http(self, url, *, opener=None):
+        """Refresh a signed-in session with one HTTP request instead of a page (#1015).
+
+        Under the profile lock (no worker holds older cookies meanwhile), the
+        site's stored rows go out with one GET (``http_refresh``); what the
+        site answered replaces that site's rows only, and ``on_saved`` pushes
+        it like any save.  Returns ``{'state': refreshed | blocked | failed |
+        busy | unavailable}``; ``blocked`` means the site wants a browser.
+        """
+        parts = urlsplit(str(url or ''))
+        site = registrable_domain(parts.hostname or '')
+        if not site:
+            return {'state': 'failed'}
+        try:
+            self._acquire(KEEPALIVE_HOLDER)
+        except ToolError:
+            return {'state': 'busy'}
+        try:
+            with self._jar_lock:
+                rows = self.jar.site_rows(site)
+            if not rows:
+                return {'state': 'failed'}
+            state, after = http_refresh(url, rows, allowed_origins=self._allowed_origins, opener=opener)
+            if state != 'refreshed':
+                return {'state': state}
+            with self._jar_lock:
+                self._save_mark = None
+                self.jar.save_export({site: after}, [parts.hostname], imported={site})
+            self._saved({site})
+            return {'state': 'refreshed'}
+        except Exception as exc:
+            return {'state': 'failed', 'error': type(exc).__name__}
+        finally:
+            self._release()
+
     def refresh_session(self, url):
         """Load ``url`` once in the hidden worker and save what the site refreshed (#990).
 

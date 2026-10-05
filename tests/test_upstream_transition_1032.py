@@ -122,6 +122,19 @@ class UpstreamTransition1032Tests(unittest.TestCase):
         if shape == "goal-ready":
             name = current["next_goal"]["id"]
             invariants.assert_active_substeps_are_legitimate(self, current, name)
+            if name == "UPSTREAM-01":
+                program = current["programs"][name]
+                selection = program.get("current_selection")
+                self.assertIsNotNone(selection)
+                self.assertEqual(
+                    current["next_goal"]["current_substep"],
+                    selection["substep"],
+                )
+                self.assertEqual(program["active_substeps"], [selection["substep"]])
+                selected = next(
+                    row for row in current["iterations"] if row["id"] == selection["substep"]
+                )
+                self.assertEqual(current["next_goal"]["current_issue"], selected["issue"])
         else:
             self.assertIsNone(current["next_goal"]["id"])
 

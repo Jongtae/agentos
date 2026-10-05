@@ -38,9 +38,11 @@ Run the app from the checkout with `agentos start`. [QUICKSTART.md](QUICKSTART.m
 
 Which work is actively scheduled is decided by the maintainer in [`delivery-plan.yaml`](delivery-plan.yaml). An open issue is not automatically in progress. Ask on the issue before starting something large.
 
-## Three rules that shape every change
+## Rules that shape every change
 
 **Reuse first: Adopt → Adapt → Build.** Before you add a component, dependency, protocol client, parser or other infrastructure, look for an existing piece in this repository, then the standard library, official SDKs and standards, then maintained open source. Say in the issue or PR which one you picked and why. See [C15](docs/development-constitution.en.md#c15-reuse-first-adopt--adapt--build).
+
+**Keep upstream changes reviewable.** Package manifests and reproducible resolution own package versions; pinned content keeps its immutable upstream revision and licence. An update PR records the upstream diff, affected real boundary, focused tests and rollback. A necessary local patch names its upstream base and the release or condition that lets the project remove it. The current relationship map and selected pilots are in [`docs/upstream-relationship-map.en.md`](docs/upstream-relationship-map.en.md).
 
 **The AI is the engine.** The owner's chosen AI (Codex, Claude Code, a local model, a model API) does the work. AgentOS code keeps owner state, permissions, secrets, payment approval and budgets, and it removes blockers that stop the AI. It never implements one specific kind of request, and it never branches on a named site, provider or task category. See [C16](docs/development-constitution.en.md#c16-ai-is-the-engine-agentos-orchestrates-it-does-not-implement-requests).
 

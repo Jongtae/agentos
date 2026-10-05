@@ -443,6 +443,20 @@ def render_catalogue(workers):
     return '\n'.join(lines)
 
 
+def runs_lowest(worker, model):
+    """Whether ``model`` ("" = the worker's default) is the worker's lowest-cost model (#1010)."""
+    effective = model or worker.get('default_model') or ''
+    return bool(effective) and (worker.get('model_tiers') or {}).get(effective) == TIER_LOWEST
+
+
+def offers_above_lowest(worker):
+    """Whether the worker can run any model that is not its lowest-cost one (#1010)."""
+    tiers = worker.get('model_tiers') or {}
+    default = worker.get('default_model') or ''
+    return (not default or tiers.get(default) != TIER_LOWEST
+            or any(item and tiers.get(item) != TIER_LOWEST for item in worker.get('models') or ()))
+
+
 def lift_model(worker, model):
     """The model an account-changing attempt runs instead of a lowest-cost one, or None (#947).
 
@@ -695,6 +709,11 @@ class Orchestration:
             lifted = lift_model(worker, model)
             if lifted is not None:
                 lifted_from, model = model or worker.get('default_model') or '', lifted
+            elif runs_lowest(worker, model) and any(row is not worker and row['available'] and offers_above_lowest(row)
+                                                    for row in candidates):
+                # #1010 review: this worker has nothing above its lowest-cost model, but another
+                # available worker has; the plan is refused rather than run below the floor.
+                return None, 'floor'
         # #820: notes are optional and supplementary; the owner's message is the goal.
         notes = data['brief']['notes'].strip()[:MAX_NOTES_CHARS]
         if self.signature(worker, model) in self.failed:

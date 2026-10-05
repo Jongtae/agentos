@@ -2283,6 +2283,20 @@ class OwnerSituationFloor(unittest.TestCase):
         self.assertEqual((attempt.model, attempt.lifted_from, attempt.owner_situation, attempt.account_change),
                          ('sonnet', 'haiku', True, False))
 
+    def test_a_worker_with_nothing_above_lowest_is_refused_only_when_another_worker_has_more(self):
+        """#1010 review: the floor is not silently skipped when a higher model exists elsewhere."""
+        from personal_agent.orchestrator import TIER_LOWEST
+        api = {'id': 'openai', 'available': True, 'models': ['gpt-4o-mini'], 'model_tiers': {'gpt-4o-mini': TIER_LOWEST},
+               'default_model': 'gpt-4o-mini'}
+        cli = {**self.worker(), 'id': 'claude-code', 'available': True}
+        plan = {'worker': 'openai', 'model': '', 'brief': {'notes': ''}, 'reason': 'r', 'account_change': False,
+                'owner_situation': True}
+        self.assertEqual(self.orchestration().validate(plan, [api, cli], 1), (None, 'floor'))
+        attempt, why = self.orchestration().validate(plan, [api], 1)
+        self.assertEqual((attempt.worker, why), ('openai', ''), 'nothing better anywhere: it runs')
+        attempt, why = self.orchestration().validate({**plan, 'owner_situation': False}, [api, cli], 1)
+        self.assertEqual((attempt.worker, why), ('openai', ''), 'no floor: the low-cost choice stands')
+
     def test_the_question_asks_for_it_without_naming_a_category(self):
         from personal_agent.orchestrator import QUESTION
         self.assertIn('owner_situation is true when a useful reply depends on the owner\'s own situation', QUESTION)

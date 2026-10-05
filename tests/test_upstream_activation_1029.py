@@ -1,4 +1,4 @@
-"""Bounded #1029 delivery selection and preservation regression."""
+"""Bounded #1029 preservation fixture plus enduring live-plan invariants."""
 from __future__ import annotations
 
 import importlib.util
@@ -9,6 +9,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "tests" / "fixtures" / "governance" / "plan-after-delivery-refresh-1021.json"
+AFTER = ROOT / "tests" / "fixtures" / "governance" / "plan-after-upstream-activation-1029.json"
 
 
 def unique_object(pairs):
@@ -36,7 +37,7 @@ class UpstreamActivation1029Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.before = read_plan(BASELINE)
-        cls.after = read_plan(ROOT / "delivery-plan.yaml")
+        cls.after = read_plan(AFTER)
         cls.before_items = {row["id"]: row for row in cls.before["iterations"]}
         cls.items = {row["id"]: row for row in cls.after["iterations"]}
 
@@ -56,6 +57,13 @@ class UpstreamActivation1029Tests(unittest.TestCase):
                 expected = expected + ["GOV-UPSTREAM-ACT-01"]
             with self.subTest(history=key):
                 self.assertEqual(new_history[key], expected)
+
+    def test_after_fixture_is_the_exact_reviewed_git_blob(self):
+        import hashlib
+
+        raw = AFTER.read_bytes()
+        digest = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+        self.assertEqual(digest, "0cdf0f9674349d9a9e810ec3d8627ba73691b046")
 
     def test_only_secretary_changes_and_upstream_iterations_are_appended(self):
         appended = [
@@ -157,6 +165,15 @@ class UpstreamActivation1029Tests(unittest.TestCase):
         for item in new["current_delivery"]["remaining_order"]:
             self.assertNotIn(item, self.after["history"]["documented_completed_iterations"])
         invariants.assert_pause_survives_redeclaration(self, self.after, "SECRETARY-01")
+
+    def test_live_plan_obeys_enduring_resting_state_invariants(self):
+        current = read_plan(ROOT / "delivery-plan.yaml")
+        shape = invariants.assert_declared_goal_shape(self, plan=current)
+        if shape == "goal-ready":
+            name = current["next_goal"]["id"]
+            invariants.assert_active_substeps_are_legitimate(self, current, name)
+        else:
+            self.assertIsNone(current["next_goal"]["id"])
 
 
 if __name__ == "__main__":

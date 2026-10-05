@@ -1,5 +1,6 @@
 agentos/
 .tools/
+.venv/
 __pycache__/
 *.pyc
 .runtime/

@@ -224,7 +224,11 @@ class IsolatedEngineIntegrationTests(unittest.TestCase):
         try:
             status, _body, cookie = self._api_post('/api/claim', {}, server=server)
             self.assertEqual(status, 200)
-            with patch.dict('os.environ', {'PATH': ''}):
+            # Make the no-CLI premise independent of CLIs installed in the
+            # developer's standard fallback directories.
+            with patch.dict('os.environ', {'PATH': ''}), patch(
+                'personal_agent.subscription_engines.INSTALL_DIRS', ()
+            ):
                 status, rejected, _cookie = self._api_post(
                     '/api/subscription-engines/connect',
                     {'engine': 'codex', 'officially_authenticated': True},

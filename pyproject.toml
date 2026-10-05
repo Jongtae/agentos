@@ -26,6 +26,9 @@ dependencies = ["pypdf>=5.0", "python-docx>=1.1", "openpyxl>=3.1", "cryptography
 [project.optional-dependencies]
 schema-validation = ["jsonschema[format]>=4.23"]
 
+[dependency-groups]
+dev = ["pytest>=9.1,<10"]
+
 [project.scripts]
 agentos = "personal_agent.quickstart:main"
 
@@ -35,3 +38,10 @@ include = ["personal_agent*"]
 
 [tool.setuptools.package-data]
 personal_agent = ["web/*.html", "web/*.css", "web/*.js", "bundled_skills/*/SKILL.md", "bundled_skills/*/references/*.md", "skill_references.json"]
+
+[tool.uv]
+required-version = ">=0.11.33,<0.13"
+environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
+build-constraint-dependencies = [
+  "setuptools==84.0.0",
+]

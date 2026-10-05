@@ -1,8 +1,10 @@
 # 역할 기반 온톨로지와 위임 모델 — 10차 편집·검수 기록
 
-**대상:** [개념 문서 v0.2](role-ontology-and-mandate-2026-10-05.ko.md)  
+**대상:** [개념 문서 v0.2](https://github.com/Jongtae/agentos/blob/88aa1f8c1bf857961ac1b37241a96fc3913dfd42/docs/research/role-ontology-and-mandate-2026-10-05.ko.md)  
 **검토일:** 2026-10-05  
-**역할 정의:** [Writing Review Agent Pack v0.1](writing-review-agents.en.md)
+**역할 정의:** [Writing Review Agent Pack v0.1](https://github.com/Jongtae/agentos/blob/88aa1f8c1bf857961ac1b37241a96fc3913dfd42/docs/research/writing-review-agents.en.md)
+
+> 보존 안내: 아래는 당시 버전에 대한 역사적 검토 기록이다. F28 이후 이 출판 준비 승인은 재검토 대상으로 전환되었다. 현재 v0.3의 판단은 [추가 검토 기록](role-ontology-review-cycle-2-2026-10-05.ko.md)을 따른다. 위 링크는 당시 원고와 페르소나를 가리키는 고정 커밋 링크이며, 아래 당시의 지적·판정·해시는 변경하지 않았다.
 
 ## 실행 방식과 승인 범위
 

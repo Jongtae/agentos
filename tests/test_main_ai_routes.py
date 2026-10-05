@@ -447,5 +447,73 @@ class MainAiRouteTests(unittest.TestCase):
         self.assertEqual(self.transport.calls, [])
 
 
+class MainAiCommandTests(unittest.TestCase):
+    """#1017: the owner-typed /ai switches the Main AI with no model asked anything."""
+
+    setUp, _service, _save = MainAiRouteTests.setUp, MainAiRouteTests._service, MainAiRouteTests._save
+
+    def _send(self, text, key, owner_typed=True):
+        job_id = self.store.enqueue(text, key, owner_typed=owner_typed)
+        self.assertTrue(self.service.run_one())
+        return self.store.job(job_id)
+
+    def test_typed_ai_switches_through_the_settings_switch_with_no_model_call(self):
+        self.service.connect_subscription_engine({'engine': 'claude-code', 'officially_authenticated': True})
+        engine = self.service.execution_adapter
+        job = self._send('/ai codex', 'switch')
+        self.assertEqual(job['status'], 'succeeded')
+        self.assertEqual(self.service.main_ai.current(), 'codex')
+        self.assertIn('Codex', job['response'])
+        self.assertIn('OpenAI (Codex 구독 계정)', job['response'])
+        self.assertEqual((engine.calls, self.transport.calls), (0, []))
+        self.assertEqual(self.service.main_ai.status()['routes'][0]['check']['state'], 'ok')
+
+    def test_bare_ai_lists_current_and_targets_and_changes_nothing(self):
+        self.service.connect_subscription_engine({'engine': 'claude-code', 'officially_authenticated': True})
+        self._save('openai', OPENAI_KEY)
+        job = self._send('/ai', 'list')
+        self.assertEqual(self.service.main_ai.current(), 'claude-code')
+        self.assertIn('기본 AI: Claude Code', job['response'])
+        self.assertIn('Codex (/ai codex)', job['response'])
+        self.assertIn('OpenAI (/ai openai)', job['response'])
+        self.assertNotIn('Anthropic', job['response'])  # no key saved
+        self.assertEqual(self.transport.calls, [])
+
+    def test_name_and_unique_prefix_resolve_and_ambiguity_is_refused(self):
+        self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+        self.assertIn('Claude Code', self.service.main_ai.command('claude'))
+        self.assertEqual(self.service.main_ai.current(), 'claude-code')
+        with self.assertRaisesRegex(MainAiError, '하나로 찾지 못했어요.*그대로'):
+            self.service.main_ai.command('open')  # openai or openrouter
+        with self.assertRaisesRegex(MainAiError, '그대로'):
+            self.service.main_ai.command('gemini')
+        self.assertEqual(self.service.main_ai.current(), 'claude-code')
+        self.assertIn('이미 Claude Code', self.service.main_ai.command('claude-code'))
+
+    def test_failed_probe_leaves_main_unchanged_and_says_why(self):
+        self.service.connect_subscription_engine({'engine': 'codex', 'officially_authenticated': True})
+        self._save('anthropic', ANTHROPIC_KEY)
+        self.transport.refuse.add('api.anthropic.com')
+        job = self._send('/ai anthropic', 'refused')
+        self.assertEqual(job['status'], 'failed')
+        self.assertIn('그대로', job['error'])
+        self.assertEqual(self.service.main_ai.current(), 'codex')
+
+    def test_a_message_the_owner_did_not_type_never_switches(self):
+        self.service.connect_subscription_engine({'engine': 'claude-code', 'officially_authenticated': True})
+        job = self._send('/ai codex', 'replayed', owner_typed=False)
+        self.assertEqual(job['status'], 'failed')
+        self.assertEqual(self.service.main_ai.current(), 'claude-code')
+
+    def test_api_route_with_model_switches_after_its_probe(self):
+        self._save('openai', OPENAI_KEY)
+        reply = self.service.main_ai.command('openai gpt-4.1-mini')
+        self.assertEqual(self.service.main_ai.current(), 'openai')
+        self.assertEqual(self.store.config('model')['model'], 'gpt-4.1-mini')
+        self.assertIn('OpenAI · gpt-4.1-mini', reply)
+        self.assertIn('api.openai.com', reply)
+        self.assertEqual({call['host'] for call in self.transport.calls}, {'api.openai.com'})
+
+
 if __name__ == '__main__':
     unittest.main()

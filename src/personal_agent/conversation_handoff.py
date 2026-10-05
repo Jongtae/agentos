@@ -308,6 +308,8 @@ INTENT_SETTINGS = 'settings'
 INTENT_WORKSPACE_SEARCH = 'workspace-search'
 INTENT_NOTE_CREATE = 'note-create'
 INTENT_NOTE_LIST = 'note-list'
+#: #1017: the owner-typed ``/ai`` form switches the Main AI with no model in between.
+INTENT_MAIN_AI = 'main-ai'
 INTENT_CALENDAR_CREATE = 'calendar-create'
 INTENT_MAIL_SEARCH = 'mail-search'
 #: Read the owner's Picker-selected Google Drive files into this turn, or
@@ -349,6 +351,7 @@ INTENT_LABELS = {
     INTENT_WORKSPACE_SEARCH: '저장한 작업공간 결과 찾기',
     INTENT_NOTE_CREATE: '메모 기록',
     INTENT_NOTE_LIST: '메모 목록',
+    INTENT_MAIN_AI: '기본 AI 바꾸기',
     INTENT_CALENDAR_CREATE: '일정 만들기',
     INTENT_MAIL_SEARCH: '메일 찾기',
     INTENT_DRIVE_READ: 'Google Drive 파일 읽기',
@@ -1218,6 +1221,8 @@ class IntentClassifier:
             return IntentDecision(INTENT_SETTINGS, AUTHORITY_OWNER, argument=text[len('/settings '):])
         if text in ('/settings', '무엇이 연결되어 있어?', '무엇을 바꿀 수 있어?'):
             return IntentDecision(INTENT_SETTINGS, AUTHORITY_OWNER, argument=text)
+        if text == '/ai' or text.startswith('/ai '):
+            return IntentDecision(INTENT_MAIN_AI, AUTHORITY_OWNER, argument=text[len('/ai'):].strip())
         if text in ('/notes', '메모 목록'):
             return IntentDecision(INTENT_NOTE_LIST, AUTHORITY_OWNER)
         if text.startswith('/note '):

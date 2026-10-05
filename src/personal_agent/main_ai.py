@@ -383,6 +383,57 @@ class MainAiRoutes:
         # after the owner switches the Main AI elsewhere (key unchanged since).
         self._record_check(route_id, {'state': 'ok', 'config': config, 'test': verified_test(record)})
 
+    # -- owner-typed /ai (#1017): the same switch with no model in between --------
+    @staticmethod
+    def _switchable(row):
+        """A route a switch can be tried on now; ``activate`` still checks it first."""
+        if row['kind'] == 'subscription':
+            return row['installed'] and (row.get('login') or {}).get('state') != 'signed-out'
+        return row['key']['saved']
+
+    @staticmethod
+    def _compact(text):
+        return ''.join(ch for ch in str(text).casefold() if ch.isalnum())
+
+    def command(self, argument):
+        """``/ai`` lists the Main AI and its switch targets; ``/ai <route> [model]`` is 확인하고 사용.
+
+        No model is asked anything: the AI being replaced may be the one that
+        cannot answer (usage limit, signed out).  A refusal raises
+        ``MainAiError`` and changes nothing.
+        """
+        status = self.status()
+        routes, current = status['routes'], status['current']
+        names = {row['id']: row['name'] for row in routes}
+        words = (argument or '').split()
+        if not words:
+            ready = [row for row in routes if row['id'] != current and self._switchable(row)]
+            return '\n'.join((f"기본 AI: {names.get(current) or ('기타 연결' if current else '없음')}",
+                              '바꿀 수 있는 AI: ' + (', '.join(f"{row['name']} (/ai {row['id']})" for row in ready)
+                                                   if ready else '지금은 없음. 연결은 설정 › AI에서 합니다.')))
+        if len(words) > 2:
+            raise MainAiError('/ai 다음에 AI 이름과, 필요하면 모델 하나만 적어 주세요. 기본 AI는 그대로입니다.')
+        wanted = self._compact(words[0])
+        keys = {row['id']: (self._compact(row['id']), self._compact(row['name'])) for row in routes}
+        found = [row for row in routes if wanted in keys[row['id']]] or \
+                [row for row in routes if wanted and any(key.startswith(wanted) for key in keys[row['id']])]
+        if len(found) != 1:
+            raise MainAiError(f"'{words[0]}'에 맞는 AI를 하나로 찾지 못했어요. 다음 중 하나를 적어 주세요: "
+                              f"{', '.join(row['id'] for row in routes)}. 기본 AI는 그대로입니다.")
+        row = found[0]
+        if row['id'] == current and len(words) == 1:
+            return f"기본 AI는 이미 {row['name']}입니다. 바꿀 것이 없습니다."
+        result = self.activate({'route': row['id'], **({'model': words[1]} if len(words) == 2 else {})})
+        model = next((item.get('model') for item in result['main_ai']['routes'] if item['id'] == row['id']), '')
+        lines = [f"기본 AI를 {row['name']}{f' · {model}' if model else ''}(으)로 바꿨어요. 확인을 통과했고, 다음 요청부터 적용됩니다.",
+                 f"작업 내용 전송처: {row['destination']}"]
+        judgment = result.get('judgment') or {}
+        if judgment.get('state') == 'queued':
+            lines.append('판단 AI는 새 기본 AI 확인을 마치면 함께 바뀝니다.')
+        elif judgment.get('message'):
+            lines.append(judgment['message'])
+        return '\n'.join(lines)
+
     def check(self):
         """확인: re-probe the current Main AI.  Never switches."""
         current = self.current()

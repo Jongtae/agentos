@@ -15,17 +15,19 @@ You need macOS or Linux and Python 3.12 or newer.
 ```sh
 git clone https://github.com/Jongtae/agentos.git
 cd agentos
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e '.[schema-validation]' pytest
+python3 -m venv .tools/uv
+.tools/uv/bin/python -m pip install 'uv==0.11.33'
+.tools/uv/bin/uv sync --locked --extra schema-validation --group dev --no-python-downloads
 git config core.hooksPath .githooks   # blocks commits and pushes directly to main
 ```
 
-Run the app from the checkout with `agentos start`. [QUICKSTART.md](QUICKSTART.md) covers model, folder, mail, calendar and Telegram setup.
+Run the app from the checkout with `.venv/bin/agentos start`. [QUICKSTART.md](QUICKSTART.md) covers model, folder, mail, calendar and Telegram setup. The exact resolver/update boundary and currently claimed profiles are in [`docs/dependency-update-contract.en.md`](docs/dependency-update-contract.en.md).
 
 ## Tests
 
-- While you work, run the tests for what you changed, for example `python3 -m pytest -q tests/test_owner_model_upkeep.py`.
-- Before you ask for review, run the suite CI runs: `python3 -m pytest -q tests`.
+- Check that the manifest and lock agree with `.tools/uv/bin/uv lock --check`.
+- While you work, run the tests for what you changed, for example `.venv/bin/python -m pytest -q tests/test_owner_model_upkeep.py`.
+- Before you ask for review, run the suite CI runs: `.venv/bin/python -m pytest -q tests`.
 - Tests use injected model and tool transports, fake clocks and temporary stores. They make no live model calls and touch no real account.
 - Tests that open a real macOS WebKit window or Keychain only run when you set `AGENTOS_REAL_BROWSER_TESTS=1`.
 

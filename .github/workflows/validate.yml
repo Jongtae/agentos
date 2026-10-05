@@ -7,6 +7,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -89,16 +92,21 @@ jobs:
       - name: Verify ledger JSON
         run: python3 -c "import json,pathlib; [json.loads(line) for line in pathlib.Path('docs/issue-branch-ledger.jsonl').read_text(encoding='utf-8').splitlines()]"
 
-      - name: Install full-suite dependencies
+      - name: Install pinned uv resolver
         if: steps.scope.outputs.full_suite == 'true'
-        run: |
-          python -m pip install --upgrade pip pytest pypdf python-docx openpyxl
-          python -m pip install -e '.[schema-validation]'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.11.33'
+          enable-cache: true
+
+      - name: Sync exact full-suite dependencies
+        if: steps.scope.outputs.full_suite == 'true'
+        run: uv sync --locked --extra schema-validation --group dev --no-python-downloads
 
       - name: Verify AgentPackage v0.1
         if: steps.scope.outputs.full_suite == 'true'
-        run: python3 scripts/verify_agentpackage_v01.py
+        run: .venv/bin/python scripts/verify_agentpackage_v01.py
 
       - name: Run full test suite
         if: steps.scope.outputs.full_suite == 'true'
-        run: python3 -m pytest -q tests
+        run: PATH="$PWD/.venv/bin:$PATH" python3 -m pytest -q tests

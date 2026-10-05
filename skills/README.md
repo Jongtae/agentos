@@ -8,5 +8,6 @@ They are not bundled into AgentOS. The owner adds one in conversation ("장보�
 | --- | --- |
 | `shopping-cart` | A method for changing an online cart safely: exact product, quantity meaning, change only what was asked, read the cart back |
 | `emart-ssg` | Site know-how for Emart mall on SSG.COM, from redacted AgentOS observations. Use it with `shopping-cart` |
+| `map-directions` | A method for answers that send the owner somewhere: starting point, when to leave, mode, approximate time, parking, and one route link in the owner's preferred map service (reference: KakaoMap) |
 
 Site hints are observations, not guarantees. Pages change, and the method tells the AI to check each hint on the page.

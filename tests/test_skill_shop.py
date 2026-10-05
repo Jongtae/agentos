@@ -84,9 +84,21 @@ class ReferencePackages(unittest.TestCase):
         for text in (method, site):
             self.assertNotRegex(text, r'(?i)password\s*[:=]|cookie\s*[:=]|card number|cvc\s*[:=]')
 
+    def test_the_map_method_is_supported_content_and_names_no_vendor_outside_its_references(self):
+        """#1013: the method is vendor-neutral; a vendor's link formats live only in its reference file."""
+        record = inspect_skill(ROOT / 'skills' / 'map-directions')
+        self.assertEqual((record['status'], record['licence']), (['supported_as_is'], 'AGPL-3.0-only'))
+        method = (ROOT / 'skills' / 'map-directions' / 'SKILL.md').read_text()
+        self.assertNotRegex(method.lower(), r'kakao|naver|tmap|google', 'the method names no vendor')
+        for phrase in ('when to leave', 'parking', 'estimates', "owner's preferred map service", 'save_memory'):
+            self.assertIn(phrase, method)
+        reference = (ROOT / 'skills' / 'map-directions' / 'references' / 'kakaomap.md').read_text()
+        self.assertIn('https://apis.map.kakao.com/web/guide/', reference)
+        self.assertIn('/link/by/{mode}/', reference)
+
     def test_the_bundled_guide_points_at_the_reference_skills(self):
         guide = (ROOT / 'src' / 'personal_agent' / 'bundled_skills' / 'agentos-skills' / 'SKILL.md').read_text()
-        for name in (SHOPPING, SITE):
+        for name in (SHOPPING, SITE, 'map-directions'):
             self.assertIn(address(f'skills/{name}'), guide)
 
 
@@ -234,7 +246,7 @@ class OwnerAddsAReferenceSkillByName(_Shop):
         self.assertIsNone(self.service.skill_binding(), 'fresh install: skills off')
         read = self.settings.read('owner', 'skills')
         available = read['settings']['skills']['add']['available']
-        self.assertEqual([(row['name'], row['installed']) for row in available], [(SHOPPING, False), (SITE, False)])
+        self.assertEqual([(row['name'], row['installed']) for row in available], [(SHOPPING, False), (SITE, False), ('map-directions', False)])
         self.assertNotIn('https://', json.dumps(read, ensure_ascii=False), 'no endpoint is reported')
 
     def test_adding_by_name_pins_the_commit_and_switches_skills_on_once_confirmed(self):
@@ -246,7 +258,7 @@ class OwnerAddsAReferenceSkillByName(_Shop):
         self.assertIn('스킬 사용도 켰어요', applied['response'])
         self.assertIn(f'{SHOPPING}/{SHOPPING}', self.service.skill_binding().entries)
         listed = self.settings.read('owner', 'skills')['settings']['skills']['add']['available']
-        self.assertEqual([(row['name'], row['installed']) for row in listed], [(SHOPPING, True), (SITE, False)])
+        self.assertEqual([(row['name'], row['installed']) for row in listed], [(SHOPPING, True), (SITE, False), ('map-directions', False)])
 
     def test_an_unknown_name_is_not_guessed(self):
         from personal_agent.settings_orchestrator import SettingsError

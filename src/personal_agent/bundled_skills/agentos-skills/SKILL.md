@@ -23,6 +23,7 @@ These are reviewed reference skills in the AgentOS repository. They are added li
 
 - **Shopping cart method:** `https://github.com/Jongtae/agentos/tree/main/skills/shopping-cart`. Changing an online cart safely: exact product, quantity meaning, read-back.
 - **Emart mall on SSG.COM:** `https://github.com/Jongtae/agentos/tree/main/skills/emart-ssg`. Site know-how. Use it with the shopping cart method.
+- **Getting the owner there:** `https://github.com/Jongtae/agentos/tree/main/skills/map-directions`. When an answer sends the owner somewhere: when to leave, how to get there, parking, and a route link in the owner's preferred map service.
 
 ## What AgentOS refuses
 

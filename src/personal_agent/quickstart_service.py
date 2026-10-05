@@ -63,7 +63,7 @@ from .conversation_handoff import (CONNECTOR_LABELS, JUDGMENT_NO, JUDGMENT_YES,
                                    INTENT_AMBIGUOUS, INTENT_CALENDAR_CREATE, AUTHORITY_OWNER, AUTHORITY_RULE, INTENT_LABELS,
                                    IntentDecision,
                                    INTENT_GREETING, INTENT_KNOWLEDGE,
-                                   INTENT_MAIL_SEARCH, INTENT_NOTE_CREATE, INTENT_NOTE_LIST, INTENT_DRIVE_READ,
+                                   INTENT_MAIL_SEARCH, INTENT_MAIN_AI, INTENT_NOTE_CREATE, INTENT_NOTE_LIST, INTENT_DRIVE_READ,
                                    INTENT_SETTINGS,
                                    INTENT_UNSUPPORTED, INTENT_WORKSPACE_SEARCH, SUPERSEDED_WORK_ERROR)
 # PRESENCE-CAP-01 / #505: contextual local authority handoff.
@@ -8773,6 +8773,13 @@ class AgentService:
                 elif decision.intent==INTENT_NOTE_LIST:
                     work_sources.add('personal-space')
                     response='\n\n'.join(n['content'] for n in self.store.notes()) or '저장된 메모가 없습니다. /note 내용으로 기록해 보세요.'
+                elif decision.intent==INTENT_MAIN_AI:
+                    # #1017: the owner's typed /ai is the Settings 확인하고 사용 itself, with no
+                    # model asked anything; only a message the owner typed may switch.
+                    work_sources.add('owner-settings')
+                    if decision.argument and job.get('owner_typed')!=1:
+                        raise ValueError('기본 AI는 소유자가 직접 보낸 메시지로만 바꿉니다. 기본 AI는 그대로입니다.')
+                    response=self.main_ai.command(decision.argument)
                 elif decision.intent==INTENT_DRIVE_READ:
                     # The selected files are read into this turn below and the
                     # model loop answers; a missing connection parks the Work.

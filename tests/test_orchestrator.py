@@ -469,7 +469,7 @@ class ToolsAndReplan(Harness):
         [turn] = self.engine.turns
         self.assertIn('weather', turn['offered'], 'the full offered toolset, not a subset')
         context, _question, schema = self.asked_plans[0]
-        self.assertEqual(set(schema['required']), {'worker', 'model', 'brief', 'reason', 'account_change'})
+        self.assertEqual(set(schema['required']), {'worker', 'model', 'brief', 'reason', 'account_change', 'owner_situation'})
         descriptions = context.facts['tool_descriptions']
         self.assertIn('- bounded_public_research: ', descriptions)
         self.assertIn('- list_notes: ', descriptions)
@@ -2237,3 +2237,66 @@ class AccountChangeFloor(unittest.TestCase):
         orchestration.record = lambda *args, **kwargs: None
         attempt = orchestration.first()
         self.assertEqual((attempt.fallback != '', attempt.model, attempt.lifted_from), (True, 'sonnet', 'haiku'))
+
+
+class OwnerSituationFloor(unittest.TestCase):
+    """#1008 (owner decision 2026-10-05): a reply that depends on the owner's own situation never runs
+    on the lowest-cost model (the 2026-10-05 "다이소 몇시 문열어?" ran on Haiku and fitted nothing)."""
+
+    worker = AccountChangeFloor.worker
+
+    def orchestration(self):
+        from personal_agent.orchestrator import Orchestration
+        orchestration = Orchestration.__new__(Orchestration)
+        orchestration.failed, orchestration.budget_allows = set(), (lambda: True)
+        return orchestration
+
+    def test_owner_situation_lifts_is_sticky_and_false_keeps_the_low_cost_choice(self):
+        worker = {**self.worker(), 'id': 'claude-code', 'available': True}
+        plan = {'worker': 'claude-code', 'model': 'haiku', 'brief': {'notes': ''}, 'reason': 'r', 'account_change': False}
+        orchestration = self.orchestration()
+        attempt, why = orchestration.validate({**plan, 'owner_situation': True}, [worker], 1)
+        self.assertEqual((attempt.model, attempt.lifted_from, attempt.owner_situation, attempt.account_change, why),
+                         ('sonnet', 'haiku', True, False, ''))
+        attempt, _ = orchestration.validate({**plan, 'owner_situation': False}, [worker], 2)
+        self.assertEqual((attempt.model, attempt.owner_situation), ('sonnet', True), 'a replan saying false keeps the floor')
+        for other in ({**plan, 'owner_situation': False}, plan):
+            attempt, _ = self.orchestration().validate(other, [worker], 1)
+            self.assertEqual((attempt.model, attempt.lifted_from), ('haiku', None), 'false or missing: not lifted')
+        for value in ('true', 1, None):
+            with self.subTest(value=value):
+                self.assertEqual(self.orchestration().validate({**plan, 'owner_situation': value}, [worker], 1),
+                                 (None, 'shape'))
+
+    def test_a_fallback_after_an_owner_situation_plan_is_lifted(self):
+        from personal_agent.orchestrator import Orchestration
+        worker = {**self.worker(default_model='haiku'), 'id': 'claude-code', 'available': True}
+        catalogue = type('Catalogue', (), {'default': 'claude-code', 'available': lambda self: [worker],
+                                           'worker': lambda self, wid: worker if wid == 'claude-code' else None})()
+        orchestration = self.orchestration()
+        orchestration.attempts, orchestration.catalogue, orchestration.notice = [], catalogue, None
+        orchestration._ask = lambda candidates: ({'worker': 'nope', 'model': 'haiku', 'brief': {'notes': ''},
+                                                  'reason': 'r', 'account_change': False, 'owner_situation': True}, '')
+        orchestration._set_state = lambda value: {}
+        orchestration.record = lambda *args, **kwargs: None
+        attempt = orchestration.first()
+        self.assertEqual((attempt.model, attempt.lifted_from, attempt.owner_situation, attempt.account_change),
+                         ('sonnet', 'haiku', True, False))
+
+    def test_a_worker_with_nothing_above_lowest_is_refused_only_when_another_worker_has_more(self):
+        """#1010 review: the floor is not silently skipped when a higher model exists elsewhere."""
+        from personal_agent.orchestrator import TIER_LOWEST
+        api = {'id': 'openai', 'available': True, 'models': ['gpt-4o-mini'], 'model_tiers': {'gpt-4o-mini': TIER_LOWEST},
+               'default_model': 'gpt-4o-mini'}
+        cli = {**self.worker(), 'id': 'claude-code', 'available': True}
+        plan = {'worker': 'openai', 'model': '', 'brief': {'notes': ''}, 'reason': 'r', 'account_change': False,
+                'owner_situation': True}
+        self.assertEqual(self.orchestration().validate(plan, [api, cli], 1), (None, 'floor'))
+        attempt, why = self.orchestration().validate(plan, [api], 1)
+        self.assertEqual((attempt.worker, why), ('openai', ''), 'nothing better anywhere: it runs')
+        attempt, why = self.orchestration().validate({**plan, 'owner_situation': False}, [api, cli], 1)
+        self.assertEqual((attempt.worker, why), ('openai', ''), 'no floor: the low-cost choice stands')
+
+    def test_the_question_asks_for_it_without_naming_a_category(self):
+        from personal_agent.orchestrator import QUESTION
+        self.assertIn('owner_situation is true when a useful reply depends on the owner\'s own situation', QUESTION)

@@ -1,9 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="420" height="656" viewBox="0 0 420 656" role="img" aria-labelledby="title desc">
-<title id="title">一人のアシスタント。文脈は手元に。</title><desc id="desc">あなたは一人の PA と話します。AgentOS が文脈、作業、権限、証拠をつなぎ、その関係を保ちながら AI やツールを交換できます。</desc>
+<title id="title">同じ PA。文脈は手元に。</title><desc id="desc">あなたは一人の PA と話します。AgentOS が文脈、作業、権限、証拠をつなぎ、その関係を保ちながら AI やツールを交換できます。</desc>
 <style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
 <rect width="420" height="656" fill="#fff"/>
-<text x="20" y="32.0" font-size="23" class="bold" text-anchor="start">一人のアシスタント。文脈は手元</text>
-<text x="20" y="64.19999999999999" font-size="23" class="bold" text-anchor="start">に。</text>
+<text x="20" y="32.0" font-size="23" class="bold" text-anchor="start">同じ PA。文脈は手元に。</text>
 <rect x="20" y="100" width="380" height="54" rx="8" fill="#fff" stroke="#ccd4de"/>
 <text x="155.0" y="135" font-size="21" class="bold" text-anchor="end">あなた</text>
 <text x="200.0" y="135" font-size="25" class="blue" text-anchor="middle">⇄</text>
@@ -11,8 +10,7 @@
 <path d="M210.0 158 L210.0 176" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M206.0 171 L210.0 176 L214.0 171" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="20" y="184" width="380" height="364" rx="8" fill="#f2f7fc" stroke="#96b6d6"/>
-<text x="36" y="212.0" font-size="18" class="bold" text-anchor="start">Personal AgentOS · 自分で管理する環</text>
-<text x="36" y="237.2" font-size="18" class="bold" text-anchor="start">境</text>
+<text x="36" y="212.0" font-size="18" class="bold" text-anchor="start">Personal AgentOS · 自分の管理下</text>
 <rect x="36" y="246" width="348" height="66" rx="5" fill="#fff" stroke="#ccd8e6"/>
 <text x="210.0" y="270" font-size="18" class="bold" text-anchor="middle">あなたについて知ること</text>
 <text x="210.0" y="297" font-size="15" class="muted" text-anchor="middle">記憶 · 文脈</text>

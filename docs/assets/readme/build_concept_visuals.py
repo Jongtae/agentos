@@ -115,8 +115,10 @@ class Figure:
    if row and cost+weight>limit:
     tail=''
     if cjk and token in '。，、？！：；”’」』':
-     latin=re.search(r'[A-Za-z0-9]+$',row)
-     tail=latin.group() if latin else row[-1]
+     # Keep a closing-punctuation run with its preceding glyph or Latin
+     # token. Moving only the last mark can leave a row containing 。」.
+     ending=re.search(r'(?:[A-Za-z0-9]+|[^。，、？！：；”’」』])[。，、？！：；”’」』]*$',row)
+     tail=ending.group() if ending else row
     previous=(row[:-len(tail)] if tail else row).rstrip()
     if previous: rows.append(previous)
     row=tail+token.lstrip();cost=sum(1 if unicodedata.east_asian_width(c) in 'WF' else .59 for c in row)

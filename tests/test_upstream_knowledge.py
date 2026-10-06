@@ -5,13 +5,14 @@ the GitHub wire and worker provider are injected; production installation,
 binding, capability dispatch and MCP tool delivery execute unchanged. This is
 model-free compatibility evidence, not a claim of live model/design quality.
 Generic withdrawal, tamper, restart and rollback coverage stays in
-test_skill_supply; the rejected same-package update is the additional boundary.
+test_skill_supply; additional boundaries are rejected same-package updates and
+preservation of prior persisted evidence across the revision lifecycle.
 """
 import hashlib
 import json
 from pathlib import Path
 
-from personal_agent.agent_runtime import run_agent, turn_context
+from personal_agent.agent_runtime import Capabilities, run_agent, turn_context
 from personal_agent.bounded_execution import AgentOSMcpTools
 from personal_agent.providers import ModelAdapter
 from personal_agent.skills import SkillBinding, SkillError, inspect_skill
@@ -133,7 +134,11 @@ class ImmutableKnowledgeConsumer(_Store):
                                    context['skills'], caps, lambda *args: None)
                 self.assertEqual(result.outcome, 'succeeded')
                 self.assertIn(SKILL, script.bodies[0]['messages'][0]['content'])
-                self.assertNotIn(instructions(FOLDERS[revision]), json.dumps(script.bodies[0]))
+                for index, message in enumerate(script.bodies[0]['messages']):
+                    content = message['content']
+                    self.assertIsInstance(content, str)
+                    self.assertNotIn(instructions(FOLDERS[revision]), content,
+                                     f'instructions leaked into initial message {index}')
                 self.assertTrue({'skill_load', 'skill_resource'} <=
                                 {tool['function']['name'] for tool in script.bodies[0]['tools']})
                 observations = {message['tool_call_id']: json.loads(message['content'])
@@ -149,6 +154,78 @@ class ImmutableKnowledgeConsumer(_Store):
         self.github.offline = True
         self.assert_delivered(CANDIDATE)
         self.assertEqual(self.github.urls, urls)
+
+    def test_prior_persisted_evidence_survives_update_refusal_and_rollback(self):
+        old = self.library.install(source(OLD))
+        job = self.store.enqueue('Read the selected design guidance and licence.', 'knowledge-evidence')
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='running' WHERE id=?", (job,))
+        recorded = []
+
+        def record(tool, status, detail):
+            with self.store.db() as db:
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           (job, tool, status, detail, 1000.0 + len(recorded)))
+            recorded.append((tool, status, detail))
+
+        def prior_rows():
+            with self.store.db() as db:
+                return tuple(tuple(row) for row in db.execute(
+                    'SELECT id,job_id,tool,status,detail,created FROM tool_events WHERE job_id=? ORDER BY id', (job,)))
+
+        binding = self.library.binding()
+        script = Script({'tool_calls': [call('load', 'skill_load', skill=SKILL)]},
+                        {'tool_calls': [call('license', 'skill_resource', skill=SKILL, path='LICENSE.txt')]},
+                        finish('done', 'load', 'license', summary='Read the selected design guidance and licence.'))
+        adapter = ModelAdapter(script)
+        caps = Capabilities(self.store, adapter, CFG, '', job, record, skills=binding, judgments=judgments(True))
+        result = run_agent(adapter, CFG, '', [{'role': 'user', 'content': 'Read the selected design guidance and licence.'}],
+                           binding.catalogue_text(), caps, record)
+        self.assertEqual(result.outcome, 'succeeded')
+        original_rows = prior_rows()
+        self.assertTrue(original_rows)
+        successful_loads = [json.loads(row[4])['evidence'] for row in original_rows
+                            if row[2:4] == ('skill_load', 'succeeded')]
+        self.assertEqual(len(successful_loads), 1)
+        self.assertEqual(successful_loads[0]['revision'], OLD)
+        self.assertEqual(successful_loads[0]['digest'], old['skills'][0]['digest'])
+        # Snapshot every field, preserving the original unparsed detail strings.
+        original_bytes = json.dumps(original_rows, ensure_ascii=False, separators=(',', ':')).encode()
+
+        def assert_prior_unchanged():
+            rows = prior_rows()
+            self.assertEqual(rows, original_rows)
+            self.assertEqual(json.dumps(rows, ensure_ascii=False, separators=(',', ':')).encode(), original_bytes)
+
+        current = self.library.install(source(CANDIDATE))
+        self.assert_delivered(CANDIDATE)
+        assert_prior_unchanged()
+        retained = {revision: self.library.content / manifest['skills'][0]['digest'] / 'frontend-design'
+                    for revision, manifest in ((OLD, old), (CANDIDATE, current))}
+        # This adverse archive is synthetic; it is not an upstream revision.
+        synthetic = 'e' * 40
+        rejected = {f'skills/frontend-design/{name}': data for name, data in files(CURRENT_FOLDER).items()}
+        rejected['skills/frontend-design/scripts/run.py'] = b'# unsupported fixture; never executed\n'
+        self.github.archives[synthetic] = tarball(UPSTREAM, synthetic, rejected)
+        with self.assertRaises(SkillError) as raised:
+            self.library.install(source(synthetic))
+        self.assertEqual(raised.exception.code, 'unsupported')
+        self.assertIn('스크립트나 훅', str(raised.exception))
+        assert_prior_unchanged()
+        for revision, folder in retained.items():
+            self.assertEqual(files(folder), files(FOLDERS[revision]))
+        restored = self.library.install(source(OLD))
+        self.assertEqual(restored['source']['revision'], OLD)
+        self.assertEqual(self.assert_delivered(OLD)['digest'], old['skills'][0]['digest'])
+        fresh_job = self.store.enqueue('Read the restored design guidance.', 'knowledge-restored')
+        fresh_caps = Capabilities(self.store, None, CFG, '', fresh_job, lambda *args: None,
+                                  skills=self.library.binding())
+        fresh_load = fresh_caps.execute('skill_load', {'skill': SKILL})
+        self.assertEqual(fresh_load['revision'], OLD)
+        self.assertEqual(fresh_load['instructions'], instructions(OLD_FOLDER))
+        assert_prior_unchanged()
+        for revision, folder in retained.items():
+            self.assertEqual(files(folder), files(FOLDERS[revision]))
 
     def test_unsupported_same_package_update_preserves_known_good_versions(self):
         old = self.library.install(source(OLD))

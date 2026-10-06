@@ -31,7 +31,7 @@
 
 - **공개 배포본:** 공개 배포본은 release manifest에 기록된 설치 smoke와 synthetic journey 증거를 가집니다. 현재 `main` 전체를 담고 있지는 않습니다.
 - **현재 `main`:** Secretary, Presence, Decision, execution 계약을 뒷받침하는 병합 코드와 deterministic/fixture 증거가 있습니다. 계약이나 테스트가 있다는 것만으로 실제 외부 서비스 동작을 주장하지는 않습니다.
-- **Owner pilot:** 더 새로운 경로 중 일부는 소유자의 실제 Telegram/desktop 환경에서도 사용됐습니다. 공개 스크린샷은 정확한 사례를 고르고 개인정보를 가린 뒤, 관찰한 revision과 연결해서 추가합니다.
+- **Owner pilot evidence:** public owner-live claims are intentionally pending until exact Telegram/desktop observations are selected, redacted and tied to a revision/evidence record.
 - **방향:** 쇼핑·예약 같은 장면은 구현과 증거가 뒷받침하기 전까지 제품 방향입니다.
 
 [현재 무엇이 되고 어떻게 아는지](docs/product-status.ko.md), [release manifest](docs/release-manifest.json), [문서 지도](docs/README.md)를 함께 보세요.

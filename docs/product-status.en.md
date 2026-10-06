@@ -1,11 +1,11 @@
 # Personal AgentOS: what works today, what still has friction, and where it is going
 
-This is the evidence and boundary page behind the [README](../README.md). The README shows what you can do; this page says how we know, what is still rough, what is only a direction, and how the project is built and licensed.
+This is the evidence and boundary page behind the [README](../README.md). It separates the newest published release from newer `main` implementation, and distinguishes synthetic/fixture, installed-smoke, owner-live and product-direction evidence.
 
 <!-- readme-section:status -->
 ## What works, what still has friction
 
-The latest synthetic first-user audit is [#472](https://github.com/Jongtae/agentos/issues/472). It drove the shipped construction with injected transports; **live provider operation was not run**, so fixture success is not live-service proof.
+The v1 journey table below is backed by the synthetic first-user audit [#472](https://github.com/Jongtae/agentos/issues/472), with injected transports; **live provider operation was not run**, so fixture success is not live-service proof. Newer `main` Secretary/Presence/Decision/execution work is tracked by its current contracts and merged tests and must not be attributed to the published release without a new release record.
 
 | Area | Current evidence |
 | --- | --- |
@@ -72,7 +72,7 @@ For installable agents the same rule holds: `downloaded != installed != enabled 
 <!-- readme-section:release -->
 ## The Homebrew release
 
-**The Homebrew package installs the newest published release, `v1.1.0` (2026-09-23), which carries every scene in the README** (see the [release manifest](release-manifest.json) for exactly what it contains and what was observed). Work merged to `main` after that tag is not in it until the next release.
+**The Homebrew package installs the newest published release, `v1.1.0` (2026-09-23).** It carries the release-scoped scenes described in the README; the README now separately labels newer `main` behavior. See the [release manifest](release-manifest.json) for exactly what the published build contains and what was observed. Work merged to `main` after that tag is not in it until the next release.
 
 ```sh
 brew install jongtae/agentos/agentos

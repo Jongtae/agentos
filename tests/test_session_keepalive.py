@@ -65,18 +65,15 @@ class DueTimeTests(unittest.TestCase):
                          'a cookie about to expire anyway sets no earlier time')
 
 
-class LearnedIntervalTests(unittest.TestCase):
-    """#1011: a site's interval comes from its observed logouts only."""
+class JitterTests(unittest.TestCase):
+    """#1041: about every 3 h, never at a machine-regular cadence."""
 
-    def test_half_the_shortest_lifetime_clamped(self):
-        self.assertEqual(bs.keepalive_interval(None), bs.KEEPALIVE_SECONDS)
-        self.assertEqual(bs.keepalive_interval(43 * 60), 43 * 60 / 2)
-        self.assertEqual(bs.keepalive_interval(5 * 60), bs.KEEPALIVE_FLOOR_SECONDS)
-        self.assertEqual(bs.keepalive_interval(30 * 3600), bs.KEEPALIVE_SECONDS)
-
-    def test_the_due_time_follows_the_learned_interval_below_the_default_gap(self):
-        interval = bs.keepalive_interval(43 * 60)
-        self.assertEqual(bs.keepalive_due_at([None], NOW, NOW, interval), NOW + interval)
+    def test_each_refresh_interval_is_within_the_jitter_and_stable_for_one_refresh(self):
+        values = [bs.keepalive_interval('shop.test', NOW + k * 3600) for k in range(50)]
+        low, high = bs.KEEPALIVE_SECONDS * (1 - bs.KEEPALIVE_JITTER), bs.KEEPALIVE_SECONDS * (1 + bs.KEEPALIVE_JITTER)
+        self.assertTrue(all(low <= value <= high for value in values))
+        self.assertGreater(len({round(value) for value in values}), 40, 'the cadence varies')
+        self.assertEqual(bs.keepalive_interval('shop.test', NOW), bs.keepalive_interval('shop.test', NOW))
 
 
 class ProfileTests(unittest.TestCase):
@@ -118,22 +115,14 @@ class ProfileTests(unittest.TestCase):
         self.profile._release()
         self.assertEqual(self.jar.writes, 4, 'after an import the jar differs from the last write')
 
-    def test_a_refresh_loads_the_page_once_saves_and_releases(self):
-        self.assertEqual(self.profile.refresh_session('https://www.shop.test/'), {'state': 'refreshed'})
-        [driver] = self.drivers
-        self.assertEqual(driver.log, [('goto', 'https://www.shop.test/')])
-        self.assertTrue(driver.closed)
-        self.assertEqual(self.jar.writes, 1)
-        self.assertTrue(self.profile._lock.acquire(blocking=False), 'the profile was released')
-        self.profile._lock.release()
-
     def test_a_refresh_never_goes_to_this_computer_and_reports_a_busy_profile(self):
-        self.assertEqual(self.profile.refresh_session('http://127.0.0.1:8787/')['state'], 'failed')
-        self.assertEqual(self.profile.refresh_session('file:///etc/passwd')['state'], 'failed')
+        self.jar.save_export({'shop.test': [cookie('.shop.test')]})
+        self.assertEqual(self.profile.refresh_session_http('http://127.0.0.1:8787/')['state'], 'failed')
+        self.assertEqual(self.profile.refresh_session_http('file:///etc/passwd')['state'], 'failed')
         self.assertEqual(self.drivers, [])
         self.profile._acquire('work-1')
         self.addCleanup(self.profile._release)
-        self.assertEqual(self.profile.refresh_session('https://www.shop.test/'), {'state': 'busy'})
+        self.assertEqual(self.profile.refresh_session_http('https://www.shop.test/'), {'state': 'busy'})
 
     def test_an_http_refresh_rewrites_only_that_site_and_pushes_it(self):
         self.jar.save_export({'shop.test': [cookie('.shop.test', 'FSID', 'old')], 'news.test': [cookie('.news.test')]})
@@ -219,9 +208,8 @@ class ServiceTests(unittest.TestCase):
         self.jar.save_export({'shop.test': [cookie('.shop.test', expires=NOW + 30 * 86400)],
                               'other.test': [cookie('.other.test')]})
         self.profile = bs.BrowserProfile(root / 'profile', launcher=lambda d, h: ExportDriver(), jar=self.jar)
-        self.refreshes, self.browser_loads = [], []
+        self.refreshes = []
         self.profile.refresh_session_http = lambda url: self.refreshes.append(url) or {'state': 'refreshed'}
-        self.profile.refresh_session = lambda url: self.browser_loads.append(url) or {'state': 'refreshed'}
         self.service = AgentService(self.store, ModelAdapter(lambda *a, **k: {}), lambda *a, **k: {'ok': True, 'result': []},
                                     browser_profile=self.profile)
         self.store.put(BROWSER_OWNER_SIGNINS_KEY, {'shop.test': {'at': NOW - 4 * 3600, 'marks': ['m'], 'host': 'www.shop.test'}})
@@ -249,44 +237,21 @@ class ServiceTests(unittest.TestCase):
         self.assertIsNone(self.service.keep_sessions_alive(now=NOW))
         self.assertEqual(self.store.config(self.service.KEEPALIVE_KEY, {}), {})
 
-    def test_an_observed_logout_shortens_only_that_sites_interval(self):
-        self.store.put(self.service.KEEPALIVE_KEY, {'shop.test': NOW - 43 * 60})
-        self.assertEqual(self.service.note_signed_out('www.shop.test', now=NOW), 43 * 60)
-        self.assertEqual(self.service.note_signed_out('www.shop.test', now=NOW + 3600 * 5), 43 * 60, 'the shortest stays')
-        self.assertIsNone(self.service.note_signed_out('other.test', now=NOW), 'not a site the owner signed in to here')
-        self.assertEqual(self.store.config(self.service.SESSION_LIFETIMES_KEY, {}), {'shop.test': 43 * 60})
-        # 25 min after that refresh the default 3 h cadence would wait; the learned 21.5 min one is due.
-        self.assertEqual(self.service.keep_sessions_alive(now=NOW - 43 * 60 + 25 * 60), 'shop.test')
-
-    def test_a_requested_sign_in_records_the_observation(self):
-        job = {'id': self.store.enqueue('담아줘', 'k-sign')}
-        self.store.put(self.service.KEEPALIVE_KEY, {'shop.test': time.time() - 1800})
-        self.service.browser_profile.available = lambda: True
-        self.service._request_browser_login(self.store.job(job['id']), 'https://www.shop.test/login', explicit=True)
-        lifetime = self.store.config(self.service.SESSION_LIFETIMES_KEY, {}).get('shop.test')
-        self.assertTrue(1700 < lifetime < 1900, lifetime)
-
-    def test_a_refresh_is_one_http_request_first_and_needs_no_browser(self):
-        """#1015: a page in the browser is ~900 MB on this site class; the request carries the cookies alone."""
-        self.assertEqual(self.service.keep_sessions_alive(now=NOW), 'shop.test')
-        self.assertEqual((self.refreshes, self.browser_loads), (['https://www.shop.test/'], []))
-        self.assertEqual(self.store.config(self.service.KEEPALIVE_VIA_KEY, {}), {'shop.test': 'http'})
-
-    def test_a_site_that_refuses_the_request_is_refreshed_by_the_browser_from_then_on(self):
+    def test_a_site_that_refuses_is_paused_without_the_browser_until_the_next_sign_in(self):
+        """#1041: a regular automated cadence drew a bot-activity alert; a refusal is never pushed past."""
         self.profile.refresh_session_http = lambda url: self.refreshes.append(url) or {'state': 'blocked'}
+        self.assertFalse(hasattr(self.profile, 'refresh_session'), 'no browser refresh exists any more')
         self.assertEqual(self.service.keep_sessions_alive(now=NOW), 'shop.test')
-        self.assertEqual(self.browser_loads, ['https://www.shop.test/'])
-        self.assertEqual(self.store.config(self.service.KEEPALIVE_BROWSER_ONLY_KEY, []), ['shop.test'])
+        self.assertEqual(self.store.config(self.service.KEEPALIVE_PAUSED_KEY, {}), {'shop.test': NOW})
         self.store.put(self.service.KEEPALIVE_KEY, {'shop.test': NOW - 4 * 3600})
-        self.service.keep_sessions_alive(now=NOW)
-        self.assertEqual(len(self.refreshes), 1, 'no second HTTP try on a browser-only site')
-        self.assertEqual(len(self.browser_loads), 2)
-
-    def test_a_logout_after_an_http_refresh_moves_the_site_to_the_browser(self):
-        self.service.keep_sessions_alive(now=NOW)
-        self.store.put(self.service.KEEPALIVE_KEY, {'shop.test': NOW - 1800})
-        self.service.note_signed_out('www.shop.test', now=NOW)
-        self.assertEqual(self.store.config(self.service.KEEPALIVE_BROWSER_ONLY_KEY, []), ['shop.test'])
+        self.assertIsNone(self.service.keep_sessions_alive(now=NOW + 60), 'paused')
+        # The owner signs in again after the pause (times shifted so the fixed jar clock sees it as due).
+        self.store.put(self.service.KEEPALIVE_PAUSED_KEY, {'shop.test': NOW - 5 * 3600})
+        self.store.put(BROWSER_OWNER_SIGNINS_KEY, {'shop.test': {'at': NOW - 4 * 3600, 'marks': ['m'], 'host': 'www.shop.test'}})
+        self.store.put(self.service.KEEPALIVE_KEY, {})
+        self.profile.refresh_session_http = lambda url: self.refreshes.append(url) or {'state': 'refreshed'}
+        self.assertEqual(self.service.keep_sessions_alive(now=NOW + 4 * 3600), 'shop.test', 'a new sign-in lifts the pause')
+        self.assertEqual(len(self.refreshes), 2)
 
     def test_the_work_loop_starts_a_check_only_while_idle_and_at_most_once_a_minute(self):
         self.service.SESSION_KEEPALIVE = True

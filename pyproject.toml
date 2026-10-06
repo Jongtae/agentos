@@ -16,7 +16,7 @@ license = {text = "AGPL-3.0-only"}
 # browser (MIT, Ronald Oussoren; 12.2.2 reviewed). macOS only; it pulls
 # pyobjc-core and pyobjc-framework-Cocoa (MIT). No browser download.
 # publicsuffixlist: #716 registrable domain (eTLD+1) of a login host from the
-# bundled Mozilla Public Suffix List (MPL-2.0, ko-zu; 1.0.2.20260925 reviewed).
+# bundled Mozilla Public Suffix List (MPL-2.0, ko-zu; 1.0.2.20261002 reviewed).
 # Pure Python, zero mandatory dependencies, never fetches the list at runtime.
 # PyYAML: #961 parses Agent Skills SKILL.md frontmatter with SafeLoader only
 # (MIT, YAML project; 6.0.3 reviewed; #960 decision record section 4).

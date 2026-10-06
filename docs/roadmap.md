@@ -1,10 +1,10 @@
-## Owner-directed UI renewal — UX-RENEW-01 / #688 (2026-09-27, complete)
-
-**Historical.** UX-RENEW-01 closed out on 2026-09-27 (#728). SECRETARY-01 / #662 was resumed on 2026-09-28 (#770) and is the active goal; the text below records the renewal as it was activated.
-
-The owner explicitly lifted SECRETARY-01's earlier exclusion of revisiting merged Presence/Settings/Telegram/current-context presentation and selected a full, sequential local web experience renewal. Governance activation is tracked by #690; implementation order is #691 shell → #692 AI → #693 files/workspace → #694 external connections → #695 privacy/context/Memory/diagnostics → #696 activity/Work. This is presentation-only and preserves current APIs, authority, privacy, connector, Work/Event/Evidence and external-effect contracts. SECRETARY-01 / #662 is owner-paused with its work preserved for a future explicit owner decision. PR #687 has merged and released overlapping web-file ownership; UI implementation starts after #690 merges. See [UX-RENEW-01](https://github.com/Jongtae/agentos/issues/688) and [delivery-plan.yaml](../delivery-plan.yaml).
-
 # Personal AgentOS roadmap
+
+> **Direction and history, not current execution status.** This document preserves product/program direction and dated planning decisions. It is not the source of truth for the currently selected goal or child. Read [Documentation map](README.md) first. Repository-root [delivery-plan.yaml](../delivery-plan.yaml) owns current goal selection/order; GitHub Issues, Pull Requests and required Checks own execution status. Rows below may intentionally describe historical states and must not be used to override those sources.
+
+## Historical program notes
+
+The sections below preserve the roadmap and program state as recorded when they were written. Later owner decisions may supersede their activation/status prose without rewriting this history.
 
 ## Secretary agency re-plan — #653 (2026-09-26)
 

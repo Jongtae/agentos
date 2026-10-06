@@ -23,6 +23,50 @@ These two scenes are observed product behaviour from the published v1 line, cond
 
 The author's sentence, in the original Korean. Why the project exists and the documents that define the concept are gathered on one page: [VISION.md](VISION.md).
 
+<!-- readme-section:interaction-model -->
+
+## From an assistant to a personal agent environment
+
+The distinction is not whether an AI can search a stock price or click **Add to cart**. Assistants already answer questions, and computer-use agents can already execute commands. Personal AgentOS moves the **persistent relationship, owner context, authority and work state** out of the AI provider and into an environment the owner controls.
+
+| Interaction model | What the owner does | What the system primarily holds |
+| --- | --- | --- |
+| **Assistant — answers** | asks a question such as “What is the current price of NVIDIA?” | the current conversation and an answer |
+| **Computer agent — acts** | gives a command such as “Add these headphones to my Amazon cart.” | a task, browser/tool state and an action/handoff |
+| **Personal AgentOS — stays with you** | talks naturally over time: “We’re almost out of coffee.” → later, “Just get the same one as last time.” | Memory, Context, Work, Authority and Evidence that persist independently of a particular AI |
+
+The NASDAQ/Amazon examples above are **interaction-model illustrations**, not claims that those exact services are shipped integrations.
+
+### Presence is an architectural property
+
+The owner talks to one **PA**, not to a changing set of models, tools and workflows.
+
+```text
+Owner  ⇄  PA (continuous presence)
+             │
+     Personal AgentOS
+  ┌──────────┼───────────┐
+Memory    Context      Work
+Authority  Evidence     Events
+  └──────────┼───────────┘
+       Judgment / orchestration
+             │
+   replaceable AI + tools/services
+```
+
+That changes the conversation. A person can share an incomplete fact, continue it hours later, send a photo or location when it becomes relevant, and grant account/computer access only at the moment an external action needs it. The owner does not have to translate everyday intent into a tool, model, workflow or memory command.
+
+A representative flow reconstructed from owner-pilot interaction patterns might look like this:
+
+> **Morning:** “We’re almost out of coffee.”  
+> **Afternoon:** “I may finish work late today.”  
+> **Evening:** “I’m heading out now. Is there somewhere on the way I can pick it up?”  
+> **Later:** “No time. Just get the same one as last time.”
+
+Underneath that ordinary conversation, AgentOS may resolve prior context, calendar/time, location, search, a continuing Work and—only when needed—an authority handoff. The dialogue is illustrative and condensed; current implementation evidence is classified separately below.
+
+**Same PA. Different AI.** The model underneath can change without making the owner rebuild the relationship from scratch.
+
 <!-- readme-section:working-software -->
 
 ## Working software, not only a concept

@@ -23,6 +23,50 @@
 
 作者の言葉を韓国語の原文のまま引用しています。このプロジェクトがなぜあるのか、そしてコンセプトを定める文書は 1 ページにまとめています: [VISION.md](VISION.md)（英語）
 
+<!-- readme-section:interaction-model -->
+
+## アシスタントから personal agent environment へ
+
+違いは、AI が株価を検索できるか、**カートに追加**できるかではありません。アシスタントはすでに質問に答え、computer-use agent は命令を実行できます。Personal AgentOS は、**継続する関係、owner context、authority、work state** を AI provider の外に置き、owner が管理する環境に保持します。
+
+| Interaction model | Owner がすること | 主にシステムに残るもの |
+| --- | --- | --- |
+| **Assistant — answers** | “NVIDIA の現在価格は？”のように質問する | 現在の会話と回答 |
+| **Computer agent — acts** | “このヘッドホンを Amazon のカートに入れて”のように命令する | task、browser/tool state、action/handoff |
+| **Personal AgentOS — stays with you** | “コーヒーがもう少ない。”→後で“前と同じものを買っておいて。”のように時間をまたいで話す | 特定 AI から独立して続く Memory、Context、Work、Authority、Evidence |
+
+NASDAQ/Amazon は **interaction model の説明例**であり、そのサービスが現在 shipped integration であるという主張ではありません。
+
+### Presence は話し方ではなく architecture です
+
+Owner は変化する model・tool・workflow と個別に会話せず、一つの **PA** と話します。
+
+```text
+Owner  ⇄  PA (continuous presence)
+             │
+     Personal AgentOS
+  ┌──────────┼───────────┐
+Memory    Context      Work
+Authority  Evidence     Events
+  └──────────┼───────────┘
+       Judgment / orchestration
+             │
+   replaceable AI + tools/services
+```
+
+そのため、未完成な事実をそのまま話し、数時間後に続きを話し、必要になった時だけ写真や位置を共有し、外部 action に account/computer authority が必要な瞬間だけ handoff できます。日常の intent を tool・model・workflow・memory command に翻訳する必要はありません。
+
+Owner-pilot で繰り返し現れた interaction pattern を一般化すると、たとえば次のようになります。
+
+> **朝:** 「コーヒーがもう少ない。」  
+> **午後:** 「今日は仕事が少し遅くなりそう。」  
+> **夕方:** 「今から出る。途中で買えるところある？」  
+> **あとで:** 「時間ないな。前と同じものを買っておいて。」
+
+この普通の会話の下で AgentOS は prior context、calendar/time、location、search、継続中の Work を必要に応じて解決し、実際の action に authority が必要な時だけ handoff できます。この会話は説明用に一般化・短縮したもので、現在の implementation evidence は下で別に分類します。
+
+**Same PA. Different AI.** 下の model が変わっても、owner が関係を最初から作り直さないことが目標です。
+
 <!-- readme-section:working-software -->
 
 ## コンセプトだけのプロジェクトではありません

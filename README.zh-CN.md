@@ -33,7 +33,7 @@
 
 - **公开版本：** 公开版本 有 release manifest 中记录的 installed-smoke 与 synthetic journey 证据，但不包含当前 `main` 的全部内容。
 - **当前 `main`：** 已合并的代码和 deterministic / fixture 证据支持更新的 Secretary、Presence、Decision 与 execution 合约。只有合约或测试并不等于 live-service 证明。
-- **Owner pilot：** 一些更新路径已经在所有者真实的 Telegram / desktop 环境中使用。公开截图会在选定案例、完成隐私处理并绑定观测 revision 后加入。
+- **Owner pilot evidence:** 公開する owner-live claim は、正確な Telegram / desktop 観測を選定・秘匿化し、revision / evidence record に結び付けるまで保留します。
 - **方向：** shopping、booking 等场景在实现和证据足够之前仍属于产品方向。
 
 参见 [product status](docs/product-status.en.md)、[release manifest](docs/release-manifest.json) 与 [documentation map](docs/README.md)。

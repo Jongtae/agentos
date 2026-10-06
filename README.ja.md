@@ -33,7 +33,7 @@
 
 - **公開リリース:** 公開リリース には release manifest に記録された installed-smoke と synthetic journey の証拠があります。現在の `main` 全体を含むものではありません。
 - **現在の `main`:** 新しい Secretary / Presence / Decision / execution 契約を支えるマージ済みコードと deterministic / fixture 証拠があります。契約やテストだけで live-service 動作を主張しません。
-- **Owner pilot:** 新しい経路の一部は所有者の実際の Telegram / desktop 環境でも使われています。公開スクリーンショットは、例を選定・秘匿化し、観測 revision と結び付けた後に追加します。
+- **Owner pilot evidence:** public owner-live claims are intentionally pending until exact Telegram/desktop observations are selected, redacted and tied to a revision/evidence record.
 - **方向性:** shopping / booking などは、実装と証拠が揃うまでは製品方向です。
 
 詳しくは [product status](docs/product-status.en.md)、[release manifest](docs/release-manifest.json)、[documentation map](docs/README.md) を参照してください。

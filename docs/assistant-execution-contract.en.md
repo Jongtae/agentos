@@ -1,8 +1,25 @@
 # Goal-directed assistant execution contract
 
+## Current rule index and precedence
+
+This contract defines the **execution loop, effect truth, recovery and acceptance boundary**. It does not select current development work; repository-root [`delivery-plan.yaml`](../delivery-plan.yaml) does that. Dated findings and superseded hardening rules remain below as traceability, not current request-path requirements.
+
+| Concern | Current controlling rule | Superseded/history note |
+| --- | --- | --- |
+| Goal execution | Existing Work + bounded model/native loop observes typed results, repairs recoverable failures, asks/awaits authority when needed, and finalizes against requested obligations/Evidence | Successful worker exit, fluent prose, declaration or fixture alone is not goal completion |
+| Semantic vs deterministic | Semantic interpretation chooses among declared/admissible possibilities; deterministic code enforces schema, current Grant/approval, destinations, budgets, idempotency, cancellation and effect/Evidence truth | Growing phrase/keyword routing catalogues are not the execution architecture |
+| Pilot egress | Current [Secretary Agency Contract](secretary-agency-contract.en.md) pilot posture, including #826, governs request-path private/search composition | The detailed lookup sensitivity judgment, `uncertain` fail-closed path, explicit-`/search` requirement, per-provider gating and removed composition bounds below are historical unless a hardening program explicitly reactivates them |
+| Effects and retry | External effects are not replayed; an uncertain dispatch remains `unknown`; reconcile authoritative external state where allowed, otherwise preserve uncertainty and owner action | Crash/non-response is not proof of failure and never licenses duplicate mutation |
+| Completion truth | Requested obligations + Evidence/effect state determine completion; attempt outcome, goal outcome and external effect are separate | Confidence/prose or an unrelated successful step cannot upgrade missing/unknown evidence |
+| Recovery/resume | Resume/retry/restart/Stop/revoke recheck current authority and preserve possible-effect uncertainty | Recovery cannot revive revoked authority or duplicate a possible effect |
+| Owner-facing result | Useful result + material uncertainty + necessary next action in one assistant voice, with technical receipts inspectable on demand | Raw tool/protocol machinery is not the default owner-facing answer |
+| Verification | #612 reduced policy: focused regression and existing required CI; bounded model/installed checks only where justified; claims remain evidence-class scoped | Earlier blanket three-trial matrices, universal 90% threshold and custom evidence-certification subsystem are historical |
+
+Unchanged safety boundaries remain exact: secrets never enter model prompts, logs or Evidence; approval must cover the consequential action it authorizes; a draft is not an applied effect; provider/model judgment cannot mint authority or change observed effect truth.
+
 ## Pilot posture — #653 (2026-09-26)
 
-The [Secretary Agency Contract](secretary-agency-contract.en.md) governs the active program. Its pilot posture removes the per-request lookup sensitivity judgment, the `uncertain` fail-closed path, the `/search` explicit-query requirement and per-provider gating described in the lookup/egress sections below (implemented by SEC-PILOT-01 #654). Deterministic redaction of saved private values, the document-sharing grant and Work/Event/Evidence semantics remain. The text below is preserved for traceability and returns to force only if a hardening program is activated.
+The [Secretary Agency Contract](secretary-agency-contract.en.md) governs the pilot policy described here; current development selection is not asserted by this document. Its pilot posture removes the per-request lookup sensitivity judgment, the `uncertain` fail-closed path, the `/search` explicit-query requirement and per-provider gating described in the lookup/egress sections below (implemented by SEC-PILOT-01 #654). Deterministic redaction of saved private values, the document-sharing grant and Work/Event/Evidence semantics remain. The text below is preserved for traceability and returns to force only if a hardening program is activated.
 
 ## Status and authority
 

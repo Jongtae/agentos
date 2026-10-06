@@ -68,7 +68,7 @@ AgentOS: http://127.0.0.1:8787/
 - **ファイル。** *Summarize “Launch review” and save it as “Launch notes”.* 許可したフォルダを読み、自分が選んだ作業スペースのフォルダに新しいメモを書き、元のファイルには触れません。
 - **メール。** *Find anything about the budget in my mail.* 接続したメールボックスだけを検索し、見つけたものを示します。
 - **予定。** *Schedule a dentist appointment tomorrow at 3.* 正確な下書きを示し、「approve」と言った後にだけ予定を作成します。「make it 4pm」「cancel」も同じ下書きで通ります。
-- **記憶。** *Remember that I have a peanut allergy.* 会話から確認・修正でき、削除は Web 画面から行える場所に保管します。モデルが自発的に提案した記憶は、受け入れるまで確認待ちのままです。
+- **v1.1.0 の記憶。** *Remember that I have a peanut allergy.* 公開ビルドには永続 Memory と candidate review があります。**現在の `main` はさらに進んでいます:** owner 自身の AI は保存可能な非 secret の事実を直接記憶し、何を記憶したかを伝え、期限付きの undo を提供します。第三者/委任 writer は引き続き candidate/approval 経路を使います。
 - **調査。** *Look up these two products and compare them.* 検索して公開ページを最大3つ読み、書かれていること、未確認のこと、リンクを分けて返します。
 
 そのあとアプリを再起動して、こう言ってみてください: *Find “Launch notes” in my saved results.* 保存した結果、許可したフォルダ、記憶、Telegram のペアリングは再起動後も残ります。

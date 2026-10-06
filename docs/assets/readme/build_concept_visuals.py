@@ -101,8 +101,13 @@ class Figure:
    suffix=token if cjk or not row else ' '+token
    weight=sum(1 if unicodedata.east_asian_width(c) in 'WF' else .59 for c in suffix)
    if row and cost+weight>limit:
-    tail=row[-1] if cjk and token in '。，、？！：；”’」』' else ''
-    rows.append((row[:-1] if tail else row).rstrip());row=tail+token.lstrip();cost=sum(1 if unicodedata.east_asian_width(c) in 'WF' else .59 for c in row)
+    tail=''
+    if cjk and token in '。，、？！：；”’」』':
+     latin=re.search(r'[A-Za-z0-9]+$',row)
+     tail=latin.group() if latin else row[-1]
+    previous=(row[:-len(tail)] if tail else row).rstrip()
+    if previous: rows.append(previous)
+    row=tail+token.lstrip();cost=sum(1 if unicodedata.east_asian_width(c) in 'WF' else .59 for c in row)
    else: row+=suffix;cost+=weight
   if row: rows.append(row)
   for i,r in enumerate(rows):self.text(x,y+i*(gap or size*1.4),r,size,cls,anchor)

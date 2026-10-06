@@ -93,7 +93,8 @@ def _serve_stdio(handle):
         async with stdio_server(stdin=stdin, stdout=stdout) as (read_stream, write_stream):
             dispatcher = JSONRPCDispatcher(
                 read_stream, write_stream,
-                inline_methods=frozenset({'initialize', 'tools/list', 'tools/call'}),
+                # Drain the notification-only method's rejected request too.
+                inline_methods=frozenset({'initialize', 'tools/list', 'tools/call', 'notifications/initialized'}),
                 peer_cancel_mode='signal', on_stream_exception=malformed_input,
             )
             # Inline callbacks have no awaits during tool execution. A later

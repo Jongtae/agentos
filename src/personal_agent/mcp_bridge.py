@@ -43,6 +43,20 @@ def negotiated_protocol_version(offered):
     return LATEST_HANDSHAKE_VERSION
 
 
+class _AllInlineMethods(frozenset):
+    """Make every request use the dispatcher's documented inline path.
+
+    The public API accepts a frozenset and checks membership.  AgentOS must
+    serialize supported and rejected requests alike: otherwise the SDK cancels
+    a final unknown-method task as soon as stdin reaches EOF, before its error
+    is written.  The exact SDK pin and contract tests cover this small wildcard
+    adaptation until upstream offers an explicit all-inline mode.
+    """
+
+    def __contains__(self, value):
+        return True
+
+
 def _serve_stdio(handle):
     """Adapt the exact-pinned SDK's public dispatcher to AgentOS callbacks.
 
@@ -69,14 +83,22 @@ def _serve_stdio(handle):
             # which can contain owner payloads, destinations or credentials.
             raise MCPError(code=-32602, message='AgentOS MCP request rejected.') from None
 
-    async def on_notify(context, method, params):
+    def handle_notification(method, params):
         # The old bridge also executed supported methods without an id.
-        # Notifications have no response; retain that behavior and contain
-        # failures here so the SDK never logs their exception text.
+        # Keep notification work in the read loop so EOF cannot cancel a
+        # normalized no-id call before its durable evidence is recorded.
         try:
             handle(method, params)
         except Exception:
             pass
+
+    async def on_notify(context, method, params):
+        # Fallback for a future dispatcher that bypasses the interceptor.
+        handle_notification(method, params)
+
+    def on_notify_intercept(method, params):
+        handle_notification(method, params)
+        return True
 
     async def malformed_input(exc):
         # Invalid wire input has no trusted request id. Drop it without the
@@ -93,14 +115,13 @@ def _serve_stdio(handle):
         async with stdio_server(stdin=stdin, stdout=stdout) as (read_stream, write_stream):
             dispatcher = JSONRPCDispatcher(
                 read_stream, write_stream,
-                # Drain the notification-only method's rejected request too.
-                inline_methods=frozenset({'initialize', 'tools/list', 'tools/call', 'notifications/initialized'}),
+                inline_methods=_AllInlineMethods(),
                 peer_cancel_mode='signal', on_stream_exception=malformed_input,
             )
             # Inline callbacks have no awaits during tool execution. A later
             # call cannot overtake its predecessor or alter shared Work budget
             # and same-tool Event pairing. Owner Stop remains the Work gate.
-            await dispatcher.run(on_request, on_notify)
+            await dispatcher.run(on_request, on_notify, on_notify_intercept)
 
     anyio.run(run)
 

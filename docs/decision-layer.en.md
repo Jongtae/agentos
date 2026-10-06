@@ -1,5 +1,21 @@
 # Provider-independent Decision Layer
 
+## Current rule index and precedence
+
+This contract defines **semantic judgment and orchestration**, not authority. Current development selection lives in repository-root [`delivery-plan.yaml`](../delivery-plan.yaml); this document does not activate work. Newer explicit amendments control where older sections conflict.
+
+| Concern | Current controlling rule | Superseded/history note |
+| --- | --- | --- |
+| DecisionEngine role | Model-backed semantic judgment for language, intent, relevance, reference, routing, recovery choice and projection; deterministic code keeps exact authority/protocol/effect invariants | Request-time semantic blocker trees are not the architecture |
+| Orchestration plan | #826: `{worker, model, brief: {notes}, reason}`; every attempt receives the worker's full toolset already eligible under policy | #710's plan-selected `tools_mode` / `tools` / `tools_reason`, pinned default worker and private/no-search subset reasons are historical |
+| Goal evaluation | #657/#710 `goal_reached` judgment may evaluate whether the request is met and drive bounded re-delegation | A judgment cannot mark an effect true, mint authority or override deterministic failure/unknown evidence |
+| Private context + search | #826 removes the semantic tool-subset separation; Decision does not recreate the older private/search gate | #605 lookup sensitivity caller was removed by #654; #678-style separation is historical under the Secretary pilot |
+| Authority boundary | Decision output is advisory/validated judgment only: no Grant widening, approval minting, effect truth, Work completion truth or destination expansion | Provider/model confidence never becomes authority |
+| Provider routing | Provider-neutral `DecisionEngine` / routed engines with explicit unavailable/failure outcomes and qualification | `gpt-4o-mini` is an initial/default implementation choice, not a kernel invariant |
+| Qualification | Current versioned qualification suite and route-specific isolation/binding checks govern activation; synthetic probes do not prove product outcomes | Earlier suite versions remain historical evidence only |
+
+The [Secretary Agency Contract](secretary-agency-contract.en.md) controls the current pilot's Memory/egress policy; the [Assistant Execution Contract](assistant-execution-contract.en.md) controls execution/effect/recovery truth. Where this document describes older callers or plan fields that a later amendment removed, treat them as retained design history rather than current interface requirements.
+
 ## Pilot posture — #653 (2026-09-26)
 
 Under SECRETARY-01 the DecisionEngine is the gate that lets the assistant choose and change paths (provider, site, query, recovery, goal-reached judgment), not a request-time blocker. The `lookup_term_sensitivity` judgment and its qualification case are removed by SEC-PILOT-01 #654; SEC-LOOP-01 #657 adds a `goal_reached` judgment. See the [Secretary Agency Contract](secretary-agency-contract.en.md).

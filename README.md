@@ -67,6 +67,10 @@ Underneath that ordinary conversation, AgentOS may resolve prior context, calend
 
 <!-- readme-section:working-software -->
 
+## Working software, not only a concept
+
+The repository now contains substantially more than the published release. On `main`, the assistant is being exercised as a continuous secretary over replaceable Main AI and Judgment AI routes, durable Memory, Telegram conversation, contextual capability handoff, search/browser mediation, preparations and evidence-qualified recovery.
+
 ### Published-release interaction evidence
 
 ![Two real conversations: a calendar draft that waits for approval, and a saved note found again after a restart](docs/assets/readme/hero.en.png)
@@ -74,9 +78,6 @@ Underneath that ordinary conversation, AgentOS may resolve prior context, calend
 These two scenes are observed product behaviour from the published v1 line, condensed and translated from Korean replies. Personal AgentOS runs on your own computer and keeps the owner state and authority layer separate from the AI worker. Local-first is not local-only: a model can be local or hosted; with a hosted model, permitted context goes to that provider.
 
 
-## Working software, not only a concept
-
-The repository now contains substantially more than the published release. On `main`, the assistant is being exercised as a continuous secretary over replaceable Main AI and Judgment AI routes, durable Memory, Telegram conversation, contextual capability handoff, search/browser mediation, preparations and evidence-qualified recovery.
 
 Evidence is deliberately separated:
 

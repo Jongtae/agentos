@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="660" viewBox="0 0 560 660" role="img" aria-labelledby="title desc">
+<title id="title">Presence 架构</title>
+<desc id="desc">所有者与同一个 PA 对话。AgentOS 持有 Memory、Context、Work、Authority、Evidence、Events，判断层编排可替换的 AI 与工具。</desc>
+<style>
+text{font-family:Arial,"Noto Sans",sans-serif;fill:#1f2328;font-size:26px}
+.heading{font-size:30px;font-weight:700}.label{font-size:28px;font-weight:700}.muted{fill:#3d444d}.center{text-anchor:middle}
+</style>
+<rect width="560" height="660" fill="#ffffff"/>
+<text x="280" y="42" class="heading center">Owner ⇄ PA</text>
+<text x="280" y="80" class="center">一段持续的对话</text>
+<g stroke="#57606a" stroke-width="2" fill="none">
+<path d="M280 96V122m-7-7 7 7 7-7"/>
+<path d="M280 322V360m-7-7 7 7 7-7"/>
+<path d="M280 440V478m-7-7 7 7 7-7"/>
+</g>
+<rect x="20" y="134" width="520" height="188" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
+<text x="280" y="174" class="heading center">Personal AgentOS</text>
+<text x="280" y="216" class="center">Memory · Context · Work</text>
+<text x="280" y="258" class="center">Authority · Evidence · Events</text>
+<text x="280" y="300" class="muted center">所有者控制的状态</text>
+<rect x="20" y="372" width="520" height="68" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
+<text x="280" y="414" class="label center">判断 / 编排</text>
+<rect x="20" y="490" width="520" height="100" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
+<text x="280" y="530" class="label center">可替换的 AI</text>
+<text x="280" y="568" class="center">工具 / 服务 / 技能</text>
+<text x="280" y="640" class="label center">同一个 PA。不同的 AI。</text>
+</svg>

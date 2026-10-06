@@ -12,10 +12,10 @@ text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans","Noto S
 <rect x="980" y="125" width="420" height="285" rx="20" fill="#f0f8f2" stroke="#dbeadd"/>
 <text x="66" y="166" class="h2">1 · Assistant — answers</text><text x="66" y="210" class="flow">Question → Search → Answer</text>
 <rect x="66" y="242" width="350" height="82" rx="15" fill="#fff"/><text x="86" y="276" class="quote">“What is NVIDIA trading at?”</text>
-<text x="536" y="166" class="h2">2 · Computer agent — acts</text><text x="536" y="210" class="flow">Command → Browser/Tool → Action → Handoff</text>
-<rect x="536" y="242" width="350" height="82" rx="15" fill="#fff"/><text x="556" y="276" class="quote">“Add these headphones to my Amazon cart.”</text>
-<text x="1006" y="166" class="h2">3 · Personal AgentOS — stays with you</text><text x="1006" y="210" class="flow">Conversation → Context → Judgment → Work → Authority</text>
-<rect x="1006" y="242" width="350" height="104" rx="15" fill="#fff"/><text x="1026" y="276" class="quote">“We’re almost out of coffee.”  …later…  “Get the same one as last time.”</text>
+<text x="536" y="166" class="h2">2 · Computer agent — acts</text><text x="536" y="204" class="flow" textLength="330" lengthAdjust="spacingAndGlyphs">Command → Browser/Tool → Action → Handoff</text>
+<rect x="536" y="242" width="350" height="82" rx="15" fill="#fff"/><text x="556" y="270" class="quote" textLength="310" lengthAdjust="spacingAndGlyphs">“Add these headphones to my Amazon cart.”</text>
+<text x="1006" y="166" class="h2">3 · Personal AgentOS — stays with you</text><text x="1006" y="198" class="flow" textLength="330" lengthAdjust="spacingAndGlyphs">Conversation → Context → Judgment → Work → Authority</text>
+<rect x="1006" y="242" width="350" height="104" rx="15" fill="#fff"/><text x="1026" y="268" class="quote" textLength="310" lengthAdjust="spacingAndGlyphs">“We’re almost out of coffee.”  …later…  “Get the same one as last time.”</text>
 <text x="48" y="468" class="h2">Presence is architectural</text>
 <rect x="40" y="492" width="1360" height="300" rx="24" fill="#f6f8ff" stroke="#dbe3f5"/>
 <rect x="75" y="548" width="190" height="120" rx="18" fill="#fff" stroke="#d8e0f0"/><text x="170" y="602" class="h2 center">Owner</text>

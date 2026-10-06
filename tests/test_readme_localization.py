@@ -1,9 +1,11 @@
+import importlib.util
 import re
 import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
@@ -495,6 +497,38 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                 self.assertTrue((visuals.OUT / name.replace(".html", ".png")).is_file(), name)
         committed = sorted(path.name for path in visuals.OUT.glob("*.html"))
         self.assertEqual(sorted(expected), committed)
+
+    def test_committed_presence_overviews_match_generator(self):
+        """Keep the eight public SVGs synchronized with their localized source."""
+        assets = ROOT / "docs" / "assets" / "readme"
+        spec = importlib.util.spec_from_file_location(
+            "readme_concept_visuals", assets / "build_concept_visuals.py"
+        )
+        visuals = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(visuals)
+        expected = {
+            Path(path).name
+            for desktop in verifier.LOCALE_PRESENCE_VISUALS.values()
+            for path in (desktop, desktop.removesuffix(".svg") + ".narrow.svg")
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            generated = Path(tmp)
+            with patch.object(visuals, "ROOT", generated):
+                for locale, data in visuals.OVERVIEW.items():
+                    for mobile in (False, True):
+                        suffix = ".narrow" if mobile else ""
+                        visuals.overview(data, mobile).write(
+                            f"presence-overview.{locale}{suffix}.svg"
+                        )
+            self.assertEqual(expected, {path.name for path in generated.glob("*.svg")})
+            self.assertEqual(expected, {path.name for path in assets.glob("presence-overview.*.svg")})
+            for name in sorted(expected):
+                with self.subTest(asset=name):
+                    self.assertEqual(
+                        (generated / name).read_bytes(),
+                        (assets / name).read_bytes(),
+                        f"{name} is stale; regenerate with docs/assets/readme/build_concept_visuals.py",
+                    )
 
     def test_scene_panel_requests_route_deterministically(self):
         """Every mail scene routes only after the fixture clears its declared

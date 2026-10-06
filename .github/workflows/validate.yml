@@ -101,7 +101,7 @@ jobs:
 
       - name: Sync exact full-suite dependencies
         if: steps.scope.outputs.full_suite == 'true'
-        run: uv sync --locked --extra schema-validation --group dev --no-python-downloads
+        run: uv sync --locked --extra mcp-host --extra schema-validation --group dev --no-python-downloads
 
       - name: Verify AgentPackage v0.1
         if: steps.scope.outputs.full_suite == 'true'

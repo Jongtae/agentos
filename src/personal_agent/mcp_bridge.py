@@ -1,10 +1,9 @@
 """Minimal stdio MCP bridge; AgentOS, never the engine, owns tool execution.
 
-The protocol version comes from the mcp-types registry, but that
-package's envelope models are deliberately not adopted: JSONRPCRequest
-accepts an unknown top-level key and model_dump then drops it, so a
-request this bridge rejects would be normalised into a clean-looking
-one and forwarded. Envelope validation stays hand-written here.
+The host-only MCP SDK owns stdio framing and JSON-RPC response correlation.
+AgentOS retains handshake negotiation, the supported method/tool profiles,
+serialized execution and Work/Grant/secret/effect/Event/Evidence callbacks.
+The isolated engine bridge keeps its separate envelope contract.
 """
 import argparse
 import json
@@ -44,8 +43,87 @@ def negotiated_protocol_version(offered):
     return LATEST_HANDSHAKE_VERSION
 
 
-def _send(value):
-    sys.stdout.write(json.dumps(value, ensure_ascii=False) + "\n"); sys.stdout.flush()
+class _AllInlineMethods(frozenset):
+    """Make every request use the dispatcher's documented inline path.
+
+    The public API accepts a frozenset and checks membership.  AgentOS must
+    serialize supported and rejected requests alike: otherwise the SDK cancels
+    a final unknown-method task as soon as stdin reaches EOF, before its error
+    is written.  The exact SDK pin and contract tests cover this small wildcard
+    adaptation until upstream offers an explicit all-inline mode.
+    """
+
+    def __contains__(self, value):
+        return True
+
+
+def _serve_stdio(handle):
+    """Adapt the exact-pinned SDK's public dispatcher to AgentOS callbacks.
+
+    Imports stay here so importing the host facade does not require the SDK
+    in the isolated engine's base package. No SDK Server/session registration
+    is used: it would add methods and require a different initialize shape.
+    """
+    import anyio
+    from mcp import MCPError
+    from mcp.server.stdio import stdio_server
+    from mcp.shared.jsonrpc_dispatcher import JSONRPCDispatcher
+
+    async def on_request(context, method, params):
+        if method == 'notifications/initialized':
+            # This is notification-only; do not turn a malformed request
+            # into a newly supported request method.
+            raise MCPError(code=-32601, message='Method not found.')
+        try:
+            return handle(method, params)
+        except _Rejected as exc:
+            raise MCPError(**exc.rpc) from None
+        except Exception:
+            # The dispatcher otherwise logs the exception and sends its text,
+            # which can contain owner payloads, destinations or credentials.
+            raise MCPError(code=-32602, message='AgentOS MCP request rejected.') from None
+
+    def handle_notification(method, params):
+        # The old bridge also executed supported methods without an id.
+        # Keep notification work in the read loop so EOF cannot cancel a
+        # normalized no-id call before its durable evidence is recorded.
+        try:
+            handle(method, params)
+        except Exception:
+            pass
+
+    async def on_notify(context, method, params):
+        # Fallback for a future dispatcher that bypasses the interceptor.
+        handle_notification(method, params)
+
+    def on_notify_intercept(method, params):
+        handle_notification(method, params)
+        return True
+
+    async def malformed_input(exc):
+        # Invalid wire input has no trusted request id. Drop it without the
+        # SDK's default debug log of the parser exception/payload, and never
+        # attribute it to a previously consumed request.
+        pass
+
+    async def run():
+        # In-process callers may inject text streams (including StringIO).
+        # Real process stdio uses the SDK's fd claim and UTF-8 wrappers, keeping
+        # stray handler/child output off the protocol wire.
+        stdin = None if hasattr(sys.stdin, 'buffer') else anyio.wrap_file(sys.stdin)
+        stdout = None if hasattr(sys.stdout, 'buffer') else anyio.wrap_file(sys.stdout)
+        async with stdio_server(stdin=stdin, stdout=stdout) as (read_stream, write_stream):
+            dispatcher = JSONRPCDispatcher(
+                read_stream, write_stream,
+                inline_methods=_AllInlineMethods(),
+                peer_cancel_mode='signal', on_stream_exception=malformed_input,
+            )
+            # Inline callbacks have no awaits during tool execution. A later
+            # call cannot overtake its predecessor or alter shared Work budget
+            # and same-tool Event pairing. Owner Stop remains the Work gate.
+            await dispatcher.run(on_request, on_notify, on_notify_intercept)
+
+    anyio.run(run)
 
 
 def _provenance(labels):
@@ -230,88 +308,79 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
     tools.PROFILE = profile
     tools.relay = relay
     tools.native_search_reason = str(search_off_reason or '')
-    for line in sys.stdin:
-        try:
-            request = json.loads(line)
-            method, ident = request.get('method'), request.get('id')
-            if method == 'initialize':
-                params = request.get('params')
-                offered = params.get('protocolVersion') if isinstance(params, dict) else None
-                result = {'protocolVersion':negotiated_protocol_version(offered),'capabilities':{'tools':{}},'serverInfo':{'name':'agentos','version':'1'}}
-            elif method == 'tools/list': result = {'tools': tools.definitions()}
-            elif method == 'tools/call':
-                params = request.get('params', {}); name = params.get('name')
-                # A CLI-chosen name is stored only when it is an offered tool.
-                listed = name if isinstance(name, str) and name in capabilities.allowed_tools else 'unlisted'
-                action = (capabilities.tools.get(listed) or {}).get('host_action') if listed != 'unlisted' else None
-                if listed == 'unlisted' or name not in tools._offered():
-                    record(listed, 'failed', json.dumps({'scope':'subscription-mcp-bridge','code':'unknown_tool','retry':'permanent',
-                                                         'effect':'none','error':'Unknown AgentOS MCP tool.'}))
-                    raise _Rejected(-32602, 'Unknown AgentOS MCP tool.')
-                # #787: a browser call's declared effect, recorded on every event of the call.
-                declared = {}
-                try:
-                    if not _work_running(store, job_id):
-                        raise ToolError(WORK_NOT_RUNNING, 'stopped')
-                    capabilities.private_provenance.update(_recorded_private_sources(store, job_id, capabilities.tools))
-                    arguments, status = split_status(params.get('arguments', {}))
-                    declared = declared_effect(action, arguments)
-                    if action:
-                        # #607: a call is durably in flight before it runs, so a
-                        # crash mid-call leaves an attempted (possibly effectful)
-                        # action that retry/resume refuse to replay blindly.
-                        # #718: with the call's bounded, redacted display step.
-                        record(listed, 'running', json.dumps({'scope':'subscription-mcp-bridge','host_action':action,
-                                                              'step':progress_step(action, arguments, status, capabilities.judgment_text),
-                                                              **declared}, ensure_ascii=False))
-                    value = tools.call(name, arguments)
-                except ExecutionError as exc:
-                    # Invalid arguments stay a protocol error (MCP: invalid
-                    # params).  Redacted: the reason, never the arguments.
-                    record(listed, 'failed',
-                           json.dumps({'scope':'subscription-mcp-bridge','code':'invalid_arguments','retry':'permanent','effect':'none',
-                                       'error':redact_reason(str(exc))}, ensure_ascii=False))
-                    raise _Rejected(-32602, 'Invalid AgentOS MCP tool arguments.') from None
-                except (ValueError, TypeError, OSError, ProviderError) as exc:
-                    # #607 AX-06: a normal tool failure is a typed tool result.
-                    result, typed = tool_error_result(exc, action)
-                    record(listed, 'failed',
-                           json.dumps({'scope':'subscription-mcp-bridge', **({'host_action':action} if action else {}), **typed,
-                                       'error':redact_reason(str(exc)), **declared}, ensure_ascii=False))
-                    _with_steer(result, store, job_id, record)
-                    if ident is not None:
-                        _send({'jsonrpc':'2.0','id':ident,'result':result})
-                    continue
-                except Exception as exc:
-                    # #735: any other exception inside one call (an EOFError from a
-                    # helper process, an HTTP-library error type no layer maps) is a
-                    # typed failure of that call.  It used to end the bridge
-                    # process: the CLI saw its MCP connection close mid-call and
-                    # the Work recorded only a call that never completed.
-                    result, typed = unexpected_error_result(exc, action)
-                    record(listed, 'failed',
-                           json.dumps({'scope':'subscription-mcp-bridge', **({'host_action':action} if action else {}), **typed,
-                                       'error':redact_reason(TOOL_FAILED_TEXT), **declared}, ensure_ascii=False))
-                    _with_steer(result, store, job_id, record)
-                    if ident is not None:
-                        _send({'jsonrpc':'2.0','id':ident,'result':result})
-                    continue
-                # The same redacted Evidence the direct route records
-                # (sources, attempted/failed URLs, counts), never the payload.
-                host_action = capabilities.tools[name]['host_action']
-                record(name, 'succeeded', json.dumps({'scope':'subscription-mcp-bridge','host_action':host_action,
-                                                       'evidence':evidence_summary(host_action, value), **declared},
-                                                      ensure_ascii=False))
-                # #836: the worker reads a held memory write as the owner's one-tap ask, nothing more.
-                result = {'content':[{'type':'text','text':json.dumps(worker_result(host_action, value), ensure_ascii=False)}]}
+
+    def handle(method, params):
+        if method == 'initialize':
+            offered = params.get('protocolVersion') if isinstance(params, dict) else None
+            result = {'protocolVersion':negotiated_protocol_version(offered),'capabilities':{'tools':{}},'serverInfo':{'name':'agentos','version':'1'}}
+        elif method == 'tools/list': result = {'tools': tools.definitions()}
+        elif method == 'tools/call':
+            params = params or {}; name = params.get('name')
+            # A CLI-chosen name is stored only when it is an offered tool.
+            listed = name if isinstance(name, str) and name in capabilities.allowed_tools else 'unlisted'
+            action = (capabilities.tools.get(listed) or {}).get('host_action') if listed != 'unlisted' else None
+            if listed == 'unlisted' or name not in tools._offered():
+                record(listed, 'failed', json.dumps({'scope':'subscription-mcp-bridge','code':'unknown_tool','retry':'permanent',
+                                                     'effect':'none','error':'Unknown AgentOS MCP tool.'}))
+                raise _Rejected(-32602, 'Unknown AgentOS MCP tool.')
+            # #787: a browser call's declared effect, recorded on every event of the call.
+            declared = {}
+            try:
+                if not _work_running(store, job_id):
+                    raise ToolError(WORK_NOT_RUNNING, 'stopped')
+                capabilities.private_provenance.update(_recorded_private_sources(store, job_id, capabilities.tools))
+                arguments, status = split_status(params.get('arguments', {}))
+                declared = declared_effect(action, arguments)
+                if action:
+                    # #607: a call is durably in flight before it runs, so a
+                    # crash mid-call leaves an attempted (possibly effectful)
+                    # action that retry/resume refuse to replay blindly.
+                    # #718: with the call's bounded, redacted display step.
+                    record(listed, 'running', json.dumps({'scope':'subscription-mcp-bridge','host_action':action,
+                                                          'step':progress_step(action, arguments, status, capabilities.judgment_text),
+                                                          **declared}, ensure_ascii=False))
+                value = tools.call(name, arguments)
+            except ExecutionError as exc:
+                # Invalid arguments stay a protocol error (MCP: invalid
+                # params).  Redacted: the reason, never the arguments.
+                record(listed, 'failed',
+                       json.dumps({'scope':'subscription-mcp-bridge','code':'invalid_arguments','retry':'permanent','effect':'none',
+                                   'error':redact_reason(str(exc))}, ensure_ascii=False))
+                raise _Rejected(-32602, 'Invalid AgentOS MCP tool arguments.') from None
+            except (ValueError, TypeError, OSError, ProviderError) as exc:
+                # #607 AX-06: a normal tool failure is a typed tool result.
+                result, typed = tool_error_result(exc, action)
+                record(listed, 'failed',
+                       json.dumps({'scope':'subscription-mcp-bridge', **({'host_action':action} if action else {}), **typed,
+                                   'error':redact_reason(str(exc)), **declared}, ensure_ascii=False))
                 _with_steer(result, store, job_id, record)
-            elif method == 'notifications/initialized': continue
-            else: raise _Rejected(-32601, 'Method not found.')
-            if ident is not None: _send({'jsonrpc':'2.0','id':ident,'result':result})
-        except (ValueError, ExecutionError, TypeError) as exc:
-            if isinstance(locals().get('request'),dict) and request.get('id') is not None:
-                error = getattr(exc, 'rpc', None) or {'code':-32602,'message':'AgentOS MCP request rejected.'}
-                _send({'jsonrpc':'2.0','id':request['id'],'error':error})
+                return result
+            except Exception as exc:
+                # #735: any other exception inside one call (an EOFError from a
+                # helper process, an HTTP-library error type no layer maps) is a
+                # typed failure of that call.  It used to end the bridge
+                # process: the CLI saw its MCP connection close mid-call and
+                # the Work recorded only a call that never completed.
+                result, typed = unexpected_error_result(exc, action)
+                record(listed, 'failed',
+                       json.dumps({'scope':'subscription-mcp-bridge', **({'host_action':action} if action else {}), **typed,
+                                   'error':redact_reason(TOOL_FAILED_TEXT), **declared}, ensure_ascii=False))
+                _with_steer(result, store, job_id, record)
+                return result
+            # The same redacted Evidence the direct route records
+            # (sources, attempted/failed URLs, counts), never the payload.
+            host_action = capabilities.tools[name]['host_action']
+            record(name, 'succeeded', json.dumps({'scope':'subscription-mcp-bridge','host_action':host_action,
+                                                   'evidence':evidence_summary(host_action, value), **declared},
+                                                  ensure_ascii=False))
+            # #836: the worker reads a held memory write as the owner's one-tap ask, nothing more.
+            result = {'content':[{'type':'text','text':json.dumps(worker_result(host_action, value), ensure_ascii=False)}]}
+            _with_steer(result, store, job_id, record)
+        elif method == 'notifications/initialized': return {}
+        else: raise _Rejected(-32601, 'Method not found.')
+        return result
+
+    _serve_stdio(handle)
 
 
 if __name__ == '__main__':

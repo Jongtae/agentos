@@ -8,8 +8,9 @@ version = "1.1.1"
 description = "A lightweight self-hosted personal agent with browser setup"
 requires-python = ">=3.12"
 license = {text = "AGPL-3.0-only"}
-# mcp-types: MCP protocol-version registry (REUSE-R2 #426). MIT; the
-# envelope models are deliberately not adopted - see the bridge docstrings.
+# mcp-types: MCP protocol-version registry (REUSE-R2 #426), exact shared
+# candidate closure for UPSTREAM-RUNTIME-01 #1025. MIT; the base/isolated
+# profile retains its local envelope checks.
 # oauthlib: RFC 6749/7636 authorization-request construction (REUSE-R1b #427).
 # BSD-3-Clause, zero mandatory dependencies, imports no HTTP library.
 # pyobjc-framework-WebKit: SEC-BROWSER-02 #680 embedded macOS system WebKit
@@ -20,11 +21,14 @@ license = {text = "AGPL-3.0-only"}
 # Pure Python, zero mandatory dependencies, never fetches the list at runtime.
 # PyYAML: #961 parses Agent Skills SKILL.md frontmatter with SafeLoader only
 # (MIT, YAML project; 6.0.3 reviewed; #960 decision record section 4).
-dependencies = ["pypdf>=5.0", "python-docx>=1.1", "openpyxl>=3.1", "cryptography>=42.0", "mcp-types>=2.2,<3", "oauthlib>=3.3.1,<4",
+dependencies = ["pypdf>=5.0", "python-docx>=1.1", "openpyxl>=3.1", "cryptography>=42.0", "mcp-types==2.3.0", "oauthlib>=3.3.1,<4",
                 "pyobjc-framework-WebKit>=12.2,<13; sys_platform == 'darwin'", "publicsuffixlist>=1.0.2,<2", "PyYAML>=6.0.1,<7"]
 
 [project.optional-dependencies]
 schema-validation = ["jsonschema[format]>=4.23"]
+# Official stdio transport/dispatcher for host profiles only (#1025). MIT.
+# Keep the HTTP/OAuth/server closure outside Dockerfile.engine's base install.
+mcp-host = ["mcp==2.3.0"]
 
 [dependency-groups]
 dev = ["pytest>=9.1,<10"]

@@ -3,7 +3,9 @@
 ## Scope and evidence boundary
 
 This contract implements the first, bounded update path selected by
-UPSTREAM-UPDATE-01 [#1024](https://github.com/Jongtae/agentos/issues/1024).
+UPSTREAM-UPDATE-01 [#1024](https://github.com/Jongtae/agentos/issues/1024),
+extended by the host-only stdio adoption in UPSTREAM-RUNTIME-01
+[#1025](https://github.com/Jongtae/agentos/issues/1025).
 It covers the root Python project and GitHub Actions. It does not enable
 production upgrades, deployment, auto-merge, repository write tokens in CI,
 owner data access, private indexes, or a second scheduler.
@@ -19,8 +21,9 @@ profile, lock Git blob, and command. The initial claimed profiles are:
 
 | Profile | Resolution represented | Operating evidence required |
 | --- | --- | --- |
-| Linux CI | Python 3.12, base project, `schema-validation`, and `dev` | Required `validate` on the exact PR head runs `uv sync --locked` and the full suite. |
-| macOS source development | Python 3.12, the same extras/groups, plus the `pyobjc-framework-WebKit` marker closure | A fresh disposable environment runs locked sync and the focused real dependency boundary. |
+| Linux CI host | Python 3.12, base project, `mcp-host`, `schema-validation`, and `dev` | Required `validate` on the exact PR head runs `uv sync --locked` and the full suite, including the real SDK consumer. |
+| macOS source development host | Python 3.12, the same extras/groups, plus the `pyobjc-framework-WebKit` marker closure | A fresh disposable environment runs locked sync and the focused real dependency boundary. |
+| Base / isolated dependency profile | Base project with `--no-dev`, without `mcp-host` | Fresh locked sync excludes `mcp` and its SDK-only closure; this is packaging evidence, not an engine-container execution claim. |
 
 The universal lock also contains Linux and macOS markers and hashes for other
 compatible Python versions, but no installed behavior is claimed for an
@@ -112,30 +115,141 @@ updater/configuration is a stop condition, not permission to run both.
   its exact observed version is update evidence. CI uses `uv==0.11.33` and
   `uv sync --locked`; a stale manifest or lock fails.
 - The lock represents `sys_platform == 'linux'` and `sys_platform ==
-  'darwin'`. It includes the optional `schema-validation` closure and the
-  `dev` group. Production-like checks use `--no-dev` when they do not need the
-  test group.
+  'darwin'`. It includes the optional `schema-validation` and `mcp-host`
+  closures and the `dev` group. Production-like checks use `--no-dev` when
+  they do not need the test group. An optional package's presence in the lock
+  does not select it for a base install.
 - Resolver downloads use the default first PyPI index. No extra index,
   dependency-confusion fallback, credential, or owner package source is
   configured.
 - Hashes establish the selected artifact bytes. They do not establish package
   safety, semantic compatibility, provenance beyond the named source, or
   freedom from vulnerabilities.
-- A future host-only MCP SDK extra belongs to #1025. It must not enter the base
-  dependency set shared with `Dockerfile.engine` without reviewing that
-  isolated image's closure.
+- The MCP SDK is selected only by the `mcp-host` extra. It does not enter the
+  base dependency set shared with `Dockerfile.engine`. `mcp-types==2.3.0`
+  remains a shared base dependency for the protocol-version registry.
 
 Contributor commands:
 
 ```sh
 uv lock --check
-uv sync --locked --extra schema-validation --group dev --no-python-downloads
-.venv/bin/python -m pytest -q tests
+uv sync --locked --extra mcp-host --extra schema-validation --group dev --no-python-downloads
+PYTHONPATH=src .venv/bin/python -m pytest -q tests
 ```
 
 Use `uv lock --upgrade-package NAME==VERSION` for one reviewed candidate.
 Inspect the whole lock diff. Do not use an unconstrained `uv lock --upgrade`
 to turn a bounded update into an unrelated refresh.
+
+## Host MCP package and recovery contract — #1025
+
+The Phase A decision [recorded in #1025](https://github.com/Jongtae/agentos/issues/1025#issuecomment-6004656860)
+**Adapts** the official public `mcp.server.stdio.stdio_server` and
+`mcp.shared.jsonrpc_dispatcher.JSONRPCDispatcher` APIs behind the existing
+host `mcp_bridge.serve` boundary. The exact release is
+[`mcp==2.3.0`](https://pypi.org/project/mcp/2.3.0/), published 2026-10-02 from
+source commit `2118f14f8a19bc158d8a1cf90af58d85d187f849`, MIT, Python >=3.10.
+PyPI reports Trusted Publishing and attestations tied to that source commit;
+these establish publishing identity, not behavioral safety. Its wheel SHA-256
+is `dd0c44c089d16453e8ae31a3877a0054d7a2314caaa81f5e0541b9b1734b2377`
+and sdist SHA-256 is
+`8b147a50441cf059dc88c684e0aeed3687f0aa0f39c6cde7b90330effd2b34d8`.
+The shared [`mcp-types==2.3.0`](https://pypi.org/project/mcp-types/2.3.0/)
+is also MIT, Python >=3.10, with wheel SHA-256
+`968efdbdaedfab06adae40d378a34395f1090c5921d4be3c9cde283aaf76d91d`
+and sdist SHA-256
+`d1e46549edb35ee19a94940fcee6d1addd7e589ab7ea92dda83f5d84781fc362`.
+Its resolved version is unchanged from the #1024 lock; the published manifest
+now pins it exactly to attribute the shared candidate closure.
+
+Internal reuse keeps the current bridge entry point, profile/tool/Work checks,
+broker callbacks and redaction. Python's standard library cannot supply an
+upstream-maintained MCP stdio dispatcher. The official SDK fits this narrow
+seam; its documented low-level `Server.run` was rejected by the Phase A probe
+for the existing initialize shape and additional registered methods. The
+existing `mcp-types` package supplies models/version constants, not transport
+or dispatch. Another framework or copied dispatcher would duplicate the
+selected supported SDK seam without satisfying a missing requirement.
+The dispatcher is provisional upstream, so an exact pin and real-consumer
+upgrade checks are required. The SDK's maintenance/release activity and
+security review apply to this exact release and closure, not future releases.
+
+Adding `mcp-host` with `uv==0.11.33` preserves every existing resolved version
+and adds the following SDK-only packages to the lock. Release dates and licence
+expressions were checked against each exact PyPI release on 2026-10-06:
+
+| Package | Exact version | Licence | Upload date |
+| --- | --- | --- | --- |
+| mcp | 2.3.0 | MIT | 2026-10-02 |
+| anyio | 4.15.1 | MIT | 2026-09-05 |
+| click | 8.5.0 | BSD-3-Clause | 2026-08-26 |
+| h11 | 0.16.0 | MIT | 2025-04-24 |
+| httpcore2 | 2.13.1 | BSD-3-Clause | 2026-09-23 |
+| httpx2 | 2.13.1 | BSD-3-Clause | 2026-09-23 |
+| opentelemetry-api | 1.45.0 | Apache-2.0 | 2026-09-25 |
+| pyjwt | 2.15.1 | MIT | 2026-09-28 |
+| python-multipart | 0.0.32 | Apache-2.0 | 2026-06-04 |
+| sse-starlette | 3.5.0 | BSD-3-Clause | 2026-09-28 |
+| starlette | 1.7.0 | BSD-3-Clause | 2026-09-23 |
+| truststore | 0.10.4 | MIT | 2025-08-12 |
+| uvicorn | 0.54.0 | BSD-3-Clause | 2026-09-25 |
+
+These licences are compatible with AGPL-3.0-only; distributions retain upstream
+notices and licence terms. Existing locked `jsonschema`, `pydantic`,
+`typing-extensions`, `typing-inspection` and their required dependencies are
+also selected by the host closure. Hashes for all artifacts live in `uv.lock`.
+HTTP, ASGI, JWT, telemetry API and multipart packages increase installed attack
+surface even though the selected stdio imports do not configure a listener,
+remote destination, credential, exporter, additional method or tool. AgentOS
+Work/Grant/secret/effect/Evidence mediation remains authoritative. Neither
+installation nor upstream code grants runtime network or owner-state authority.
+No SDK CLI/rich extras or new private indexes are selected.
+
+Install the source host profile with the locked contributor command above. A
+published PEP 621 install uses `pip install '.[mcp-host]'`, which retains the
+exact direct SDK/types pins but is not a lock-backed transitive installation.
+The base command is `uv sync --locked --no-dev --no-python-downloads`;
+`Dockerfile.engine` continues to use `pip install --no-cache-dir .` and does
+not select the host extra. Container and Homebrew transitive lock consumption
+remain the resolution gaps stated above; a base sync on macOS is not proof of
+an observed Linux container run.
+
+For a future SDK update, save the known-good commit and lock Git blob, link one
+bounded issue, update the exact manifest pins, and use the pinned resolver to
+update only the selected SDK/types candidate. Record source revision, artifact
+hashes, writer, full transitive diff, platform/Python/profile and observed
+commands. Exercise actual host caller -> SDK -> broker -> synthetic target
+tests, including denial, stale/revoked Work, malformed input, redaction,
+timeout/cancellation, typed and unknown-effect failures, EOF/Stop/shutdown.
+Repeat the base exclusion check and the unchanged isolated bridge's protocol
+regressions; a passing import is insufficient. Require exact-head CI and
+independent review for the changed supply-chain/protocol/authority boundary.
+
+Recovery restores the saved manifest, lock **and matching adapter code** to a
+fresh disposable environment, syncs the same profile, verifies exact installed
+versions, and reruns the affected boundary. Downgrading only the SDK under new
+adapter code is not a demonstrated recovery path. The pre-adoption baseline
+is commit `7965ddd0c4f1d544233764b26215ad0481dc7701` (the #1025 worktree start);
+the base `mcp-types` version is
+already 2.3.0 there and no `mcp` dependency is selected. Baseline restoration
+and host-extra deselection are separate checks: removing the extra from the
+new adapter does not claim to restore the prior host call path. Rollback does
+not undo external effects, owner state changes, package Grants or deployment.
+
+Observed disposable packaging evidence on 2026-10-06 uses macOS 26.3.1 arm64,
+CPython 3.12.12 and `uv==0.11.33`:
+
+| Check | Attributable result |
+| --- | --- |
+| Candidate resolution | Lock Git blob `96922ee3034f110ffe0f1d9a8302e330dbb81bf6`; 56 packages represented, 13 new SDK-only packages, no existing version changed. |
+| Fresh host sync | Locked `mcp-host` / `schema-validation` / `dev` command above succeeds; exact SDK/types 2.3.0 and both public APIs import from installed packages. |
+| Fresh base sync | Locked `--no-dev` command succeeds; installed types 2.3.0, no `mcp` module. All 13 SDK-only distributions are absent. |
+| Known-good recovery | Saved source/manifest/lock at the baseline commit restored to a fresh environment; lock blob `551f8aeb0ce4d12ae13f1567b9f8f0f4058c9a77`; locked `schema-validation` / `dev` sync excludes SDK; baseline protocol and dependency-contract tests pass (29 tests, 71 subtests). |
+
+These observations establish local package selection and restoration. Current
+host adapter semantic tests and Linux exact-head CI are separate evidence;
+this table does not claim live owner operation, Linux container execution or
+production rollback.
 
 ## Dependabot discovery and promotion
 

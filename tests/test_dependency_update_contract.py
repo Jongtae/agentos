@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from importlib.metadata import requires, version
 import tomllib
 
 import yaml
+from packaging.requirements import Requirement
 
 
 ROOT = Path(__file__).resolve().parents[1]
 UV_VERSION = "0.11.33"
 SETUP_UV_REF = "c18668ad3cf93ea998bef934396af7bb5c839dc7"
+MCP_VERSION = "2.3.0"
 
 
 def _toml(path: str) -> dict:
@@ -80,7 +83,72 @@ def test_validation_uses_the_pinned_resolver_with_read_only_permissions() -> Non
         workflow = (ROOT / relative_path).read_text(encoding="utf-8")
         assert f"astral-sh/setup-uv@{SETUP_UV_REF}" in workflow
         assert f"version: '{UV_VERSION}'" in workflow
-        assert "uv sync --locked --extra schema-validation --group dev" in workflow
+        assert "uv sync --locked --extra mcp-host --extra schema-validation --group dev" in workflow
         assert "permissions:\n  contents: read" in workflow
         assert "pull_request_target" not in workflow
         assert "contents: write" not in workflow
+
+
+def _dependency_closure(packages: dict, roots: list[dict]) -> set[str]:
+    """Follow the locked required edges, without opting into another extra."""
+    closure: set[str] = set()
+    pending = [edge["name"] for edge in roots]
+    while pending:
+        name = pending.pop()
+        if name in closure:
+            continue
+        closure.add(name)
+        pending.extend(edge["name"] for edge in packages[name].get("dependencies", []))
+    return closure
+
+
+def test_mcp_sdk_is_exact_and_host_only_in_the_resolved_package_graph() -> None:
+    project = _toml("pyproject.toml")["project"]
+    assert project["optional-dependencies"]["mcp-host"] == [f"mcp=={MCP_VERSION}"]
+    assert f"mcp-types=={MCP_VERSION}" in project["dependencies"]
+    assert not any(dependency.split("=")[0] == "mcp" for dependency in project["dependencies"])
+
+    packages = {package["name"]: package for package in _toml("uv.lock")["package"]}
+    root = packages["personal-agentos"]
+    assert root["optional-dependencies"]["mcp-host"] == [{"name": "mcp"}]
+    assert {"name": "mcp", "marker": "extra == 'mcp-host'", "specifier": "==2.3.0"} in root["metadata"]["requires-dist"]
+    base = _dependency_closure(packages, root["dependencies"])
+    host = _dependency_closure(packages, root["optional-dependencies"]["mcp-host"])
+    sdk_only = {
+        "mcp", "anyio", "click", "h11", "httpcore2", "httpx2",
+        "opentelemetry-api", "pyjwt", "python-multipart", "sse-starlette",
+        "starlette", "truststore", "uvicorn",
+    }
+    assert sdk_only <= host
+    assert not sdk_only & base
+    assert "mcp-types" in base & host
+    for name in ("mcp", "mcp-types"):
+        assert packages[name]["version"] == MCP_VERSION
+        assert packages[name]["source"] == {"registry": "https://pypi.org/simple"}
+    assert packages["mcp"]["wheels"][0]["hash"] == "sha256:dd0c44c089d16453e8ae31a3877a0054d7a2314caaa81f5e0541b9b1734b2377"
+    assert packages["mcp"]["sdist"]["hash"] == "sha256:8b147a50441cf059dc88c684e0aeed3687f0aa0f39c6cde7b90330effd2b34d8"
+
+    # The isolated image consumes PEP 621 base dependencies, not host extras.
+    engine_image = (ROOT / "Dockerfile.engine").read_text(encoding="utf-8")
+    assert "pip install --no-cache-dir . \\" in engine_image
+    assert "mcp-host" not in engine_image
+
+
+def test_host_profile_executes_the_pinned_public_sdk_apis() -> None:
+    from mcp.server.stdio import stdio_server
+    from mcp.shared.jsonrpc_dispatcher import JSONRPCDispatcher
+
+    assert version("mcp") == MCP_VERSION
+    assert version("mcp-types") == MCP_VERSION
+    assert callable(stdio_server)
+    assert callable(JSONRPCDispatcher)
+
+    # Exercise setuptools' installed metadata, not only the source manifest.
+    sdk = next(
+        Requirement(item) for item in requires("personal-agentos") or []
+        if Requirement(item).name == "mcp"
+    )
+    assert str(sdk.specifier) == f"=={MCP_VERSION}"
+    assert sdk.marker is not None
+    assert sdk.marker.evaluate({"extra": "mcp-host"})
+    assert not sdk.marker.evaluate({"extra": ""})

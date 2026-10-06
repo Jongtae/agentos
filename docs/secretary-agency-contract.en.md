@@ -15,7 +15,7 @@ This contract contains dated amendments because they are durable decision eviden
 | Main/Judgment orchestration | #710 plus the current [Decision Layer](decision-layer.en.md): Judgment plans and evaluates; deterministic code enforces authority/effect boundaries | Any older wording that treats deterministic routing rules as the semantic planner |
 | Preparations/watch | #719 on top of #659: bounded accepted watch windows, when-needed notification judgment, owner cancellation | No general background scheduler or unbounded monitoring is implied |
 
-Cross-cutting invariants remain: stored secrets do not enter model prompts/logs/Evidence; payment is per-action approved; external effects are not replayed blindly and `unknown` remains explicit; folder grants bound file authority; owner-visible claims remain Evidence-qualified. The [Presence Experience Contract](presence-experience-contract.en.md) controls owner-facing projection where it adds presentation rules without changing these authority boundaries.
+Cross-cutting invariants remain: secrets never enter model prompts, logs or Evidence; payment is per-action approved; external effects are not replayed and `unknown` remains explicit; folder grants bound file authority; owner-visible claims remain Evidence-qualified. The [Presence Experience Contract](presence-experience-contract.en.md) controls owner-facing projection where it adds presentation rules without changing these authority boundaries.
 
 ## Amendment — #998 SELF-REVIEW-01 (2026-10-04): the secretary reviews its own misses
 

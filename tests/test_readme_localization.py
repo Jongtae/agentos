@@ -697,6 +697,54 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             self.assertTrue(any("try-today is missing its visible published-release/main boundary" in error
                                 for error in errors), errors)
 
+    def test_required_claims_cannot_be_markdown_code(self):
+        release = verifier.newest_published_release(ROOT)
+        wrappers = {
+            "backtick fence": lambda text: "\n\n```text\n" + text + "\n```\n\n",
+            "tilde fence": lambda text: "\n\n~~~text\n" + text + "\n~~~\n\n",
+            "space indentation": lambda text: "\n\n    " + text + "\n\n",
+            "tab indentation": lambda text: "\n\n\t" + text + "\n\n",
+            "inline backticks": lambda text: "`" + text + "`",
+            "double backticks": lambda text: "``" + text + "``",
+            "multiline span": lambda text: "``\n" + text + "\n``",
+        }
+        for name in verifier.READMES:
+            claims = (
+                (verifier.README_RELEASE_BOUNDARIES[name].format(
+                    version=release["version"], date=release["tag_date"]
+                 ), "visible published-release/main boundary"),
+                (verifier.README_DIRECTION_DISCLAIMERS[name],
+                 "visible illustrative product-direction boundary"),
+            )
+            for token, expected_error in claims:
+                for markup, wrap in wrappers.items():
+                    with self.subTest(readme=name, claim=expected_error, markup=markup):
+                        tmp, root = self.temp_root()
+                        with tmp:
+                            target = root / name
+                            body = target.read_text(encoding="utf-8")
+                            self.assertIn(token, body)
+                            target.write_text(body.replace(token, wrap(token), 1), encoding="utf-8")
+                            errors = verifier.validate_readmes(root)
+                            self.assertTrue(any(name in error and expected_error in error
+                                                for error in errors), errors)
+
+    def test_inline_main_and_fenced_install_commands_remain_valid(self):
+        tmp, root = self.temp_root()
+        with tmp:
+            for name in verifier.READMES:
+                target = root / name
+                body = target.read_text(encoding="utf-8")
+                self.assertIn("```sh\nbrew install jongtae/agentos/agentos", body)
+                target.write_text(body.replace("`main`", "`` main ``"), encoding="utf-8")
+            self.assertEqual([], verifier.validate_readmes(root))
+
+    def test_claim_prose_keeps_unmatched_ticks_and_paragraph_boundaries(self):
+        token = verifier.README_DIRECTION_DISCLAIMERS["README.md"]
+        for sample in ("`" + token, "`\n\n" + token + "\n\n`", "\\`" + token + "\\`"):
+            with self.subTest(sample=sample):
+                self.assertIn(token, verifier.visible_prose(sample))
+
     def test_core_narrative_cannot_disappear_in_all_locales(self):
         tmp, root = self.temp_root()
         with tmp:

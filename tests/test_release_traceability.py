@@ -197,9 +197,14 @@ class ReleaseTraceabilityTests(unittest.TestCase):
                     version=newest, date=release['tag_date']
                 )
                 self.assertIn(
-                    boundary, visible_prose(window),
-                    f'{name} must visibly state the published-release/main '
-                    f'boundary within 1200 characters of brew install')
+                    boundary, window,
+                    f'{name} must state the published-release/main boundary '
+                    f'within 1200 characters of brew install')
+                # The raw window begins inside the brew code fence. Normalize
+                # the full document so its closing fence keeps that context.
+                self.assertIn(
+                    visible_prose(boundary), visible_prose(body),
+                    f'{name} must state the release boundary as prose, not code')
                 for claim in ('current baseline', '최신 빌드', '现行基线'):
                     self.assertNotIn(claim, window,
                                      f'{name} still presents the published '

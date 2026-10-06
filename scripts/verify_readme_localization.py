@@ -125,9 +125,50 @@ COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
-def visible_prose(section: str) -> str:
-    """Required copy must be readable, not an image alt or HTML attribute."""
+def text_without_hidden_markup(section: str) -> str:
+    """Exclude comments and image/HTML attributes; retain literal command code."""
     return HTML_TAG_RE.sub("", IMAGE_RE.sub("", COMMENT_RE.sub("", section)))
+
+
+def inline_code_atoms(paragraph: str) -> str:
+    """Normalize matched code spans as opaque tokens, never as prose words."""
+    ticks = re.compile(r"`+")
+    result: list[str] = []
+    cursor = 0
+    while opening := ticks.search(paragraph, cursor):
+        prefix = paragraph[:opening.start()]
+        escaped = (len(prefix) - len(prefix.rstrip("\\"))) % 2
+        closing = None if escaped else next(
+            (match for match in ticks.finditer(paragraph, opening.end())
+             if len(match[0]) == len(opening[0])), None
+        )
+        if closing is None:
+            result.append(paragraph[cursor:opening.end()])
+            cursor = opening.end()
+            continue
+        content = paragraph[opening.end():closing.start()].replace("\n", " ")
+        if content.startswith(" ") and content.endswith(" ") and content.strip(" "):
+            content = content[1:-1]
+        result.append(paragraph[cursor:opening.start()])
+        result.append("\0code:" + content.encode("utf-8").hex() + "\0")
+        cursor = closing.end()
+    result.append(paragraph[cursor:])
+    return "".join(result)
+
+
+def visible_prose(section: str) -> str:
+    """Normalize claim prose while excluding Markdown code examples.
+
+    An inline identifier such as `main` remains an opaque atom, so comparing
+    equally normalized required copy permits that formatting but cannot find
+    a whole disclaimer hidden inside one code span. Spans stop at paragraph
+    breaks; unmatched or escaped backticks remain literal.
+    """
+    text = without_fenced_code(text_without_hidden_markup(section))
+    text = re.sub(r"(?m)^(?: {4}| {0,3}\t).*$", "", text)
+    parts = re.split(r"(\n[ \t]*\n)", text)
+    return "".join(inline_code_atoms(part) if index % 2 == 0 else part
+                   for index, part in enumerate(parts))
 
 
 # Keep the established localized wording, now beside the ownership explanation
@@ -387,14 +428,15 @@ def validate_body(
         )
     errors.extend(validate_presence_picture(name, section("presence"), root))
 
-    installation = visible_prose(section("try-today"))
+    installation = section("try-today")
+    command_text = text_without_hidden_markup(installation)
     for token in ("brew install jongtae/agentos/agentos", "http://127.0.0.1:8787/"):
-        if token not in installation:
+        if token not in command_text:
             errors.append(f"{name}: try-today is missing {token!r}")
     boundary = README_RELEASE_BOUNDARIES[name].format(
         version=release_version, date=release["tag_date"]
     )
-    if boundary not in installation:
+    if visible_prose(boundary) not in visible_prose(installation):
         errors.append(
             f"{name}: try-today is missing its visible published-release/main boundary "
             f"for v{release_version} ({release['tag_date']})"

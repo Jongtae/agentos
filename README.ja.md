@@ -29,7 +29,7 @@
 
 証拠の種類は混ぜません。
 
-- **公開リリース:** v1.1.0 には release manifest に記録された installed-smoke と synthetic journey の証拠があります。現在の `main` 全体を含むものではありません。
+- **公開リリース:** 公開リリース には release manifest に記録された installed-smoke と synthetic journey の証拠があります。現在の `main` 全体を含むものではありません。
 - **現在の `main`:** 新しい Secretary / Presence / Decision / execution 契約を支えるマージ済みコードと deterministic / fixture 証拠があります。契約やテストだけで live-service 動作を主張しません。
 - **Owner pilot:** 新しい経路の一部は所有者の実際の Telegram / desktop 環境でも使われています。公開スクリーンショットは、例を選定・秘匿化し、観測 revision と結び付けた後に追加します。
 - **方向性:** shopping / booking などは、実装と証拠が揃うまでは製品方向です。
@@ -54,7 +54,7 @@ AgentOS: http://127.0.0.1:8787/
 
 ブラウザがそのアドレスで開きます。**바로 시작하기**（今すぐ始める）を押し、モデルを接続すれば、もう話しかけられます。画面は現在韓国語で、依頼は韓国語か英語で理解されます。
 
-**Homebrew は最新の公開リリース `v1.1.0`（2026-09-23）をインストールします。** 以下の release シーンは、そのビルドに含まれる範囲に限定しています。 その後 `main` にマージされた作業はそのビルドにないため、次のリリースまで Homebrew ビルドは `main` より遅れています。最新のコードを使うにはソースチェックアウトから実行してください（`git clone https://github.com/Jongtae/agentos.git` のあと Python 3.12 以上で `python3 -m pip install -e .`）。すべての手順は [QUICKSTART](QUICKSTART.md) にあります。
+**Homebrew は最新の公開リリース `公開リリース`（2026-09-23）をインストールします。** 以下の release シーンは、そのビルドに含まれる範囲に限定しています。 その後 `main` にマージされた作業はそのビルドにないため、次のリリースまで Homebrew ビルドは `main` より遅れています。最新のコードを使うにはソースチェックアウトから実行してください（`git clone https://github.com/Jongtae/agentos.git` のあと Python 3.12 以上で `python3 -m pip install -e .`）。すべての手順は [QUICKSTART](QUICKSTART.md) にあります。
 
 <!-- capability:current-supported-slice -->
 <!-- readme-section:scenes-today -->
@@ -68,7 +68,7 @@ AgentOS: http://127.0.0.1:8787/
 - **ファイル。** *Summarize “Launch review” and save it as “Launch notes”.* 許可したフォルダを読み、自分が選んだ作業スペースのフォルダに新しいメモを書き、元のファイルには触れません。
 - **メール。** *Find anything about the budget in my mail.* 接続したメールボックスだけを検索し、見つけたものを示します。
 - **予定。** *Schedule a dentist appointment tomorrow at 3.* 正確な下書きを示し、「approve」と言った後にだけ予定を作成します。「make it 4pm」「cancel」も同じ下書きで通ります。
-- **v1.1.0 の記憶。** *Remember that I have a peanut allergy.* 公開ビルドには永続 Memory と candidate review があります。**現在の `main` はさらに進んでいます:** owner 自身の AI は保存可能な非 secret の事実を直接記憶し、何を記憶したかを伝え、期限付きの undo を提供します。第三者/委任 writer は引き続き candidate/approval 経路を使います。
+- **公開リリース の記憶。** *Remember that I have a peanut allergy.* 公開ビルドには永続 Memory と candidate review があります。**現在の `main` はさらに進んでいます:** owner 自身の AI は保存可能な非 secret の事実を直接記憶し、何を記憶したかを伝え、期限付きの undo を提供します。第三者/委任 writer は引き続き candidate/approval 経路を使います。
 - **調査。** *Look up these two products and compare them.* 検索して公開ページを最大3つ読み、書かれていること、未確認のこと、リンクを分けて返します。
 
 そのあとアプリを再起動して、こう言ってみてください: *Find “Launch notes” in my saved results.* 保存した結果、許可したフォルダ、記憶、Telegram のペアリングは再起動後も残ります。

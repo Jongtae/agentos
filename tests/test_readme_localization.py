@@ -411,6 +411,43 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             self.assertTrue(any("presence must contain exactly one localized picture" in error
                                 for error in errors), errors)
 
+    def test_presence_picture_inside_fenced_code_is_not_rendered(self):
+        for fence in ("```html", "~~~html"):
+            for closed in (True, False):
+                with self.subTest(fence=fence, closed=closed):
+                    tmp, root = self.temp_root()
+                    with tmp:
+                        target = root / "README.md"
+                        body = target.read_text(encoding="utf-8")
+                        ending = fence[:3] if closed else ""
+                        body = re.sub(
+                            r"<picture>.*?</picture>",
+                            lambda match: fence + "\n" + match[0] + "\n" + ending,
+                            body, count=1, flags=re.S,
+                        )
+                        target.write_text(body, encoding="utf-8")
+                        errors = verifier.validate_readmes(root)
+                        self.assertTrue(any(
+                            "presence must contain exactly one localized picture" in error
+                            for error in errors
+                        ), errors)
+
+    def test_fenced_picture_sample_does_not_hide_actual_picture(self):
+        for fence in ("```html", "~~~html"):
+            with self.subTest(fence=fence):
+                tmp, root = self.temp_root()
+                with tmp:
+                    target = root / "README.md"
+                    body = target.read_text(encoding="utf-8")
+                    body = re.sub(
+                        r"<picture>.*?</picture>",
+                        lambda match: fence + "\n" + match[0] + "\n" + fence[:3]
+                        + "\n\n" + match[0],
+                        body, count=1, flags=re.S,
+                    )
+                    target.write_text(body, encoding="utf-8")
+                    self.assertEqual([], verifier.validate_readmes(root))
+
     def test_presence_picture_must_have_alt_text(self):
         tmp, root = self.temp_root()
         with tmp:

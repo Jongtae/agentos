@@ -172,7 +172,7 @@ def validate_presence_picture(name: str, section: str, root: Path) -> list[str]:
     desktop = LOCALE_PRESENCE_VISUALS[name]
     narrow = desktop.removesuffix(".svg") + ".narrow.svg"
     parser = PictureParser()
-    parser.feed(section)
+    parser.feed(without_fenced_code(section))
     if len(parser.pictures) != 1:
         return [f"{name}: presence must contain exactly one localized picture"]
     entries = parser.pictures[0]
@@ -233,18 +233,14 @@ def section_markers(body: str) -> tuple[str, ...]:
     return tuple(match.group(1) for match in SECTION_MARKER_RE.finditer(body))
 
 
-def public_h2_indexes(body: str) -> list[tuple[int, str]]:
-    """Return public Markdown H2 headings outside fenced code blocks.
-
-    Detect both ATX H2 headings and setext H2 headings so a new user-facing
-    section cannot bypass parity by changing Markdown syntax.
-    """
+def without_fenced_code(body: str) -> str:
+    """Blank fenced code while retaining line numbers for heading diagnostics."""
     lines = body.splitlines()
-    headings: list[tuple[int, str]] = []
     fence_char: str | None = None
     fence_len = 0
+    visible_lines: list[str] = []
 
-    for index, line in enumerate(lines):
+    for line in lines:
         fence = FENCE_RE.match(line)
         if fence:
             token = fence.group(1)
@@ -256,11 +252,22 @@ def public_h2_indexes(body: str) -> list[tuple[int, str]]:
             elif char == fence_char and len(token) >= fence_len and not rest:
                 fence_char = None
                 fence_len = 0
+            visible_lines.append("")
             continue
+        visible_lines.append(line if fence_char is None else "")
+    return "\n".join(visible_lines)
 
-        if fence_char is not None:
-            continue
 
+def public_h2_indexes(body: str) -> list[tuple[int, str]]:
+    """Return public Markdown H2 headings outside fenced code blocks.
+
+    Detect both ATX H2 headings and setext H2 headings so a new user-facing
+    section cannot bypass parity by changing Markdown syntax.
+    """
+    lines = without_fenced_code(body).splitlines()
+    headings: list[tuple[int, str]] = []
+
+    for index, line in enumerate(lines):
         if ATX_H2_RE.match(line):
             headings.append((index, line.strip()))
             continue

@@ -222,6 +222,7 @@ class ServiceLoginFlow(unittest.TestCase):
         finally:
             service.stop.set()
             server.shutdown(); thread.join(); server.server_close()
+            # Setting the event is asynchronous; finish every worker before TemporaryDirectory removes the store.
             for worker in service.threads:
                 worker.join(timeout=3)
             self.assertFalse([worker.name for worker in service.threads if worker.is_alive()],

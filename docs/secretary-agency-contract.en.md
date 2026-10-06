@@ -1,5 +1,22 @@
 # Personal AgentOS Secretary Agency Contract
 
+## Current rule index and precedence
+
+This contract contains dated amendments because they are durable decision evidence. **Do not infer the currently selected development goal from this file**; use repository-root [`delivery-plan.yaml`](../delivery-plan.yaml) as described by the [documentation map](README.md). For product policy, newer explicit amendments supersede the older clauses they name. The current reading by concern is:
+
+| Concern | Current controlling rule | Older text retained only as history where superseded |
+| --- | --- | --- |
+| Secretary self-review | #998 SELF-REVIEW-01: typed miss/correction/retry triggers; bounded Judgment review; kept lesson becomes Memory; blocker remains Evidence | #805 is reused as the upkeep execution seam, not a separate self-review loop |
+| Owner AI Memory writes | #918 slice (a): the owner's own AI saves current Memory directly, tells the owner, and offers exact bounded undo; secret-shaped values are refused | #818/#836 ask flow and #597 request-path write gate for the owner's own AI |
+| Third-party/delegated Memory writes | #918 keeps C5: third-party/delegated writers create pending MemoryCandidate; #836/#818 define the one-ask/approval presentation | Owner-AI auto-save does not widen third-party authority |
+| Owner-model upkeep | #805 trigger/budget/evidence mechanics, with Memory disposition superseded by #918 slice (a) | #805 candidate/per-fact judgment disposition and #836 owner-AI ask behavior |
+| Private context + web search / egress | #826 EGRESS-OPEN-01: private reads and web search may share a turn; public lookups may carry owner values; information-use audit is required | #678 separation and the conflicting #774/#701/#705 native-search/private-read restrictions |
+| Browser/search platform | #677 as subsequently integrated by #701/#826: connected AI native search by default; macOS system WebKit browser; payment approval and browser mediation remain | Naver and separate Playwright-browser direction |
+| Main/Judgment orchestration | #710 plus the current [Decision Layer](decision-layer.en.md): Judgment plans and evaluates; deterministic code enforces authority/effect boundaries | Any older wording that treats deterministic routing rules as the semantic planner |
+| Preparations/watch | #719 on top of #659: bounded accepted watch windows, when-needed notification judgment, owner cancellation | No general background scheduler or unbounded monitoring is implied |
+
+Cross-cutting invariants remain: stored secrets do not enter model prompts/logs/Evidence; payment is per-action approved; external effects are not replayed blindly and `unknown` remains explicit; folder grants bound file authority; owner-visible claims remain Evidence-qualified. The [Presence Experience Contract](presence-experience-contract.en.md) controls owner-facing projection where it adds presentation rules without changing these authority boundaries.
+
 ## Amendment — #998 SELF-REVIEW-01 (2026-10-04): the secretary reviews its own misses
 
 Owner direction 2026-10-04: like a human secretary, the assistant notices when it fell short, works out why from its own records, and does better next time, without the owner operating anything. This adapts the #805 upkeep seam (`src/personal_agent/owner_model.py`): the same durable rows (now keyed by Work and kind), the same idle tick, single flight, pause switch and rolling 24-hour call cap. No new loop, store, scheduler or evaluator; no model call on a request path.
@@ -134,9 +151,9 @@ Live-data tools (such as directions or traffic) remain an owner decision recorde
 
 ## Status and purpose
 
-This is the canonical product and execution contract for the **SECRETARY-01** program, activated by the owner on 2026-09-26 through [GOV-SECRETARY-01 #653](https://github.com/Jongtae/agentos/issues/653). It distills the owner's product specification, preserved as [research](research/secretary-agency-spec-2026-09-26.ko.md), and the owner decisions recorded in #653.
+This is the canonical product and execution contract for the **SECRETARY-01** program. Its original activation was recorded by the owner on 2026-09-26 through [GOV-SECRETARY-01 #653](https://github.com/Jongtae/agentos/issues/653); that dated activation is history, not a claim about the repository's currently selected goal. It distills the owner's product specification, preserved as [research](research/secretary-agency-spec-2026-09-26.ko.md), and the owner decisions recorded in #653.
 
-It supersedes the PRESENCE-01 program's execution queue as the active goal. It does **not** replace the kernel authority model in [Personal AgentOS Architecture](personal-agentos-architecture.en.md), the [Decision Layer](decision-layer.en.md) boundary, Work/Event/Evidence semantics, or the [Goal Execution Contract](goal-execution-contract.en.md). Where the [Owner Control Contract](owner-control-contract.en.md) or the [Assistant Execution Contract](assistant-execution-contract.en.md) conflict with the pilot posture below, this contract governs for the duration of the pilot and the conflicting text is marked as conditional in place.
+Its 2026-09-26 activation superseded the PRESENCE-01 execution queue at that time. Current goal selection is intentionally not restated here. It does **not** replace the kernel authority model in [Personal AgentOS Architecture](personal-agentos-architecture.en.md), the [Decision Layer](decision-layer.en.md) boundary, Work/Event/Evidence semantics, or the [Goal Execution Contract](goal-execution-contract.en.md). Where the [Owner Control Contract](owner-control-contract.en.md) or the [Assistant Execution Contract](assistant-execution-contract.en.md) conflict with the pilot posture below, this contract governs for the duration of the pilot and the conflicting text is marked as conditional in place.
 
 It does not claim any described behavior is shipped. Capability claims still require merged implementation and named evidence.
 

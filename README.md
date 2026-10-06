@@ -9,6 +9,8 @@
 
 **One assistant. Replaceable AI. Owner-controlled memory, context, tools and authority.**
 
+Local-first is not local-only: Personal AgentOS can use local or hosted models; with a hosted model, permitted context goes to that provider.
+
 <!-- readme-section:concept -->
 
 ## The idea in one sentence

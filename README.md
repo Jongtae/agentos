@@ -27,6 +27,8 @@ The author's sentence, in the original Korean. Why the project exists and the do
 
 ## From an assistant to a personal agent environment
 
+![Interaction models: assistant, computer agent, and persistent Personal AgentOS](docs/assets/readme/interaction-model.en.svg)
+
 The distinction is not whether an AI can search a stock price or click **Add to cart**. Assistants already answer questions, and computer-use agents can already execute commands. Personal AgentOS moves the **persistent relationship, owner context, authority and work state** out of the AI provider and into an environment the owner controls.
 
 | Interaction model | What the owner does | What the system primarily holds |

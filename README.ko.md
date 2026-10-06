@@ -10,6 +10,8 @@
 **하나의 비서. 교체 가능한 AI. 내가 통제하는 기억·맥락·도구·권한.**
 
 
+로컬 우선(local-first)은 로컬 전용(local-only)이 아닙니다. Personal AgentOS는 로컬 또는 외부 모델을 사용할 수 있고, 외부 모델을 쓰면 허용된 맥락은 그 제공자로 전송됩니다.
+
 <!-- readme-section:concept -->
 
 ## 한 문장으로

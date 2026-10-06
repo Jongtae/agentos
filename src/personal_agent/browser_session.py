@@ -1300,23 +1300,24 @@ KEEPALIVE_SECONDS = 3 * 3600
 KEEPALIVE_LEAD_SECONDS = 600
 #: but never more often than this.  Generic: no site has its own value (Constitution C16).
 KEEPALIVE_MIN_GAP_SECONDS = 3600
-#: #1011: a site whose logout was observed is refreshed within half of the shortest lifetime seen,
-#: never more often than this.  Learned per site from observations only, never set per site in code.
-KEEPALIVE_FLOOR_SECONDS = 600
-
-
-def keepalive_interval(lifetime=None):
-    """The refresh interval for a site whose shortest observed session lifetime is ``lifetime`` (#1011).
-
-    Half of it, clamped to [``KEEPALIVE_FLOOR_SECONDS``, ``KEEPALIVE_SECONDS``];
-    ``KEEPALIVE_SECONDS`` when no logout was observed.  Pure.
-    """
-    if not isinstance(lifetime, (int, float)) or lifetime <= 0:
-        return KEEPALIVE_SECONDS
-    return max(KEEPALIVE_FLOOR_SECONDS, min(KEEPALIVE_SECONDS, float(lifetime) / 2))
 #: #990: the profile holder name of a keep-alive, and how long another holder waits for one to finish.
 KEEPALIVE_HOLDER = 'keepalive'
 KEEPALIVE_YIELD_SECONDS = ACTION_TIMEOUT_SECONDS + 15
+#: #1041: each refresh's interval varies by up to this fraction either way, so refreshes never come
+#: at a machine-regular cadence (a regular one drew a bot-activity alert, 2026-10-06).
+KEEPALIVE_JITTER = 0.2
+
+
+def keepalive_interval(site, last):
+    """The interval before ``site``'s next refresh after the one at ``last`` (#1041).
+
+    ``KEEPALIVE_SECONDS`` varied by up to ``KEEPALIVE_JITTER`` either way,
+    deterministic for one ``(site, last)`` so every check before the refresh
+    sees the same due time.  Pure.
+    """
+    digest = hashlib.sha256(f'{site}|{float(last or 0):.3f}'.encode()).digest()
+    fraction = int.from_bytes(digest[:4], 'big') / 0xFFFFFFFF   # 0..1
+    return KEEPALIVE_SECONDS * (1 - KEEPALIVE_JITTER + 2 * KEEPALIVE_JITTER * fraction)
 
 
 def keepalive_due_at(expiries, last, now, interval=KEEPALIVE_SECONDS):
@@ -1324,8 +1325,8 @@ def keepalive_due_at(expiries, last, now, interval=KEEPALIVE_SECONDS):
 
     ``last`` is the later of the sign-in and the last refresh.  A cookie
     already within ``KEEPALIVE_LEAD_SECONDS`` of expiring (or session-only,
-    ``None``) sets no earlier time.  ``interval`` (#1011) is the site's own
-    cadence (``keepalive_interval``); the minimum gap never exceeds it.  Pure.
+    ``None``) sets no earlier time.  ``interval`` (#1041) is this refresh's
+    jittered cadence (``keepalive_interval``).  Pure.
     """
     last = float(last or 0)
     interval = float(interval or KEEPALIVE_SECONDS)
@@ -2139,7 +2140,7 @@ class BrowserProfile:
         site's stored rows go out with one GET (``http_refresh``); what the
         site answered replaces that site's rows only, and ``on_saved`` pushes
         it like any save.  Returns ``{'state': refreshed | blocked | failed |
-        busy | unavailable}``; ``blocked`` means the site wants a browser.
+        busy}``; ``blocked`` means the site refused a non-browser request.
         """
         parts = urlsplit(str(url or ''))
         site = registrable_domain(parts.hostname or '')
@@ -2166,42 +2167,6 @@ class BrowserProfile:
             return {'state': 'failed', 'error': type(exc).__name__}
         finally:
             self._release()
-
-    def refresh_session(self, url):
-        """Load ``url`` once in the hidden worker and save what the site refreshed (#990).
-
-        Keeps a signed-in session alive: a site extends a session when one of
-        its pages is loaded, not when cookies are copied.  The same address
-        rule as ``browser_open`` (http(s) only; never this computer or a
-        private network) and the same jar save; nothing is read, clicked or
-        typed.  Returns ``{'state': refreshed | not_saved | busy | unavailable | failed}``.
-        """
-        if not self.available():
-            return {'state': 'unavailable'}
-        parts = urlsplit(str(url or ''))
-        if parts.scheme not in ('http', 'https') or not parts.netloc or local_destination(url, self._allowed_origins):
-            return {'state': 'failed', 'error': 'blocked_destination'}
-        try:
-            self._acquire(KEEPALIVE_HOLDER)
-        except ToolError:
-            return {'state': 'busy'}
-        driver = None
-        try:
-            self.profile_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-            driver = self.launcher(self.profile_dir, self.headless)
-            self._live = driver
-            driver.goto(url, ACTION_TIMEOUT_SECONDS)
-            return {'state': 'refreshed' if self._save(driver) else 'not_saved'}
-        except Exception as exc:
-            return {'state': 'failed', 'error': type(exc).__name__}
-        finally:
-            try:
-                if driver is not None:
-                    driver.close()
-            except Exception:
-                pass
-            finally:
-                self._release()
 
     def open_for_login(self, url, wait=False, seconds=None, on_closed=None, on_opened=None):
         """Show the worker window at ``url`` for the owner to log in by hand.

@@ -9,5 +9,7 @@ These documents record work that is finished: a release plan, acceptance and eva
 | [early-access-smoke.en.md](early-access-smoke.en.md) | Owner smoke test of the early-access checkpoint (PR #362) |
 | [use-01-evaluation.en.md](use-01-evaluation.en.md) | USE-01 (#358) evaluation evidence; #358 closed as not planned |
 | [readme-first-impression-eval.en.md](readme-first-impression-eval.en.md) | A lightweight README comprehension check |
+| [structure-reorg/](structure-reorg/) | STRUCT-01 repository-structure work units and final audit (2026-09-08); preserved as completed implementation history |
+| [contract-amendments/](contract-amendments/) | Superseded contract amendments preserved as decision history; not current policy |
 
 For the current product, start at the [README](../../../README.md) and [VISION.md](../../../VISION.md).

@@ -155,40 +155,19 @@ Runtimes receive Work-scoped Context and effective Grants only. A Runtime may re
 
 ## Required lifecycle
 
-Every milestone and iteration uses:
+Follow the [Development Constitution](docs/development-constitution.en.md) first, then [Development Governance](docs/development-governance.en.md) for the ordinary contribution workflow. The [Goal Execution Contract](docs/goal-execution-contract.en.md) adds autonomous goal-ready/delegation rules, and [Incremental Delivery and Merge Handoff](docs/incremental-delivery.en.md) defines integration-pending and merge/handoff receipts.
 
-1. a GitHub issue with user outcome, runtime impact, acceptance criteria, non-goals, dependencies/authority and validation plan;
-2. a matching branch;
-3. small intentional commits;
-4. a pull request with current automated validation evidence;
-5. independent review only when the change materially alters a security/authority boundary or weakens a declared safety invariant; ordinary recovery, historical reconciliation and final completion do not trigger review by themselves;
-6. merge and issue closeout; reconcile planning/governance documents only when the plan itself changed or the active contract requires a substantive record that GitHub-native state does not represent.
+The repository-level invariants contributors need before editing are:
 
-### Execution status source of truth
+- create the Issue and matching `codex/` branch before changing implementation or documentation;
+- use one worktree per concurrent session; never mutate the owner's main working copy from a session worktree;
+- GitHub Issues/PRs/Checks own execution status; root `delivery-plan.yaml` owns current goal selection/order/scope/dependencies/authority;
+- do not mirror GitHub status into roadmap/ledger/planning files unless their own plan/decision/evidence meaning changes;
+- required CI/exact-head validation always applies; independent review applies only for the Constitution's material security/authority escalation boundaries;
+- English internal development documents are canonical; public README locale parity remains required;
+- after merge, remove only your own worktree/branch and leave other sessions' worktrees alone.
 
-GitHub Issues, Pull Requests, merge state, and required Checks are authoritative for execution status. `delivery-plan.yaml` is authoritative for active goal selection, ordering, declared scope, dependencies, and execution authority; it is **not** a duplicate database of whether a PR is open, merged, or closed. `TASKS.md`, `docs/roadmap.md`, ledgers, and other planning/governance documents record plans, durable decisions, and historical evidence rather than mirroring GitHub state after every transition.
-
-Do not create a follow-up commit or pull request solely to change a work item from `open`/`in progress` to `merged`/`closed`, copy a merge SHA already available from GitHub, or mirror a Check result. After a normal merge, the GitHub PR/Issue/Checks are sufficient execution-status evidence. Update a planning/governance document only when its own meaning changes: scope, sequencing, dependency, authority, acceptance criteria, milestone, activation, re-scope, blocker/disposition, next-goal selection, or another substantive decision/evidence record explicitly required by the active contract and not represented by GitHub-native state. Preserve existing historical closeout records as historical evidence; do not churn them merely to normalize old status mirrors.
-
-Before making an implementation or documentation change, create the issue and switch to its matching branch. Enable the repository hooks once per clone with `git config core.hooksPath .githooks`; they reject commits and pushes directly to `main` or `master`.
-
-**One worktree per session (owner direction 2026-09-30, [#884](https://github.com/Jongtae/agentos/issues/884)).** Several sessions (Claude Code, Codex, subagents) work on this repository at the same time, and the owner's live AgentOS runs from the main working copy.
-
-- Each session does its edits, commits, test runs and pushes in its own `git worktree` on its issue branch, created from `origin/main`.
-- Never check out a branch, commit, stash, reset or merge in the main working copy. It stays on `main`.
-- After a merge, fast-forward the main working copy only when it is on `main` with no local changes. Otherwise leave it alone and report.
-- Check `git worktree list` and the current branch before any git command in a shared location.
-- Never run a bare `git stash`: the stash stack is shared across worktrees.
-- In a worktree, run tests with `PYTHONPATH=src`, because the editable install points at the main working copy.
-- Remove your own worktree and local branch after its PR merges or closes. Leave other sessions' worktrees alone.
-
-The active delivery order is `delivery-plan.yaml`. Historical v1/P7/Master Plan work and later successor plans are preserved rather than rewritten. An iteration cannot advance until its predecessor is complete or its explicitly recorded external blocker is resolved.
-
-Every active iteration must satisfy the English canonical [Goal Execution Contract](docs/goal-execution-contract.en.md): establish its goal-ready record before activation, preserve declared authority and non-goals, and close only with current evidence. Vision, roadmap order, issue creation and reserved proposals never activate implementation by themselves.
-
-Internal development standards, designs and execution guidance use English as the single canonical source. Korean is used for owner-facing progress/completion and user-facing companion docs where useful; translations do not silently create new authority.
-
-The four public README files are one user-facing product surface: `README.md` is canonical for factual claims, while `README.ko.md`, `README.ja.md` and `README.zh-CN.md` must preserve semantic/structural parity. A canonical README change must update all public locales in the same PR. Prefer language-neutral visuals; if essential copy is embedded in an image, provide localized variants. Never let an illustrative product-direction scene read as current shipped capability.
+Enable repository hooks once per clone with `git config core.hooksPath .githooks`. In a worktree, run tests with `PYTHONPATH=src` because the editable install may point at the main working copy.
 
 ## Licensing and marks
 
@@ -213,32 +192,11 @@ A package/runtime/distribution issue must explicitly state where applicable:
 
 Use the dedicated issue templates when available.
 
-## Autonomous goal execution
+## Autonomous goal execution and verification
 
-An owner may explicitly activate one goal-ready iteration or one goal-ready top-level program and delegate its delivery cycle. The Agent then continues safe, in-scope work without waiting for routine owner review or a manual automation trigger. A top-level program may advance only to its already enumerated, dependency-satisfied substep; substep closeout does not end the top-level goal. It may not select an unlisted successor, start a new feature, reactivate a reserved proposal, or widen authority merely because a substep ends.
+The detailed lifecycle, delegation, terminal-state discipline, requirement-to-evidence audit and stable-head verification budget are canonical in the [Goal Execution Contract](docs/goal-execution-contract.en.md). Merge/integration waiting and handoff receipts are canonical in [Incremental Delivery](docs/incremental-delivery.en.md).
 
-There is one existing delivery heartbeat. It may resume only the explicitly active goal after inspecting current repository and GitHub state; it must not create another automation or concurrent execution. It stays paused when no top-level goal is active or after top-level closeout, not after an in-scope substep closeout. A changed external condition is required before retrying a recorded authentication, permission, environment or usage failure.
-
-Retired Agent Distribution Platform issues and #358–#360 are historical evidence, not an autonomous queue. D-AP-01 #334 and DOGFOOD-01 #351 completion does not activate a successor. Each execution unit still requires explicit owner activation and a goal-ready delivery-plan state. GOV-USE-01 #357 authorizes only its bounded documentation/governance alignment, not product execution.
-
-Use role-appropriate delegation only for independent bounded work. Record the requested model/reasoning setting when material, the tool-accepted setting when observable, the observed execution result, and exclusive file ownership. Do not claim a model/runtime change that was not accepted or observed.
-
-Independent review is required only for a material security/authority boundary change. Triggers include widening filesystem/network/secret/connector/runtime authority; OAuth or credential-boundary changes; consequential-action approval changes; sandbox/isolation/privilege changes; private-data egress or recipient-boundary changes; package/dependency supply-chain trust or install/update authority changes; canonical owner-state/authority ownership changes; or weakening/removing a declared safety invariant. Recovery work requires independent review only when it changes one of those semantics. Final completion, ordinary UI/conversation/Settings work, non-authority bug fixes/refactors/docs, and tracker/ledger reconciliation do not trigger review by themselves. When review is required, an implementer's self-review or a label transition alone is not independent review.
-
-Completion is rejected unless a current requirement-to-evidence audit maps every acceptance criterion to merged artifacts and required CI, plus any substantive planning/governance update required because the plan itself changed. GitHub-native execution status must not be duplicated into tracker/roadmap/ledger files merely to prove a merge. A local command, fixture, signature, package manifest, closed issue, branch or PR alone never proves live capability completion.
-
-## Verification budget and stable-head review
-
-Required CI, branch protection, exact-head validation and truthful evidence remain mandatory. Independent review is mandatory only when the risk-based escalation criteria above apply. Verification efficiency governs both when broad validation is triggered and whether an independent-review escalation is justified.
-
-- During implementation and review remediation, run focused tests for the contract being changed. Keep related fixes together and prefer coherent checkpoint pushes over pushing every micro-edit when a push triggers full CI or review.
-- Request full repository validation on a stable, review-ready head. If the change crosses a material security/authority boundary, request independent review on that same stable head. After any review, collect compatible findings and remediate them in one batch.
-- Normal soft budget after review-ready is one stable-head full validation. When independent review is risk-triggered, add one review pass. If review findings require remediation, run one consolidated post-remediation full validation; re-review only when the remediation itself changes the triggering security/authority boundary or introduces a new review-triggering boundary. A third or later broad cycle is allowed when necessary, but the PR must record why another cycle is required (for example a new security finding, changed shared contract, flaky/unknown root cause, or material cross-worktree conflict).
-- Never request re-review for an unchanged head, request duplicate review while one is already running, or repeatedly poll CI/review when no decision can be made from a new result. Inspect gates at meaningful transitions.
-- A narrow mechanical fix should use focused tests first and be batched before the eventual exact-head merge gate. Changing a previously reviewed head does not automatically require re-review: re-review only when the remediation changes the boundary that triggered review or introduces another review-triggering change. Do not weaken, skip, or relabel required tests or a genuinely triggered review to save compute, time, or context.
-- Broaden validation earlier when security, authentication/OAuth, privacy, external effects, shared contracts, replay/idempotency/recovery, or an uncertain root cause is involved. Escalate to independent review only when the material security/authority criteria above are actually crossed.
-
-A critical execution profile is not permission for unlimited validation churn. If broad cycles keep repeating, stop micro-fixing, establish the root cause, batch the remediation, and document the reason for any additional cycle.
+An owner may delegate only an explicitly activated goal-ready unit/program. No substep completion selects an unlisted successor or widens authority. Independent review is risk-triggered by material security/authority boundary changes, not by ordinary completion. Required CI, exact-head validation and truthful evidence remain mandatory; do not weaken gates to save time.
 
 ## Truthfulness and safety
 
@@ -256,16 +214,4 @@ The canonical process is [development governance](docs/development-governance.en
 
 ## Pull request closeout
 
-Every PR states what changed, why, automated validation evidence, known limitations, data/security impact and the issue it closes.
-
-Package/runtime/distribution PRs additionally state:
-
-- permission/data/egress delta;
-- Memory/Event/background delta;
-- supply-chain/provenance evidence;
-- exact revision/digest behavior;
-- update/rollback/uninstall impact;
-- negative authority/security tests;
-- whether any live external operation was actually observed.
-
-Squash merge feature work into `main` after validation and any risk-triggered required review pass. Record completed work in `TASKS.md`, `docs/roadmap.md`, and `docs/issue-branch-ledger.jsonl` together when the activated goal's contract requires those records.
+Use the structured PR closeout required by [Development Governance](docs/development-governance.en.md) and the handoff receipt in [Incremental Delivery](docs/incremental-delivery.en.md). Every PR states what changed, why, validation evidence, known limitations, data/security impact and the Issue it closes. Package/runtime/distribution changes additionally state authority/egress, provenance/revision and rollback impact. Squash merge only after required validation and any genuinely triggered independent review.

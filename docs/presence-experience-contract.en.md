@@ -1,8 +1,25 @@
 # Personal AgentOS Presence Experience Contract
 
-## Current goal selection — SECRETARY-01 / #662 resumed (2026-09-28)
+## Current rule index and precedence
 
-The owner resumed SECRETARY-01 / #662 as the current top-level goal on 2026-09-28 (GOV-SECRETARY-04 / #770) after UX-RENEW-01 closed out. This contract remains the owner-facing experience contract; the UX-RENEW-01 presentation below is merged and is regression input.
+This is the owner-facing projection contract. **It does not select the repository's current development goal**; use repository-root [`delivery-plan.yaml`](../delivery-plan.yaml) and the [documentation map](README.md). Dated goal-selection paragraphs below are retained as program history.
+
+| Concern | Current controlling rule | Older text retained only as history where superseded |
+| --- | --- | --- |
+| Presence identity | North Star + Experience principles: one continuous secretary voice over replaceable workers; receipts/details on demand | Worker/tool/AgentOS machinery as the ordinary speaking identity |
+| Owner AI Memory presentation | #918 slice (a): no ask; save, then one quiet notice with exact seven-day undo | #836/#818 ask flow for the owner's own AI |
+| Third-party/delegated Memory presentation | #836 one ask per owner message/Work, natural values not keys; #818 exact approval mechanics underneath | Owner-AI no-ask policy does not apply |
+| Conversation lifecycle | current Telegram rules: no routine acknowledgement/status card; native typing/thinking presence; semantic progress only when useful | received/queued/running/completed narration and fixed wait text |
+| Answer projection | PRESENCE-ANS-01 / #847 plus truth-first outcome rules: the answer is the message; technical causes stay in detail; failed/partial/unknown remain explicit | machinery headers, tool names and raw execution errors in ordinary replies |
+| Settings and management | #880 Pages + #814/#855 conversation-first settings: the agent manages in conversation; pages exist for results text cannot carry or inputs conversation cannot safely carry | web-as-general-management-console framing |
+| Authority handoff | contextual capability/folder/account handoff at the moment of need; local approval owns local authority; successful handoff resumes the original Work exactly once | Settings-first onboarding as the ordinary task path |
+| Worker identity and routing | Main AI / Judgment AI are execution roles; worker changes do not change who the owner is talking to | engine/provider names as separate assistant identities |
+
+The [Secretary Agency Contract](secretary-agency-contract.en.md) controls the underlying Memory/egress/orchestration authority when this contract only changes presentation. Work/Event/Evidence, Grants, approvals, exact external-effect semantics and truthful `unknown` remain kernel truth.
+
+## Historical program decisions
+
+Dated Presence/Secretary/UX goal selections are preserved in [Presence program and Memory history](archive/history/contract-amendments/presence-program-memory-history-2026-09.md). They do not select current work.
 
 ## Amendment — GOV-ASK-LESS-01 / #918 slice (a) (2026-10-02): remembered, told, undoable
 
@@ -14,25 +31,11 @@ Owner decision 2026-09-30 (#918): "이런건 물어보지 않고 그냥 처리 �
 - **Still asked.** Only a third party's write (a package tool or a delegated specialist) keeps the #836 ask below (C5). Per-action payment approval and irreversible effects outside AgentOS stay asks (#918 item 4).
 - **Kept.** Nothing is described as remembered before it is; the worker reads a direct save as remembered and is told not to ask.
 
-## Amendment — PRESENCE-MEM-01 / #836 (2026-09-28): one memory ask, spoken as the secretary
+## Third-party/delegated Memory presentation
 
-Owner feedback 2026-09-28 (live Telegram, one message about a discounted-sushi dinner): "두 번 물어봤고, 첫 번째에 답을 하면 그 뒤에 것도 처리가 되어야 함. 그리고 AgentOS가 라면서 시스템 툴을 다루듯이 했는데, 우리의 컨셉은 presence잖아." That one message produced two separate "기억해 둘까요?" asks, raw memory keys, and a reply that narrated AgentOS approval machinery. It amends the #818 rules in the [Secretary Agency Contract](secretary-agency-contract.en.md).
-- **One ask per owner message (Work).** Every MemoryCandidate of the same Work is in one Telegram ask, whether the worker's `save_memory` or #805 upkeep proposed it. A candidate that arrives while the ask is open is added by editing that message (Telegram `editMessageText`); it is bound to the buttons only once the edit is confirmed. A candidate that arrives after the owner answered is settled by that answer, because the answer covers what the owner said in that message: yes saves it through the owner approval path, no drops it. The binding records it as decided by the owner's answer to that Work's ask. A yes never replaces a current Memory the owner was not shown, and mixed answers do not settle anything: in both cases the ask reopens with the new fact. Upkeep reads what the Work already noted and does not re-propose it.
-- **Natural wording.** The ask lists each fact as its value, never a memory key; a value written like a key is shown as its words. Buttons are 👍 / 👎 (#881; with a number per fact and 모두 for all when several are open). They are inline buttons, not message reactions: the Bot API does not deliver the owner's reaction changes in a private chat. Once answered, the message reads "기억해 둘게요." or "기억하지 않을게요." with what is kept. The "기억한 내용은 내 기록에서 고치거나 지울 수 있습니다" line is gone.
-- **No machinery in replies.** The worker reads a held `save_memory` only as "not remembered yet; the owner will be asked with one tap; do not describe how remembering works; you may say you would like to remember it". It never sees AgentOS, approval, candidate or storage wording. The core instructions say to speak as the owner's secretary and never narrate AgentOS, tools, approvals or internal states. Telegram no longer appends "기억은 아직 저장되지 않았어요…": the ask below the reply is the ask. The web, which has no inline ask, keeps one short line ("기억해 둘지는 내 기록에서 골라 주세요.") until the Work has nothing pending.
-- **Kept.** Nothing becomes canonical Memory without the owner's answer or an explicit request (#597), secrets are never shown or saved, and nothing is described as remembered before it is (truth before fluency).
+The owner's own AI follows #918 above: save, tell, exact undo. A package tool or delegated specialist remains under C5 and the candidate/approval path. For those third-party candidates, keep the still-current #836 presentation semantics: one natural ask per owner message/Work, values rather than raw keys, approval bound to exactly what was shown and is still current, no machinery narration, and never describe a candidate as remembered before approval. The full pre-#918 owner-AI ask history and dated UX/Secretary program selections are preserved in [Presence program and Memory history](archive/history/contract-amendments/presence-program-memory-history-2026-09.md).
 
-## UX-RENEW-01 / #688 (2026-09-27, complete)
-
-The owner selected UX-RENEW-01 as the then-current top-level goal, with governance activation in #690 and sequential presentation-only work in #691–#696. The owner explicitly lifted the earlier Secretary program exclusion of revisiting merged Presence/Settings/Telegram/current-context presentation. This contract remains the owner-facing experience contract for those slices; all state, Grant, approval, privacy, connector, Work/Event/Evidence, and external-effect rules below remain in force. PR #687 has merged and released its overlapping `src/personal_agent/web` files; implementation starts after governance PR #697 merges. SECRETARY-01 / #662 was owner-paused by #690 with its agency scope and completion criteria preserved, and was resumed by #770.
-
-## Secretary agency re-plan — #653 (2026-09-26, historical selection)
-
-Owner decision 2026-09-26 originally activated **SECRETARY-01 [#662](https://github.com/Jongtae/agentos/issues/662)** under the canonical [Secretary Agency Contract](secretary-agency-contract.en.md), activated by GOV-SECRETARY-01 [#653](https://github.com/Jongtae/agentos/issues/653). On 2026-09-27, #690 paused it in favor of UX-RENEW-01; on 2026-09-28, #770 resumed it. The center of that program is the secretary agency loop: the decision model chooses providers, sites, queries and recovery paths from the owner's context; deterministic code enforces only Grants, approvals, secret exclusion, idempotency and Evidence. PRESENCE-01 #508 is owner-paused; its merged work is regression input.
-
-**Pilot posture.** One owner, own machine, own accounts. Enforced at request time: secrets never enter a model prompt, log or Evidence; payment needs per-action owner approval. Per-request sensitivity judgments, re-asks, per-provider gating and the "no cart authority" rule are removed from the request path and deferred to a separately activated hardening program. The #625 paragraph below and the AGENCY/#605 egress-composition rules are historical for this program; Attention preparations and phase-2 family delegation are explicitly selected, not deferred.
-
-**No scenario-specific code.** Probes (book → cart, calendar reminder, lunch with allergies, one held-out) are observation windows, not completion criteria. Decision/runtime code must not branch on a named site, provider or question category; every PR states whether it generalizes the loop or only makes a probe pass.
+**Pilot posture remains current as policy, not goal selection.** One owner, own machine, own accounts. Secrets never enter a model prompt, log or Evidence; payment needs per-action owner approval. Per-request sensitivity judgments, re-asks, per-provider gating and the "no cart authority" rule remain removed from the request path unless a separately activated hardening program changes that. No scenario-specific code: probes are observation windows, not request/category branches.
 
 ## Execution integration refinement — AGENCY #600
 
@@ -40,7 +43,7 @@ Presence requires useful action, not only natural projection. The [execution con
 
 ## Status and purpose
 
-This is the canonical owner-facing experience refinement for conversation, Settings, contextual capability handoff and recovery. It distills the 2026-09-23 focused [Presence and Settings UX research](research/presence-and-settings-ux.ko.md) into implementation and review rules. Experience convergence is tracked by [PRESENCE-01 #508](https://github.com/Jongtae/agentos/issues/508). On 2026-09-24 the owner selected Presence as the next product goal; governance migration is tracked by #523. This document still does not itself authorize runtime execution outside the delivery-plan contract.
+This is the canonical owner-facing experience refinement for conversation, Settings, contextual capability handoff and recovery. It distills the 2026-09-23 focused [Presence and Settings UX research](research/presence-and-settings-ux.ko.md) into implementation and review rules. Experience convergence was tracked by [PRESENCE-01 #508](https://github.com/Jongtae/agentos/issues/508). The 2026-09-24 selection of Presence and governance migration #523 are historical records. This document does not itself authorize runtime execution or select work outside the delivery-plan contract.
 
 It does **not** replace the kernel authority model, the Owner Control Contract, Work/Event/Evidence semantics, Grants/approvals, or the Goal Execution Contract. It does not claim every target behavior is shipped. Current capability claims still require merged implementation and named evidence.
 

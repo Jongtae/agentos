@@ -169,13 +169,31 @@ routine PR limits above are not claimed to cap future security PRs.
 The selected first candidate is the bundled Public Suffix List data package:
 
 - known baseline: `publicsuffixlist==1.0.2.20260925`, uploaded 2026-09-25;
-- candidate: `publicsuffixlist==1.0.2.20261003`, uploaded 2026-10-03;
+- actual updater candidate: `publicsuffixlist==1.0.2.20261002`, uploaded
+  2026-10-02;
 - package licence: MPL-2.0; pure Python; no mandatory dependency; no runtime
   list fetch;
 - real consumer: `browser_session._public_suffix_list()` and
   `registrable_domain()`;
 - focused boundary: the login tests for lookalike, country-code, private,
-  bare-suffix, IP and IDN hosts.
+  bare-suffix, IP and IDN hosts;
+- candidate artifacts: wheel SHA-256
+  `b8e159190c24b16420f58d7c2c21c02cfb24ab05b501331260485b8b32a57c1f`
+  and sdist SHA-256
+  `3d814ff5eb0ca4bb8a2c9d7e9fd029485a9cd76110a7f37dad39b5936e8764cc`;
+- source: unsigned wrapper release commit
+  `71d2fffa6b4bef58d83fbb25064cfc1de87ec1bf`, containing only the package
+  version and bundled-list update, with the list itself sourced from
+  publicsuffix/list commit `714ac1bf5f2d038161c7419478cc3207431d706d`
+  whose GitHub signature is verified.
+
+Pre-activation research prepared the then-newest `1.0.2.20261003` as a
+possible disposable candidate. The first successful native Dependabot job on
+the merged configuration instead proposed `1.0.2.20261002`. That actual bot
+candidate is explicitly reselected here so the source review, lock bytes,
+real-consumer tests, negative check, rollback, exact-head CI and independent
+review all describe the same release. A later `20261003` proposal remains a
+separate future update and is not silently folded into this evidence.
 
 The initial lock intentionally records the known baseline. After this updater
 configuration reaches the default branch, a successful Dependabot job/PR must

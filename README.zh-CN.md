@@ -9,9 +9,6 @@
 
 **一个助手。可替换的 AI。由你掌控的记忆、上下文、工具和权限。**
 
-![两段真实对话：等待批准的日程草稿，以及重启后再次找到的已保存笔记](docs/assets/readme/hero.zh-CN.png)
-
-上面两段对话都是产品的真实行为，回复经过精简并译自韩语。请求保留英文原文（今天还不理解中文请求）。在你说 approve 之前什么都不会创建，保存的笔记重启后仍在原处。它运行在你自己的电脑上（macOS 或 Linux，Python 3.12 或更新），模型由你自己提供：本地 Ollama 模型、OpenAI 兼容端点或 Anthropic。本地优先（local-first）不等于只在本地（local-only）：使用托管模型时，你批准的上下文会发送给该提供商。
 
 <!-- readme-section:concept -->
 
@@ -74,6 +71,13 @@ Authority  Evidence     Events
 ## 不只是一个概念
 
 当前 `main` 已经包含了远多于公开版本的实现。项目正在把可替换的 Main AI / Judgment AI、持久 Memory、Telegram 对话、按上下文交接权限、搜索/浏览器中介、准备任务以及基于 Evidence 的恢复，组合成一个持续的个人助手体验。
+
+
+### 公开版本的交互证据
+
+![两段真实对话：等待批准的日程草稿，以及重启后再次找到的已保存笔记](docs/assets/readme/hero.zh-CN.png)
+
+上面两段对话都是产品的真实行为，回复经过精简并译自韩语。请求保留英文原文（今天还不理解中文请求）。在你说 approve 之前什么都不会创建，保存的笔记重启后仍在原处。它运行在你自己的电脑上（macOS 或 Linux，Python 3.12 或更新），模型由你自己提供：本地 Ollama 模型、OpenAI 兼容端点或 Anthropic。本地优先（local-first）不等于只在本地（local-only）：使用托管模型时，你批准的上下文会发送给该提供商。
 
 我们刻意区分不同证据：
 

@@ -1,11 +1,11 @@
 # Personal AgentOS: 지금 되는 것, 아직 마찰이 있는 것, 앞으로 가려는 곳
 
-[README](../README.ko.md) 뒤에 있는 근거와 경계 페이지입니다. README는 무엇을 할 수 있는지 보여주고, 이 페이지는 그것을 어떻게 아는지, 무엇이 아직 거친지, 무엇이 방향일 뿐인지, 프로젝트가 어떻게 만들어지고 어떤 라이선스인지 적습니다.
+[README](../README.ko.md) 뒤에 있는 근거와 경계 페이지입니다. 최신 공개 배포본과 더 새로운 `main` 구현을 구분하고 synthetic/fixture, installed-smoke, owner-live, product-direction 증거를 서로 섞지 않습니다.
 
 <!-- readme-section:status -->
 ## 지금 되는 것과 아직 마찰이 있는 것
 
-가장 최근의 synthetic first-user audit은 [#472](https://github.com/Jongtae/agentos/issues/472)입니다. 실제 제품 구성에 injected transport를 사용해 검증했으며, **실제 외부 제공자 운영은 실행하지 않았습니다.** fixture 성공은 live service 성공의 증거가 아닙니다.
+아래 v1 journey 표의 근거는 synthetic first-user audit [#472](https://github.com/Jongtae/agentos/issues/472)입니다. 실제 제품 구성에 injected transport를 사용해 검증했으며, **실제 외부 제공자 운영은 실행하지 않았습니다.** fixture 성공은 live service 성공의 증거가 아닙니다. 더 새로운 `main`의 Secretary/Presence/Decision/execution 작업은 현재 계약과 병합된 테스트로 추적하며, 새 release 기록 없이 공개 배포본의 기능으로 돌려 말하지 않습니다.
 
 | 영역 | 현재 근거 |
 | --- | --- |

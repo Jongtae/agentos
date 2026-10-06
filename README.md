@@ -5,13 +5,13 @@
 <!-- readme-parity:v1 -->
 <!-- readme-section:hero -->
 
-## Your own AI assistant, on your own machine.
+## A personal AI environment that stays yours.
 
-**Your choice of model. Your files, mail, calendar and memory. Your rules.**
+**One assistant. Replaceable AI. Owner-controlled memory, context, tools and authority.**
 
 ![Two real conversations: a calendar draft that waits for approval, and a saved note found again after a restart](docs/assets/readme/hero.en.png)
 
-Both conversations are the product's real behaviour, condensed and translated from its Korean replies. Nothing is created until you say approve, and the note you saved is still there after a restart. It runs on your own computer (macOS or Linux, Python 3.12 or newer) and you bring your own model: a local Ollama model, an OpenAI-compatible endpoint or Anthropic. Local-first is not local-only: with a hosted model, the context you approve goes to that provider.
+These two scenes are observed product behaviour from the published v1 line, condensed and translated from Korean replies. Personal AgentOS runs on your own computer and keeps the owner state and authority layer separate from the AI worker. Local-first is not local-only: a model can be local or hosted; with a hosted model, permitted context goes to that provider.
 
 <!-- readme-section:concept -->
 
@@ -22,6 +22,21 @@ Both conversations are the product's real behaviour, condensed and translated fr
 > *A personal AI environment I install and control: good built-in abilities finish real work, and even when I install or swap in better agents like apps, my memory and results stay with me.*
 
 The author's sentence, in the original Korean. Why the project exists and the documents that define the concept are gathered on one page: [VISION.md](VISION.md).
+
+<!-- readme-section:working-software -->
+
+## Working software, not only a concept
+
+The repository now contains substantially more than the published v1.1.0 build. On `main`, the assistant is being exercised as a continuous secretary over replaceable Main AI and Judgment AI routes, durable Memory, Telegram conversation, contextual capability handoff, search/browser mediation, preparations and evidence-qualified recovery.
+
+Evidence is deliberately separated:
+
+- **Published release:** published release has installed-smoke and synthetic journey evidence recorded in the release manifest. It does **not** contain everything now on `main`.
+- **Current `main`:** merged code and deterministic/fixture evidence support newer Secretary, Presence, Decision and execution contracts. A merged contract or test is not by itself a live-service claim.
+- **Owner pilot evidence:** public owner-live claims are intentionally pending until exact Telegram/desktop observations are selected, redacted and tied to a revision/evidence record.
+- **Direction:** shopping, booking and other future scenes remain product direction until implementation and evidence support a stronger claim.
+
+See [what works and how we know](docs/product-status.en.md), the [release manifest](docs/release-manifest.json), and the [documentation map](docs/README.md).
 
 <!-- readme-section:try-today -->
 
@@ -41,7 +56,7 @@ AgentOS: http://127.0.0.1:8787/
 
 The browser opens on that address. Press **바로 시작하기** (Start now), connect a model, and you are talking to it. The interface is in Korean today; it understands requests in Korean or English.
 
-**Homebrew installs the newest published release, `v1.1.0` (2026-09-23), which carries everything on this page.** Work merged to `main` after it is not in that build, so Homebrew can be behind `main` until the next release; for the newest code run from a source checkout (`git clone https://github.com/Jongtae/agentos.git`, then `python3 -m pip install -e .` on Python 3.12 or newer). [QUICKSTART](QUICKSTART.md) has every step.
+**Homebrew installs the newest published release, `published release` (2026-09-23).** The release scenes below are limited to what that build carries. Newer Secretary/Presence/orchestration work on `main` is not in published release; for the newest code run from a source checkout (`git clone https://github.com/Jongtae/agentos.git`, then `python3 -m pip install -e .` on Python 3.12 or newer). [QUICKSTART](QUICKSTART.md) has every step.
 
 <!-- capability:current-supported-slice -->
 <!-- readme-section:scenes-today -->
@@ -55,7 +70,7 @@ The journeys behind these were run end to end by the project's automated first-u
 - **Files.** *Summarize “Launch review” and save it as “Launch notes”.* It reads the folder you allowed, writes a new note into the workspace folder you chose and leaves the original untouched.
 - **Mail.** *Find anything about the budget in my mail.* It searches only the mailbox you connected and shows what it found.
 - **Calendar.** *Schedule a dentist appointment tomorrow at 3.* It shows an exact draft and creates the event only after you say approve. “Make it 4pm” and “cancel” work on the same draft.
-- **Memory.** *Remember that I have a peanut allergy.* It keeps that where you can inspect and correct it from the conversation, and delete it from the web page. A memory the model proposes on its own is held for your review until you accept it.
+- **Memory in published release.** *Remember that I have a peanut allergy.* The published build keeps durable memory and candidate review. **Current `main` has moved on:** the owner's own AI saves an eligible non-secret fact, tells you what it remembered and offers bounded undo; a third-party/delegated writer still uses the candidate/approval path.
 - **Research.** *Look up these two products and compare them.* It searches, reads up to three public pages from that search, and returns what they say, what stayed unknown, and the links.
 
 Then restart the app and ask *Find “Launch notes” in my saved results.* The saved result, the folders you allowed, memory and Telegram pairing survive the restart.

@@ -5,9 +5,9 @@
 <!-- readme-parity:v1 -->
 <!-- readme-section:hero -->
 
-## 自分のマシンで動く、自分だけの AI アシスタント。
+## 自分の手元に残る、個人のための AI 環境。
 
-**モデルは自分で選ぶ。ファイル・メール・予定・記憶は自分のもの。ルールは自分が決める。**
+**ひとりのアシスタント。交換可能な AI。自分で管理する記憶・コンテキスト・ツール・権限。**
 
 ![実際の会話2つ: 承認を待つ予定の下書きと、再起動後に見つけ直した保存メモ](docs/assets/readme/hero.ja.png)
 
@@ -22,6 +22,21 @@
 > *自分でインストールして管理する個人 AI 環境で、よくできた基本機能が実際の仕事を終わらせ、より良いエージェントをアプリのように入れ替えても、自分の記憶と成果は自分の手元に残る。*
 
 作者の言葉を韓国語の原文のまま引用しています。このプロジェクトがなぜあるのか、そしてコンセプトを定める文書は 1 ページにまとめています: [VISION.md](VISION.md)（英語）
+
+<!-- readme-section:working-software -->
+
+## コンセプトだけのプロジェクトではありません
+
+現在の `main` には、公開リリース v1.1.0 よりかなり新しい実装があります。交換可能な Main AI / Judgment AI、永続 Memory、Telegram 会話、コンテキストに応じた権限ハンドオフ、検索・ブラウザ仲介、準備処理、Evidence に基づく回復を、ひとつの継続的なアシスタント体験として実装・検証しています。
+
+証拠の種類は混ぜません。
+
+- **公開リリース:** 公開リリース には release manifest に記録された installed-smoke と synthetic journey の証拠があります。現在の `main` 全体を含むものではありません。
+- **現在の `main`:** 新しい Secretary / Presence / Decision / execution 契約を支えるマージ済みコードと deterministic / fixture 証拠があります。契約やテストだけで live-service 動作を主張しません。
+- **Owner pilot evidence:** public owner-live claims are intentionally pending until exact Telegram/desktop observations are selected, redacted and tied to a revision/evidence record.
+- **方向性:** shopping / booking などは、実装と証拠が揃うまでは製品方向です。
+
+詳しくは [product status](docs/product-status.en.md)、[release manifest](docs/release-manifest.json)、[documentation map](docs/README.md) を参照してください。
 
 <!-- readme-section:try-today -->
 
@@ -41,7 +56,7 @@ AgentOS: http://127.0.0.1:8787/
 
 ブラウザがそのアドレスで開きます。**바로 시작하기**（今すぐ始める）を押し、モデルを接続すれば、もう話しかけられます。画面は現在韓国語で、依頼は韓国語か英語で理解されます。
 
-**Homebrew は最新の公開リリース `v1.1.0`（2026-09-23）をインストールし、このページの内容はすべてそこに含まれています。** その後 `main` にマージされた作業はそのビルドにないため、次のリリースまで Homebrew ビルドは `main` より遅れています。最新のコードを使うにはソースチェックアウトから実行してください（`git clone https://github.com/Jongtae/agentos.git` のあと Python 3.12 以上で `python3 -m pip install -e .`）。すべての手順は [QUICKSTART](QUICKSTART.md) にあります。
+**Homebrew は最新の公開リリース `公開リリース`（2026-09-23）をインストールします。** 以下の release シーンは、そのビルドに含まれる範囲に限定しています。 その後 `main` にマージされた作業はそのビルドにないため、次のリリースまで Homebrew ビルドは `main` より遅れています。最新のコードを使うにはソースチェックアウトから実行してください（`git clone https://github.com/Jongtae/agentos.git` のあと Python 3.12 以上で `python3 -m pip install -e .`）。すべての手順は [QUICKSTART](QUICKSTART.md) にあります。
 
 <!-- capability:current-supported-slice -->
 <!-- readme-section:scenes-today -->
@@ -55,7 +70,7 @@ AgentOS: http://127.0.0.1:8787/
 - **ファイル。** *Summarize “Launch review” and save it as “Launch notes”.* 許可したフォルダを読み、自分が選んだ作業スペースのフォルダに新しいメモを書き、元のファイルには触れません。
 - **メール。** *Find anything about the budget in my mail.* 接続したメールボックスだけを検索し、見つけたものを示します。
 - **予定。** *Schedule a dentist appointment tomorrow at 3.* 正確な下書きを示し、「approve」と言った後にだけ予定を作成します。「make it 4pm」「cancel」も同じ下書きで通ります。
-- **記憶。** *Remember that I have a peanut allergy.* 会話から確認・修正でき、削除は Web 画面から行える場所に保管します。モデルが自発的に提案した記憶は、受け入れるまで確認待ちのままです。
+- **公開リリース の記憶。** *Remember that I have a peanut allergy.* 公開ビルドには永続 Memory と candidate review があります。**現在の `main` はさらに進んでいます:** owner 自身の AI は保存可能な非 secret の事実を直接記憶し、何を記憶したかを伝え、期限付きの undo を提供します。第三者/委任 writer は引き続き candidate/approval 経路を使います。
 - **調査。** *Look up these two products and compare them.* 検索して公開ページを最大3つ読み、書かれていること、未確認のこと、リンクを分けて返します。
 
 そのあとアプリを再起動して、こう言ってみてください: *Find “Launch notes” in my saved results.* 保存した結果、許可したフォルダ、記憶、Telegram のペアリングは再起動後も残ります。

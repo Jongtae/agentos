@@ -1,27 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="560" height="660" viewBox="0 0 560 660" role="img" aria-labelledby="title desc">
-<title id="title">Presence 架构</title>
-<desc id="desc">所有者与同一个 PA 对话。AgentOS 持有 Memory、Context、Work、Authority、Evidence、Events，判断层编排可替换的 AI 与工具。</desc>
-<style>
-text{font-family:Arial,"Noto Sans",sans-serif;fill:#1f2328;font-size:26px}
-.heading{font-size:30px;font-weight:700}.label{font-size:28px;font-weight:700}.muted{fill:#3d444d}.center{text-anchor:middle}
-</style>
-<rect width="560" height="660" fill="#ffffff"/>
-<text x="280" y="42" class="heading center">Owner ⇄ PA</text>
-<text x="280" y="80" class="center">一段持续的对话</text>
-<g stroke="#57606a" stroke-width="2" fill="none">
-<path d="M280 96V122m-7-7 7 7 7-7"/>
-<path d="M280 322V360m-7-7 7 7 7-7"/>
-<path d="M280 440V478m-7-7 7 7 7-7"/>
-</g>
-<rect x="20" y="134" width="520" height="188" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
-<text x="280" y="174" class="heading center">Personal AgentOS</text>
-<text x="280" y="216" class="center">Memory · Context · Work</text>
-<text x="280" y="258" class="center">Authority · Evidence · Events</text>
-<text x="280" y="300" class="muted center">所有者控制的状态</text>
-<rect x="20" y="372" width="520" height="68" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
-<text x="280" y="414" class="label center">判断 / 编排</text>
-<rect x="20" y="490" width="520" height="100" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
-<text x="280" y="530" class="label center">可替换的 AI</text>
-<text x="280" y="568" class="center">工具 / 服务 / 技能</text>
-<text x="280" y="640" class="label center">同一个 PA。不同的 AI。</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="730" viewBox="0 0 840 730" role="img" aria-labelledby="title desc">
+<title id="title">Presence：所有者控制的结构</title><desc id="desc">关系与状态仍由所有者掌控。</desc>
+<style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
+<rect width="840" height="730" fill="#fff"/>
+<text x="20" y="32.0" font-size="23" class="bold" text-anchor="start">Presence：所有者控制的结构</text>
+<text x="20" y="68" font-size="16" class="muted" text-anchor="start">概念说明图</text>
+<rect x="20" y="132" width="172" height="110" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="106" y="175" font-size="23" class="bold" text-anchor="middle">所有者</text>
+<text x="106" y="202.0" font-size="16" class="muted" text-anchor="middle">自然对话</text>
+<path d="M198 182H268M203 177L198 182L203 187M263 177L268 182L263 187" fill="none" stroke="#245b92" stroke-width="1.6"/>
+<rect x="280" y="90" width="540" height="376" rx="8" fill="#f2f7fc" stroke="#96b6d6"/>
+<text x="298" y="122.0" font-size="19" class="bold" text-anchor="start">Personal AgentOS · 所有者控制的状态</text>
+<rect x="298" y="154" width="504" height="56" rx="5" fill="#e4edf8" stroke="#b4c9df"/>
+<text x="550.0" y="189" font-size="20" class="bold" text-anchor="middle">PA · 个人助手</text>
+<path d="M550.0 215 L550.0 236" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M546.0 231 L550.0 236 L554.0 231" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="298.0" y="246" width="162.66666666666666" height="52" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="379.3333333333333" y="279" font-size="18" class="bold" text-anchor="middle">记忆</text>
+<rect x="468.66666666666663" y="246" width="162.66666666666666" height="52" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="550.0" y="279" font-size="18" class="bold" text-anchor="middle">上下文</text>
+<rect x="639.3333333333333" y="246" width="162.66666666666666" height="52" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="720.6666666666666" y="279" font-size="18" class="bold" text-anchor="middle">工作</text>
+<rect x="298.0" y="310" width="162.66666666666666" height="52" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="379.3333333333333" y="343" font-size="18" class="bold" text-anchor="middle">权限</text>
+<rect x="468.66666666666663" y="310" width="162.66666666666666" height="52" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="550.0" y="343" font-size="18" class="bold" text-anchor="middle">证据</text>
+<rect x="639.3333333333333" y="310" width="162.66666666666666" height="52" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="720.6666666666666" y="343" font-size="18" class="bold" text-anchor="middle">事件</text>
+<path d="M550.0 366 L550.0 386" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M546.0 381 L550.0 386 L554.0 381" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="298" y="396" width="504" height="52" rx="5" fill="#fff" stroke="#b4c9df"/>
+<text x="550.0" y="429" font-size="18" class="bold" text-anchor="middle">判断 / 编排</text>
+<path d="M550.0 468 L550.0 498" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M546.0 493 L550.0 498 L554.0 493" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="550.0" y="522" font-size="18" class="muted" text-anchor="middle">可替换的执行能力</text>
+<rect x="280" y="540" width="540" height="76" rx="6" fill="#fff" stroke="#8492a3"/>
+<text x="550.0" y="569" font-size="20" class="bold" text-anchor="middle">AI 模型</text>
+<text x="550.0" y="597" font-size="18" class="muted" text-anchor="middle">工具 / 服务 / 技能</text>
+<text x="420.0" y="680" font-size="23" class="blue bold" text-anchor="middle">同一个 PA。不同的 AI。</text>
+<text x="420.0" y="710" font-size="17" class="muted" text-anchor="middle">关系与状态仍由所有者掌控。</text>
 </svg>

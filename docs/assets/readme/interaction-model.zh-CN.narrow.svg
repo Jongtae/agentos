@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="1240" viewBox="0 0 420 1240" role="img" aria-labelledby="title desc">
+<title id="title">交互方式如何改变</title><desc id="desc">NASDAQ / Amazon 是交互示例，并不代表已发布的集成功能。</desc>
+<style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
+<rect width="420" height="1240" fill="#fff"/>
+<text x="20" y="32.0" font-size="24" class="bold" text-anchor="start">交互方式如何改变</text>
+<text x="20" y="66" font-size="16" class="muted" text-anchor="start">概念说明图</text>
+<rect x="20" y="86" width="380" height="340" rx="8" fill="#f6f8fa" stroke="#ccd4de"/>
+<text x="36" y="118" font-size="16" class="blue bold" text-anchor="start">01</text>
+<text x="68" y="118" font-size="20" class="bold" text-anchor="start">Assistant</text>
+<text x="36" y="149.0" font-size="19" class="blue bold" text-anchor="start">回答问题</text>
+<rect x="34" y="166" width="352" height="88" rx="5" fill="#ffffff" stroke="#dbe2ea"/>
+<text x="46" y="191.0" font-size="18" class="" text-anchor="start">“NVIDIA 现在的股价是多少？”</text>
+<circle cx="44" cy="268" r="3" fill="#245b92"/>
+<text x="58" y="274" font-size="17" class="" text-anchor="start">问题</text>
+<circle cx="44" cy="290" r="3" fill="#245b92"/>
+<path d="M44 274 L44 283" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 278 L44 283 L48 278" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="296" font-size="17" class="" text-anchor="start">搜索</text>
+<circle cx="44" cy="312" r="3" fill="#245b92"/>
+<path d="M44 296 L44 305" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 300 L44 305 L48 300" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="318" font-size="17" class="" text-anchor="start">回答</text>
+<text x="36" y="406.0" font-size="16" class="bold" text-anchor="start">当前对话与回答</text>
+<rect x="20" y="442" width="380" height="340" rx="8" fill="#f6f8fa" stroke="#ccd4de"/>
+<text x="36" y="474" font-size="16" class="blue bold" text-anchor="start">02</text>
+<text x="68" y="474" font-size="20" class="bold" text-anchor="start">Computer agent</text>
+<text x="36" y="505.0" font-size="19" class="blue bold" text-anchor="start">执行命令</text>
+<rect x="34" y="522" width="352" height="88" rx="5" fill="#ffffff" stroke="#dbe2ea"/>
+<text x="46" y="547.0" font-size="18" class="" text-anchor="start">“把这款耳机加入我的 Amazon 购物</text>
+<text x="46" y="572.2" font-size="18" class="" text-anchor="start">车。”</text>
+<circle cx="44" cy="624" r="3" fill="#245b92"/>
+<text x="58" y="630" font-size="17" class="" text-anchor="start">明确命令</text>
+<circle cx="44" cy="646" r="3" fill="#245b92"/>
+<path d="M44 630 L44 639" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 634 L44 639 L48 634" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="652" font-size="17" class="" text-anchor="start">浏览器 / 工具</text>
+<circle cx="44" cy="668" r="3" fill="#245b92"/>
+<path d="M44 652 L44 661" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 656 L44 661 L48 656" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="674" font-size="17" class="" text-anchor="start">行动</text>
+<circle cx="44" cy="690" r="3" fill="#245b92"/>
+<path d="M44 674 L44 683" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 678 L44 683 L48 678" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="696" font-size="17" class="" text-anchor="start">需要时取得权限</text>
+<circle cx="44" cy="712" r="3" fill="#245b92"/>
+<path d="M44 696 L44 705" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 700 L44 705 L48 700" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="718" font-size="17" class="" text-anchor="start">交接</text>
+<text x="36" y="762.0" font-size="16" class="bold" text-anchor="start">任务和浏览器、工具状态</text>
+<rect x="20" y="798" width="380" height="340" rx="8" fill="#f2f7fc" stroke="#96b6d6"/>
+<text x="36" y="830" font-size="16" class="blue bold" text-anchor="start">03</text>
+<text x="68" y="830" font-size="20" class="bold" text-anchor="start">Personal AgentOS</text>
+<text x="36" y="861.0" font-size="19" class="blue bold" text-anchor="start">持续陪伴所有者</text>
+<rect x="34" y="878" width="352" height="88" rx="5" fill="#ffffff" stroke="#dbe2ea"/>
+<text x="46" y="903.0" font-size="18" class="" text-anchor="start">“咖啡快没了。” → 之后：“买上次那款</text>
+<text x="46" y="928.2" font-size="18" class="" text-anchor="start">就好。”</text>
+<circle cx="44" cy="980" r="3" fill="#245b92"/>
+<text x="58" y="986" font-size="17" class="" text-anchor="start">跨越时间的对话</text>
+<circle cx="44" cy="1002" r="3" fill="#245b92"/>
+<path d="M44 986 L44 995" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 990 L44 995 L48 990" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="1008" font-size="17" class="" text-anchor="start">上下文</text>
+<circle cx="44" cy="1024" r="3" fill="#245b92"/>
+<path d="M44 1008 L44 1017" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 1012 L44 1017 L48 1012" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="1030" font-size="17" class="" text-anchor="start">判断</text>
+<circle cx="44" cy="1046" r="3" fill="#245b92"/>
+<path d="M44 1030 L44 1039" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 1034 L44 1039 L48 1034" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="1052" font-size="17" class="" text-anchor="start">持续工作</text>
+<circle cx="44" cy="1068" r="3" fill="#245b92"/>
+<path d="M44 1052 L44 1061" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 1056 L44 1061 L48 1056" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="1074" font-size="17" class="" text-anchor="start">需要时取得权限</text>
+<circle cx="44" cy="1090" r="3" fill="#245b92"/>
+<path d="M44 1074 L44 1083" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 1078 L44 1083 L48 1078" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="1096" font-size="17" class="" text-anchor="start">持续的 Presence</text>
+<text x="36" y="1118.0" font-size="16" class="bold" text-anchor="start">所有者的上下文与工作持续保留</text>
+<text x="20" y="1183.0" font-size="16" class="muted" text-anchor="start">NASDAQ / Amazon 是交互示例，并不代表已发布的</text>
+<text x="20" y="1205.4" font-size="16" class="muted" text-anchor="start">集成功能。</text>
+</svg>

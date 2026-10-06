@@ -1,29 +1,84 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="560" height="824" viewBox="0 0 560 824" role="img" aria-labelledby="title desc">
-<title id="title">상호작용 모델</title>
-<desc id="desc">설명용 비교: 질문에 답하는 어시스턴트, 명령을 실행하는 컴퓨터 에이전트, 소유자의 맥락을 지속하는 Personal AgentOS. 배포 통합 기능을 뜻하지 않습니다.</desc>
-<style>
-text{font-family:Arial,"Noto Sans",sans-serif;fill:#1f2328;font-size:26px}
-.heading{font-size:30px;font-weight:700}.label{font-size:28px;font-weight:700}.muted{fill:#3d444d}.center{text-anchor:middle}
-</style>
-<rect width="560" height="824" fill="#ffffff"/>
-<text x="24" y="40" class="heading">상호작용 모델</text>
-<rect x="20" y="64" width="520" height="210" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
-<text x="44" y="102" class="heading">1 · Assistant</text>
-<text x="44" y="138" class="label">질문에 답한다</text>
-<text x="44" y="176" class="">“NVIDIA 지금 얼마야?”</text>
-<text x="44" y="256" class="muted">현재 대화와 답</text>
-<rect x="20" y="290" width="520" height="210" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
-<text x="44" y="328" class="heading">2 · Computer agent</text>
-<text x="44" y="364" class="label">명령을 실행한다</text>
-<text x="44" y="402">“이 헤드폰을</text>
-<text x="44" y="436">Amazon 장바구니에 담아줘.”</text>
-<text x="44" y="482" class="muted">작업과 브라우저·도구 상태</text>
-<rect x="20" y="516" width="520" height="210" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
-<text x="44" y="554" class="heading">3 · Personal AgentOS</text>
-<text x="44" y="590" class="label">소유자와 함께한다</text>
-<text x="44" y="628" class="">“커피 거의 다 떨어졌네.”</text>
-<text x="44" y="662" class="">나중에: “지난번에 사던 걸로 그냥 사줘.”</text>
-<text x="44" y="708" class="muted">AI가 바뀌어도 맥락과 작업은 이어짐</text>
-<text x="24" y="774" class="muted">NASDAQ / Amazon은 상호작용 예시입니다.</text>
-<text x="24" y="808" class="muted">현재 배포된 통합 기능을 뜻하지 않습니다.</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="748" viewBox="0 0 840 748" role="img" aria-labelledby="title desc">
+<title id="title">상호작용이 달라지는 방식</title><desc id="desc">NASDAQ / Amazon은 상호작용 예시이며, 배포된 통합 기능 주장이 아닙니다.</desc>
+<style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
+<rect width="840" height="748" fill="#fff"/>
+<text x="20" y="32.0" font-size="24" class="bold" text-anchor="start">상호작용이 달라지는 방식</text>
+<text x="20" y="66" font-size="16" class="muted" text-anchor="start">개념 설명용 그림</text>
+<rect x="20" y="86" width="256" height="550" rx="8" fill="#f6f8fa" stroke="#ccd4de"/>
+<text x="36" y="118" font-size="16" class="blue bold" text-anchor="start">01</text>
+<text x="68" y="118" font-size="20" class="bold" text-anchor="start">Assistant</text>
+<text x="36" y="149.0" font-size="19" class="blue bold" text-anchor="start">질문에 답한다</text>
+<rect x="34" y="188" width="228" height="150" rx="5" fill="#ffffff" stroke="#dbe2ea"/>
+<text x="46" y="214.0" font-size="18" class="" text-anchor="start">“NVIDIA 지금 주가가</text>
+<text x="46" y="239.2" font-size="18" class="" text-anchor="start">얼마야?”</text>
+<circle cx="44" cy="366" r="3" fill="#245b92"/>
+<text x="58" y="372" font-size="18" class="" text-anchor="start">질문</text>
+<circle cx="44" cy="400" r="3" fill="#245b92"/>
+<path d="M44 372 L44 393" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 388 L44 393 L48 388" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="406" font-size="18" class="" text-anchor="start">검색</text>
+<circle cx="44" cy="434" r="3" fill="#245b92"/>
+<path d="M44 406 L44 427" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 422 L44 427 L48 422" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="440" font-size="18" class="" text-anchor="start">답변</text>
+<text x="36" y="606.0" font-size="16" class="bold" text-anchor="start">현재 대화와 답변</text>
+<rect x="292" y="86" width="256" height="550" rx="8" fill="#f6f8fa" stroke="#ccd4de"/>
+<text x="308" y="118" font-size="16" class="blue bold" text-anchor="start">02</text>
+<text x="340" y="118" font-size="20" class="bold" text-anchor="start">Computer agent</text>
+<text x="308" y="149.0" font-size="19" class="blue bold" text-anchor="start">명령을 실행한다</text>
+<rect x="306" y="188" width="228" height="150" rx="5" fill="#ffffff" stroke="#dbe2ea"/>
+<text x="318" y="214.0" font-size="18" class="" text-anchor="start">“이 헤드폰을 Amazon</text>
+<text x="318" y="239.2" font-size="18" class="" text-anchor="start">장바구니에 담아줘.”</text>
+<circle cx="316" cy="366" r="3" fill="#245b92"/>
+<text x="330" y="372" font-size="18" class="" text-anchor="start">명시적인 명령</text>
+<circle cx="316" cy="400" r="3" fill="#245b92"/>
+<path d="M316 372 L316 393" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M312 388 L316 393 L320 388" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="330" y="406" font-size="18" class="" text-anchor="start">브라우저 / 도구</text>
+<circle cx="316" cy="434" r="3" fill="#245b92"/>
+<path d="M316 406 L316 427" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M312 422 L316 427 L320 422" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="330" y="440" font-size="18" class="" text-anchor="start">행동</text>
+<circle cx="316" cy="468" r="3" fill="#245b92"/>
+<path d="M316 440 L316 461" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M312 456 L316 461 L320 456" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="330" y="474" font-size="18" class="" text-anchor="start">필요할 때 권한</text>
+<circle cx="316" cy="502" r="3" fill="#245b92"/>
+<path d="M316 474 L316 495" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M312 490 L316 495 L320 490" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="330" y="508" font-size="18" class="" text-anchor="start">인계</text>
+<text x="308" y="606.0" font-size="16" class="bold" text-anchor="start">작업과 브라우저·도구 상태</text>
+<rect x="564" y="86" width="256" height="550" rx="8" fill="#f2f7fc" stroke="#96b6d6"/>
+<text x="580" y="118" font-size="16" class="blue bold" text-anchor="start">03</text>
+<text x="612" y="118" font-size="20" class="bold" text-anchor="start">Personal AgentOS</text>
+<text x="580" y="149.0" font-size="19" class="blue bold" text-anchor="start">소유자와 함께한다</text>
+<rect x="578" y="188" width="228" height="150" rx="5" fill="#ffffff" stroke="#dbe2ea"/>
+<text x="590" y="214.0" font-size="18" class="" text-anchor="start">“커피 거의 다</text>
+<text x="590" y="239.2" font-size="18" class="" text-anchor="start">떨어졌네.” → 나중에</text>
+<text x="590" y="264.4" font-size="18" class="" text-anchor="start">“지난번에 사던 걸로</text>
+<text x="590" y="289.6" font-size="18" class="" text-anchor="start">사줘.”</text>
+<circle cx="588" cy="366" r="3" fill="#245b92"/>
+<text x="602" y="372" font-size="18" class="" text-anchor="start">시간에 걸친 대화</text>
+<circle cx="588" cy="400" r="3" fill="#245b92"/>
+<path d="M588 372 L588 393" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M584 388 L588 393 L592 388" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="602" y="406" font-size="18" class="" text-anchor="start">맥락</text>
+<circle cx="588" cy="434" r="3" fill="#245b92"/>
+<path d="M588 406 L588 427" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M584 422 L588 427 L592 422" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="602" y="440" font-size="18" class="" text-anchor="start">판단</text>
+<circle cx="588" cy="468" r="3" fill="#245b92"/>
+<path d="M588 440 L588 461" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M584 456 L588 461 L592 456" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="602" y="474" font-size="18" class="" text-anchor="start">이어지는 작업</text>
+<circle cx="588" cy="502" r="3" fill="#245b92"/>
+<path d="M588 474 L588 495" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M584 490 L588 495 L592 490" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="602" y="508" font-size="18" class="" text-anchor="start">필요할 때 권한</text>
+<circle cx="588" cy="536" r="3" fill="#245b92"/>
+<path d="M588 508 L588 529" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M584 524 L588 529 L592 524" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="602" y="542" font-size="18" class="" text-anchor="start">지속되는 Presence</text>
+<text x="580" y="606.0" font-size="16" class="bold" text-anchor="start">소유자의 맥락과 작업이 지속</text>
+<text x="20" y="691.0" font-size="16" class="muted" text-anchor="start">NASDAQ / Amazon은 상호작용 예시이며, 배포된 통합 기능 주장이 아닙니다.</text>
 </svg>

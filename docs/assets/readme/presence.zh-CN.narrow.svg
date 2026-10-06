@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="830" viewBox="0 0 420 830" role="img" aria-labelledby="title desc">
+<title id="title">Presence：所有者控制的结构</title><desc id="desc">关系与状态仍由所有者掌控。</desc>
+<style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
+<rect width="420" height="830" fill="#fff"/>
+<text x="20" y="32.0" font-size="23" class="bold" text-anchor="start">Presence：所有者控制的结构</text>
+<text x="20" y="68" font-size="16" class="muted" text-anchor="start">概念说明图</text>
+<rect x="20" y="90" width="380" height="64" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="44" y="130" font-size="20" class="bold" text-anchor="start">所有者</text>
+<text x="162" y="130" font-size="28" class="blue" text-anchor="start">⇄</text>
+<text x="206" y="130" font-size="22" class="bold" text-anchor="start">PA</text>
+<text x="210" y="182" font-size="18" class="muted" text-anchor="middle">自然对话</text>
+<path d="M210 194 L210 214" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M206 209 L210 214 L214 209" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="20" y="226" width="380" height="376" rx="8" fill="#f2f7fc" stroke="#96b6d6"/>
+<text x="38" y="258.0" font-size="19" class="bold" text-anchor="start">Personal AgentOS · 所有者控制的</text>
+<text x="38" y="284.6" font-size="19" class="bold" text-anchor="start">状态</text>
+<rect x="38" y="290" width="344" height="56" rx="5" fill="#e4edf8" stroke="#b4c9df"/>
+<text x="210.0" y="325" font-size="20" class="bold" text-anchor="middle">PA · 个人助手</text>
+<path d="M210.0 351 L210.0 372" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M206.0 367 L210.0 372 L214.0 367" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="38.0" y="382" width="109.33333333333333" height="52" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="92.66666666666666" y="415" font-size="18" class="bold" text-anchor="middle">记忆</text>
+<rect x="155.33333333333331" y="382" width="109.33333333333333" height="52" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="209.99999999999997" y="415" font-size="18" class="bold" text-anchor="middle">上下文</text>
+<rect x="272.66666666666663" y="382" width="109.33333333333333" height="52" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="327.3333333333333" y="415" font-size="18" class="bold" text-anchor="middle">工作</text>
+<rect x="38.0" y="446" width="109.33333333333333" height="52" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="92.66666666666666" y="479" font-size="18" class="bold" text-anchor="middle">权限</text>
+<rect x="155.33333333333331" y="446" width="109.33333333333333" height="52" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="209.99999999999997" y="479" font-size="18" class="bold" text-anchor="middle">证据</text>
+<rect x="272.66666666666663" y="446" width="109.33333333333333" height="52" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="327.3333333333333" y="479" font-size="18" class="bold" text-anchor="middle">事件</text>
+<path d="M210.0 502 L210.0 522" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M206.0 517 L210.0 522 L214.0 517" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="38" y="532" width="344" height="52" rx="5" fill="#fff" stroke="#b4c9df"/>
+<text x="210.0" y="565" font-size="18" class="bold" text-anchor="middle">判断 / 编排</text>
+<path d="M210.0 604 L210.0 634" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M206.0 629 L210.0 634 L214.0 629" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="210.0" y="658" font-size="18" class="muted" text-anchor="middle">可替换的执行能力</text>
+<rect x="20" y="676" width="380" height="76" rx="6" fill="#fff" stroke="#8492a3"/>
+<text x="210.0" y="705" font-size="20" class="bold" text-anchor="middle">AI 模型</text>
+<text x="210.0" y="733" font-size="18" class="muted" text-anchor="middle">工具 / 服务 / 技能</text>
+<text x="210.0" y="780" font-size="23" class="blue bold" text-anchor="middle">同一个 PA。不同的 AI。</text>
+<text x="210.0" y="810" font-size="17" class="muted" text-anchor="middle">关系与状态仍由所有者掌控。</text>
+</svg>

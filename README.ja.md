@@ -25,7 +25,10 @@
 
 ## アシスタントから personal agent environment へ
 
-![説明用の比較: 質問に答える Assistant、命令を実行する Computer agent、AI が変わっても文脈と作業を維持する Personal AgentOS](docs/assets/readme/interaction-model.ja.svg)
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/interaction-model.ja.narrow.svg">
+  <img src="docs/assets/readme/interaction-model.ja.svg" alt="説明用の比較: 質問に答える Assistant、命令を実行する Computer agent、AI が変わっても文脈と作業を維持する Personal AgentOS">
+</picture>
 
 違いは、AI が株価を検索できるか、**カートに追加**できるかではありません。アシスタントはすでに質問に答え、computer-use agent は命令を実行できます。Personal AgentOS は、**継続する関係、owner context、authority、work state** を AI provider の外に置き、owner が管理する環境に保持します。
 
@@ -41,11 +44,19 @@ NASDAQ/Amazon は **interaction model の説明例**であり、そのサービ�
 
 Owner は変化する model・tool・workflow と個別に会話せず、一つの **PA** と話します。
 
-![Presence の構造: 所有者は PA と話し、AgentOS が Memory、Context、Work、Authority、Evidence、Events を保持し、判断層が交換可能な AI とツールを調整する](docs/assets/readme/presence.ja.svg)
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence.ja.narrow.svg">
+  <img src="docs/assets/readme/presence.ja.svg" alt="Presence の構造: 所有者は PA と話し、AgentOS が Memory、Context、Work、Authority、Evidence、Events を保持し、判断層が交換可能な AI とツールを調整する">
+</picture>
 
 そのため、未完成な事実をそのまま話し、数時間後に続きを話し、必要になった時だけ写真や位置を共有し、外部 action に account/computer authority が必要な瞬間だけ handoff できます。日常の intent を tool・model・workflow・memory command に翻訳する必要はありません。
 
 **代表的な対話 — 製品の方向性。** 所有者が提供した対話パターンをまとめた説明用の例であり、一回の観測済み実行を再現したものではありません。
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/continuing-conversation.ja.narrow.svg">
+  <img src="docs/assets/readme/continuing-conversation.ja.svg" alt="時間をまたぐ説明用の会話: コーヒーが少ない、数時間後に立ち寄る場所を聞く、後で以前の選択を依頼する。文脈と Work が続き、必要な時に権限を解決する製品の方向性。一回の実観測ではない。">
+</picture>
 
 > **朝:** 「コーヒーがもう少ない。」  
 > **午後:** 「今日は仕事が少し遅くなりそう。」  

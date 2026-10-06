@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="550" viewBox="0 0 840 550" role="img" aria-labelledby="title desc">
+<title id="title">時間をまたいで続く会話</title><desc id="desc">説明用にまとめた例であり、一回の実観測ではありません。</desc>
+<style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
+<rect width="840" height="550" fill="#fff"/>
+<text x="20" y="32.0" font-size="23" class="bold" text-anchor="start">時間をまたいで続く会話</text>
+<text x="20" y="68" font-size="16" class="muted" text-anchor="start">代表的な対話 · 製品の方向性</text>
+<rect x="20" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="36" y="122" font-size="18" class="blue bold" text-anchor="start">01  はじめに</text>
+<text x="36" y="158.0" font-size="19" class="bold" text-anchor="start">「コーヒーがもう少な</text>
+<text x="36" y="184.6" font-size="19" class="bold" text-anchor="start">い。」</text>
+<path d="M36 290H260" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="36" y="318.0" font-size="17" class="muted" text-anchor="start">保存できる以前の文脈</text>
+<path d="M278 210 L290 210" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M285 206 L290 210 L285 214" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="292" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="308" y="122" font-size="18" class="blue bold" text-anchor="start">02  数時間後</text>
+<text x="308" y="158.0" font-size="19" class="bold" text-anchor="start">「今から出る。途中で買</text>
+<text x="308" y="184.6" font-size="19" class="bold" text-anchor="start">えるところある？」</text>
+<path d="M308 290H532" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="308" y="318.0" font-size="17" class="muted" text-anchor="start">時間 / 経路 / 営業状況</text>
+<path d="M550 210 L562 210" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M557 206 L562 210 L557 214" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="564" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="580" y="122" font-size="18" class="blue bold" text-anchor="start">03  その後</text>
+<text x="580" y="158.0" font-size="19" class="bold" text-anchor="start">「時間ないな。前と同じ</text>
+<text x="580" y="184.6" font-size="19" class="bold" text-anchor="start">ものを買っておいて。」</text>
+<path d="M580 290H804" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="580" y="318.0" font-size="17" class="muted" text-anchor="start">以前の選択 / 必要な時に権</text>
+<text x="580" y="341.8" font-size="17" class="muted" text-anchor="start">限</text>
+<rect x="20" y="422" width="800" height="58" rx="5" fill="#f2f7fc" stroke="#96b6d6"/>
+<text x="420.0" y="447" font-size="18" class="bold" text-anchor="middle">会話の下で文脈をつなぎ、一つの Work を継続</text>
+<text x="20" y="527.0" font-size="16" class="muted" text-anchor="start">説明用にまとめた例であり、一回の実観測ではありません。</text>
+</svg>

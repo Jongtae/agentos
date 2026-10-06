@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="550" viewBox="0 0 840 550" role="img" aria-labelledby="title desc">
+<title id="title">相隔数小时，仍是同一段对话</title><desc id="desc">经过浓缩的说明示例，并非一次真实观测的运行。</desc>
+<style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
+<rect width="840" height="550" fill="#fff"/>
+<text x="20" y="32.0" font-size="23" class="bold" text-anchor="start">相隔数小时，仍是同一段对话</text>
+<text x="20" y="68" font-size="16" class="muted" text-anchor="start">代表性交互 · 产品方向</text>
+<rect x="20" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="36" y="122" font-size="18" class="blue bold" text-anchor="start">01  起初</text>
+<text x="36" y="158.0" font-size="19" class="bold" text-anchor="start">“咖啡快没了。”</text>
+<path d="M36 290H260" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="36" y="318.0" font-size="17" class="muted" text-anchor="start">符合保存条件的既有上下文</text>
+<path d="M278 210 L290 210" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M285 206 L290 210 L285 214" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="292" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="308" y="122" font-size="18" class="blue bold" text-anchor="start">02  数小时后</text>
+<text x="308" y="158.0" font-size="19" class="bold" text-anchor="start">“我现在出门，顺路有地方</text>
+<text x="308" y="184.6" font-size="19" class="bold" text-anchor="start">可以买到吗？”</text>
+<path d="M308 290H532" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="308" y="318.0" font-size="17" class="muted" text-anchor="start">时间 / 路线 / 营业情况</text>
+<path d="M550 210 L562 210" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M557 206 L562 210 L557 214" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="564" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="580" y="122" font-size="18" class="blue bold" text-anchor="start">03  之后</text>
+<text x="580" y="158.0" font-size="19" class="bold" text-anchor="start">“没时间了，买上次那款就</text>
+<text x="580" y="184.6" font-size="19" class="bold" text-anchor="start">好。”</text>
+<path d="M580 290H804" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="580" y="318.0" font-size="17" class="muted" text-anchor="start">先前选择 / 需要时取得权限</text>
+<rect x="20" y="422" width="800" height="58" rx="5" fill="#f2f7fc" stroke="#96b6d6"/>
+<text x="420.0" y="447" font-size="18" class="bold" text-anchor="middle">在对话之下连接上下文，延续同一个 Work</text>
+<text x="20" y="527.0" font-size="16" class="muted" text-anchor="start">经过浓缩的说明示例，并非一次真实观测的运行。</text>
+</svg>

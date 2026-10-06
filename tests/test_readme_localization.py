@@ -295,7 +295,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
         with tmp:
             target = root / "README.md"
             clean = target.read_text(encoding="utf-8")
-            hero = "## Your own AI assistant, on your own machine."
+            hero = "## A personal AI environment that stays yours."
             heading = "## The settings you will need"
             self.assertIn(hero, clean)
             self.assertIn(heading, clean)

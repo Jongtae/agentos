@@ -9,10 +9,6 @@
 
 **One assistant. Replaceable AI. Owner-controlled memory, context, tools and authority.**
 
-![Two real conversations: a calendar draft that waits for approval, and a saved note found again after a restart](docs/assets/readme/hero.en.png)
-
-These two scenes are observed product behaviour from the published v1 line, condensed and translated from Korean replies. Personal AgentOS runs on your own computer and keeps the owner state and authority layer separate from the AI worker. Local-first is not local-only: a model can be local or hosted; with a hosted model, permitted context goes to that provider.
-
 <!-- readme-section:concept -->
 
 ## The idea in one sentence
@@ -70,6 +66,13 @@ Underneath that ordinary conversation, AgentOS may resolve prior context, calend
 **Same PA. Different AI.** The model underneath can change without making the owner rebuild the relationship from scratch.
 
 <!-- readme-section:working-software -->
+
+### Published-release interaction evidence
+
+![Two real conversations: a calendar draft that waits for approval, and a saved note found again after a restart](docs/assets/readme/hero.en.png)
+
+These two scenes are observed product behaviour from the published v1 line, condensed and translated from Korean replies. Personal AgentOS runs on your own computer and keeps the owner state and authority layer separate from the AI worker. Local-first is not local-only: a model can be local or hosted; with a hosted model, permitted context goes to that provider.
+
 
 ## Working software, not only a concept
 

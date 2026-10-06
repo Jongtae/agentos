@@ -28,20 +28,31 @@ def _assert_any(text: str, *alternatives: str) -> None:
 
 def test_agents_declares_permanent_autonomous_delivery_guards() -> None:
     agents = _read("AGENTS.md")
+    goal = _read("docs/goal-execution-contract.en.md")
 
     _assert_all(
         agents,
-        "## Autonomous goal execution",
-        "requested model",
-        "observed execution result",
+        "## Autonomous goal execution and verification",
+        "[Goal Execution Contract](docs/goal-execution-contract.en.md)",
+        "[Incremental Delivery](docs/incremental-delivery.en.md)",
         "requirement-to-evidence audit",
-        "enumerated, dependency-satisfied substep",
-        "top-level goal",
-        "declared authority",
-        "non-goals",
+        "stable-head verification budget",
+        "explicitly activated goal-ready unit/program",
+        "No substep completion selects an unlisted successor or widens authority",
+        "Required CI, exact-head validation and truthful evidence remain mandatory",
     )
-    _assert_any(agents, "must not select an unlisted", "may advance only")
-    _assert_any(agents, "accepted setting", "tool-accepted setting")
+    _assert_all(
+        goal,
+        "requested model/reasoning",
+        "observed result",
+        "already enumerated, dependency-satisfied substep",
+        "top-level goal",
+        "allowed authority",
+        "non-goals",
+        "requested, accepted, and observed settings",
+    )
+    _assert_any(goal, "must not select an unlisted", "may advance only")
+    _assert_any(goal, "accepted setting", "tool-accepted setting", "accepted, and observed settings")
 
 
 def test_english_goal_contract_is_canonical_and_korean_reference_links_to_it() -> None:
@@ -75,7 +86,14 @@ def test_github_is_authoritative_for_execution_status_and_plans_are_not_status_m
     governance = _read("docs/development-governance.en.md")
     incremental = _read("docs/incremental-delivery.en.md")
 
-    for text in (agents, governance, incremental):
+    _assert_all(
+        agents,
+        "GitHub Issues/PRs/Checks own execution status",
+        "`delivery-plan.yaml` owns current goal selection/order/scope/dependencies/authority",
+        "do not mirror GitHub status",
+    )
+
+    for text in (governance, incremental):
         _assert_all(
             text,
             "GitHub Issues, Pull Requests",
@@ -83,11 +101,10 @@ def test_github_is_authoritative_for_execution_status_and_plans_are_not_status_m
         )
 
     _assert_all(
-        agents,
-        "`delivery-plan.yaml` is authoritative for active goal selection",
-        "duplicate database",
+        governance,
+        "they are not a second database of GitHub status",
         "Do not create a follow-up commit or pull request solely",
-        "scope, sequencing, dependency, authority, acceptance criteria, milestone, activation, re-scope, blocker/disposition, next-goal selection",
+        "scope, ordering, dependency, authority, acceptance, milestone, activation, re-scope, blocker/disposition, or next-goal selection",
     )
     _assert_all(
         goal,
@@ -150,20 +167,26 @@ def test_verification_budget_requires_stable_heads_and_batched_remediation() -> 
     goal = _read("docs/goal-execution-contract.en.md")
     pa1 = _read("docs/pa1-parallel-delivery.en.md")
 
-    for text in (agents, goal):
-        _assert_all(
-            text,
-            "verification budget",
-            "stable",
-            "focused tests",
-            "coherent checkpoint",
-            "batch",
-            "unchanged head",
-            "duplicate review",
-            "poll",
-            "exact-head",
-            "independent review",
-        )
+    _assert_all(
+        agents,
+        "stable-head verification budget",
+        "Goal Execution Contract",
+        "Required CI, exact-head validation",
+        "Independent review is risk-triggered",
+    )
+    _assert_all(
+        goal,
+        "verification budget",
+        "stable",
+        "focused tests",
+        "coherent checkpoint",
+        "batch",
+        "unchanged head",
+        "duplicate review",
+        "poll",
+        "exact-head",
+        "independent review",
+    )
 
     _assert_all(
         goal,
@@ -204,15 +227,10 @@ def test_independent_review_is_risk_based_not_default_completion_gate() -> None:
 
     _assert_all(
         agents,
-        "Independent review is required only for a material security/authority boundary change",
-        "OAuth",
-        "sandbox/isolation/privilege",
-        "private-data egress",
-        "supply-chain",
-        "safety invariant",
-        "Recovery work requires independent review only when it changes one of those semantics",
-        "Final completion",
-        "do not trigger review by themselves",
+        "Goal Execution Contract",
+        "Independent review is risk-triggered by material security/authority boundary changes",
+        "not by ordinary completion",
+        "genuinely triggered independent review",
     )
     _assert_all(
         constitution,

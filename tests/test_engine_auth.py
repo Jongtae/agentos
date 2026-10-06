@@ -220,7 +220,13 @@ class ServiceLoginFlow(unittest.TestCase):
             self.assertEqual(self.store.secret('claude_code_token'), '', 'a rejected request stored nothing')
             self.assertEqual(post('/api/subscription-engines/login-status', {'engine': 'codex'})['state'], 'signed-in')
         finally:
-            server.shutdown(); thread.join(); server.server_close(); service.stop.set()
+            service.stop.set()
+            server.shutdown(); thread.join(); server.server_close()
+            # Setting the event is asynchronous; finish every worker before TemporaryDirectory removes the store.
+            for worker in service.threads:
+                worker.join(timeout=3)
+            self.assertFalse([worker.name for worker in service.threads if worker.is_alive()],
+                             'the test must not remove its store while service workers still use it')
 
     def test_signed_out_cli_is_not_selected_and_says_how_to_sign_in(self):
         service = self._service(_FakeEngine('signed-out'))

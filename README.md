@@ -25,7 +25,7 @@ The author's sentence, in the original Korean. Why the project exists and the do
 
 ## From an assistant to a personal agent environment
 
-![Interaction models: assistant, computer agent, and persistent Personal AgentOS](docs/assets/readme/interaction-model.en.svg)
+![Illustrative progression: Assistant answers; Computer agent acts; Personal AgentOS keeps context and work across AI changes](docs/assets/readme/interaction-model.en.svg)
 
 The distinction is not whether an AI can search a stock price or click **Add to cart**. Assistants already answer questions, and computer-use agents can already execute commands. Personal AgentOS moves the **persistent relationship, owner context, authority and work state** out of the AI provider and into an environment the owner controls.
 
@@ -41,22 +41,11 @@ The NASDAQ/Amazon examples above are **interaction-model illustrations**, not cl
 
 The owner talks to one **PA**, not to a changing set of models, tools and workflows.
 
-```text
-Owner  ⇄  PA (continuous presence)
-             │
-     Personal AgentOS
-  ┌──────────┼───────────┐
-Memory    Context      Work
-Authority  Evidence     Events
-  └──────────┼───────────┘
-       Judgment / orchestration
-             │
-   replaceable AI + tools/services
-```
+![Presence architecture: Owner talks to PA; Personal AgentOS owns Memory, Context, Work, Authority, Evidence and Events; Judgment orchestrates replaceable AI and tools](docs/assets/readme/presence.en.svg)
 
 That changes the conversation. A person can share an incomplete fact, continue it hours later, send a photo or location when it becomes relevant, and grant account/computer access only at the moment an external action needs it. The owner does not have to translate everyday intent into a tool, model, workflow or memory command.
 
-A representative flow reconstructed from owner-pilot interaction patterns might look like this:
+**Representative interaction — product direction.** These owner-supplied interaction patterns are condensed into an example, not a single observed run:
 
 > **Morning:** “We’re almost out of coffee.”  
 > **Afternoon:** “I may finish work late today.”  
@@ -71,24 +60,22 @@ Underneath that ordinary conversation, AgentOS may resolve prior context, calend
 
 ## Working software, not only a concept
 
-The repository now contains substantially more than the published release. On `main`, the assistant is being exercised as a continuous secretary over replaceable Main AI and Judgment AI routes, durable Memory, Telegram conversation, contextual capability handoff, search/browser mediation, preparations and evidence-qualified recovery.
-
-### Published-release interaction evidence
-
-![Two real conversations: a calendar draft that waits for approval, and a saved note found again after a restart](docs/assets/readme/hero.en.png)
-
-These two scenes are observed product behaviour from the published v1 line, condensed and translated from Korean replies. Personal AgentOS runs on your own computer and keeps the owner state and authority layer separate from the AI worker. Local-first is not local-only: a model can be local or hosted; with a hosted model, permitted context goes to that provider.
-
-
+The repository contains implementation newer than the published release: replaceable Main AI and Judgment AI routes, durable Memory, Telegram conversation, contextual capability handoff, search/browser mediation, preparations and evidence-qualified recovery. Merged code and deterministic/fixture checks support those paths; they do not establish that the complete experience described here has been observed live.
 
 Evidence is deliberately separated:
 
-- **Published release:** published release has installed-smoke and synthetic journey evidence recorded in the release manifest. It does **not** contain everything now on `main`.
+- **Published release:** installed-smoke and synthetic journey evidence is recorded in the release manifest. It does **not** contain everything now on `main`.
 - **Current `main`:** merged code and deterministic/fixture evidence support newer Secretary, Presence, Decision and execution contracts. A merged contract or test is not by itself a live-service claim.
-- **Owner pilot evidence:** public owner-live claims are intentionally pending until exact Telegram/desktop observations are selected, redacted and tied to a revision/evidence record.
-- **Direction:** shopping, booking and other future scenes remain product direction until implementation and evidence support a stronger claim.
+- **Owner-pilot evidence:** public owner-live claims remain pending until exact Telegram/desktop observations are selected, redacted and tied to a revision/evidence record.
+- **Product direction:** the representative conversation above, shopping, booking and other future scenes remain direction until implementation and evidence support a stronger claim.
 
 See [what works and how we know](docs/product-status.en.md), the [release manifest](docs/release-manifest.json), and the [documentation map](docs/README.md).
+
+### Published-release journey illustrations
+
+The two scenes below are reconstructed, condensed illustrations of the v1 synthetic calendar and file journeys, not screenshots of live accounts. Their replies are translated from Korean. The published release has local installed-smoke evidence; the release manifest does not claim live Google or Telegram operation.
+
+![Reconstructed v1 synthetic journeys: calendar draft approval and a saved note found after restart](docs/assets/readme/hero.en.png)
 
 <!-- readme-section:try-today -->
 
@@ -115,7 +102,7 @@ The browser opens on that address. Press **바로 시작하기** (Start now), co
 
 ## Then try these
 
-![Five everyday requests that run today, and one after a restart](docs/assets/readme/scenes.en.png)
+![Synthetic first-user journeys: files, mail, calendar, Memory, research and restart reuse](docs/assets/readme/scenes.en.png)
 
 The journeys behind these were run end to end by the project's automated first-user check, against a local folder and stand-in mail, calendar and web services rather than live accounts. The wording is the wording that routes today.
 

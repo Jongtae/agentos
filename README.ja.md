@@ -9,7 +9,6 @@
 
 **ひとりのアシスタント。交換可能な AI。自分で管理する記憶・コンテキスト・ツール・権限。**
 
-
 ローカルファースト（local-first）はローカル限定（local-only）ではありません。Personal AgentOS はローカルまたはホスト型モデルを使え、ホスト型モデルでは許可されたコンテキストがその提供者へ送られます。
 
 <!-- readme-section:concept -->
@@ -26,7 +25,7 @@
 
 ## アシスタントから personal agent environment へ
 
-![Assistant、Computer Agent、Personal AgentOS の interaction model 比較](docs/assets/readme/interaction-model.ja.svg)
+![説明用の比較: 質問に答える Assistant、命令を実行する Computer agent、AI が変わっても文脈と作業を維持する Personal AgentOS](docs/assets/readme/interaction-model.ja.svg)
 
 違いは、AI が株価を検索できるか、**カートに追加**できるかではありません。アシスタントはすでに質問に答え、computer-use agent は命令を実行できます。Personal AgentOS は、**継続する関係、owner context、authority、work state** を AI provider の外に置き、owner が管理する環境に保持します。
 
@@ -42,22 +41,11 @@ NASDAQ/Amazon は **interaction model の説明例**であり、そのサービ�
 
 Owner は変化する model・tool・workflow と個別に会話せず、一つの **PA** と話します。
 
-```text
-Owner  ⇄  PA (continuous presence)
-             │
-     Personal AgentOS
-  ┌──────────┼───────────┐
-Memory    Context      Work
-Authority  Evidence     Events
-  └──────────┼───────────┘
-       Judgment / orchestration
-             │
-   replaceable AI + tools/services
-```
+![Presence の構造: 所有者は PA と話し、AgentOS が Memory、Context、Work、Authority、Evidence、Events を保持し、判断層が交換可能な AI とツールを調整する](docs/assets/readme/presence.ja.svg)
 
 そのため、未完成な事実をそのまま話し、数時間後に続きを話し、必要になった時だけ写真や位置を共有し、外部 action に account/computer authority が必要な瞬間だけ handoff できます。日常の intent を tool・model・workflow・memory command に翻訳する必要はありません。
 
-Owner-pilot で繰り返し現れた interaction pattern を一般化すると、たとえば次のようになります。
+**代表的な対話 — 製品の方向性。** 所有者が提供した対話パターンをまとめた説明用の例であり、一回の観測済み実行を再現したものではありません。
 
 > **朝:** 「コーヒーがもう少ない。」  
 > **午後:** 「今日は仕事が少し遅くなりそう。」  
@@ -72,23 +60,22 @@ Owner-pilot で繰り返し現れた interaction pattern を一般化すると�
 
 ## コンセプトだけのプロジェクトではありません
 
-現在の `main` には、公開リリースよりかなり新しい実装があります。交換可能な Main AI / Judgment AI、永続 Memory、Telegram 会話、コンテキストに応じた権限ハンドオフ、検索・ブラウザ仲介、準備処理、Evidence に基づく回復を、ひとつの継続的なアシスタント体験として実装・検証しています。
+現在のリポジトリには公開リリース以降の実装があります。交換可能な Main AI と Judgment AI、永続 Memory、Telegram 対話、文脈に応じた権限ハンドオフ、検索・ブラウザー仲介、準備処理、Evidence に基づく回復を、マージ済みコードと deterministic / fixture 検証で確認しています。この証拠だけで、ここで説明する体験全体が実際の外部サービスで観測されたとは言えません。
 
+証拠の種類は区別します。
 
-### 公開リリースの interaction evidence
-
-![実際の会話2つ: 承認を待つ予定の下書きと、再起動後に見つけ直した保存メモ](docs/assets/readme/hero.ja.png)
-
-上の2つの会話は製品の実際の挙動を、返答を短くして韓国語から訳したものです。依頼は英語のまま示しています（日本語の依頼は今日は理解されません）。「approve」と言うまで何も作成されず、保存したメモは再起動後もそこにあります。自分のコンピュータ（macOS または Linux、Python 3.12 以上）で動き、モデルは自分で用意します。ローカルの Ollama モデル、OpenAI 互換エンドポイント、Anthropic のいずれかです。ローカルファースト（local-first）はローカル限定（local-only）ではありません。ホスト型モデルを使うと、承認したコンテキストはそのプロバイダに送信されます。
-
-証拠の種類は混ぜません。
-
-- **公開リリース:** 公開リリース には release manifest に記録された installed-smoke と synthetic journey の証拠があります。現在の `main` 全体を含むものではありません。
-- **現在の `main`:** 新しい Secretary / Presence / Decision / execution 契約を支えるマージ済みコードと deterministic / fixture 証拠があります。契約やテストだけで live-service 動作を主張しません。
-- **Owner pilot evidence:** public owner-live claims are intentionally pending until exact Telegram/desktop observations are selected, redacted and tied to a revision/evidence record.
-- **方向性:** shopping / booking などは、実装と証拠が揃うまでは製品方向です。
+- **公開リリース:** release manifest に installed-smoke と synthetic journey の証拠があります。現在の `main` 全体を含むものではありません。
+- **現在の `main`:** マージ済みコードと deterministic / fixture 証拠が、新しい Secretary、Presence、Decision、execution 契約を支えます。契約やテストだけで実サービスの動作を主張しません。
+- **所有者パイロットの証拠:** 正確な Telegram / デスクトップ観測を選定し、個人情報を伏せ、revision / evidence 記録と結び付けるまで、公開の owner-live 主張は保留します。
+- **製品の方向性:** 上の代表的な対話や買い物・予約などは、実装と証拠がより強い主張を支えるまでは製品の方向性です。
 
 詳しくは [product status](docs/product-status.en.md)、[release manifest](docs/release-manifest.json)、[documentation map](docs/README.md) を参照してください。
+
+### 公開リリースの検証を説明する図
+
+以下の二つの場面は、v1 の synthetic カレンダー・ファイル検証を再構成して短くした説明図であり、実アカウントのスクリーンショットではありません。返答は韓国語から翻訳しています。公開リリースにはローカルの installed-smoke 証拠がありますが、release manifest は Google / Telegram の実運用を主張していません。
+
+![再構成した v1 synthetic 検証: 予定の下書き承認と、再起動後の保存メモ検索](docs/assets/readme/hero.ja.png)
 
 <!-- readme-section:try-today -->
 
@@ -115,7 +102,7 @@ AgentOS: http://127.0.0.1:8787/
 
 ## 次はこんなことも
 
-![今日実際に動く5つの依頼と、再起動後の続き](docs/assets/readme/scenes.ja.png)
+![Synthetic 初回ユーザー検証: ファイル、メール、予定、Memory、調査、再起動後の再利用](docs/assets/readme/scenes.ja.png)
 
 下の依頼の流れはすべて、このプロジェクトの自動化された初回ユーザー検証で、実際のアカウントではなく、ローカルフォルダと模擬のメール・予定・Web サービスで最後まで実行されました。文言は今日実際にルーティングされる文言です。
 

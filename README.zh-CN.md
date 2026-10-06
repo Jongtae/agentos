@@ -9,7 +9,6 @@
 
 **一个助手。可替换的 AI。由你掌控的记忆、上下文、工具和权限。**
 
-
 本地优先（local-first）不等于只在本地（local-only）。Personal AgentOS 可以使用本地或托管模型；使用托管模型时，获准的上下文会发送给该提供商。
 
 <!-- readme-section:concept -->
@@ -26,7 +25,7 @@
 
 ## 从助手到个人 Agent 环境
 
-![Assistant、Computer Agent 与 Personal AgentOS 的交互模型对比](docs/assets/readme/interaction-model.zh-CN.svg)
+![示意比较：Assistant 回答问题，Computer agent 执行命令，Personal AgentOS 在 AI 改变后仍保留上下文与工作](docs/assets/readme/interaction-model.zh-CN.svg)
 
 区别不在于 AI 能不能查询股价或点击**加入购物车**。助手已经能回答问题，computer-use agent 也已经能执行命令。Personal AgentOS 把**持续的关系、owner context、authority 和 work state**从 AI provider 中移出来，放在由 owner 控制的环境里。
 
@@ -42,22 +41,11 @@
 
 Owner 不需要分别和不断变化的 model、tool、workflow 对话，而是始终和一个 **PA** 对话。
 
-```text
-Owner  ⇄  PA (continuous presence)
-             │
-     Personal AgentOS
-  ┌──────────┼───────────┐
-Memory    Context      Work
-Authority  Evidence     Events
-  └──────────┼───────────┘
-       Judgment / orchestration
-             │
-   replaceable AI + tools/services
-```
+![Presence 架构：所有者与 PA 对话；AgentOS 持有 Memory、Context、Work、Authority、Evidence、Events；判断层编排可替换的 AI 与工具](docs/assets/readme/presence.zh-CN.svg)
 
 因此，人可以只说一个不完整的生活事实，几小时后继续说；在需要时才发送照片或位置；只有真正的外部 action 需要 account/computer authority 时才 handoff。不必把日常 intent 翻译成 tool、model、workflow 或 memory command。
 
-把 owner-pilot 中反复出现的 interaction pattern 一般化，可以是这样的：
+**代表性交互 — 产品方向。** 这是将所有者提供的交互模式浓缩而成的示例，并不是对一次完整观测运行的重现。
 
 > **早上：**“咖啡快没了。”  
 > **下午：**“今天工作可能会晚一点结束。”  
@@ -72,23 +60,22 @@ Authority  Evidence     Events
 
 ## 不只是一个概念
 
-当前 `main` 已经包含了远多于公开版本的实现。项目正在把可替换的 Main AI / Judgment AI、持久 Memory、Telegram 对话、按上下文交接权限、搜索/浏览器中介、准备任务以及基于 Evidence 的恢复，组合成一个持续的个人助手体验。
+当前仓库包含公开版本之后的实现。可替换的 Main AI 与 Judgment AI、持久 Memory、Telegram 对话、按上下文交接权限、搜索与浏览器中介、准备任务及基于 Evidence 的恢复，都有已合并代码和 deterministic / fixture 验证。这些证据并不意味着这里描述的完整体验已经在实际外部服务上得到观测。
 
+我们区分不同的证据：
 
-### 公开版本的交互证据
-
-![两段真实对话：等待批准的日程草稿，以及重启后再次找到的已保存笔记](docs/assets/readme/hero.zh-CN.png)
-
-上面两段对话都是产品的真实行为，回复经过精简并译自韩语。请求保留英文原文（今天还不理解中文请求）。在你说 approve 之前什么都不会创建，保存的笔记重启后仍在原处。它运行在你自己的电脑上（macOS 或 Linux，Python 3.12 或更新），模型由你自己提供：本地 Ollama 模型、OpenAI 兼容端点或 Anthropic。本地优先（local-first）不等于只在本地（local-only）：使用托管模型时，你批准的上下文会发送给该提供商。
-
-我们刻意区分不同证据：
-
-- **公开版本：** 公开版本 有 release manifest 中记录的 installed-smoke 与 synthetic journey 证据，但不包含当前 `main` 的全部内容。
-- **当前 `main`：** 已合并的代码和 deterministic / fixture 证据支持更新的 Secretary、Presence、Decision 与 execution 合约。只有合约或测试并不等于 live-service 证明。
-- **Owner pilot evidence:** 公開する owner-live claim は、正確な Telegram / desktop 観測を選定・秘匿化し、revision / evidence record に結び付けるまで保留します。
-- **方向：** shopping、booking 等场景在实现和证据足够之前仍属于产品方向。
+- **公开版本：** release manifest 记录了 installed-smoke 和 synthetic journey 证据，但不包含当前 `main` 的全部内容。
+- **当前 `main`：** 已合并代码与 deterministic / fixture 证据支持新的 Secretary、Presence、Decision 和 execution 合约。合约或测试本身并不证明实际服务的运行。
+- **所有者试用证据：** 在选定准确的 Telegram / 桌面观测、遮盖个人信息并关联 revision / evidence 记录之前，公开的 owner-live 声明仍然待定。
+- **产品方向：** 上面的代表性对话，以及购物、预订等场景，在实现和证据足以支持更强声明之前，都属于产品方向。
 
 参见 [product status](docs/product-status.en.md)、[release manifest](docs/release-manifest.json) 与 [documentation map](docs/README.md)。
+
+### 公开版本验证流程示意
+
+下面两段场景是对 v1 synthetic 日历与文件验证流程的重构和浓缩示意，并非真实账户的截图。回复译自韩语。公开版本具有本地 installed-smoke 证据，但 release manifest 并未声称观测到了 Google / Telegram 的实际运行。
+
+![重构的 v1 synthetic 验证：日程草稿审批与重启后查找已保存笔记](docs/assets/readme/hero.zh-CN.png)
 
 <!-- readme-section:try-today -->
 
@@ -115,7 +102,7 @@ AgentOS: http://127.0.0.1:8787/
 
 ## 接下来还能这样
 
-![今天就能完成的五个日常请求，以及重启后的继续](docs/assets/readme/scenes.zh-CN.png)
+![Synthetic 首次用户验证：文件、邮件、日程、Memory、调研与重启后复用](docs/assets/readme/scenes.zh-CN.png)
 
 下面这些请求背后的流程都由本项目的自动化首次用户检查端到端跑通，用本地文件夹和模拟的邮件、日程、网页服务，而不是真实账户。措辞就是今天实际会被路由的措辞。
 

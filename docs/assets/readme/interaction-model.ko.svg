@@ -53,9 +53,10 @@
 <text x="612" y="118" font-size="20" class="bold" text-anchor="start">Personal AgentOS</text>
 <text x="580" y="149.0" font-size="19" class="blue bold" text-anchor="start">소유자와 함께한다</text>
 <rect x="578" y="188" width="228" height="150" rx="5" fill="#ffffff" stroke="#dbe2ea"/>
-<text x="590" y="214.0" font-size="18" class="" text-anchor="start">“커피 거의 다 떨어졌</text>
-<text x="590" y="239.2" font-size="18" class="" text-anchor="start">네.” → 나중에 “지난번</text>
-<text x="590" y="264.4" font-size="18" class="" text-anchor="start">에 사던 걸로 사줘.”</text>
+<text x="590" y="214.0" font-size="18" class="" text-anchor="start">“커피 거의 다</text>
+<text x="590" y="239.2" font-size="18" class="" text-anchor="start">떨어졌네.” → 나중에</text>
+<text x="590" y="264.4" font-size="18" class="" text-anchor="start">“지난번에 사던 걸로</text>
+<text x="590" y="289.6" font-size="18" class="" text-anchor="start">사줘.”</text>
 <circle cx="588" cy="366" r="3" fill="#245b92"/>
 <text x="602" y="372" font-size="18" class="" text-anchor="start">시간에 걸친 대화</text>
 <circle cx="588" cy="400" r="3" fill="#245b92"/>

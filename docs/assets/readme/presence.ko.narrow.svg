@@ -12,8 +12,8 @@
 <path d="M210 194 L210 214" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M206 209 L210 214 L214 209" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="20" y="226" width="380" height="376" rx="8" fill="#f2f7fc" stroke="#96b6d6"/>
-<text x="38" y="258.0" font-size="19" class="bold" text-anchor="start">Personal AgentOS · 소유자가 통제</text>
-<text x="38" y="284.6" font-size="19" class="bold" text-anchor="start">하는 상태</text>
+<text x="38" y="258.0" font-size="19" class="bold" text-anchor="start">Personal AgentOS · 소유자가</text>
+<text x="38" y="284.6" font-size="19" class="bold" text-anchor="start">통제하는 상태</text>
 <rect x="38" y="290" width="344" height="56" rx="5" fill="#e4edf8" stroke="#b4c9df"/>
 <text x="210.0" y="325" font-size="20" class="bold" text-anchor="middle">PA · 개인 비서</text>
 <path d="M210.0 351 L210.0 372" fill="none" stroke="#8492a3" stroke-width="1.6"/>

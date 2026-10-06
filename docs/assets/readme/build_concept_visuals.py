@@ -6,6 +6,7 @@ Desktop and narrow layouts share all content; no fonts or external assets.
 from pathlib import Path
 from html import escape
 import unicodedata
+import re
 
 ROOT = Path(__file__).resolve().parent
 DATA = {
@@ -94,13 +95,14 @@ class Figure:
   # Wrap at spaces for Latin and at glyph boundaries for CJK. Conservative
   # widths leave room for system font fallback; browser QA measures each row.
   limit=width/size; rows=[]; row=''; cost=0
-  tokens=list(s) if any(unicodedata.east_asian_width(c) in 'WF' for c in s) else s.split(' ')
-  cjk=len(tokens)>0 and tokens==list(s)
+  cjk=any(unicodedata.east_asian_width(c) in 'WF' for c in s) and not any('가' <= c <= '힣' for c in s)
+  tokens=re.findall(r'[A-Za-z0-9]+|.',s) if cjk else s.split(' ')
   for token in tokens:
    suffix=token if cjk or not row else ' '+token
    weight=sum(1 if unicodedata.east_asian_width(c) in 'WF' else .59 for c in suffix)
    if row and cost+weight>limit:
-    rows.append(row.rstrip());row=token.lstrip();cost=sum(1 if unicodedata.east_asian_width(c) in 'WF' else .59 for c in row)
+    tail=row[-1] if cjk and token in '。，、？！：；”’」』' else ''
+    rows.append((row[:-1] if tail else row).rstrip());row=tail+token.lstrip();cost=sum(1 if unicodedata.east_asian_width(c) in 'WF' else .59 for c in row)
    else: row+=suffix;cost+=weight
   if row: rows.append(row)
   for i,r in enumerate(rows):self.text(x,y+i*(gap or size*1.4),r,size,cls,anchor)

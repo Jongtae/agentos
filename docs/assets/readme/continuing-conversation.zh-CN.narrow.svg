@@ -14,8 +14,8 @@
 <path d="M16 345 L20 350 L24 345" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="40" y="336" width="360" height="220" rx="8" fill="#fff" stroke="#ccd4de"/>
 <text x="56" y="366" font-size="18" class="blue bold" text-anchor="start">02  数小时后</text>
-<text x="56" y="402.0" font-size="19" class="bold" text-anchor="start">“我现在出门，顺路有地方可以买到吗</text>
-<text x="56" y="428.6" font-size="19" class="bold" text-anchor="start">？”</text>
+<text x="56" y="402.0" font-size="19" class="bold" text-anchor="start">“我现在出门，顺路有地方可以买到</text>
+<text x="56" y="428.6" font-size="19" class="bold" text-anchor="start">吗？”</text>
 <path d="M56 494H384" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <text x="56" y="522.0" font-size="17" class="muted" text-anchor="start">时间 / 路线 / 营业情况</text>
 <circle cx="20" cy="362" r="4" fill="#245b92"/>

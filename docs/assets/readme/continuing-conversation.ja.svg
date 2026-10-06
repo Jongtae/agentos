@@ -6,8 +6,8 @@
 <text x="20" y="68" font-size="16" class="muted" text-anchor="start">代表的な対話 · 製品の方向性</text>
 <rect x="20" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
 <text x="36" y="122" font-size="18" class="blue bold" text-anchor="start">01  はじめに</text>
-<text x="36" y="158.0" font-size="19" class="bold" text-anchor="start">「コーヒーがもう少ない</text>
-<text x="36" y="184.6" font-size="19" class="bold" text-anchor="start">。」</text>
+<text x="36" y="158.0" font-size="19" class="bold" text-anchor="start">「コーヒーがもう少な</text>
+<text x="36" y="184.6" font-size="19" class="bold" text-anchor="start">い。」</text>
 <path d="M36 290H260" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <text x="36" y="318.0" font-size="17" class="muted" text-anchor="start">保存できる以前の文脈</text>
 <path d="M278 210 L290 210" fill="none" stroke="#8492a3" stroke-width="1.6"/>

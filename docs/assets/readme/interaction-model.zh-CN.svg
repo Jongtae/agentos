@@ -27,8 +27,8 @@
 <text x="340" y="118" font-size="20" class="bold" text-anchor="start">Computer agent</text>
 <text x="308" y="149.0" font-size="19" class="blue bold" text-anchor="start">执行命令</text>
 <rect x="306" y="188" width="228" height="150" rx="5" fill="#ffffff" stroke="#dbe2ea"/>
-<text x="318" y="214.0" font-size="18" class="" text-anchor="start">“把这款耳机加入我的 A</text>
-<text x="318" y="239.2" font-size="18" class="" text-anchor="start">mazon 购物车。”</text>
+<text x="318" y="214.0" font-size="18" class="" text-anchor="start">“把这款耳机加入我的</text>
+<text x="318" y="239.2" font-size="18" class="" text-anchor="start">Amazon 购物车。”</text>
 <circle cx="316" cy="366" r="3" fill="#245b92"/>
 <text x="330" y="372" font-size="18" class="" text-anchor="start">明确命令</text>
 <circle cx="316" cy="400" r="3" fill="#245b92"/>
@@ -53,8 +53,8 @@
 <text x="612" y="118" font-size="20" class="bold" text-anchor="start">Personal AgentOS</text>
 <text x="580" y="149.0" font-size="19" class="blue bold" text-anchor="start">持续陪伴所有者</text>
 <rect x="578" y="188" width="228" height="150" rx="5" fill="#ffffff" stroke="#dbe2ea"/>
-<text x="590" y="214.0" font-size="18" class="" text-anchor="start">“咖啡快没了。” → 之后</text>
-<text x="590" y="239.2" font-size="18" class="" text-anchor="start">：“买上次那款就好。”</text>
+<text x="590" y="214.0" font-size="18" class="" text-anchor="start">“咖啡快没了。” → 之</text>
+<text x="590" y="239.2" font-size="18" class="" text-anchor="start">后：“买上次那款就好。”</text>
 <circle cx="588" cy="366" r="3" fill="#245b92"/>
 <text x="602" y="372" font-size="18" class="" text-anchor="start">跨越时间的对话</text>
 <circle cx="588" cy="400" r="3" fill="#245b92"/>

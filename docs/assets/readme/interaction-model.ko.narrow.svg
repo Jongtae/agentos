@@ -26,8 +26,8 @@
 <text x="68" y="474" font-size="20" class="bold" text-anchor="start">Computer agent</text>
 <text x="36" y="505.0" font-size="19" class="blue bold" text-anchor="start">명령을 실행한다</text>
 <rect x="34" y="522" width="352" height="88" rx="5" fill="#ffffff" stroke="#dbe2ea"/>
-<text x="46" y="547.0" font-size="18" class="" text-anchor="start">“이 헤드폰을 Amazon 장바구니에 담</text>
-<text x="46" y="572.2" font-size="18" class="" text-anchor="start">아줘.”</text>
+<text x="46" y="547.0" font-size="18" class="" text-anchor="start">“이 헤드폰을 Amazon 장바구니에</text>
+<text x="46" y="572.2" font-size="18" class="" text-anchor="start">담아줘.”</text>
 <circle cx="44" cy="624" r="3" fill="#245b92"/>
 <text x="58" y="630" font-size="17" class="" text-anchor="start">명시적인 명령</text>
 <circle cx="44" cy="646" r="3" fill="#245b92"/>

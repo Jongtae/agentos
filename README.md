@@ -23,6 +23,8 @@ These two scenes are observed product behaviour from the published v1 line, cond
 
 The author's sentence, in the original Korean. Why the project exists and the documents that define the concept are gathered on one page: [VISION.md](VISION.md).
 
+<!-- readme-section:working-software -->
+
 ## Working software, not only a concept
 
 The repository now contains substantially more than the published v1.1.0 build. On `main`, the assistant is being exercised as a continuous secretary over replaceable Main AI and Judgment AI routes, durable Memory, Telegram conversation, contextual capability handoff, search/browser mediation, preparations and evidence-qualified recovery.

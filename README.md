@@ -27,7 +27,7 @@ The author's sentence, in the original Korean. Why the project exists and the do
 
 ## Working software, not only a concept
 
-The repository now contains substantially more than the published v1.1.0 build. On `main`, the assistant is being exercised as a continuous secretary over replaceable Main AI and Judgment AI routes, durable Memory, Telegram conversation, contextual capability handoff, search/browser mediation, preparations and evidence-qualified recovery.
+The repository now contains substantially more than the published release. On `main`, the assistant is being exercised as a continuous secretary over replaceable Main AI and Judgment AI routes, durable Memory, Telegram conversation, contextual capability handoff, search/browser mediation, preparations and evidence-qualified recovery.
 
 Evidence is deliberately separated:
 
@@ -56,7 +56,7 @@ AgentOS: http://127.0.0.1:8787/
 
 The browser opens on that address. Press **바로 시작하기** (Start now), connect a model, and you are talking to it. The interface is in Korean today; it understands requests in Korean or English.
 
-**Homebrew installs the newest published release, `published release` (2026-09-23).** The release scenes below are limited to what that build carries. Newer Secretary/Presence/orchestration work on `main` is not in published release; for the newest code run from a source checkout (`git clone https://github.com/Jongtae/agentos.git`, then `python3 -m pip install -e .` on Python 3.12 or newer). [QUICKSTART](QUICKSTART.md) has every step.
+**Homebrew installs the newest published release, `v1.1.0` (2026-09-23).** The release scenes below are limited to what that build carries. Newer Secretary/Presence/orchestration work on `main` is not in that release, so Homebrew can be behind `main` until the next release; for the newest code run from a source checkout (`git clone https://github.com/Jongtae/agentos.git`, then `python3 -m pip install -e .` on Python 3.12 or newer). [QUICKSTART](QUICKSTART.md) has every step.
 
 <!-- capability:current-supported-slice -->
 <!-- readme-section:scenes-today -->

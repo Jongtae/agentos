@@ -68,7 +68,7 @@ AgentOS: http://127.0.0.1:8787/
 - **文件。** *Summarize “Launch review” and save it as “Launch notes”.* 它读取你允许的文件夹，在你选定的工作区文件夹里写入一条新笔记，原文件保持不动。
 - **邮件。** *Find anything about the budget in my mail.* 它只搜索你连接的邮箱，并展示找到的内容。
 - **日程。** *Schedule a dentist appointment tomorrow at 3.* 它展示精确的草稿，只有你说 approve 之后才创建事件。“make it 4pm”和“cancel”在同一份草稿上都有效。
-- **记忆。** *Remember that I have a peanut allergy.* 它把这条记忆放在你能在对话里查看、修改，并在网页端删除的地方。模型自行提出的记忆在你接受之前保持待审核。
+- **v1.1.0 的记忆。** *Remember that I have a peanut allergy.* 公开构建提供持久 Memory 和 candidate 审核。**当前 `main` 已经进一步演进：** 所有者自己的 AI 会直接保存可保存且非 secret 的事实，告诉你记住了什么，并提供有期限的 undo；第三方/委派 writer 仍走 candidate/approval 路径。
 - **调研。** *Look up these two products and compare them.* 它先搜索，再读取其中最多三个公开页面，返回页面所说的内容、仍未确认的内容，以及链接。
 
 然后重启应用，这样说：*Find “Launch notes” in my saved results.* 保存的结果、你允许的文件夹、记忆和 Telegram 配对在重启后都还在。

@@ -67,7 +67,7 @@ agentos start
 
 Homebrew 会一起安装 Python，模型的使用权限需另行准备。[QUICKSTART](QUICKSTART.md) 介绍了模型设置、文件处理、Telegram，以及如何从源码运行最新版本。
 
-**当前阶段：** Homebrew 安装的是较早的预览版 **v1.1.0**（2026-09-23），后续的 Presence 实现在 `main` 中。该版本无法创建日程，调研功能仅部分可用。具体范围见[版本清单](docs/release-manifest.json)。[当前状态](docs/product-status.en.md)区分了哪些功能可以使用、哪些经过验证、哪些仍是目标。
+**当前阶段：** Homebrew 安装的是较早的预览版 **v1.1.0**（2026-09-23），后续 `main` 中的 Presence 实现尚未包含在此版本中。该版本无法创建日程，调研功能仅部分可用。具体范围见[版本清单](docs/release-manifest.json)。[当前状态](docs/product-status.en.md)区分了哪些功能可以使用、哪些经过验证、哪些仍是目标。
 
 <!-- readme-section:more -->
 

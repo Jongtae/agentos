@@ -67,7 +67,7 @@ agentos start
 
 Python は Homebrew が一緒にインストールします。モデルの利用環境は別途用意してください。モデルの設定、ファイル作業、Telegram、最新ソースからの実行手順は [QUICKSTART](QUICKSTART.md) にあります。
 
-**現在の段階：** Homebrew で入るのは以前のプレビュー版 **v1.1.0**（2026-09-23）です。その後の Presence 実装は `main` にあります。このリリースでは予定の作成は利用できず、調査は一部対応です。詳しい範囲は[リリース内容](docs/release-manifest.json)を参照してください。[現在の状態](docs/product-status.en.md)では、利用できるもの、検証済みのもの、今後の目標を分けて説明しています。
+**現在の段階：** Homebrew で入るのは以前のプレビュー版 **v1.1.0**（2026-09-23）です。その後の `main` の Presence 実装は、このリリースには含まれていません。このリリースでは予定の作成は利用できず、調査は一部対応です。詳しい範囲は[リリース内容](docs/release-manifest.json)を参照してください。[現在の状態](docs/product-status.en.md)では、利用できるもの、検証済みのもの、今後の目標を分けて説明しています。
 
 <!-- readme-section:more -->
 

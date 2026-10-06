@@ -67,7 +67,7 @@ agentos start
 
 Homebrew installs Python for you; model access is separate. [QUICKSTART](QUICKSTART.md) covers model setup, file work, Telegram and running the newest code from source.
 
-**Where it stands:** Homebrew installs **v1.1.0** (2026-09-23), an earlier preview. Newer Presence work is on `main`. Calendar creation is unavailable in that release and research is partial; see the [release manifest](docs/release-manifest.json). [Product status](docs/product-status.en.md) separates what is available, what has been tested and what remains a goal.
+**Where it stands:** Homebrew installs **v1.1.0** (2026-09-23), an earlier preview. Newer Presence work on `main` is not included in this release. Calendar creation is unavailable in that release and research is partial; see the [release manifest](docs/release-manifest.json). [Product status](docs/product-status.en.md) separates what is available, what has been tested and what remains a goal.
 
 <!-- readme-section:more -->
 

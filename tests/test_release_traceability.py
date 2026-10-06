@@ -18,11 +18,18 @@ two drift conditions fail loudly:
 """
 import json
 import re
+import sys
 import tomllib
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / 'scripts'
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+from verify_readme_localization import README_RELEASE_BOUNDARIES, visible_prose
+
 TEMPLATE = ROOT / 'deploy' / 'homebrew' / 'agentos.rb.template'
 MANIFEST = ROOT / 'docs' / 'release-manifest.json'
 RUNBOOK = ROOT / 'docs' / 'release.en.md'
@@ -33,11 +40,6 @@ READMES = ('README.md', 'README.ko.md', 'README.ja.md', 'README.zh-CN.md')
 #: runbook and the template together.
 TAP = 'Jongtae/homebrew-agentos'
 FORMULA_NAME = 'jongtae/agentos/agentos'
-
-#: Words that mark the published build as older than `main`, in each language
-#: a README is written in. Naming the version without one of these is how the
-#: original defect read.
-BEHIND_WORDS = ('behind', 'predates', '뒤입니다', '遅れて', '落后')
 
 #: The executable body, pinned literally. Changing the formula means changing
 #: this too, deliberately, in the same commit.
@@ -171,11 +173,12 @@ class ReleaseTraceabilityTests(unittest.TestCase):
     def test_no_readme_offers_brew_install_without_saying_what_it_installs(self):
         """`brew install` works. Calling it "the current baseline" did not.
 
-        It resolves the newest published release, which predates every PA1
-        child. Each README that offers the command must say so within sight
-        of it, not only in QUICKSTART.
+        It resolves the newest published release, which can precede Presence
+        work on main. Each README must state that boundary within sight of the
+        command, not only in QUICKSTART.
         """
-        newest = max((row['version'] for row in manifest()['published']), key=version_key)
+        release = max(manifest()['published'], key=lambda row: version_key(row['version']))
+        newest = release['version']
         for name in READMES:
             body = (ROOT / name).read_text(encoding='utf-8')
             if 'brew install ' + FORMULA_NAME not in body:
@@ -190,10 +193,13 @@ class ReleaseTraceabilityTests(unittest.TestCase):
                 # caveat with "v1.0.4, the fully current baseline with every
                 # feature described below" -- the exact claim this test
                 # exists to prevent -- and it still passed.
-                self.assertTrue(
-                    any(word in window for word in BEHIND_WORDS),
-                    f'{name} names the version but does not say it is behind '
-                    f'`main`; naming it while calling it current is the defect')
+                boundary = README_RELEASE_BOUNDARIES[name].format(
+                    version=newest, date=release['tag_date']
+                )
+                self.assertIn(
+                    boundary, visible_prose(window),
+                    f'{name} must visibly state the published-release/main '
+                    f'boundary within 1200 characters of brew install')
                 for claim in ('current baseline', '최신 빌드', '现行基线'):
                     self.assertNotIn(claim, window,
                                      f'{name} still presents the published '

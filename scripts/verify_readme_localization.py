@@ -114,10 +114,10 @@ README_DIRECTION_DISCLAIMERS = {
 }
 
 README_RELEASE_BOUNDARIES = {
-    "README.md": "Homebrew installs **v{version}** ({date}), an earlier preview. Newer Presence work is on `main`.",
-    "README.ko.md": "Homebrew는 이전 프리뷰인 **v{version}**({date})을 설치합니다. 이후의 Presence 구현은 `main`에 있습니다.",
-    "README.ja.md": "Homebrew で入るのは以前のプレビュー版 **v{version}**（{date}）です。その後の Presence 実装は `main` にあります。",
-    "README.zh-CN.md": "Homebrew 安装的是较早的预览版 **v{version}**（{date}），后续的 Presence 实现在 `main` 中。",
+    "README.md": "Homebrew installs **v{version}** ({date}), an earlier preview. Newer Presence work on `main` is not included in this release.",
+    "README.ko.md": "Homebrew는 이전 프리뷰인 **v{version}**({date})을 설치합니다. 이후 `main`의 Presence 구현은 이 배포판에 포함되지 않습니다.",
+    "README.ja.md": "Homebrew で入るのは以前のプレビュー版 **v{version}**（{date}）です。その後の `main` の Presence 実装は、このリリースには含まれていません。",
+    "README.zh-CN.md": "Homebrew 安装的是较早的预览版 **v{version}**（{date}），后续 `main` 中的 Presence 实现尚未包含在此版本中。",
 }
 
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")

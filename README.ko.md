@@ -67,7 +67,7 @@ agentos start
 
 Python은 Homebrew가 함께 설치하며, 모델 이용 권한은 별도로 준비합니다. 모델 설정, 파일 작업, Telegram, 최신 소스 실행은 [QUICKSTART](QUICKSTART.md)에 안내되어 있습니다.
 
-**현재 단계:** Homebrew는 이전 프리뷰인 **v1.1.0**(2026-09-23)을 설치합니다. 이후의 Presence 구현은 `main`에 있습니다. 해당 배포판에서는 일정 생성이 불가능하고 조사는 부분 지원입니다. 자세한 범위는 [release manifest](docs/release-manifest.json)를 보세요. [현재 상태](docs/product-status.ko.md)에서 사용할 수 있는 것, 검증한 것, 앞으로의 목표를 구분해 설명합니다.
+**현재 단계:** Homebrew는 이전 프리뷰인 **v1.1.0**(2026-09-23)을 설치합니다. 이후 `main`의 Presence 구현은 이 배포판에 포함되지 않습니다. 해당 배포판에서는 일정 생성이 불가능하고 조사는 부분 지원입니다. 자세한 범위는 [release manifest](docs/release-manifest.json)를 보세요. [현재 상태](docs/product-status.ko.md)에서 사용할 수 있는 것, 검증한 것, 앞으로의 목표를 구분해 설명합니다.
 
 <!-- readme-section:more -->
 

@@ -27,6 +27,8 @@
 
 ## アシスタントから personal agent environment へ
 
+![Assistant、Computer Agent、Personal AgentOS の interaction model 比較](docs/assets/readme/interaction-model.ja.svg)
+
 違いは、AI が株価を検索できるか、**カートに追加**できるかではありません。アシスタントはすでに質問に答え、computer-use agent は命令を実行できます。Personal AgentOS は、**継続する関係、owner context、authority、work state** を AI provider の外に置き、owner が管理する環境に保持します。
 
 | Interaction model | Owner がすること | 主にシステムに残るもの |

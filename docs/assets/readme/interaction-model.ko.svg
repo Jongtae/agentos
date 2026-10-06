@@ -1,0 +1,29 @@
+<!-- README interaction-model figure; semantics mirror #1084 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-labelledby="title desc">
+<title id="title">어시스턴트에서 개인 에이전트 환경으로</title><desc id="desc">상호작용 모델을 설명하는 그림 — NASDAQ/Amazon은 현재 배포 통합 기능을 뜻하지 않습니다.</desc>
+<style>
+text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans","Noto Sans CJK KR","Noto Sans CJK JP",Arial,sans-serif;fill:#15224a}.h1{font-size:36px;font-weight:700}.h2{font-size:23px;font-weight:700}.body{font-size:18px}.small{font-size:15px;fill:#5c6a8c}.flow{font-size:18px;font-weight:600;fill:#334d85}.quote{font-size:18px;fill:#14213d}.tag{font-size:16px;font-weight:600}.center{text-anchor:middle}
+</style>
+<rect width="1440" height="900" fill="#fbfcff"/>
+<text x="48" y="62" class="h1">어시스턴트에서 개인 에이전트 환경으로</text>
+<text x="48" y="92" class="small">Personal AgentOS · interaction model</text>
+<rect x="40" y="125" width="420" height="285" rx="20" fill="#f4f6fa" stroke="#e2e7f0"/>
+<rect x="510" y="125" width="420" height="285" rx="20" fill="#f4f6fa" stroke="#e2e7f0"/>
+<rect x="980" y="125" width="420" height="285" rx="20" fill="#f0f8f2" stroke="#dbeadd"/>
+<text x="66" y="166" class="h2">1 · Assistant — 답한다</text><text x="66" y="210" class="flow">질문 → 검색 → 답</text>
+<rect x="66" y="242" width="350" height="82" rx="15" fill="#fff"/><text x="86" y="276" class="quote">“NVIDIA 지금 얼마야?”</text>
+<text x="536" y="166" class="h2">2 · Computer agent — 행동한다</text><text x="536" y="204" class="flow" textLength="330" lengthAdjust="spacingAndGlyphs">명령 → Browser/Tool → Action → Handoff</text>
+<rect x="536" y="242" width="350" height="82" rx="15" fill="#fff"/><text x="556" y="270" class="quote" textLength="310" lengthAdjust="spacingAndGlyphs">“이 헤드폰 Amazon 장바구니에 담아줘.”</text>
+<text x="1006" y="166" class="h2">3 · Personal AgentOS — 함께한다</text><text x="1006" y="198" class="flow" textLength="330" lengthAdjust="spacingAndGlyphs">대화 → Context → Judgment → Work → Authority</text>
+<rect x="1006" y="242" width="350" height="104" rx="15" fill="#fff"/><text x="1026" y="268" class="quote" textLength="310" lengthAdjust="spacingAndGlyphs">“커피 거의 다 떨어졌네.”  …나중에…  “지난번에 사던 걸로 그냥 사줘.”</text>
+<text x="48" y="468" class="h2">Presence는 말투가 아니라 구조</text>
+<rect x="40" y="492" width="1360" height="300" rx="24" fill="#f6f8ff" stroke="#dbe3f5"/>
+<rect x="75" y="548" width="190" height="120" rx="18" fill="#fff" stroke="#d8e0f0"/><text x="170" y="602" class="h2 center">Owner</text>
+<text x="335" y="612" class="h2 center">⇄</text>
+<rect x="400" y="530" width="720" height="205" rx="22" fill="#fff" stroke="#b9c9ee" stroke-width="2"/>
+<text x="760" y="570" class="h2 center">Owner ⇄ PA</text>
+<rect x="440" y="592" width="640" height="54" rx="12" fill="#eef3ff"/><text x="760" y="626" class="tag center">Memory · Context · Work · Authority · Evidence</text>
+<text x="760" y="682" class="flow center">Judgment / orchestration</text><text x="760" y="716" class="small center">교체 가능한 AI · Search · Browser · Calendar · Files · Skills</text>
+<rect x="1160" y="548" width="205" height="120" rx="18" fill="#eef3ff"/><text x="1262" y="592" class="h2 center">같은 PA. 다른 AI.</text><text x="1262" y="624" class="small center">persistent relationship</text>
+<text x="48" y="842" class="small">상호작용 모델을 설명하는 그림 — NASDAQ/Amazon은 현재 배포 통합 기능을 뜻하지 않습니다.</text>
+</svg>

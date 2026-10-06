@@ -33,8 +33,8 @@ def test_agents_declares_permanent_autonomous_delivery_guards() -> None:
     _assert_all(
         agents,
         "## Autonomous goal execution and verification",
-        "Goal Execution Contract",
-        "Incremental Delivery",
+        "[Goal Execution Contract](docs/goal-execution-contract.en.md)",
+        "[Incremental Delivery](docs/incremental-delivery.en.md)",
         "requirement-to-evidence audit",
         "stable-head verification budget",
         "explicitly activated goal-ready unit/program",

@@ -50,7 +50,7 @@ EXPECTED_FORMULA = '''class Agentos < Formula
 
   def install
     system Formula["python@3.13"].opt_bin/"python3.13", "-m", "venv", libexec
-    system libexec/"bin/pip", "install", buildpath
+    system libexec/"bin/pip", "install", "#{buildpath}[mcp-host]"
     (bin/"agentos").write <<~PYTHON
       #!#{libexec}/bin/python
       from personal_agent.quickstart import main

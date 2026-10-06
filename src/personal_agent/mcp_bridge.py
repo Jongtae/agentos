@@ -51,8 +51,8 @@ def _serve_stdio(handle):
     is used: it would add methods and require a different initialize shape.
     """
     import anyio
+    from mcp import MCPError
     from mcp.server.stdio import stdio_server
-    from mcp.shared.exceptions import MCPError
     from mcp.shared.jsonrpc_dispatcher import JSONRPCDispatcher
 
     async def on_request(context, method, params):

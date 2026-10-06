@@ -93,7 +93,7 @@ From a source checkout the same actions are available as
 `python3 -m personal_agent.quickstart service <action>`. `install` and `upgrade` must record
 an absolute path to the executable launchd will run; they resolve `agentos` from `PATH` and
 then from the Homebrew prefix, so from a source checkout either install the console script
-(`pip install -e .`) or pass `--cli-path /full/path/to/agentos` explicitly. Use `--data` only
+(`pip install -e '.[mcp-host]'`) or pass `--cli-path /full/path/to/agentos` explicitly. Use `--data` only
 to override the data directory: with no `--data`, the other actions report the directory
 recorded in the installed service definition.
 

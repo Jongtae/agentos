@@ -24,7 +24,7 @@ jobs:
         with:
           version: '0.11.33'
           enable-cache: true
-      - run: uv sync --locked --extra schema-validation --group dev --no-python-downloads
+      - run: uv sync --locked --extra mcp-host --extra schema-validation --group dev --no-python-downloads
       - run: .venv/bin/python scripts/verify_master_plan_docs.py
       - run: .venv/bin/python scripts/verify_readme_localization.py --check-git-diff
       - run: .venv/bin/python scripts/verify_src_layout.py

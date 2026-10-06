@@ -1,34 +1,79 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="840" height="550" viewBox="0 0 840 550" role="img" aria-labelledby="title desc">
-<title id="title">시간에 걸쳐 이어지는 대화</title><desc id="desc">축약한 설명용 예시이며, 하나의 실제 관찰 실행이 아닙니다.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="1262" viewBox="0 0 840 1262" role="img" aria-labelledby="title desc">
+<title id="title">시간에 걸쳐 이어지는 대화</title><desc id="desc">제품 방향을 재구성한 예시입니다. 하나의 실제 관찰 실행이나 배포된 구매 기능이 아닙니다.</desc>
 <style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
-<rect width="840" height="550" fill="#fff"/>
+<rect width="840" height="1262" fill="#fff"/>
 <text x="20" y="32.0" font-size="23" class="bold" text-anchor="start">시간에 걸쳐 이어지는 대화</text>
 <text x="20" y="68" font-size="16" class="muted" text-anchor="start">대표 상호작용 · 제품 방향</text>
-<rect x="20" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
-<text x="36" y="122" font-size="18" class="blue bold" text-anchor="start">01  처음에</text>
-<text x="36" y="158.0" font-size="19" class="bold" text-anchor="start">“커피 거의 다</text>
-<text x="36" y="184.6" font-size="19" class="bold" text-anchor="start">떨어졌네.”</text>
-<path d="M36 290H260" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<text x="36" y="318.0" font-size="17" class="muted" text-anchor="start">저장 가능한 이전 맥락</text>
-<path d="M278 210 L290 210" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M285 206 L290 210 L285 214" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="292" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
-<text x="308" y="122" font-size="18" class="blue bold" text-anchor="start">02  몇 시간 뒤</text>
-<text x="308" y="158.0" font-size="19" class="bold" text-anchor="start">“이제 나가려고. 가는</text>
-<text x="308" y="184.6" font-size="19" class="bold" text-anchor="start">길에 살 만한 데</text>
-<text x="308" y="211.2" font-size="19" class="bold" text-anchor="start">있을까?”</text>
-<path d="M308 290H532" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<text x="308" y="318.0" font-size="17" class="muted" text-anchor="start">시간 / 경로 / 영업 여부</text>
-<path d="M550 210 L562 210" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M557 206 L562 210 L557 214" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="564" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
-<text x="580" y="122" font-size="18" class="blue bold" text-anchor="start">03  나중에</text>
-<text x="580" y="158.0" font-size="19" class="bold" text-anchor="start">“시간 없네. 지난번에</text>
-<text x="580" y="184.6" font-size="19" class="bold" text-anchor="start">사던 걸로 그냥 사줘.”</text>
-<path d="M580 290H804" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<text x="580" y="318.0" font-size="17" class="muted" text-anchor="start">이전 선택 / 필요할 때</text>
-<text x="580" y="341.8" font-size="17" class="muted" text-anchor="start">권한</text>
-<rect x="20" y="422" width="800" height="58" rx="5" fill="#f2f7fc" stroke="#96b6d6"/>
-<text x="420.0" y="447" font-size="18" class="bold" text-anchor="middle">대화 아래에서 맥락을 연결하며 이어가는 하나의 Work</text>
-<text x="20" y="527.0" font-size="16" class="muted" text-anchor="start">축약한 설명용 예시이며, 하나의 실제 관찰 실행이 아닙니다.</text>
+<text x="20" y="96.0" font-size="17" class="muted" text-anchor="start">예시 조건: 지난번 커피 선택은 남아 있고, 이동 경로와 구매 계정 권한은 아직 없습니다.</text>
+<rect x="20" y="137.8" width="500" height="204.39999999999998" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="36" y="165.8" font-size="19" class="blue bold" text-anchor="start">처음에</text>
+<text x="36" y="200.4" font-size="16" class="muted" text-anchor="start">소유자</text>
+<text x="36" y="226.4" font-size="20" class="bold" text-anchor="start">“커피 거의 다 떨어졌네.”</text>
+<text x="36" y="266.4" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="36" y="292.4" font-size="20" class="" text-anchor="start">“다음에 장 볼 때 커피도 챙기면 되겠네요.”</text>
+<rect x="548" y="137.8" width="272" height="204.39999999999998" rx="8" fill="#f2f7fc" stroke="#ccd8e6"/>
+<path d="M524 240.0 L544 240.0" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M539 236.0 L544 240.0 L539 244.0" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="564" y="163.8" font-size="17" class="blue bold" text-anchor="start">AgentOS가 아래에서</text>
+<text x="564" y="187.60000000000002" font-size="17" class="blue bold" text-anchor="start">해석하는 것</text>
+<text x="564" y="219.4" font-size="18" class="" text-anchor="start">저장 가능한 맥락을</text>
+<text x="564" y="244.6" font-size="18" class="" text-anchor="start">남긴다. 일상적인 사실</text>
+<text x="564" y="269.8" font-size="18" class="" text-anchor="start">공유가 구매 권한은</text>
+<text x="564" y="295.0" font-size="18" class="" text-anchor="start">아니다.</text>
+<path d="M270 346.2 L270 360.2" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M266 355.2 L270 360.2 L274 355.2" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="20" y="366.2" width="500" height="252.6" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="36" y="394.2" font-size="19" class="blue bold" text-anchor="start">몇 시간 뒤</text>
+<text x="36" y="428.79999999999995" font-size="16" class="muted" text-anchor="start">소유자</text>
+<text x="36" y="454.79999999999995" font-size="20" class="bold" text-anchor="start">“이제 나가려고. 가는 길에 살 만한 데</text>
+<text x="36" y="482.79999999999995" font-size="20" class="bold" text-anchor="start">있을까?”</text>
+<text x="36" y="522.8" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="36" y="548.8" font-size="20" class="" text-anchor="start">“커피 말씀이죠? 이동 경로를 알려주시면 들르기</text>
+<text x="36" y="576.8" font-size="20" class="" text-anchor="start">편한 곳을 찾아볼게요.”</text>
+<rect x="548" y="366.2" width="272" height="252.6" rx="8" fill="#f2f7fc" stroke="#ccd8e6"/>
+<path d="M524 492.5 L544 492.5" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M539 488.5 L544 492.5 L539 496.5" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="564" y="392.2" font-size="17" class="blue bold" text-anchor="start">AgentOS가 아래에서</text>
+<text x="564" y="416.0" font-size="17" class="blue bold" text-anchor="start">해석하는 것</text>
+<text x="564" y="447.79999999999995" font-size="18" class="" text-anchor="start">이전 맥락에서 커피를</text>
+<text x="564" y="472.99999999999994" font-size="18" class="" text-anchor="start">이어받는다. 모르는 이동</text>
+<text x="564" y="498.19999999999993" font-size="18" class="" text-anchor="start">경로만 필요해진 순간</text>
+<text x="564" y="523.4" font-size="18" class="" text-anchor="start">묻는다.</text>
+<path d="M270 622.8 L270 636.8" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M266 631.8 L270 636.8 L274 631.8" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="20" y="642.8" width="500" height="224.6" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="36" y="670.8" font-size="19" class="blue bold" text-anchor="start">나중에</text>
+<text x="36" y="705.4" font-size="16" class="muted" text-anchor="start">소유자</text>
+<text x="36" y="731.4" font-size="20" class="bold" text-anchor="start">“시간 없네. 지난번에 사던 걸로 그냥 사줘.”</text>
+<text x="36" y="771.4" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="36" y="797.4" font-size="20" class="" text-anchor="start">“지난번 커피로요. 주문을 준비하려면 구매</text>
+<text x="36" y="825.4" font-size="20" class="" text-anchor="start">계정이 필요해요. 여기서 연결해주세요.”</text>
+<rect x="548" y="642.8" width="272" height="224.6" rx="8" fill="#f2f7fc" stroke="#ccd8e6"/>
+<path d="M524 755.0999999999999 L544 755.0999999999999" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M539 751.0999999999999 L544 755.0999999999999 L539 759.0999999999999" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="564" y="668.8" font-size="17" class="blue bold" text-anchor="start">AgentOS가 아래에서</text>
+<text x="564" y="692.5999999999999" font-size="17" class="blue bold" text-anchor="start">해석하는 것</text>
+<text x="564" y="724.4" font-size="18" class="" text-anchor="start">이전 선택을 찾는다. 구매</text>
+<text x="564" y="749.6" font-size="18" class="" text-anchor="start">계정 권한이 없어 해당</text>
+<text x="564" y="774.8" font-size="18" class="" text-anchor="start">Work를 잠시 멈춘다.</text>
+<path d="M270 871.4 L270 885.4" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M266 880.4 L270 885.4 L274 880.4" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="20" y="891.4" width="500" height="224.6" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="36" y="919.4" font-size="19" class="blue bold" text-anchor="start">계정 연결 뒤</text>
+<text x="36" y="954.0" font-size="16" class="muted" text-anchor="start">소유자</text>
+<text x="36" y="980.0" font-size="20" class="bold" text-anchor="start">“연결했어.”</text>
+<text x="36" y="1020.0" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="36" y="1046.0" font-size="20" class="" text-anchor="start">“그 커피로 이어서 주문을 준비할게요. 결제</text>
+<text x="36" y="1074.0" font-size="20" class="" text-anchor="start">전에는 확인받을게요.”</text>
+<rect x="548" y="891.4" width="272" height="224.6" rx="8" fill="#f2f7fc" stroke="#ccd8e6"/>
+<path d="M524 1003.6999999999999 L544 1003.6999999999999" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M539 999.6999999999999 L544 1003.6999999999999 L539 1007.6999999999999" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="564" y="917.4" font-size="17" class="blue bold" text-anchor="start">AgentOS가 아래에서</text>
+<text x="564" y="941.1999999999999" font-size="17" class="blue bold" text-anchor="start">해석하는 것</text>
+<text x="564" y="973.0" font-size="18" class="" text-anchor="start">권한 연결 뒤 원래 Work를</text>
+<text x="564" y="998.2" font-size="18" class="" text-anchor="start">재개한다. 계정 연결과</text>
+<text x="564" y="1023.4" font-size="18" class="" text-anchor="start">결제 승인은 별개다.</text>
+<rect x="20" y="1140.0" width="800" height="54.599999999999994" rx="5" fill="#f2f7fc" stroke="#96b6d6"/>
+<text x="36" y="1168.0" font-size="19" class="bold" text-anchor="start">맥락은 남고, 권한 연결 뒤 원래 구매 Work를 이어갑니다.</text>
+<text x="20" y="1226.6" font-size="17" class="muted" text-anchor="start">제품 방향을 재구성한 예시입니다. 하나의 실제 관찰 실행이나 배포된 구매 기능이 아닙니다.</text>
 </svg>

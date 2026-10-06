@@ -1,38 +1,83 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="420" height="980" viewBox="0 0 420 980" role="img" aria-labelledby="title desc">
-<title id="title">A conversation over time</title><desc id="desc">Illustrative, condensed; not one observed live run.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="2130" viewBox="0 0 420 2130" role="img" aria-labelledby="title desc">
+<title id="title">A conversation over time</title><desc id="desc">Reconstructed product direction, not one observed live run or a shipped shopping integration.</desc>
 <style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
-<rect width="420" height="980" fill="#fff"/>
+<rect width="420" height="2130" fill="#fff"/>
 <text x="20" y="32.0" font-size="23" class="bold" text-anchor="start">A conversation over time</text>
 <text x="20" y="68" font-size="16" class="muted" text-anchor="start">Representative interaction · product direction</text>
-<rect x="40" y="92" width="360" height="220" rx="8" fill="#fff" stroke="#ccd4de"/>
-<text x="56" y="122" font-size="18" class="blue bold" text-anchor="start">01  Earlier</text>
-<text x="56" y="158.0" font-size="19" class="bold" text-anchor="start">“We’re almost out of coffee.”</text>
-<path d="M56 250H384" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<text x="56" y="278.0" font-size="17" class="muted" text-anchor="start">Eligible prior context</text>
-<circle cx="20" cy="118" r="4" fill="#245b92"/>
-<path d="M20 127 L20 350" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M16 345 L20 350 L24 345" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="40" y="336" width="360" height="220" rx="8" fill="#fff" stroke="#ccd4de"/>
-<text x="56" y="366" font-size="18" class="blue bold" text-anchor="start">02  Hours later</text>
-<text x="56" y="402.0" font-size="19" class="bold" text-anchor="start">“I’m heading out now. Is</text>
-<text x="56" y="428.6" font-size="19" class="bold" text-anchor="start">there somewhere on the way I</text>
-<text x="56" y="455.2" font-size="19" class="bold" text-anchor="start">can pick it up?”</text>
-<path d="M56 494H384" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<text x="56" y="522.0" font-size="17" class="muted" text-anchor="start">Time / route / availability</text>
-<circle cx="20" cy="362" r="4" fill="#245b92"/>
-<path d="M20 371 L20 594" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M16 589 L20 594 L24 589" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="40" y="580" width="360" height="220" rx="8" fill="#fff" stroke="#ccd4de"/>
-<text x="56" y="610" font-size="18" class="blue bold" text-anchor="start">03  Later</text>
-<text x="56" y="646.0" font-size="19" class="bold" text-anchor="start">“No time. Just get the same</text>
-<text x="56" y="672.6" font-size="19" class="bold" text-anchor="start">one as last time.”</text>
-<path d="M56 738H384" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<text x="56" y="766.0" font-size="17" class="muted" text-anchor="start">Prior choice / authority when</text>
-<text x="56" y="789.8" font-size="17" class="muted" text-anchor="start">needed</text>
-<circle cx="20" cy="606" r="4" fill="#245b92"/>
-<rect x="20" y="836" width="380" height="58" rx="5" fill="#f2f7fc" stroke="#96b6d6"/>
-<text x="210.0" y="861" font-size="18" class="bold" text-anchor="middle">One continuing Work, resolved</text>
-<text x="210.0" y="884" font-size="18" class="bold" text-anchor="middle">beneath the conversation</text>
-<text x="20" y="934.0" font-size="16" class="muted" text-anchor="start">Illustrative, condensed; not one</text>
-<text x="20" y="956.4" font-size="16" class="muted" text-anchor="start">observed live run.</text>
+<text x="20" y="96.0" font-size="17" class="muted" text-anchor="start">Illustrated conditions: prior coffee</text>
+<text x="20" y="119.8" font-size="17" class="muted" text-anchor="start">choice is available; route and</text>
+<text x="20" y="143.6" font-size="17" class="muted" text-anchor="start">account access are missing.</text>
+<rect x="40" y="185.39999999999998" width="360" height="378.0" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="56" y="213.39999999999998" font-size="19" class="blue bold" text-anchor="start">Earlier</text>
+<text x="56" y="247.99999999999997" font-size="16" class="muted" text-anchor="start">Owner</text>
+<text x="56" y="274.0" font-size="20" class="bold" text-anchor="start">“We’re almost out of</text>
+<text x="56" y="302.0" font-size="20" class="bold" text-anchor="start">coffee.”</text>
+<text x="56" y="342.0" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="56" y="368.0" font-size="20" class="" text-anchor="start">“I’ll keep coffee in mind</text>
+<text x="56" y="396.0" font-size="20" class="" text-anchor="start">for your next shop.”</text>
+<rect x="40" y="438.0" width="360" height="125.4" rx="5" fill="#f2f7fc" stroke="#ccd8e6"/>
+<text x="56" y="464.0" font-size="17" class="blue bold" text-anchor="start">What AgentOS resolves</text>
+<text x="56" y="495.8" font-size="18" class="" text-anchor="start">Keep eligible context; sharing</text>
+<text x="56" y="521.0" font-size="18" class="" text-anchor="start">a fact does not authorize a</text>
+<text x="56" y="546.2" font-size="18" class="" text-anchor="start">purchase.</text>
+<circle cx="20" cy="209.39999999999998" r="4" fill="#245b92"/>
+<path d="M20 219.39999999999998 L20 599.4" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M16 594.4 L20 599.4 L24 594.4" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="40" y="587.4" width="360" height="434.0" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="56" y="615.4" font-size="19" class="blue bold" text-anchor="start">Hours later</text>
+<text x="56" y="650.0" font-size="16" class="muted" text-anchor="start">Owner</text>
+<text x="56" y="676.0" font-size="20" class="bold" text-anchor="start">“I’m heading out now. Is</text>
+<text x="56" y="704.0" font-size="20" class="bold" text-anchor="start">there somewhere on the way</text>
+<text x="56" y="732.0" font-size="20" class="bold" text-anchor="start">I can pick it up?”</text>
+<text x="56" y="772.0" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="56" y="798.0" font-size="20" class="" text-anchor="start">“The coffee? Share your</text>
+<text x="56" y="826.0" font-size="20" class="" text-anchor="start">route and I’ll look for a</text>
+<text x="56" y="854.0" font-size="20" class="" text-anchor="start">convenient stop.”</text>
+<rect x="40" y="896.0" width="360" height="125.39999999999998" rx="5" fill="#f2f7fc" stroke="#ccd8e6"/>
+<text x="56" y="922.0" font-size="17" class="blue bold" text-anchor="start">What AgentOS resolves</text>
+<text x="56" y="953.8" font-size="18" class="" text-anchor="start">Resolve “it” from earlier</text>
+<text x="56" y="979.0" font-size="18" class="" text-anchor="start">context. Ask for the route</text>
+<text x="56" y="1004.1999999999999" font-size="18" class="" text-anchor="start">only because it is missing.</text>
+<circle cx="20" cy="611.4" r="4" fill="#245b92"/>
+<path d="M20 621.4 L20 1057.4" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M16 1052.4 L20 1057.4 L24 1052.4" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="40" y="1045.4" width="360" height="434.0" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="56" y="1073.4" font-size="19" class="blue bold" text-anchor="start">Later</text>
+<text x="56" y="1108.0" font-size="16" class="muted" text-anchor="start">Owner</text>
+<text x="56" y="1134.0" font-size="20" class="bold" text-anchor="start">“No time. Just get the same</text>
+<text x="56" y="1162.0" font-size="20" class="bold" text-anchor="start">one as last time.”</text>
+<text x="56" y="1202.0" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="56" y="1228.0" font-size="20" class="" text-anchor="start">“The coffee from last time.</text>
+<text x="56" y="1256.0" font-size="20" class="" text-anchor="start">Connect your shopping</text>
+<text x="56" y="1284.0" font-size="20" class="" text-anchor="start">account here so I can</text>
+<text x="56" y="1312.0" font-size="20" class="" text-anchor="start">prepare the order.”</text>
+<rect x="40" y="1354.0" width="360" height="125.39999999999998" rx="5" fill="#f2f7fc" stroke="#ccd8e6"/>
+<text x="56" y="1380.0" font-size="17" class="blue bold" text-anchor="start">What AgentOS resolves</text>
+<text x="56" y="1411.8" font-size="18" class="" text-anchor="start">Resolve the prior choice.</text>
+<text x="56" y="1437.0" font-size="18" class="" text-anchor="start">Pause the shopping Work for</text>
+<text x="56" y="1462.2" font-size="18" class="" text-anchor="start">the missing account authority.</text>
+<circle cx="20" cy="1069.4" r="4" fill="#245b92"/>
+<path d="M20 1079.4 L20 1515.4" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M16 1510.4 L20 1515.4 L24 1510.4" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="40" y="1503.4" width="360" height="406.0" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="56" y="1531.4" font-size="19" class="blue bold" text-anchor="start">After connecting the account</text>
+<text x="56" y="1566.0" font-size="16" class="muted" text-anchor="start">Owner</text>
+<text x="56" y="1592.0" font-size="20" class="bold" text-anchor="start">“Connected.”</text>
+<text x="56" y="1632.0" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="56" y="1658.0" font-size="20" class="" text-anchor="start">“Back to that coffee. I’ll</text>
+<text x="56" y="1686.0" font-size="20" class="" text-anchor="start">prepare the order for your</text>
+<text x="56" y="1714.0" font-size="20" class="" text-anchor="start">review; payment needs your</text>
+<text x="56" y="1742.0" font-size="20" class="" text-anchor="start">approval.”</text>
+<rect x="40" y="1784.0" width="360" height="125.39999999999998" rx="5" fill="#f2f7fc" stroke="#ccd8e6"/>
+<text x="56" y="1810.0" font-size="17" class="blue bold" text-anchor="start">What AgentOS resolves</text>
+<text x="56" y="1841.8" font-size="18" class="" text-anchor="start">Resume the original Work after</text>
+<text x="56" y="1867.0" font-size="18" class="" text-anchor="start">the handoff. Account access is</text>
+<text x="56" y="1892.2" font-size="18" class="" text-anchor="start">not payment approval.</text>
+<circle cx="20" cy="1527.4" r="4" fill="#245b92"/>
+<rect x="20" y="1933.4" width="380" height="81.19999999999999" rx="5" fill="#f2f7fc" stroke="#96b6d6"/>
+<text x="36" y="1961.4" font-size="19" class="bold" text-anchor="start">Context persists. The shopping</text>
+<text x="36" y="1988.0" font-size="19" class="bold" text-anchor="start">Work resumes after the handoff.</text>
+<text x="20" y="2046.6000000000001" font-size="17" class="muted" text-anchor="start">Reconstructed product direction, not</text>
+<text x="20" y="2070.4" font-size="17" class="muted" text-anchor="start">one observed live run or a shipped</text>
+<text x="20" y="2094.2000000000003" font-size="17" class="muted" text-anchor="start">shopping integration.</text>
 </svg>

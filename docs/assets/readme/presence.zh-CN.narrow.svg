@@ -38,7 +38,7 @@
 <path d="M206.0 629 L210.0 634 L214.0 629" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <text x="210.0" y="658" font-size="18" class="muted" text-anchor="middle">可替换的执行能力</text>
 <rect x="20" y="676" width="380" height="76" rx="6" fill="#fff" stroke="#8492a3"/>
-<text x="210.0" y="705" font-size="20" class="bold" text-anchor="middle">AI 模型</text>
+<text x="210.0" y="705" font-size="20" class="bold" text-anchor="middle">AI 模型 · A → B</text>
 <text x="210.0" y="733" font-size="18" class="muted" text-anchor="middle">工具 / 服务 / 技能</text>
 <text x="210.0" y="780" font-size="23" class="blue bold" text-anchor="middle">同一个 PA。不同的 AI。</text>
 <text x="210.0" y="810" font-size="17" class="muted" text-anchor="middle">关系与状态仍由所有者掌控。</text>

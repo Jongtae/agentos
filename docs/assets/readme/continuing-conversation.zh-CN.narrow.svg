@@ -1,33 +1,68 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="420" height="980" viewBox="0 0 420 980" role="img" aria-labelledby="title desc">
-<title id="title">相隔数小时，仍是同一段对话</title><desc id="desc">经过浓缩的说明示例，并非一次真实观测的运行。</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="1729" viewBox="0 0 420 1729" role="img" aria-labelledby="title desc">
+<title id="title">相隔数小时，仍是同一段对话</title><desc id="desc">重构的产品方向示例，并非一次真实观测，也不代表已发布的购物功能。</desc>
 <style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
-<rect width="420" height="980" fill="#fff"/>
+<rect width="420" height="1729" fill="#fff"/>
 <text x="20" y="32.0" font-size="23" class="bold" text-anchor="start">相隔数小时，仍是同一段对话</text>
 <text x="20" y="68" font-size="16" class="muted" text-anchor="start">代表性交互 · 产品方向</text>
-<rect x="40" y="92" width="360" height="220" rx="8" fill="#fff" stroke="#ccd4de"/>
-<text x="56" y="122" font-size="18" class="blue bold" text-anchor="start">01  起初</text>
-<text x="56" y="158.0" font-size="19" class="bold" text-anchor="start">“咖啡快没了。”</text>
-<path d="M56 250H384" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<text x="56" y="278.0" font-size="17" class="muted" text-anchor="start">符合保存条件的既有上下文</text>
-<circle cx="20" cy="118" r="4" fill="#245b92"/>
-<path d="M20 127 L20 350" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M16 345 L20 350 L24 345" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="40" y="336" width="360" height="220" rx="8" fill="#fff" stroke="#ccd4de"/>
-<text x="56" y="366" font-size="18" class="blue bold" text-anchor="start">02  数小时后</text>
-<text x="56" y="402.0" font-size="19" class="bold" text-anchor="start">“我现在出门，顺路有地方可以买到</text>
-<text x="56" y="428.6" font-size="19" class="bold" text-anchor="start">吗？”</text>
-<path d="M56 494H384" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<text x="56" y="522.0" font-size="17" class="muted" text-anchor="start">时间 / 路线 / 营业情况</text>
-<circle cx="20" cy="362" r="4" fill="#245b92"/>
-<path d="M20 371 L20 594" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M16 589 L20 594 L24 589" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="40" y="580" width="360" height="220" rx="8" fill="#fff" stroke="#ccd4de"/>
-<text x="56" y="610" font-size="18" class="blue bold" text-anchor="start">03  之后</text>
-<text x="56" y="646.0" font-size="19" class="bold" text-anchor="start">“没时间了，买上次那款就好。”</text>
-<path d="M56 738H384" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<text x="56" y="766.0" font-size="17" class="muted" text-anchor="start">先前选择 / 需要时取得权限</text>
-<circle cx="20" cy="606" r="4" fill="#245b92"/>
-<rect x="20" y="836" width="380" height="58" rx="5" fill="#f2f7fc" stroke="#96b6d6"/>
-<text x="210.0" y="861" font-size="18" class="bold" text-anchor="middle">在对话之下连接上下文，延续同一个 Work</text>
-<text x="20" y="934.0" font-size="16" class="muted" text-anchor="start">经过浓缩的说明示例，并非一次真实观测的运行。</text>
+<text x="20" y="96.0" font-size="17" class="muted" text-anchor="start">示例条件：保留了上次的咖啡选择，但尚不知道路</text>
+<text x="20" y="119.8" font-size="17" class="muted" text-anchor="start">线，也没有购物账户权限。</text>
+<rect x="40" y="161.6" width="360" height="296.79999999999995" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="56" y="189.6" font-size="19" class="blue bold" text-anchor="start">起初</text>
+<text x="56" y="224.2" font-size="16" class="muted" text-anchor="start">所有者</text>
+<text x="56" y="250.2" font-size="20" class="bold" text-anchor="start">“咖啡快没了。”</text>
+<text x="56" y="290.2" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="56" y="316.2" font-size="20" class="" text-anchor="start">“下次买东西时，也得补上咖啡。”</text>
+<rect x="40" y="358.2" width="360" height="100.19999999999996" rx="5" fill="#f2f7fc" stroke="#ccd8e6"/>
+<text x="56" y="384.2" font-size="17" class="blue bold" text-anchor="start">AgentOS 在对话之下解析什么</text>
+<text x="56" y="416.0" font-size="18" class="" text-anchor="start">保留符合保存条件的上下文。分享日常事</text>
+<text x="56" y="441.2" font-size="18" class="" text-anchor="start">实并不等于授权购买。</text>
+<circle cx="20" cy="185.6" r="4" fill="#245b92"/>
+<path d="M20 195.6 L20 494.4" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M16 489.4 L20 494.4 L24 489.4" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="40" y="482.4" width="360" height="352.79999999999995" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="56" y="510.4" font-size="19" class="blue bold" text-anchor="start">数小时后</text>
+<text x="56" y="545.0" font-size="16" class="muted" text-anchor="start">所有者</text>
+<text x="56" y="571.0" font-size="20" class="bold" text-anchor="start">“我现在出门，顺路有地方可以买到</text>
+<text x="56" y="599.0" font-size="20" class="bold" text-anchor="start">吗？”</text>
+<text x="56" y="639.0" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="56" y="665.0" font-size="20" class="" text-anchor="start">“是说咖啡吧？告诉我路线，我来找</text>
+<text x="56" y="693.0" font-size="20" class="" text-anchor="start">方便顺路停留的店。”</text>
+<rect x="40" y="735.0" width="360" height="100.19999999999996" rx="5" fill="#f2f7fc" stroke="#ccd8e6"/>
+<text x="56" y="761.0" font-size="17" class="blue bold" text-anchor="start">AgentOS 在对话之下解析什么</text>
+<text x="56" y="792.8" font-size="18" class="" text-anchor="start">从先前的上下文理解是在说咖啡。只在需</text>
+<text x="56" y="818.0" font-size="18" class="" text-anchor="start">要时询问尚缺的路线。</text>
+<circle cx="20" cy="506.4" r="4" fill="#245b92"/>
+<path d="M20 516.4 L20 871.1999999999999" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M16 866.1999999999999 L20 871.1999999999999 L24 866.1999999999999" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="40" y="859.1999999999999" width="360" height="324.79999999999995" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="56" y="887.1999999999999" font-size="19" class="blue bold" text-anchor="start">之后</text>
+<text x="56" y="921.8" font-size="16" class="muted" text-anchor="start">所有者</text>
+<text x="56" y="947.8" font-size="20" class="bold" text-anchor="start">“没时间了，买上次那款就好。”</text>
+<text x="56" y="987.8" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="56" y="1013.8" font-size="20" class="" text-anchor="start">“上次那款咖啡。准备订单需要你的</text>
+<text x="56" y="1041.8" font-size="20" class="" text-anchor="start">购物账户，请在这里连接。”</text>
+<rect x="40" y="1083.8" width="360" height="100.19999999999996" rx="5" fill="#f2f7fc" stroke="#ccd8e6"/>
+<text x="56" y="1109.8" font-size="17" class="blue bold" text-anchor="start">AgentOS 在对话之下解析什么</text>
+<text x="56" y="1141.6" font-size="18" class="" text-anchor="start">找到先前的选择。购物账户权限尚缺，暂</text>
+<text x="56" y="1166.8" font-size="18" class="" text-anchor="start">时暂停这个 Work。</text>
+<circle cx="20" cy="883.1999999999999" r="4" fill="#245b92"/>
+<path d="M20 893.1999999999999 L20 1220.0" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M16 1215.0 L20 1220.0 L24 1215.0" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="40" y="1208.0" width="360" height="324.79999999999995" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="56" y="1236.0" font-size="19" class="blue bold" text-anchor="start">连接账户后</text>
+<text x="56" y="1270.6" font-size="16" class="muted" text-anchor="start">所有者</text>
+<text x="56" y="1296.6" font-size="20" class="bold" text-anchor="start">“连接好了。”</text>
+<text x="56" y="1336.6" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="56" y="1362.6" font-size="20" class="" text-anchor="start">“继续准备那款咖啡的订单，付款前</text>
+<text x="56" y="1390.6" font-size="20" class="" text-anchor="start">会请你确认。”</text>
+<rect x="40" y="1432.6" width="360" height="100.19999999999996" rx="5" fill="#f2f7fc" stroke="#ccd8e6"/>
+<text x="56" y="1458.6" font-size="17" class="blue bold" text-anchor="start">AgentOS 在对话之下解析什么</text>
+<text x="56" y="1490.3999999999999" font-size="18" class="" text-anchor="start">权限交接后恢复原来的 Work。连接账户</text>
+<text x="56" y="1515.6" font-size="18" class="" text-anchor="start">不等于批准付款。</text>
+<circle cx="20" cy="1232.0" r="4" fill="#245b92"/>
+<rect x="20" y="1556.8" width="380" height="81.19999999999999" rx="5" fill="#f2f7fc" stroke="#96b6d6"/>
+<text x="36" y="1584.8" font-size="19" class="bold" text-anchor="start">上下文保留，权限交接后继续原来的购物</text>
+<text x="36" y="1611.3999999999999" font-size="19" class="bold" text-anchor="start">Work。</text>
+<text x="20" y="1670.0" font-size="17" class="muted" text-anchor="start">重构的产品方向示例，并非一次真实观测，也不代</text>
+<text x="20" y="1693.8" font-size="17" class="muted" text-anchor="start">表已发布的购物功能。</text>
 </svg>

@@ -23,11 +23,14 @@ DATA = {
  'judgment':'Judgment / orchestration','replaceable':'Replaceable execution capabilities', 'ai':'AI models','tools':'Tools / services / skills',
  'same':'Same PA. Different AI.', 'retain':'The relationship and state stay with the owner.',
  'usage':'A conversation over time','direction':'Representative interaction · product direction',
- 'times':['Earlier','Hours later','Later'],
- 'utterances':['“We’re almost out of coffee.”','“I’m heading out now. Is there somewhere on the way I can pick it up?”','“No time. Just get the same one as last time.”'],
- 'under':['Eligible prior context','Time / route / availability','Prior choice / authority when needed'],
- 'ongoing':'One continuing Work, resolved beneath the conversation',
- 'usage_note':'Illustrative, condensed; not one observed live run.',
+ 'times':['Earlier','Hours later','Later','After connecting the account'],
+ 'utterances':['“We’re almost out of coffee.”','“I’m heading out now. Is there somewhere on the way I can pick it up?”','“No time. Just get the same one as last time.”','“Connected.”'],
+ 'replies':['“I’ll keep coffee in mind for your next shop.”','“The coffee? Share your route and I’ll look for a convenient stop.”','“The coffee from last time. Connect your shopping account here so I can prepare the order.”','“Back to that coffee. I’ll prepare the order for your review; payment needs your approval.”'],
+ 'under':['Keep eligible context; sharing a fact does not authorize a purchase.','Resolve “it” from earlier context. Ask for the route only because it is missing.','Resolve the prior choice. Pause the shopping Work for the missing account authority.','Resume the original Work after the handoff. Account access is not payment approval.'],
+ 'under_title':'What AgentOS resolves','owner_label':'Owner','pa_label':'PA',
+ 'assumption':'Illustrated conditions: prior coffee choice is available; route and account access are missing.',
+ 'ongoing':'Context persists. The shopping Work resumes after the handoff.',
+ 'usage_note':'Reconstructed product direction, not one observed live run or a shipped shopping integration.',
 },
 'ko': {
  'comparison':'상호작용이 달라지는 방식','illustration':'개념 설명용 그림',
@@ -41,11 +44,14 @@ DATA = {
  'judgment':'판단 / 조율','replaceable':'교체 가능한 실행 기능','ai':'AI 모델','tools':'도구 / 서비스 / 스킬',
  'same':'같은 PA, 다른 AI.','retain':'관계와 상태는 소유자에게 남습니다.',
  'usage':'시간에 걸쳐 이어지는 대화','direction':'대표 상호작용 · 제품 방향',
- 'times':['처음에','몇 시간 뒤','나중에'],
- 'utterances':['“커피 거의 다 떨어졌네.”','“이제 나가려고. 가는 길에 살 만한 데 있을까?”','“시간 없네. 지난번에 사던 걸로 그냥 사줘.”'],
- 'under':['저장 가능한 이전 맥락','시간 / 경로 / 영업 여부','이전 선택 / 필요할 때 권한'],
- 'ongoing':'대화 아래에서 맥락을 연결하며 이어가는 하나의 Work',
- 'usage_note':'축약한 설명용 예시이며, 하나의 실제 관찰 실행이 아닙니다.',
+ 'times':['처음에','몇 시간 뒤','나중에','계정 연결 뒤'],
+ 'utterances':['“커피 거의 다 떨어졌네.”','“이제 나가려고. 가는 길에 살 만한 데 있을까?”','“시간 없네. 지난번에 사던 걸로 그냥 사줘.”','“연결했어.”'],
+ 'replies':['“다음에 장 볼 때 커피도 챙기면 되겠네요.”','“커피 말씀이죠? 이동 경로를 알려주시면 들르기 편한 곳을 찾아볼게요.”','“지난번 커피로요. 주문을 준비하려면 구매 계정이 필요해요. 여기서 연결해주세요.”','“그 커피로 이어서 주문을 준비할게요. 결제 전에는 확인받을게요.”'],
+ 'under':['저장 가능한 맥락을 남긴다. 일상적인 사실 공유가 구매 권한은 아니다.','이전 맥락에서 커피를 이어받는다. 모르는 이동 경로만 필요해진 순간 묻는다.','이전 선택을 찾는다. 구매 계정 권한이 없어 해당 Work를 잠시 멈춘다.','권한 연결 뒤 원래 Work를 재개한다. 계정 연결과 결제 승인은 별개다.'],
+ 'under_title':'AgentOS가 아래에서 해석하는 것','owner_label':'소유자','pa_label':'PA',
+ 'assumption':'예시 조건: 지난번 커피 선택은 남아 있고, 이동 경로와 구매 계정 권한은 아직 없습니다.',
+ 'ongoing':'맥락은 남고, 권한 연결 뒤 원래 구매 Work를 이어갑니다.',
+ 'usage_note':'제품 방향을 재구성한 예시입니다. 하나의 실제 관찰 실행이나 배포된 구매 기능이 아닙니다.',
 },
 'ja': {
  'comparison':'対話のあり方が変わる','illustration':'概念を説明する図',
@@ -59,11 +65,14 @@ DATA = {
  'judgment':'判断 / オーケストレーション','replaceable':'交換可能な実行機能','ai':'AI モデル','tools':'ツール / サービス / スキル',
  'same':'同じ PA。別の AI。','retain':'関係と状態は所有者の手元に残ります。',
  'usage':'時間をまたいで続く会話','direction':'代表的な対話 · 製品の方向性',
- 'times':['はじめに','数時間後','その後'],
- 'utterances':['「コーヒーがもう少ない。」','「今から出る。途中で買えるところある？」','「時間ないな。前と同じものを買っておいて。」'],
- 'under':['保存できる以前の文脈','時間 / 経路 / 営業状況','以前の選択 / 必要な時に権限'],
- 'ongoing':'会話の下で文脈をつなぎ、一つの Work を継続',
- 'usage_note':'説明用にまとめた例であり、一回の実観測ではありません。',
+ 'times':['はじめに','数時間後','その後','アカウント接続後'],
+ 'utterances':['「コーヒーがもう少ない。」','「今から出る。途中で買えるところある？」','「時間ないな。前と同じものを買っておいて。」','「接続したよ。」'],
+ 'replies':['「次の買い物ではコーヒーも必要ですね。」','「コーヒーですね。移動ルートを教えてもらえれば、立ち寄りやすい店を探します。」','「前回のコーヒーですね。注文の準備には購入用のアカウントが必要です。ここで接続してください。」','「そのコーヒーの注文準備を続けます。支払い前には確認をお願いします。」'],
+ 'under':['保存できる文脈を残す。日常の事実を共有しても購入権限にはならない。','以前の文脈からコーヒーと理解する。不明な移動ルートを必要な時にだけ聞く。','以前の選択を参照する。購入用のアカウント権限がないため、この Work を一時停止する。','権限の引き継ぎ後に元の Work を再開する。アカウント接続と支払い承認は別。'],
+ 'under_title':'AgentOS が会話の下で解決すること','owner_label':'所有者','pa_label':'PA',
+ 'assumption':'この例の条件：前回のコーヒーの選択は残っており、移動ルートとアカウント権限は未取得。',
+ 'ongoing':'文脈は残り、権限の引き継ぎ後に元の購入 Work を再開。',
+ 'usage_note':'製品の方向性を再構成した例。一回の実観測や提供済みの購入機能ではありません。',
 },
 'zh-CN': {
  'comparison':'交互方式如何改变','illustration':'概念说明图',
@@ -77,11 +86,14 @@ DATA = {
  'judgment':'判断 / 编排','replaceable':'可替换的执行能力','ai':'AI 模型','tools':'工具 / 服务 / 技能',
  'same':'同一个 PA。不同的 AI。','retain':'关系与状态仍由所有者掌控。',
  'usage':'相隔数小时，仍是同一段对话','direction':'代表性交互 · 产品方向',
- 'times':['起初','数小时后','之后'],
- 'utterances':['“咖啡快没了。”','“我现在出门，顺路有地方可以买到吗？”','“没时间了，买上次那款就好。”'],
- 'under':['符合保存条件的既有上下文','时间 / 路线 / 营业情况','先前选择 / 需要时取得权限'],
- 'ongoing':'在对话之下连接上下文，延续同一个 Work',
- 'usage_note':'经过浓缩的说明示例，并非一次真实观测的运行。',
+ 'times':['起初','数小时后','之后','连接账户后'],
+ 'utterances':['“咖啡快没了。”','“我现在出门，顺路有地方可以买到吗？”','“没时间了，买上次那款就好。”','“连接好了。”'],
+ 'replies':['“下次买东西时，也得补上咖啡。”','“是说咖啡吧？告诉我路线，我来找方便顺路停留的店。”','“上次那款咖啡。准备订单需要你的购物账户，请在这里连接。”','“继续准备那款咖啡的订单，付款前会请你确认。”'],
+ 'under':['保留符合保存条件的上下文。分享日常事实并不等于授权购买。','从先前的上下文理解是在说咖啡。只在需要时询问尚缺的路线。','找到先前的选择。购物账户权限尚缺，暂时暂停这个 Work。','权限交接后恢复原来的 Work。连接账户不等于批准付款。'],
+ 'under_title':'AgentOS 在对话之下解析什么','owner_label':'所有者','pa_label':'PA',
+ 'assumption':'示例条件：保留了上次的咖啡选择，但尚不知道路线，也没有购物账户权限。',
+ 'ongoing':'上下文保留，权限交接后继续原来的购物 Work。',
+ 'usage_note':'重构的产品方向示例，并非一次真实观测，也不代表已发布的购物功能。',
 }}
 
 class Figure:
@@ -167,28 +179,63 @@ def presence(d,mobile):
  f.arrow(center,y+378,center,bottom-12)
  f.text(center,bottom+12,d['replaceable'],18,'muted','middle')
  f.rect(x,bottom+30,cw,76,'#fff','#8492a3',6)
- f.text(x+cw/2,bottom+59,d['ai'],20,'bold','middle');f.text(x+cw/2,bottom+87,d['tools'],18,'muted','middle')
+ f.text(x+cw/2,bottom+59,d['ai']+' · A → B',20,'bold','middle');f.text(x+cw/2,bottom+87,d['tools'],18,'muted','middle')
  f.text(w/2,h-50,d['same'],23,'blue bold','middle');f.text(w/2,h-20,d['retain'],17,'muted','middle')
  return f
 
 def usage(d,mobile):
- w=420 if mobile else 840;h=980 if mobile else 550
- f=Figure(w,h,d['usage'],d['usage_note'])
- f.lines(20,32,d['usage'],w-40,23,'bold');f.text(20,68,d['direction'],16,'muted')
- for i in range(3):
-  x=40 if mobile else 20+i*272;y=92+i*244 if mobile else 92;cw=360 if mobile else 256
-  f.rect(x,y,cw,220 if mobile else 310,'#fff')
-  f.text(x+16,y+30,f'{i+1:02}  {d["times"][i]}',18,'blue bold')
-  f.lines(x+16,y+66,d['utterances'][i],cw-32,19,'bold')
-  f.path(f'M{x+16} {y+(158 if mobile else 198)}H{x+cw-16}')
-  f.lines(x+16,y+(186 if mobile else 226),d['under'][i],cw-32,17,'muted')
+ # The owner-facing exchange and its architectural interpretation share a row.
+ # Compute row heights from the same wrapping used to emit text in every locale.
+ w=420 if mobile else 840
+ f=Figure(w,3000,d['usage'],d['usage_note'])
+ f.lines(20,32,d['usage'],w-40,23,'bold')
+ f.text(20,68,d['direction'],16,'muted')
+ y=96+f.lines(20,96,d['assumption'],w-40,17,'muted')+18
+ for i in range(4):
+  x=40 if mobile else 20; cw=360 if mobile else 500
+  # Count wrapped text using a disposable figure, then draw the sized cards.
+  measure=Figure(w,3000,'','')
+  title_h=measure.lines(0,0,d['times'][i],cw-32,19)
+  owner_h=measure.lines(0,0,d['utterances'][i],cw-32,20)
+  reply_h=measure.lines(0,0,d['replies'][i],cw-32,20)
+  note_w=cw-32 if mobile else 240
+  note_h=measure.lines(0,0,d['under'][i],note_w,18)
+  conversation_h=title_h+owner_h+reply_h+114
   if mobile:
-   f.out.append(f'<circle cx="20" cy="{y+26}" r="4" fill="#245b92"/>')
-   if i<2:f.arrow(20,y+35,20,y+244+14)
-  elif i<2:f.arrow(x+cw+2,y+118,x+cw+14,y+118)
- band=836 if mobile else 422
- f.rect(20,band,w-40,58,'#f2f7fc','#96b6d6',5);f.lines(w/2,band+25,d['ongoing'],w-64,18,'bold',anchor='middle',gap=23)
- f.lines(20,h-(46 if mobile else 23),d['usage_note'],w-40,16,'muted')
+   note_title_h=measure.lines(0,0,d['under_title'],cw-32,17)
+   row_h=conversation_h+note_title_h+note_h+26
+  else:
+   note_title_h=measure.lines(0,0,d['under_title'],note_w,17)
+   row_h=max(conversation_h,note_title_h+note_h+56)
+  f.rect(x,y,cw,row_h,'#fff')
+  cursor=y+28
+  cursor+=f.lines(x+16,cursor,d['times'][i],cw-32,19,'blue bold')+8
+  f.text(x+16,cursor,d['owner_label'],16,'muted');cursor+=26
+  cursor+=f.lines(x+16,cursor,d['utterances'][i],cw-32,20,'bold')+12
+  f.text(x+16,cursor,d['pa_label'],16,'blue bold');cursor+=26
+  f.lines(x+16,cursor,d['replies'][i],cw-32,20)
+  if mobile:
+   nx=x;ny=y+conversation_h;nw=cw
+   f.rect(nx,ny,nw,row_h-conversation_h,'#f2f7fc','#ccd8e6',5)
+  else:
+   nx=548;ny=y;nw=272
+   f.rect(nx,ny,nw,row_h,'#f2f7fc','#ccd8e6')
+   f.arrow(x+cw+4,y+row_h/2,nx-4,y+row_h/2)
+  next_y=ny+26+f.lines(nx+16,ny+26,d['under_title'],nw-32,17,'blue bold')+8
+  f.lines(nx+16,next_y,d['under'][i],nw-32,18)
+  if mobile:
+   f.out.append(f'<circle cx="20" cy="{y+24}" r="4" fill="#245b92"/>')
+   if i<3:f.arrow(20,y+34,20,y+row_h+36)
+  elif i<3:f.arrow(270,y+row_h+4,270,y+row_h+18)
+  y+=row_h+24
+ band_h=measure.lines(0,0,d['ongoing'],w-72,19)+28
+ f.rect(20,y,w-40,band_h,'#f2f7fc','#96b6d6',5)
+ f.lines(36,y+28,d['ongoing'],w-72,19,'bold')
+ y+=band_h+32
+ y+=f.lines(20,y,d['usage_note'],w-40,17,'muted')+12
+ # Update both canvas and background once the content height is known.
+ f.out[0]=f.out[0].replace('height="3000"',f'height="{int(y)}"').replace(f'viewBox="0 0 {w} 3000"',f'viewBox="0 0 {w} {int(y)}"')
+ f.out[3]=f.out[3].replace('height="3000"',f'height="{int(y)}"')
  return f
 
 if __name__=='__main__':

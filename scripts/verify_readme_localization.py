@@ -167,12 +167,37 @@ class PictureParser(HTMLParser):
             self.current = None
 
 
+def standalone_picture_html(section: str) -> str:
+    """Accept the README's standalone HTML format, not Markdown code examples.
+
+    Outer picture tags occupy their own lines with at most three leading
+    spaces. A block starts after a blank line (or at the section start).
+    Child tags may be indented freely inside that HTML block; a blank line
+    ends it, as it does for this CommonMark HTML-block form.
+    """
+    lines = without_fenced_code(COMMENT_RE.sub("", section)).splitlines()
+    opening = re.compile(r" {0,3}<picture>[ \t]*", re.I)
+    closing = re.compile(r" {0,3}</picture>[ \t]*", re.I)
+    blocks: list[str] = []
+    start: int | None = None
+    for index, line in enumerate(lines):
+        if start is None:
+            if opening.fullmatch(line) and (index == 0 or not lines[index - 1].strip()):
+                start = index
+        elif not line.strip():
+            start = None
+        elif closing.fullmatch(line):
+            blocks.append("\n".join(lines[start:index + 1]))
+            start = None
+    return "\n".join(blocks)
+
+
 def validate_presence_picture(name: str, section: str, root: Path) -> list[str]:
     errors: list[str] = []
     desktop = LOCALE_PRESENCE_VISUALS[name]
     narrow = desktop.removesuffix(".svg") + ".narrow.svg"
     parser = PictureParser()
-    parser.feed(without_fenced_code(section))
+    parser.feed(standalone_picture_html(section))
     if len(parser.pictures) != 1:
         return [f"{name}: presence must contain exactly one localized picture"]
     entries = parser.pictures[0]

@@ -450,6 +450,62 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                     target.write_text(body, encoding="utf-8")
                     self.assertEqual([], verifier.validate_readmes(root))
 
+    def test_picture_markup_displayed_as_markdown_code_is_rejected(self):
+        wrappers = {
+            "four-space indentation": lambda picture: "\n".join(
+                "    " + line for line in picture.splitlines()
+            ),
+            "tab indentation": lambda picture: "\n".join(
+                "\t" + line for line in picture.splitlines()
+            ),
+            "blank line before indented code": lambda picture: "<picture>\n\n"
+            + "\n".join("    " + line for line in picture.splitlines()[1:]),
+            "inline backticks": lambda picture: "\n".join(
+                "`" + line + "`" for line in picture.splitlines()
+            ),
+            "multiline code span": lambda picture: "`\n" + picture + "\n`",
+            "multiline double-backtick span": lambda picture: "``\n" + picture + "\n``",
+        }
+        for name, wrap in wrappers.items():
+            with self.subTest(markup=name):
+                tmp, root = self.temp_root()
+                with tmp:
+                    target = root / "README.md"
+                    body = target.read_text(encoding="utf-8")
+                    body = re.sub(
+                        r"<picture>.*?</picture>", lambda match: wrap(match[0]),
+                        body, count=1, flags=re.S,
+                    )
+                    target.write_text(body, encoding="utf-8")
+                    errors = verifier.validate_readmes(root)
+                    self.assertTrue(any(
+                        "presence must contain exactly one localized picture" in error
+                        for error in errors
+                    ), errors)
+
+    def test_standalone_picture_allows_indented_child_tags(self):
+        for outer_indent in ("", "   "):
+            with self.subTest(outer_indent=len(outer_indent)):
+                tmp, root = self.temp_root()
+                with tmp:
+                    target = root / "README.md"
+                    body = target.read_text(encoding="utf-8")
+
+                    def indent_children(match):
+                        lines = match[0].splitlines()
+                        return "\n".join(
+                            [outer_indent + lines[0]]
+                            + ["    " + line.lstrip() for line in lines[1:-1]]
+                            + [outer_indent + lines[-1]]
+                        )
+
+                    body = re.sub(
+                        r"<picture>.*?</picture>", indent_children,
+                        body, count=1, flags=re.S,
+                    )
+                    target.write_text(body, encoding="utf-8")
+                    self.assertEqual([], verifier.validate_readmes(root))
+
     def test_presence_picture_must_have_alt_text(self):
         tmp, root = self.temp_root()
         with tmp:

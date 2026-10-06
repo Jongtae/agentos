@@ -240,8 +240,84 @@ def usage(d,mobile):
  f.out[3]=f.out[3].replace('height="3000"',f'height="{int(y)}"')
  return f
 
+OVERVIEW = {
+ 'en': {
+  'title':'One assistant. Your context stays with you.',
+  'you':'You', 'pa':'Your PA', 'owned':'Personal AgentOS · in your control',
+  'labels':['Your context','Your current work','What happened'],
+  'terms':['Memory · Context','Work · Grant','Artifact · Event · Evidence'],
+  'judgment':'Judgment: choose capabilities, check results',
+  'replaceable':'Replaceable AI + tools / services', 'engines':'AI A  →  AI B',
+  'desc':'You talk to one PA. AgentOS connects context, work, permissions and evidence. AI and tools can change beneath that continuing relationship.',
+ },
+ 'ko': {
+  'title':'하나의 비서, 내게 남는 맥락',
+  'you':'나', 'pa':'내 PA', 'owned':'Personal AgentOS · 내가 통제하는 환경',
+  'labels':['나에 대해 아는 것','지금 하고 있는 일','실제로 일어난 일'],
+  'terms':['기억 · 맥락','작업 · 권한','결과 · 이벤트 · 근거'],
+  'judgment':'판단: 필요한 기능 선택, 결과 확인',
+  'replaceable':'교체 가능한 AI + 도구 / 서비스', 'engines':'AI A  →  AI B',
+  'desc':'나는 하나의 PA와 이야기합니다. AgentOS는 맥락과 일, 권한과 근거를 연결합니다. 그 관계 아래의 AI와 도구는 교체할 수 있습니다.',
+ },
+ 'ja': {
+  'title':'一人のアシスタント。文脈は手元に。',
+  'you':'あなた', 'pa':'あなたの PA', 'owned':'Personal AgentOS · 自分で管理する環境',
+  'labels':['あなたについて知ること','今取り組んでいること','実際に起きたこと'],
+  'terms':['記憶 · 文脈','作業 · 権限','成果 · イベント · 証拠'],
+  'judgment':'判断：必要な機能を選び、結果を確認',
+  'replaceable':'交換できる AI + ツール / サービス', 'engines':'AI A  →  AI B',
+  'desc':'あなたは一人の PA と話します。AgentOS が文脈、作業、権限、証拠をつなぎ、その関係を保ちながら AI やツールを交換できます。',
+ },
+ 'zh-CN': {
+  'title':'同一个助手，上下文留在你手中',
+  'you':'你', 'pa':'你的 PA', 'owned':'Personal AgentOS · 由你掌控的环境',
+  'labels':['关于你的了解','正在处理的事','实际发生的事'],
+  'terms':['记忆 · 上下文','工作 · 权限','成果 · 事件 · 证据'],
+  'judgment':'判断：选择所需能力，检查结果',
+  'replaceable':'可替换的 AI + 工具 / 服务', 'engines':'AI A  →  AI B',
+  'desc':'你与同一个 PA 对话。AgentOS 连接上下文、工作、权限和证据；这段关系持续保留，底层 AI 和工具可以替换。',
+ },
+}
+
+def overview(d,mobile):
+ # A small reader-facing overview: conversation, connected owner state,
+ # judgment, then replaceable execution. Detailed kernel vocabulary lives
+ # in the linked architecture document rather than another README poster.
+ w=420 if mobile else 840; h=656 if mobile else 434
+ f=Figure(w,h,d['title'],d['desc'])
+ f.lines(20,32,d['title'],w-40,23,'bold')
+ offset=36 if mobile else 0
+ f.rect(20,64+offset,w-40,54,'#fff')
+ f.text(w/2-55,99+offset,d['you'],21,'bold','end')
+ f.text(w/2-10,99+offset,'⇄',25,'blue','middle')
+ f.text(w/2+25,99+offset,d['pa'],21,'bold')
+ f.arrow(w/2,122+offset,w/2,140+offset)
+ outer_h=364 if mobile else 194
+ f.rect(20,148+offset,w-40,outer_h,'#f2f7fc','#96b6d6')
+ f.lines(36,176+offset,d['owned'],w-72,18,'bold')
+ for i in range(3):
+  x=36 if mobile else 36+i*260
+  y=(210+i*80 if mobile else 196)+offset
+  cw=w-72 if mobile else 248
+  f.rect(x,y,cw,66,'#fff','#ccd8e6',5)
+  f.lines(x+cw/2,y+24,d['labels'][i],cw-24,18,'bold',anchor='middle',gap=23)
+  f.text(x+cw/2,y+51,d['terms'][i],15,'muted','middle')
+  if i<2:
+   if mobile:f.path(f'M{w/2} {y+66}V{y+80}')
+   else:f.path(f'M{x+cw} {y+33}H{x+260}')
+ f.lines(w/2,(464 if mobile else 318)+offset,d['judgment'],w-72,17,'blue',anchor='middle',gap=22)
+ bottom=148+offset+outer_h
+ f.arrow(w/2,bottom+4,w/2,bottom+24)
+ f.text(w/2,bottom+52,d['replaceable'],18,'muted','middle')
+ f.text(w/2,bottom+81,d['engines'],22,'bold','middle')
+ return f
+
 if __name__=='__main__':
  for locale,d in DATA.items():
   for kind,builder in [('interaction-model',comparison),('presence',presence),('continuing-conversation',usage)]:
    for mobile in [False,True]:
     builder(d,mobile).write(f'{kind}.{locale}{".narrow" if mobile else ""}.svg')
+
+ for locale,d in OVERVIEW.items():
+  for mobile in [False,True]:
+   overview(d,mobile).write(f'presence-overview.{locale}{".narrow" if mobile else ""}.svg')

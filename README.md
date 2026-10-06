@@ -5,165 +5,83 @@
 <!-- readme-parity:v1 -->
 <!-- readme-section:hero -->
 
-## A personal AI environment that stays yours.
+## The personal assistant we wanted
 
-**One assistant. Replaceable AI. Owner-controlled memory, context, tools and authority.**
+We should be able to pick up yesterday’s conversation, share half a thought, and carry unfinished work forward without explaining our lives all over again. And we should be able to trust the environment that holds that knowledge.
 
-Local-first is not local-only: Personal AgentOS can use local or hosted models; with a hosted model, permitted context goes to that provider.
+**Personal AgentOS explores how to build that kind of personal assistant (PA) in an environment you install and control.**
 
-<!-- readme-section:concept -->
+Assistants answer questions. Computer agents carry out commands. A personal agent should also stay with you across conversations, tasks and changes of AI. We call that continuity **Presence**.
 
-## The idea in one sentence
+<!-- readme-section:ownership -->
 
-> 내가 설치하고 통제하는 개인 AI 환경에서, 좋은 기본 기능으로 실제 일을 끝내고, 더 좋은 에이전트를 앱처럼 설치·교체해도 내 기억과 결과는 나에게 남는다.
->
-> *A personal AI environment I install and control: good built-in abilities finish real work, and even when I install or swap in better agents like apps, my memory and results stay with me.*
+## Your assistant, on your terms
 
-The author's sentence, in the original Korean. Why the project exists and the documents that define the concept are gathered on one page: [VISION.md](VISION.md).
+The more an assistant knows about your life, the more it matters who holds its memory and decides what it can do. Your relationship with it should outlast a provider, a model or a chat session.
 
-<!-- readme-section:interaction-model -->
+AgentOS keeps memory, work and authority in your environment. You choose the AI, the information it can use and the access you give it. Better AI should make your assistant more capable without making you start over.
 
-## From an assistant to a personal agent environment
+Local-first is not local-only: you can use a local or hosted model. With a hosted model, the context used for a request is sent to that provider.
 
-<picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/interaction-model.en.narrow.svg">
-  <img src="docs/assets/readme/interaction-model.en.svg" alt="Illustrative progression: Assistant answers; Computer agent acts; Personal AgentOS keeps context and work across AI changes">
-</picture>
+<!-- readme-section:presence -->
 
-The distinction is not whether an AI can search a stock price or click **Add to cart**. Assistants already answer questions, and computer-use agents can already execute commands. Personal AgentOS moves the **persistent relationship, owner context, authority and work state** out of the AI provider and into an environment the owner controls.
+## What makes continuity possible
 
-| Interaction model | What the owner does | What the system primarily holds |
-| --- | --- | --- |
-| **Assistant — answers** | asks a question such as “What is the current price of NVIDIA?” | the current conversation and an answer |
-| **Computer agent — acts** | gives a command such as “Add these headphones to my Amazon cart.” | a task, browser/tool state and an action/handoff |
-| **Personal AgentOS — stays with you** | talks naturally over time: “We’re almost out of coffee.” → later, “Just get the same one as last time.” | Memory, Context, Work, Authority and Evidence that persist independently of a particular AI |
+Presence needs more than a long chat history. The assistant needs to connect what it knows about you, what is happening now, what you are working on, what you have allowed and what actually happened.
 
-The NASDAQ/Amazon examples above are **interaction-model illustrations**, not claims that those exact services are shipped integrations.
-
-### Presence is an architectural property
-
-The owner talks to one **PA**, not to a changing set of models, tools and workflows.
+AgentOS gives these things a shared structure—its **ontology**. A piece of work links its context, permissions, results and evidence. A new event or correction can inform what happens next. So when the AI changes or work is interrupted, what it knew and where to continue can remain available.
 
 <picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence.en.narrow.svg">
-  <img src="docs/assets/readme/presence.en.svg" alt="Presence architecture: Owner talks to PA; Personal AgentOS owns Memory, Context, Work, Authority, Evidence and Events; Judgment orchestrates replaceable AI and tools; AI A can be replaced by AI B beneath the same PA and owner-controlled state">
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.en.narrow.svg">
+  <img src="docs/assets/readme/presence-overview.en.svg" alt="You talk to one PA. AgentOS connects your memory and context, work and permissions, and results and evidence. Its judgment layer coordinates replaceable AI and tools underneath; your state stays with you.">
 </picture>
 
-That changes the conversation. A person can share an incomplete fact, continue it hours later, send a photo or location when it becomes relevant, and grant account/computer access only at the moment an external action needs it. The owner does not have to translate everyday intent into a tool, model, workflow or memory command.
+AgentOS uses its judgment layer to choose AI and tools and check their results. You talk to the PA while AgentOS carries that structure underneath the conversation. **Same PA. Different AI.**
 
-**Representative interaction — product direction.** These owner-supplied interaction patterns are condensed into an example, not a single observed run:
+<!-- readme-section:conversation -->
 
-<picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/continuing-conversation.en.narrow.svg">
-  <img src="docs/assets/readme/continuing-conversation.en.svg" alt="Representative owner/PA conversation: a coffee remark becomes a route question hours later, then a prior-choice request, account handoff and resumption of the same Work. Reconstructed product direction, not live evidence or a shipped shopping integration.">
-</picture>
+## A conversation that carries on
 
-<details>
-<summary>Read the representative dialogue</summary>
+> “We’re almost out of coffee.”<br>
+> Hours later: “I’m heading out. Is there somewhere on the way I can pick it up?”<br>
+> Later: “No time. Just get the same one as last time.”
 
-Illustrated conditions: prior coffee choice is available; route and account access are missing.
+The aspiration is simple: the PA follows what “it” and “the same one” mean, brings in relevant context, and asks for missing information or authority when needed. You keep talking; you do not assemble a workflow.
 
-**Earlier**
-
-> **Owner:** “We’re almost out of coffee.”
->
-> **PA:** “I’ll keep coffee in mind for your next shop.”
-
-**Hours later**
-
-> **Owner:** “I’m heading out now. Is there somewhere on the way I can pick it up?”
->
-> **PA:** “The coffee? Share your route and I’ll look for a convenient stop.”
-
-**Later**
-
-> **Owner:** “No time. Just get the same one as last time.”
->
-> **PA:** “The coffee from last time. Connect your shopping account here so I can prepare the order.”
-
-**After connecting the account**
-
-> **Owner:** “Connected.”
->
-> **PA:** “Back to that coffee. I’ll prepare the order for your review; payment needs your approval.”
-
-</details>
-
-Illustrative PA replies resolve the earlier coffee context, ask for missing route/account access only when needed, and resume the original Work after the handoff. Account access does not approve payment. The owner never selects a memory tool, model, browser or workflow; AgentOS resolves eligible capabilities underneath the conversation. This is product direction; implementation evidence is classified separately below.
-
-**Same PA. Different AI.** The model underneath can change without making the owner rebuild the relationship from scratch.
-
-<!-- readme-section:working-software -->
-
-## Working software, not only a concept
-
-The repository contains implementation newer than the published release: replaceable Main AI and Judgment AI routes, durable Memory, Telegram conversation, contextual capability handoff, search/browser mediation, preparations and evidence-qualified recovery. Merged code and deterministic/fixture checks support those paths; they do not establish that the complete experience described here has been observed live.
-
-Evidence is deliberately separated:
-
-- **Published release:** installed-smoke and synthetic journey evidence is recorded in the release manifest. It does **not** contain everything now on `main`.
-- **Current `main`:** merged code and deterministic/fixture evidence support newer Secretary, Presence, Decision and execution contracts. A merged contract or test is not by itself a live-service claim.
-- **Owner-pilot evidence:** public owner-live claims remain pending until exact Telegram/desktop observations are selected, redacted and tied to a revision/evidence record.
-- **Product direction:** the representative conversation above, shopping, booking and other future scenes remain direction until implementation and evidence support a stronger claim.
-
-See [what works and how we know](docs/product-status.en.md), the [release manifest](docs/release-manifest.json), and the [documentation map](docs/README.md).
-
-### Published-release journey illustrations
-
-The two scenes below are reconstructed, condensed illustrations of the v1 synthetic calendar and file journeys, not screenshots of live accounts. Their replies are translated from Korean. The published release has local installed-smoke evidence; the release manifest does not claim live Google or Telegram operation.
-
-![Reconstructed v1 synthetic journeys: calendar draft approval and a saved note found after restart](docs/assets/readme/hero.en.png)
+*Illustrative product direction, not an observed live run or a shipped shopping integration.*
 
 <!-- readme-section:try-today -->
 
-## Install
+## Try it
+
+On macOS with [Homebrew](https://brew.sh):
 
 ```sh
 brew install jongtae/agentos/agentos
 agentos start
 ```
 
-You will see:
+1. The browser opens at [http://127.0.0.1:8787](http://127.0.0.1:8787/). Choose **바로 시작하기** (Start now).
+2. Connect and test your own model: a tool-capable local Ollama model, or OpenAI, an OpenAI-compatible service or Anthropic with your API access. The setup interface is currently Korean.
+3. Start a conversation: **“Help me think through what to focus on this week.”**
 
-```text
-AgentOS: http://127.0.0.1:8787/
-초기 설정 링크: /Users/you/.local/share/agentos/private/setup-link.txt (개인 파일)
-```
+Homebrew installs Python for you; model access is separate. [QUICKSTART](QUICKSTART.md) covers model setup, file work, Telegram and running the newest code from source.
 
-The browser opens on that address. Press **바로 시작하기** (Start now), connect a model, and you are talking to it. The interface is in Korean today; it understands requests in Korean or English.
-
-**Homebrew installs the newest published release, `v1.1.0` (2026-09-23).** The [release manifest](docs/release-manifest.json) records what that build carries and its limits: calendar creation is unreachable (J4), and research is partial (J5). The synthetic scenes below are not a promise that every journey is reachable in that build. Newer Secretary/Presence/orchestration work on `main` is not in that release, so Homebrew can be behind `main` until the next release; for the newest code run from a source checkout (`git clone https://github.com/Jongtae/agentos.git`, then `python3 -m pip install -e '.[mcp-host]'` on Python 3.12 or newer). [QUICKSTART](QUICKSTART.md) has every step.
-
-<!-- capability:current-supported-slice -->
-<!-- readme-section:scenes-today -->
-
-## Then try these
-
-![Synthetic first-user journeys: files, mail, calendar, Memory, research and restart reuse](docs/assets/readme/scenes.en.png)
-
-The journeys behind these were run end to end by the project's automated first-user check, against a local folder and stand-in mail, calendar and web services rather than live accounts. The wording is the wording that routes today.
-
-- **Files.** *Summarize “Launch review” and save it as “Launch notes”.* It reads the folder you allowed, writes a new note into the workspace folder you chose and leaves the original untouched.
-- **Mail.** *Find anything about the budget in my mail.* It searches only the mailbox you connected and shows what it found.
-- **Calendar.** *Schedule a dentist appointment tomorrow at 3.* It shows an exact draft and creates the event only after you say approve. “Make it 4pm” and “cancel” work on the same draft.
-- **Memory in published release.** *Remember that I have a peanut allergy.* The published build keeps durable memory and candidate review. **Current `main` has moved on:** the owner's own AI saves an eligible non-secret fact, tells you what it remembered and offers bounded undo; a third-party/delegated writer still uses the candidate/approval path.
-- **Research.** *Look up these two products and compare them.* It searches, reads up to three public pages from that search, and returns what they say, what stayed unknown, and the links.
-
-Then restart the app and ask *Find “Launch notes” in my saved results.* The saved result, the folders you allowed, memory and Telegram pairing survive the restart.
-
-<!-- readme-section:settings -->
-
-## The settings you will need
-
-- **A model.** A local Ollama server, an OpenAI-compatible endpoint or Anthropic, with your own access. The file scene needs one of these direct connections.
-- **Two folders.** In **내 에이전트 관리 → 내 자료**: one reference folder it may read, one workspace folder it may write into. Nothing outside them. With a hosted model you approve document sharing once before the file scene.
-- **Mail and calendar, optional.** Your own Google account through a Google Cloud OAuth client you create, one setup command each (`agentos gmail-config`, `agentos calendar-config`), then connect read and write separately. QUICKSTART has the exact steps.
-- **Telegram, optional.** Your own bot token from BotFather, pasted in Settings, then open the pairing link. Only your paired account can talk to it.
-
-That is all of it.
+**Where it stands:** Homebrew installs **v1.1.0** (2026-09-23), an earlier preview. Newer Presence work is on `main`. Calendar creation is unavailable in that release and research is partial; see the [release manifest](docs/release-manifest.json). [Product status](docs/product-status.en.md) separates what is available, what has been tested and what remains a goal.
 
 <!-- readme-section:more -->
 
-## More
+## Explore the ideas
 
-[What works and what still has friction](docs/product-status.en.md) · [Where this is going](docs/product-status.en.md#where-this-is-going) · [Why this is different](docs/product-status.en.md#why-this-is-different) · [Under the hood](docs/product-status.en.md#under-the-hood-briefly) · License [AGPL-3.0-only](LICENSE) and [trademark notice](TRADEMARKS.md) · [How it is built](AGENTS.md) · [Acknowledgements and references](docs/acknowledgements.en.md)
+- [Why this project exists](VISION.md) — the relationship with computers this project is trying to make possible.
+- [Architecture and ontology](docs/personal-agentos-architecture.en.md) · [Presence](docs/presence-experience-contract.en.md) — how personal state, work and control support one continuing assistant.
+- [Research and references](docs/acknowledgements.en.md) — the work on personal agents, memory, owner models and provenance that informed the design.
+- [Documentation map](docs/README.md) · [Contributing](CONTRIBUTING.md) — find the current contracts, inspect the implementation and help develop it.
+
+<!-- readme-section:license -->
+
+## Open source
+
+This is a working exploration, open for others to run, question and improve. It does not have to be the final answer to be a useful beginning.
+
+Code: [AGPL-3.0-only](LICENSE). The Personal AgentOS name and logo follow the [trademark notice](TRADEMARKS.md). Third-party work is credited in [acknowledgements](docs/acknowledgements.en.md).

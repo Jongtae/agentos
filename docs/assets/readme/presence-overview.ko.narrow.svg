@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="656" viewBox="0 0 420 656" role="img" aria-labelledby="title desc">
+<title id="title">하나의 비서, 내게 남는 맥락</title><desc id="desc">나는 하나의 PA와 이야기합니다. AgentOS는 맥락과 일, 권한과 근거를 연결합니다. 그 관계 아래의 AI와 도구는 교체할 수 있습니다.</desc>
+<style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
+<rect width="420" height="656" fill="#fff"/>
+<text x="20" y="32.0" font-size="23" class="bold" text-anchor="start">하나의 비서, 내게 남는 맥락</text>
+<rect x="20" y="100" width="380" height="54" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="155.0" y="135" font-size="21" class="bold" text-anchor="end">나</text>
+<text x="200.0" y="135" font-size="25" class="blue" text-anchor="middle">⇄</text>
+<text x="235.0" y="135" font-size="21" class="bold" text-anchor="start">내 PA</text>
+<path d="M210.0 158 L210.0 176" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M206.0 171 L210.0 176 L214.0 171" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="20" y="184" width="380" height="364" rx="8" fill="#f2f7fc" stroke="#96b6d6"/>
+<text x="36" y="212.0" font-size="18" class="bold" text-anchor="start">Personal AgentOS · 내가 통제하는</text>
+<text x="36" y="237.2" font-size="18" class="bold" text-anchor="start">환경</text>
+<rect x="36" y="246" width="348" height="66" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="210.0" y="270" font-size="18" class="bold" text-anchor="middle">나에 대해 아는 것</text>
+<text x="210.0" y="297" font-size="15" class="muted" text-anchor="middle">기억 · 맥락</text>
+<path d="M210.0 312V326" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="36" y="326" width="348" height="66" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="210.0" y="350" font-size="18" class="bold" text-anchor="middle">지금 하고 있는 일</text>
+<text x="210.0" y="377" font-size="15" class="muted" text-anchor="middle">작업 · 권한</text>
+<path d="M210.0 392V406" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="36" y="406" width="348" height="66" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="210.0" y="430" font-size="18" class="bold" text-anchor="middle">실제로 일어난 일</text>
+<text x="210.0" y="457" font-size="15" class="muted" text-anchor="middle">결과 · 이벤트 · 근거</text>
+<text x="210.0" y="500" font-size="17" class="blue" text-anchor="middle">판단: 필요한 기능 선택, 결과 확인</text>
+<path d="M210.0 552 L210.0 572" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M206.0 567 L210.0 572 L214.0 567" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="210.0" y="600" font-size="18" class="muted" text-anchor="middle">교체 가능한 AI + 도구 / 서비스</text>
+<text x="210.0" y="629" font-size="22" class="bold" text-anchor="middle">AI A  →  AI B</text>
+</svg>

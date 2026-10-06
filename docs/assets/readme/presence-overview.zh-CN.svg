@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="434" viewBox="0 0 840 434" role="img" aria-labelledby="title desc">
+<title id="title">同一个助手，上下文留在你手中</title><desc id="desc">你与同一个 PA 对话。AgentOS 连接上下文、工作、权限和证据；这段关系持续保留，底层 AI 和工具可以替换。</desc>
+<style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
+<rect width="840" height="434" fill="#fff"/>
+<text x="20" y="32.0" font-size="23" class="bold" text-anchor="start">同一个助手，上下文留在你手中</text>
+<rect x="20" y="64" width="800" height="54" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="365.0" y="99" font-size="21" class="bold" text-anchor="end">你</text>
+<text x="410.0" y="99" font-size="25" class="blue" text-anchor="middle">⇄</text>
+<text x="445.0" y="99" font-size="21" class="bold" text-anchor="start">你的 PA</text>
+<path d="M420.0 122 L420.0 140" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M416.0 135 L420.0 140 L424.0 135" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="20" y="148" width="800" height="194" rx="8" fill="#f2f7fc" stroke="#96b6d6"/>
+<text x="36" y="176.0" font-size="18" class="bold" text-anchor="start">Personal AgentOS · 由你掌控的环境</text>
+<rect x="36" y="196" width="248" height="66" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="160.0" y="220" font-size="18" class="bold" text-anchor="middle">关于你的了解</text>
+<text x="160.0" y="247" font-size="15" class="muted" text-anchor="middle">记忆 · 上下文</text>
+<path d="M284 229H296" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="296" y="196" width="248" height="66" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="420.0" y="220" font-size="18" class="bold" text-anchor="middle">正在处理的事</text>
+<text x="420.0" y="247" font-size="15" class="muted" text-anchor="middle">工作 · 权限</text>
+<path d="M544 229H556" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="556" y="196" width="248" height="66" rx="5" fill="#fff" stroke="#ccd8e6"/>
+<text x="680.0" y="220" font-size="18" class="bold" text-anchor="middle">实际发生的事</text>
+<text x="680.0" y="247" font-size="15" class="muted" text-anchor="middle">成果 · 事件 · 证据</text>
+<text x="420.0" y="318" font-size="17" class="blue" text-anchor="middle">判断：选择所需能力，检查结果</text>
+<path d="M420.0 346 L420.0 366" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M416.0 361 L420.0 366 L424.0 361" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="420.0" y="394" font-size="18" class="muted" text-anchor="middle">可替换的 AI + 工具 / 服务</text>
+<text x="420.0" y="423" font-size="22" class="bold" text-anchor="middle">AI A  →  AI B</text>
+</svg>

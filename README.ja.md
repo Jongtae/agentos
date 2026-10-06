@@ -5,165 +5,83 @@
 <!-- readme-parity:v1 -->
 <!-- readme-section:hero -->
 
-## 自分の手元に残る、個人のための AI 環境。
+## 私たちが求めていた、個人のためのアシスタント
 
-**ひとりのアシスタント。交換可能な AI。自分で管理する記憶・コンテキスト・ツール・権限。**
+昨日の話の続きをして、まだまとまっていない考えも気軽に話し、やりかけの仕事を一緒に進めたい。そのたびに自分のことを最初から説明しなくていい。そして、自分についての記憶を安心して任せられる環境で使いたい。
 
-ローカルファースト（local-first）はローカル限定（local-only）ではありません。Personal AgentOS はローカルまたはホスト型モデルを使え、ホスト型モデルでは許可されたコンテキストがその提供者へ送られます。
+**Personal AgentOS は、自分でインストールし、管理できる環境に、そんな個人のためのアシスタント（PA）を作ろうとするプロジェクトです。**
 
-<!-- readme-section:concept -->
+アシスタントは質問に答え、コンピューターエージェントは指示を実行します。個人のためのエージェントなら、会話や仕事が変わり、AI が入れ替わっても、一緒に続けられるはずです。この継続性を **Presence** と呼んでいます。
 
-## ひとことで言うと
+<!-- readme-section:ownership -->
 
-> 내가 설치하고 통제하는 개인 AI 환경에서, 좋은 기본 기능으로 실제 일을 끝내고, 더 좋은 에이전트를 앱처럼 설치·교체해도 내 기억과 결과는 나에게 남는다.
->
-> *自分でインストールして管理する個人 AI 環境で、よくできた基本機能が実際の仕事を終わらせ、より良いエージェントをアプリのように入れ替えても、自分の記憶と成果は自分の手元に残る。*
+## 自分のアシスタントを、自分の環境に
 
-作者の言葉を韓国語の原文のまま引用しています。このプロジェクトがなぜあるのか、そしてコンセプトを定める文書は 1 ページにまとめています: [VISION.md](VISION.md)（英語）
+日常をよく知るアシスタントほど、その記憶を誰が持ち、できることを誰が決めるかが大切になります。築いた関係が、特定の会社やモデル、一度の会話だけに縛られてほしくありません。
 
-<!-- readme-section:interaction-model -->
+AgentOS は、記憶、進めている仕事、与えた権限を自分の環境に保持します。どの AI を使い、どの情報を渡し、どこまでアクセスを認めるかを自分で決めます。より良い AI が登場したら、最初からやり直すのではなく、自分のアシスタントができることが増えていく。そのための仕組みです。
 
-## アシスタントから personal agent environment へ
+ローカルファースト（local-first）はローカル限定（local-only）ではありません。ローカルモデルと外部のモデルを選べます。外部のモデルを使う場合、依頼に使う文脈はその提供者へ送信されます。
 
-<picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/interaction-model.ja.narrow.svg">
-  <img src="docs/assets/readme/interaction-model.ja.svg" alt="説明用の比較: 質問に答える Assistant、命令を実行する Computer agent、AI が変わっても文脈と作業を維持する Personal AgentOS">
-</picture>
+<!-- readme-section:presence -->
 
-違いは、AI が株価を検索できるか、**カートに追加**できるかではありません。アシスタントはすでに質問に答え、computer-use agent は命令を実行できます。Personal AgentOS は、**継続する関係、owner context、authority、work state** を AI provider の外に置き、owner が管理する環境に保持します。
+## 続けていくための仕組み
 
-| Interaction model | Owner がすること | 主にシステムに残るもの |
-| --- | --- | --- |
-| **Assistant — answers** | “NVIDIA の現在価格は？”のように質問する | 現在の会話と回答 |
-| **Computer agent — acts** | “このヘッドホンを Amazon のカートに入れて”のように命令する | task、browser/tool state、action/handoff |
-| **Personal AgentOS — stays with you** | “コーヒーがもう少ない。”→後で“前と同じものを買っておいて。”のように時間をまたいで話す | 特定 AI から独立して続く Memory、Context、Work、Authority、Evidence |
+Presence には、長い会話履歴以上のものが必要です。自分について知っていること、今の状況、進めている仕事、許可した範囲、実際に起きたことを結び付ける必要があります。
 
-NASDAQ/Amazon は **interaction model の説明例**であり、そのサービスが現在 shipped integration であるという主張ではありません。
-
-### Presence は話し方ではなく architecture です
-
-Owner は変化する model・tool・workflow と個別に会話せず、一つの **PA** と話します。
+AgentOS は、これらを共通の概念と関係で表します。この構造が **オントロジー**です。一つの仕事に、その文脈、権限、成果、根拠を結び付け、新しい出来事や訂正を次の判断に生かせるようにします。そうすることで、AI が入れ替わったり仕事が中断したりしても、それまでに何を知り、どこから続ければよいかを残せます。
 
 <picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence.ja.narrow.svg">
-  <img src="docs/assets/readme/presence.ja.svg" alt="Presence の構造: 所有者は PA と話し、AgentOS が Memory、Context、Work、Authority、Evidence、Events を保持し、判断層が交換可能な AI とツールを調整する。同じ PA と所有者の状態の下で AI A を AI B に交換">
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.ja.narrow.svg">
+  <img src="docs/assets/readme/presence-overview.ja.svg" alt="あなたは一つの PA と話します。AgentOS が記憶と文脈、仕事と権限、成果と根拠を結び付けて保持します。その下で判断層が交換可能な AI とツールを調整し、あなたの状態はあなたの環境に残ります。">
 </picture>
 
-そのため、未完成な事実をそのまま話し、数時間後に続きを話し、必要になった時だけ写真や位置を共有し、外部 action に account/computer authority が必要な瞬間だけ handoff できます。日常の intent を tool・model・workflow・memory command に翻訳する必要はありません。
+AgentOS は判断層を通じて必要な AI とツールを選び、その結果を確かめます。あなたは PA と話し、AgentOS が会話の下でこの構造を支えます。**同じ PA。変わる AI。**
 
-**代表的な対話 — 製品の方向性。** 所有者が提供した対話パターンをまとめた説明用の例であり、一回の観測済み実行を再現したものではありません。
+<!-- readme-section:conversation -->
 
-<picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/continuing-conversation.ja.narrow.svg">
-  <img src="docs/assets/readme/continuing-conversation.ja.svg" alt="所有者と PA の代表的な対話：コーヒーの話から、数時間後の移動ルートの質問、以前の選択、アカウント権限の引き継ぎ、元の Work の再開へ。製品の方向性を再構成した例であり、実観測や提供済みの購入機能ではない。">
-</picture>
+## 短い言葉でも、話は続く
 
-<details>
-<summary>代表的な対話をテキストで読む</summary>
+> 「コーヒー、もうなくなりそう。」<br>
+> 数時間後：「今から出るんだけど、途中で買えるところあるかな？」<br>
+> その後：「時間ないな。前と同じものを買っておいて。」
 
-この例の条件：前回のコーヒーの選択は残っており、移動ルートとアカウント権限は未取得。
+目指す姿はシンプルです。PA が何を買う話なのか、「前と同じもの」が何なのかを引き継いで理解し、関連する文脈を使い、足りない情報や権限は必要になった時に尋ねます。自分は話を続ければよく、作業の手順を組み立てる必要はありません。
 
-**はじめに**
-
-> **所有者:** 「コーヒーがもう少ない。」
->
-> **PA:** 「次の買い物ではコーヒーも必要ですね。」
-
-**数時間後**
-
-> **所有者:** 「今から出る。途中で買えるところある？」
->
-> **PA:** 「コーヒーですね。移動ルートを教えてもらえれば、立ち寄りやすい店を探します。」
-
-**その後**
-
-> **所有者:** 「時間ないな。前と同じものを買っておいて。」
->
-> **PA:** 「前回のコーヒーですね。注文の準備には購入用のアカウントが必要です。ここで接続してください。」
-
-**アカウント接続後**
-
-> **所有者:** 「接続したよ。」
->
-> **PA:** 「そのコーヒーの注文準備を続けます。支払い前には確認をお願いします。」
-
-</details>
-
-PA は以前のコーヒーの話を引き継ぎ、不明な移動ルートや不足するアカウント権限だけを必要な時に尋ね、接続後に元の Work を再開します。アカウント接続は支払いの承認ではありません。所有者が記憶ツール・モデル・ブラウザー・ワークフローを選ぶ必要はなく、AgentOS が会話の下で利用可能な文脈と機能をつなぎます。この例は製品の方向性であり、現在の実装証拠は以下で別に分類します。
-
-**Same PA. Different AI.** 下の model が変わっても、owner が関係を最初から作り直さないことが目標です。
-
-<!-- readme-section:working-software -->
-
-## コンセプトだけのプロジェクトではありません
-
-現在のリポジトリには公開リリース以降の実装があります。交換可能な Main AI と Judgment AI、永続 Memory、Telegram 対話、文脈に応じた権限ハンドオフ、検索・ブラウザー仲介、準備処理、Evidence に基づく回復を、マージ済みコードと deterministic / fixture 検証で確認しています。この証拠だけで、ここで説明する体験全体が実際の外部サービスで観測されたとは言えません。
-
-証拠の種類は区別します。
-
-- **公開リリース:** release manifest に installed-smoke と synthetic journey の証拠があります。現在の `main` 全体を含むものではありません。
-- **現在の `main`:** マージ済みコードと deterministic / fixture 証拠が、新しい Secretary、Presence、Decision、execution 契約を支えます。契約やテストだけで実サービスの動作を主張しません。
-- **所有者パイロットの証拠:** 正確な Telegram / デスクトップ観測を選定し、個人情報を伏せ、revision / evidence 記録と結び付けるまで、公開の owner-live 主張は保留します。
-- **製品の方向性:** 上の代表的な対話や買い物・予約などは、実装と証拠がより強い主張を支えるまでは製品の方向性です。
-
-詳しくは [product status](docs/product-status.en.md)、[release manifest](docs/release-manifest.json)、[documentation map](docs/README.md) を参照してください。
-
-### 公開リリースの検証を説明する図
-
-以下の二つの場面は、v1 の synthetic カレンダー・ファイル検証を再構成して短くした説明図であり、実アカウントのスクリーンショットではありません。返答は韓国語から翻訳しています。公開リリースにはローカルの installed-smoke 証拠がありますが、release manifest は Google / Telegram の実運用を主張していません。
-
-![再構成した v1 synthetic 検証: 予定の下書き承認と、再起動後の保存メモ検索](docs/assets/readme/hero.ja.png)
+*製品の方向性を説明する例であり、実際に観測した動作や提供済みの購入機能ではありません。*
 
 <!-- readme-section:try-today -->
 
-## インストール
+## まずは試してみる
+
+macOS で [Homebrew](https://brew.sh) を使う場合：
 
 ```sh
 brew install jongtae/agentos/agentos
 agentos start
 ```
 
-次のように表示されます。
+1. ブラウザーで [http://127.0.0.1:8787](http://127.0.0.1:8787/) が開いたら、**바로 시작하기**（今すぐ始める）を選びます。
+2. 自分のモデルを接続し、接続テストを完了します。ツール呼び出しに対応したローカルの Ollama モデル、または自分の API 利用権限で OpenAI、OpenAI 互換サービス、Anthropic を使えます。設定画面は現在韓国語です。
+3. **「今週、何に集中するとよさそうか、一緒に考えてほしい。」**と話しかけてみてください。
 
-```text
-AgentOS: http://127.0.0.1:8787/
-초기 설정 링크: /Users/you/.local/share/agentos/private/setup-link.txt (개인 파일)
-```
+Python は Homebrew が一緒にインストールします。モデルの利用環境は別途用意してください。モデルの設定、ファイル作業、Telegram、最新ソースからの実行手順は [QUICKSTART](QUICKSTART.md) にあります。
 
-ブラウザがそのアドレスで開きます。**바로 시작하기**（今すぐ始める）を押し、モデルを接続すれば、もう話しかけられます。画面は現在韓国語で、依頼は韓国語か英語で理解されます。
-
-**Homebrew は最新の公開リリース `v1.1.0`（2026-09-23）をインストールします。** [release manifest](docs/release-manifest.json) に、このビルドの内容と制限を記録しています。予定作成は到達不可（J4）、調査は部分対応（J5）です。以下の synthetic 場面は、すべての流れがこのビルドで実行できるという約束ではありません。 その後 `main` にマージされた作業はそのビルドにないため、次のリリースまで Homebrew ビルドは `main` より遅れています。最新のコードを使うにはソースチェックアウトから実行してください（`git clone https://github.com/Jongtae/agentos.git` のあと Python 3.12 以上で `python3 -m pip install -e '.[mcp-host]'`）。すべての手順は [QUICKSTART](QUICKSTART.md) にあります。
-
-<!-- capability:current-supported-slice -->
-<!-- readme-section:scenes-today -->
-
-## 次はこんなことも
-
-![Synthetic 初回ユーザー検証: ファイル、メール、予定、Memory、調査、再起動後の再利用](docs/assets/readme/scenes.ja.png)
-
-下の依頼の流れはすべて、このプロジェクトの自動化された初回ユーザー検証で、実際のアカウントではなく、ローカルフォルダと模擬のメール・予定・Web サービスで最後まで実行されました。文言は今日実際にルーティングされる文言です。
-
-- **ファイル。** *Summarize “Launch review” and save it as “Launch notes”.* 許可したフォルダを読み、自分が選んだ作業スペースのフォルダに新しいメモを書き、元のファイルには触れません。
-- **メール。** *Find anything about the budget in my mail.* 接続したメールボックスだけを検索し、見つけたものを示します。
-- **予定。** *Schedule a dentist appointment tomorrow at 3.* 正確な下書きを示し、「approve」と言った後にだけ予定を作成します。「make it 4pm」「cancel」も同じ下書きで通ります。
-- **公開リリース の記憶。** *Remember that I have a peanut allergy.* 公開ビルドには永続 Memory と candidate review があります。**現在の `main` はさらに進んでいます:** owner 自身の AI は保存可能な非 secret の事実を直接記憶し、何を記憶したかを伝え、期限付きの undo を提供します。第三者/委任 writer は引き続き candidate/approval 経路を使います。
-- **調査。** *Look up these two products and compare them.* 検索して公開ページを最大3つ読み、書かれていること、未確認のこと、リンクを分けて返します。
-
-そのあとアプリを再起動して、こう言ってみてください: *Find “Launch notes” in my saved results.* 保存した結果、許可したフォルダ、記憶、Telegram のペアリングは再起動後も残ります。
-
-<!-- readme-section:settings -->
-
-## 必要な設定
-
-- **モデル。** ローカルの Ollama サーバー、OpenAI 互換エンドポイント、Anthropic のいずれかを、自分のアクセス権で接続します。ファイルの場面にはこの直接接続のどれかが必要です。
-- **フォルダ2つ。** **내 에이전트 관리 → 내 자료**（マイエージェント管理 → マイ資料）で、読んでよい参照フォルダを1つ、書いてよい作業スペースフォルダを1つ。その外には触れません。ホスト型モデルなら、ファイルの場面の前にドキュメント共有を1回承認します。
-- **メールと予定、任意。** 自分で作成した Google Cloud OAuth クライアントで自分の Google アカウントに接続し、それぞれ1回の設定コマンド（`agentos gmail-config`、`agentos calendar-config`）を実行してから、読み取りと書き込みを別々に接続します。正確な手順は QUICKSTART にあります。
-- **Telegram、任意。** BotFather で作った自分のボットトークンを設定に貼り、ペアリングリンクを開きます。ペアリングした自分のアカウントだけが話しかけられます。
-
-これで全部です。
+**現在の段階：** Homebrew で入るのは以前のプレビュー版 **v1.1.0**（2026-09-23）です。その後の Presence 実装は `main` にあります。このリリースでは予定の作成は利用できず、調査は一部対応です。詳しい範囲は[リリース内容](docs/release-manifest.json)を参照してください。[現在の状態](docs/product-status.en.md)では、利用できるもの、検証済みのもの、今後の目標を分けて説明しています。
 
 <!-- readme-section:more -->
 
-## さらに詳しく
+## 考え方をもっと知る
 
-[今できること、まだ摩擦があること](docs/product-status.en.md)（英語） · [この先に向かう場所](docs/product-status.en.md#where-this-is-going) · [何が違うのか](docs/product-status.en.md#why-this-is-different) · [内部の仕組み](docs/product-status.en.md#under-the-hood-briefly) · ライセンス [AGPL-3.0-only](LICENSE) と[商標に関する注記](TRADEMARKS.md) · [どう作られているか](AGENTS.md) · [謝辞と参考資料](docs/acknowledgements.en.md)（英語）
+- [このプロジェクトを作る理由](VISION.md) — コンピューターとどのような関係を築きたいのか。
+- [構造とオントロジー](docs/personal-agentos-architecture.en.md) · [Presence](docs/presence-experience-contract.en.md) — 個人の状態、仕事、自分で管理する仕組みが、一つの続いていくアシスタントをどう支えるか。
+- [研究と参考資料](docs/acknowledgements.en.md) — 個人のエージェント、記憶、ユーザーモデル、情報の出所について、設計の参考にした研究や取り組み。
+- [ドキュメント案内](docs/README.md) · [開発への参加](CONTRIBUTING.md) — 現在の仕様と実装を調べ、一緒に改善するための入口。内部文書の基準言語は英語です。
+
+<!-- readme-section:license -->
+
+## オープンソース
+
+実際に動かし、問い直し、一緒に改善できる試みです。最終的な答えでなくても、意味のある始まりにはできると考えています。
+
+コードのライセンスは [AGPL-3.0-only](LICENSE) です。Personal AgentOS の名前とロゴには[商標に関する注記](TRADEMARKS.md)が適用されます。参考にした外部の取り組みは[謝辞と参考資料](docs/acknowledgements.en.md)に記載しています。

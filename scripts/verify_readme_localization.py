@@ -10,6 +10,7 @@ requiring literal translations.
 from __future__ import annotations
 
 import argparse
+from html.parser import HTMLParser
 import json
 import os
 from pathlib import Path
@@ -33,10 +34,12 @@ LOCALIZED_READMES = READMES[1:]
 # README.md and must then appear in every public locale in the same order.
 CORE_SECTION_IDS = (
     "hero",
+    "ownership",
+    "presence",
+    "conversation",
     "try-today",
-    "scenes-today",
-    "settings",
     "more",
+    "license",
 )
 
 # The evidence/boundary page behind the README. English is canonical and
@@ -101,26 +104,34 @@ PRODUCT_DIRECTION_DISCLAIMERS = {
 
 STATUS_ROW_EVIDENCE_TOKEN = "Synthetic **pass-with-friction**"
 
-# The scenes shown as available today must say, visibly and in the same
-# section, which evidence class backs them: stand-ins, not live accounts.
-SCENES_EVIDENCE_LABELS = {
-    "README.md": "stand-in mail, calendar and web services rather than live accounts",
-    "README.ko.md": "실제 계정 대신 로컬 폴더와 모의 메일·일정·웹 서비스로",
-    "README.ja.md": "実際のアカウントではなく、ローカルフォルダと模擬のメール・予定・Web サービスで",
-    "README.zh-CN.md": "用本地文件夹和模拟的邮件、日程、网页服务，而不是真实账户",
+# This scene explains the intended experience; it cannot silently become
+# a shipped integration claim when the README narrative changes.
+README_DIRECTION_DISCLAIMERS = {
+    "README.md": "Illustrative product direction, not an observed live run or a shipped shopping integration.",
+    "README.ko.md": "제품 방향을 설명하는 예시이며, 실제 관찰 실행이나 배포된 구매 기능을 뜻하지 않습니다.",
+    "README.ja.md": "製品の方向性を説明する例であり、実際に観測した動作や提供済みの購入機能ではありません。",
+    "README.zh-CN.md": "这是产品方向示例，并非实际观测的运行，也不代表已发布的购物功能。",
+}
+
+README_RELEASE_BOUNDARIES = {
+    "README.md": "Homebrew installs **v{version}** ({date}), an earlier preview. Newer Presence work is on `main`.",
+    "README.ko.md": "Homebrew는 이전 프리뷰인 **v{version}**({date})을 설치합니다. 이후의 Presence 구현은 `main`에 있습니다.",
+    "README.ja.md": "Homebrew で入るのは以前のプレビュー版 **v{version}**（{date}）です。その後の Presence 実装は `main` にあります。",
+    "README.zh-CN.md": "Homebrew 安装的是较早的预览版 **v{version}**（{date}），后续的 Presence 实现在 `main` 中。",
 }
 
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def visible_prose(section: str) -> str:
-    """Drop image alt text and HTML comments so a required sentence must be
-    readable on the page, not hidden in markup."""
-    return COMMENT_RE.sub("", IMAGE_RE.sub("", section))
+    """Required copy must be readable, not an image alt or HTML attribute."""
+    return HTML_TAG_RE.sub("", IMAGE_RE.sub("", COMMENT_RE.sub("", section)))
 
-# The hero may not promise local-only processing; every locale keeps the
-# local-first != local-only sentence within the first screen.
+
+# Keep the established localized wording, now beside the ownership explanation
+# rather than forcing implementation caveats into the opening thesis.
 HERO_LOCAL_FIRST_LABELS = {
     "README.md": "Local-first is not local-only",
     "README.ko.md": "로컬 우선(local-first)은 로컬 전용(local-only)이 아닙니다",
@@ -128,20 +139,57 @@ HERO_LOCAL_FIRST_LABELS = {
     "README.zh-CN.md": "本地优先（local-first）不等于只在本地（local-only）",
 }
 
-# The hero and scene panels carry copy, so each README references exactly
-# its own locale's pair and no other locale's.
-LOCALE_HERO_VISUALS = {
-    "README.md": "docs/assets/readme/hero.en.png",
-    "README.ko.md": "docs/assets/readme/hero.ko.png",
-    "README.ja.md": "docs/assets/readme/hero.ja.png",
-    "README.zh-CN.md": "docs/assets/readme/hero.zh-CN.png",
+LOCALE_PRESENCE_VISUALS = {
+    "README.md": "docs/assets/readme/presence-overview.en.svg",
+    "README.ko.md": "docs/assets/readme/presence-overview.ko.svg",
+    "README.ja.md": "docs/assets/readme/presence-overview.ja.svg",
+    "README.zh-CN.md": "docs/assets/readme/presence-overview.zh-CN.svg",
 }
-LOCALE_SCENE_VISUALS = {
-    "README.md": "docs/assets/readme/scenes.en.png",
-    "README.ko.md": "docs/assets/readme/scenes.ko.png",
-    "README.ja.md": "docs/assets/readme/scenes.ja.png",
-    "README.zh-CN.md": "docs/assets/readme/scenes.zh-CN.png",
-}
+
+
+class PictureParser(HTMLParser):
+    """Read actual picture elements, so a path in a comment is insufficient."""
+
+    def __init__(self):
+        super().__init__()
+        self.pictures: list[list[tuple[str, dict[str, str | None]]]] = []
+        self.current: list[tuple[str, dict[str, str | None]]] | None = None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "picture":
+            self.current = []
+            self.pictures.append(self.current)
+        elif self.current is not None and tag in ("source", "img"):
+            self.current.append((tag, dict(attrs)))
+
+    def handle_endtag(self, tag):
+        if tag == "picture":
+            self.current = None
+
+
+def validate_presence_picture(name: str, section: str, root: Path) -> list[str]:
+    errors: list[str] = []
+    desktop = LOCALE_PRESENCE_VISUALS[name]
+    narrow = desktop.removesuffix(".svg") + ".narrow.svg"
+    parser = PictureParser()
+    parser.feed(section)
+    if len(parser.pictures) != 1:
+        return [f"{name}: presence must contain exactly one localized picture"]
+    entries = parser.pictures[0]
+    images = [attrs for tag, attrs in entries if tag == "img"]
+    sources = [attrs for tag, attrs in entries if tag == "source"]
+    if len(images) != 1 or images[0].get("src") != desktop:
+        errors.append(f"{name}: presence picture must use localized img src {desktop!r}")
+    if len(images) == 1 and not (images[0].get("alt") or "").strip():
+        errors.append(f"{name}: presence picture needs meaningful alt text")
+    if (len(sources) != 1 or sources[0].get("srcset") != narrow
+            or sources[0].get("media") != "(max-width: 600px)"):
+        errors.append(f"{name}: presence picture needs narrow source {narrow!r} at 600px")
+    for visual in (desktop, narrow):
+        if not (root / visual).is_file():
+            errors.append(f"{name}: missing presence asset {visual!r}")
+    return errors
+
 
 STATUS_EVIDENCE_BOUNDARIES = {
     "README.md": "**live provider operation was not run**",
@@ -151,13 +199,8 @@ STATUS_EVIDENCE_BOUNDARIES = {
 }
 
 STATIC_SHARED_FACTS = (
-    "<!-- readme-parity:v1 -->",
-    "brew install jongtae/agentos/agentos",
-    "git clone https://github.com/Jongtae/agentos.git",
-    "AgentOS: http://127.0.0.1:8787/",
-    "AGPL-3.0-only",
-    "TRADEMARKS.md",
     "[QUICKSTART](QUICKSTART.md)",
+    "docs/release-manifest.json",
 )
 
 # Facts the status page must carry so the README can stay short without
@@ -175,14 +218,15 @@ def version_key(value: str) -> tuple[int, ...]:
     return tuple(int(part) for part in value.split("."))
 
 
-def newest_published_version(root: Path = ROOT) -> str:
+def newest_published_release(root: Path = ROOT) -> dict[str, str]:
     manifest = json.loads(
         (root / "docs" / "release-manifest.json").read_text(encoding="utf-8")
     )
-    published = [row["version"] for row in manifest["published"]]
+    published = manifest["published"]
     if not published:
         raise ValueError("release manifest records no published release")
-    return max(published, key=version_key)
+    newest = max(published, key=lambda row: version_key(row["version"]))
+    return {"version": newest["version"], "tag_date": newest["tag_date"]}
 
 
 def section_markers(body: str) -> tuple[str, ...]:
@@ -271,41 +315,24 @@ def validate_body(
     name: str,
     body: str,
     canonical_sections: tuple[str, ...],
-    release_version: str,
+    release: dict[str, str],
+    root: Path,
 ) -> list[str]:
     errors: list[str] = []
+    release_version = release["version"]
 
-    for token in NAV_LINKS + STATIC_SHARED_FACTS + (
-        CAPABILITY_MARKERS[1],
-        LOCALE_HERO_VISUALS[name],
-        LOCALE_SCENE_VISUALS[name],
-        STATUS_DOC_LINKS[name],
-    ):
-        count = body.count(token)
-        if count < 1:
+    if "<!-- readme-parity:v1 -->" not in body:
+        errors.append(f"{name}: missing readme-parity:v1 marker")
+    for token in NAV_LINKS + STATIC_SHARED_FACTS + (STATUS_DOC_LINKS[name],):
+        if token not in COMMENT_RE.sub("", body):
             errors.append(f"{name}: expected {token!r}, found none")
-    for token in (CAPABILITY_MARKERS[1], LOCALE_HERO_VISUALS[name], LOCALE_SCENE_VISUALS[name]):
-        if body.count(token) != 1:
-            errors.append(f"{name}: expected exactly one {token!r}, found {body.count(token)}")
-    if CAPABILITY_MARKERS[0] in body:
-        errors.append(
-            f"{name}: the illustrative product-direction scene belongs on the status page, not the README"
-        )
     if body.count(f"v{release_version}") != 1:
         errors.append(
             f"{name}: expected exactly one 'v{release_version}' next to the brew command, "
             f"found {body.count(f'v{release_version}')}"
         )
 
-    for table in (LOCALE_HERO_VISUALS, LOCALE_SCENE_VISUALS):
-        for other_name, visual in table.items():
-            if other_name != name and visual in body:
-                errors.append(
-                    f"{name}: references another locale's scene panel {visual!r}"
-                )
-
     errors.extend(validate_heading_marker_discipline(name, body))
-
     actual_sections = section_markers(body)
     if len(actual_sections) != len(set(actual_sections)):
         errors.append(f"{name}: duplicate readme-section marker in {actual_sections!r}")
@@ -315,26 +342,35 @@ def validate_body(
             f"expected {canonical_sections!r}, found {actual_sections!r}"
         )
 
-    hero = section_slice(body, "hero", next_section_id(canonical_sections, "hero"))
-    if HERO_LOCAL_FIRST_LABELS[name] not in visible_prose(hero):
-        errors.append(
-            f"{name}: hero is missing the visible local-first != local-only sentence"
-        )
+    def section(section_id: str) -> str:
+        return section_slice(body, section_id, next_section_id(canonical_sections, section_id))
 
-    scenes = section_slice(
-        body, "scenes-today", next_section_id(canonical_sections, "scenes-today")
+    if HERO_LOCAL_FIRST_LABELS[name] not in visible_prose(section("ownership")):
+        errors.append(
+            f"{name}: ownership is missing the visible local-first != local-only sentence"
+        )
+    if README_DIRECTION_DISCLAIMERS[name] not in visible_prose(section("conversation")):
+        errors.append(
+            f"{name}: conversation is missing its visible illustrative product-direction boundary"
+        )
+    errors.extend(validate_presence_picture(name, section("presence"), root))
+
+    installation = visible_prose(section("try-today"))
+    for token in ("brew install jongtae/agentos/agentos", "http://127.0.0.1:8787/"):
+        if token not in installation:
+            errors.append(f"{name}: try-today is missing {token!r}")
+    boundary = README_RELEASE_BOUNDARIES[name].format(
+        version=release_version, date=release["tag_date"]
     )
-    scenes_marker = body.find("<!-- readme-section:scenes-today -->")
-    if scenes_marker >= 0 and CAPABILITY_MARKERS[1] not in body[:scenes_marker]:
+    if boundary not in installation:
         errors.append(
-            f"{name}: the current-supported-slice marker must precede the scenes-today section"
+            f"{name}: try-today is missing its visible published-release/main boundary "
+            f"for v{release_version} ({release['tag_date']})"
         )
-    if SCENES_EVIDENCE_LABELS[name] not in visible_prose(scenes):
-        errors.append(
-            f"{name}: scenes-today is missing its visible evidence-class sentence "
-            f"({SCENES_EVIDENCE_LABELS[name]!r})"
-        )
-
+    license_section = visible_prose(section("license"))
+    for token in ("AGPL-3.0-only", "TRADEMARKS.md"):
+        if token not in license_section:
+            errors.append(f"{name}: license is missing {token!r}")
     return errors
 
 
@@ -411,14 +447,19 @@ def validate_readmes(root: Path = ROOT) -> list[str]:
             + ", ".join(missing_core)
         )
 
+    core_order = tuple(section for section in canonical_sections if section in CORE_SECTION_IDS)
+    if not missing_core and core_order != CORE_SECTION_IDS:
+        errors.append("README.md: core section order must follow thesis, ownership, presence, conversation, installation, references, license")
+
     try:
-        release_version = newest_published_version(root)
+        release = newest_published_release(root)
+        release_version = release["version"]
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         errors.append(f"cannot determine newest published release: {exc}")
         return errors
 
     for name, body in bodies.items():
-        errors.extend(validate_body(name, body, canonical_sections, release_version))
+        errors.extend(validate_body(name, body, canonical_sections, release, root))
 
     canonical_rows = None
     for path, name in STATUS_DOCS.items():

@@ -22,7 +22,7 @@ Personal AgentOS keeps current contracts, delivery selection, research, evidence
 - AI judgment and execution: [Decision Layer](decision-layer.en.md), [Assistant Execution Contract](assistant-execution-contract.en.md).
 - Repository delivery: [Development Constitution](development-constitution.en.md), [Development Governance](development-governance.en.md), [Goal Execution Contract](goal-execution-contract.en.md), [Incremental Delivery](incremental-delivery.en.md).
 
-Some current contracts retain dated amendments for traceability. Read their current/superseding clauses before older preserved text. Consolidating amendment-heavy contracts into clean current specifications is a separate documentation change; this map does not alter product semantics.
+Core current contracts now lead with a current-rule/precedence section. Superseded amendment chains and dated diagnostic evidence that can be separated safely are preserved under [archive/history/contract-amendments/](archive/history/contract-amendments/) rather than requiring readers to replay them inline. Mixed amendments stay canonical when they still contain live rules. This organization does not alter product semantics.
 
 ## Planning and status
 

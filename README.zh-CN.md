@@ -23,6 +23,8 @@
 
 这是作者的原话，保留韩语原文。这个项目为什么存在，以及定义这个理念的文档，都汇集在一页上：[VISION.md](VISION.md)（英文）
 
+<!-- readme-section:working-software -->
+
 ## 不只是一个概念
 
 当前 `main` 已经包含了远多于公开版本 v1.1.0 的实现。项目正在把可替换的 Main AI / Judgment AI、持久 Memory、Telegram 对话、按上下文交接权限、搜索/浏览器中介、准备任务以及基于 Evidence 的恢复，组合成一个持续的个人助手体验。

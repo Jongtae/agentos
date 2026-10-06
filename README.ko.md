@@ -25,6 +25,8 @@
 
 ## 어시스턴트에서 개인 에이전트 환경으로
 
+![Assistant, Computer Agent, Personal AgentOS의 상호작용 모델 비교](docs/assets/readme/interaction-model.ko.svg)
+
 차이는 AI가 주가를 검색하거나 **장바구니에 담기**를 할 수 있느냐가 아닙니다. 어시스턴트는 이미 질문에 답하고, computer-use agent는 명령을 실행할 수 있습니다. Personal AgentOS는 **지속되는 관계, 소유자의 맥락, 권한과 작업 상태**를 AI 제공자 밖으로 꺼내 소유자가 통제하는 환경에 둡니다.
 
 | 상호작용 모델 | 사용자가 하는 일 | 시스템에 주로 남는 것 |

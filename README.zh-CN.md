@@ -46,7 +46,7 @@ Owner 不需要分别和不断变化的 model、tool、workflow 对话，而是�
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence.zh-CN.narrow.svg">
-  <img src="docs/assets/readme/presence.zh-CN.svg" alt="Presence 架构：所有者与 PA 对话；AgentOS 持有 Memory、Context、Work、Authority、Evidence、Events；判断层编排可替换的 AI 与工具">
+  <img src="docs/assets/readme/presence.zh-CN.svg" alt="Presence 架构：所有者与 PA 对话；AgentOS 持有 Memory、Context、Work、Authority、Evidence、Events；判断层编排可替换的 AI 与工具；在同一个 PA 和所有者状态之下，将 AI A 替换为 AI B">
 </picture>
 
 因此，人可以只说一个不完整的生活事实，几小时后继续说；在需要时才发送照片或位置；只有真正的外部 action 需要 account/computer authority 时才 handoff。不必把日常 intent 翻译成 tool、model、workflow 或 memory command。
@@ -55,15 +55,41 @@ Owner 不需要分别和不断变化的 model、tool、workflow 对话，而是�
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/continuing-conversation.zh-CN.narrow.svg">
-  <img src="docs/assets/readme/continuing-conversation.zh-CN.svg" alt="跨越时间的说明对话：咖啡快没了，数小时后询问顺路购买地点，之后请求之前的选择。上下文与 Work 持续，需要时处理权限。产品方向，并非一次真实观测。">
+  <img src="docs/assets/readme/continuing-conversation.zh-CN.svg" alt="所有者与 PA 的代表性对话：从咖啡话题到数小时后的路线问题、先前选择、账户权限交接，再恢复原来的 Work。重构的产品方向示例，并非真实观测或已发布的购物功能。">
 </picture>
 
-> **早上：**“咖啡快没了。”  
-> **下午：**“今天工作可能会晚一点结束。”  
-> **晚上：**“我现在要走了，路上有地方可以买到吗？”  
-> **稍后：**“没时间了，就买上次那个吧。”
+<details>
+<summary>阅读代表性对话文本</summary>
 
-在这段普通对话下面，AgentOS 可以按需解析 prior context、calendar/time、location、search 和持续中的 Work，并且只在真正需要 authority 时进行 handoff。这段对话是为了说明而一般化、压缩的示例；当前 implementation evidence 会在下文单独分类。
+示例条件：保留了上次的咖啡选择，但尚不知道路线，也没有购物账户权限。
+
+**起初**
+
+> **所有者:** “咖啡快没了。”
+>
+> **PA:** “下次买东西时，也得补上咖啡。”
+
+**数小时后**
+
+> **所有者:** “我现在出门，顺路有地方可以买到吗？”
+>
+> **PA:** “是说咖啡吧？告诉我路线，我来找方便顺路停留的店。”
+
+**之后**
+
+> **所有者:** “没时间了，买上次那款就好。”
+>
+> **PA:** “上次那款咖啡。准备订单需要你的购物账户，请在这里连接。”
+
+**连接账户后**
+
+> **所有者:** “连接好了。”
+>
+> **PA:** “继续准备那款咖啡的订单，付款前会请你确认。”
+
+</details>
+
+PA 接续先前的咖啡话题，只在需要时询问尚缺的路线或账户权限，并在连接后继续原来的 Work。连接账户并不等于批准付款。所有者不用手动选择记忆工具、模型、浏览器或工作流；AgentOS 在对话之下连接可用的上下文和能力。这是产品方向，当前实现的证据在下文单独分类。
 
 **Same PA. Different AI.** 即使底层 model 改变，目标也是让 owner 不必从头重建关系。
 

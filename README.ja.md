@@ -46,7 +46,7 @@ Owner は変化する model・tool・workflow と個別に会話せず、一つ�
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence.ja.narrow.svg">
-  <img src="docs/assets/readme/presence.ja.svg" alt="Presence の構造: 所有者は PA と話し、AgentOS が Memory、Context、Work、Authority、Evidence、Events を保持し、判断層が交換可能な AI とツールを調整する">
+  <img src="docs/assets/readme/presence.ja.svg" alt="Presence の構造: 所有者は PA と話し、AgentOS が Memory、Context、Work、Authority、Evidence、Events を保持し、判断層が交換可能な AI とツールを調整する。同じ PA と所有者の状態の下で AI A を AI B に交換">
 </picture>
 
 そのため、未完成な事実をそのまま話し、数時間後に続きを話し、必要になった時だけ写真や位置を共有し、外部 action に account/computer authority が必要な瞬間だけ handoff できます。日常の intent を tool・model・workflow・memory command に翻訳する必要はありません。
@@ -55,15 +55,41 @@ Owner は変化する model・tool・workflow と個別に会話せず、一つ�
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/continuing-conversation.ja.narrow.svg">
-  <img src="docs/assets/readme/continuing-conversation.ja.svg" alt="時間をまたぐ説明用の会話: コーヒーが少ない、数時間後に立ち寄る場所を聞く、後で以前の選択を依頼する。文脈と Work が続き、必要な時に権限を解決する製品の方向性。一回の実観測ではない。">
+  <img src="docs/assets/readme/continuing-conversation.ja.svg" alt="所有者と PA の代表的な対話：コーヒーの話から、数時間後の移動ルートの質問、以前の選択、アカウント権限の引き継ぎ、元の Work の再開へ。製品の方向性を再構成した例であり、実観測や提供済みの購入機能ではない。">
 </picture>
 
-> **朝:** 「コーヒーがもう少ない。」  
-> **午後:** 「今日は仕事が少し遅くなりそう。」  
-> **夕方:** 「今から出る。途中で買えるところある？」  
-> **あとで:** 「時間ないな。前と同じものを買っておいて。」
+<details>
+<summary>代表的な対話をテキストで読む</summary>
 
-この普通の会話の下で AgentOS は prior context、calendar/time、location、search、継続中の Work を必要に応じて解決し、実際の action に authority が必要な時だけ handoff できます。この会話は説明用に一般化・短縮したもので、現在の implementation evidence は下で別に分類します。
+この例の条件：前回のコーヒーの選択は残っており、移動ルートとアカウント権限は未取得。
+
+**はじめに**
+
+> **所有者:** 「コーヒーがもう少ない。」
+>
+> **PA:** 「次の買い物ではコーヒーも必要ですね。」
+
+**数時間後**
+
+> **所有者:** 「今から出る。途中で買えるところある？」
+>
+> **PA:** 「コーヒーですね。移動ルートを教えてもらえれば、立ち寄りやすい店を探します。」
+
+**その後**
+
+> **所有者:** 「時間ないな。前と同じものを買っておいて。」
+>
+> **PA:** 「前回のコーヒーですね。注文の準備には購入用のアカウントが必要です。ここで接続してください。」
+
+**アカウント接続後**
+
+> **所有者:** 「接続したよ。」
+>
+> **PA:** 「そのコーヒーの注文準備を続けます。支払い前には確認をお願いします。」
+
+</details>
+
+PA は以前のコーヒーの話を引き継ぎ、不明な移動ルートや不足するアカウント権限だけを必要な時に尋ね、接続後に元の Work を再開します。アカウント接続は支払いの承認ではありません。所有者が記憶ツール・モデル・ブラウザー・ワークフローを選ぶ必要はなく、AgentOS が会話の下で利用可能な文脈と機能をつなぎます。この例は製品の方向性であり、現在の実装証拠は以下で別に分類します。
 
 **Same PA. Different AI.** 下の model が変わっても、owner が関係を最初から作り直さないことが目標です。
 

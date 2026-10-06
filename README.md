@@ -46,7 +46,7 @@ The owner talks to one **PA**, not to a changing set of models, tools and workfl
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence.en.narrow.svg">
-  <img src="docs/assets/readme/presence.en.svg" alt="Presence architecture: Owner talks to PA; Personal AgentOS owns Memory, Context, Work, Authority, Evidence and Events; Judgment orchestrates replaceable AI and tools">
+  <img src="docs/assets/readme/presence.en.svg" alt="Presence architecture: Owner talks to PA; Personal AgentOS owns Memory, Context, Work, Authority, Evidence and Events; Judgment orchestrates replaceable AI and tools; AI A can be replaced by AI B beneath the same PA and owner-controlled state">
 </picture>
 
 That changes the conversation. A person can share an incomplete fact, continue it hours later, send a photo or location when it becomes relevant, and grant account/computer access only at the moment an external action needs it. The owner does not have to translate everyday intent into a tool, model, workflow or memory command.
@@ -55,15 +55,41 @@ That changes the conversation. A person can share an incomplete fact, continue i
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/continuing-conversation.en.narrow.svg">
-  <img src="docs/assets/readme/continuing-conversation.en.svg" alt="Illustrative continuing conversation: coffee running low, finding a stop hours later, then asking for the previous choice; context and Work continue, authority is resolved when needed. Product direction, not one observed run.">
+  <img src="docs/assets/readme/continuing-conversation.en.svg" alt="Representative owner/PA conversation: a coffee remark becomes a route question hours later, then a prior-choice request, account handoff and resumption of the same Work. Reconstructed product direction, not live evidence or a shipped shopping integration.">
 </picture>
 
-> **Morning:** “We’re almost out of coffee.”  
-> **Afternoon:** “I may finish work late today.”  
-> **Evening:** “I’m heading out now. Is there somewhere on the way I can pick it up?”  
-> **Later:** “No time. Just get the same one as last time.”
+<details>
+<summary>Read the representative dialogue</summary>
 
-Underneath that ordinary conversation, AgentOS may resolve prior context, calendar/time, location, search, a continuing Work and—only when needed—an authority handoff. The dialogue is illustrative and condensed; current implementation evidence is classified separately below.
+Illustrated conditions: prior coffee choice is available; route and account access are missing.
+
+**Earlier**
+
+> **Owner:** “We’re almost out of coffee.”
+>
+> **PA:** “I’ll keep coffee in mind for your next shop.”
+
+**Hours later**
+
+> **Owner:** “I’m heading out now. Is there somewhere on the way I can pick it up?”
+>
+> **PA:** “The coffee? Share your route and I’ll look for a convenient stop.”
+
+**Later**
+
+> **Owner:** “No time. Just get the same one as last time.”
+>
+> **PA:** “The coffee from last time. Connect your shopping account here so I can prepare the order.”
+
+**After connecting the account**
+
+> **Owner:** “Connected.”
+>
+> **PA:** “Back to that coffee. I’ll prepare the order for your review; payment needs your approval.”
+
+</details>
+
+Illustrative PA replies resolve the earlier coffee context, ask for missing route/account access only when needed, and resume the original Work after the handoff. Account access does not approve payment. The owner never selects a memory tool, model, browser or workflow; AgentOS resolves eligible capabilities underneath the conversation. This is product direction; implementation evidence is classified separately below.
 
 **Same PA. Different AI.** The model underneath can change without making the owner rebuild the relationship from scratch.
 

@@ -1,33 +1,78 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="840" height="550" viewBox="0 0 840 550" role="img" aria-labelledby="title desc">
-<title id="title">時間をまたいで続く会話</title><desc id="desc">説明用にまとめた例であり、一回の実観測ではありません。</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="1254" viewBox="0 0 840 1254" role="img" aria-labelledby="title desc">
+<title id="title">時間をまたいで続く会話</title><desc id="desc">製品の方向性を再構成した例。一回の実観測や提供済みの購入機能ではありません。</desc>
 <style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
-<rect width="840" height="550" fill="#fff"/>
+<rect width="840" height="1254" fill="#fff"/>
 <text x="20" y="32.0" font-size="23" class="bold" text-anchor="start">時間をまたいで続く会話</text>
 <text x="20" y="68" font-size="16" class="muted" text-anchor="start">代表的な対話 · 製品の方向性</text>
-<rect x="20" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
-<text x="36" y="122" font-size="18" class="blue bold" text-anchor="start">01  はじめに</text>
-<text x="36" y="158.0" font-size="19" class="bold" text-anchor="start">「コーヒーがもう少な</text>
-<text x="36" y="184.6" font-size="19" class="bold" text-anchor="start">い。」</text>
-<path d="M36 290H260" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<text x="36" y="318.0" font-size="17" class="muted" text-anchor="start">保存できる以前の文脈</text>
-<path d="M278 210 L290 210" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M285 206 L290 210 L285 214" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="292" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
-<text x="308" y="122" font-size="18" class="blue bold" text-anchor="start">02  数時間後</text>
-<text x="308" y="158.0" font-size="19" class="bold" text-anchor="start">「今から出る。途中で買</text>
-<text x="308" y="184.6" font-size="19" class="bold" text-anchor="start">えるところある？」</text>
-<path d="M308 290H532" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<text x="308" y="318.0" font-size="17" class="muted" text-anchor="start">時間 / 経路 / 営業状況</text>
-<path d="M550 210 L562 210" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M557 206 L562 210 L557 214" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="564" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
-<text x="580" y="122" font-size="18" class="blue bold" text-anchor="start">03  その後</text>
-<text x="580" y="158.0" font-size="19" class="bold" text-anchor="start">「時間ないな。前と同じ</text>
-<text x="580" y="184.6" font-size="19" class="bold" text-anchor="start">ものを買っておいて。」</text>
-<path d="M580 290H804" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<text x="580" y="318.0" font-size="17" class="muted" text-anchor="start">以前の選択 / 必要な時に権</text>
-<text x="580" y="341.8" font-size="17" class="muted" text-anchor="start">限</text>
-<rect x="20" y="422" width="800" height="58" rx="5" fill="#f2f7fc" stroke="#96b6d6"/>
-<text x="420.0" y="447" font-size="18" class="bold" text-anchor="middle">会話の下で文脈をつなぎ、一つの Work を継続</text>
-<text x="20" y="527.0" font-size="16" class="muted" text-anchor="start">説明用にまとめた例であり、一回の実観測ではありません。</text>
+<text x="20" y="96.0" font-size="17" class="muted" text-anchor="start">この例の条件：前回のコーヒーの選択は残っており、移動ルートとアカウント権限は未取得。</text>
+<rect x="20" y="137.8" width="500" height="196.6" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="36" y="165.8" font-size="19" class="blue bold" text-anchor="start">はじめに</text>
+<text x="36" y="200.4" font-size="16" class="muted" text-anchor="start">所有者</text>
+<text x="36" y="226.4" font-size="20" class="bold" text-anchor="start">「コーヒーがもう少ない。」</text>
+<text x="36" y="266.4" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="36" y="292.4" font-size="20" class="" text-anchor="start">「次の買い物ではコーヒーも必要ですね。」</text>
+<rect x="548" y="137.8" width="272" height="196.6" rx="8" fill="#f2f7fc" stroke="#ccd8e6"/>
+<path d="M524 236.10000000000002 L544 236.10000000000002" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M539 232.10000000000002 L544 236.10000000000002 L539 240.10000000000002" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="564" y="163.8" font-size="17" class="blue bold" text-anchor="start">AgentOS が会話の下で解決す</text>
+<text x="564" y="187.60000000000002" font-size="17" class="blue bold" text-anchor="start">ること</text>
+<text x="564" y="219.4" font-size="18" class="" text-anchor="start">保存できる文脈を残す。日常</text>
+<text x="564" y="244.6" font-size="18" class="" text-anchor="start">の事実を共有しても購入権限</text>
+<text x="564" y="269.8" font-size="18" class="" text-anchor="start">にはならない。</text>
+<path d="M270 338.4 L270 352.4" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M266 347.4 L270 352.4 L274 347.4" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="20" y="358.4" width="500" height="224.6" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="36" y="386.4" font-size="19" class="blue bold" text-anchor="start">数時間後</text>
+<text x="36" y="421.0" font-size="16" class="muted" text-anchor="start">所有者</text>
+<text x="36" y="447.0" font-size="20" class="bold" text-anchor="start">「今から出る。途中で買えるところある？」</text>
+<text x="36" y="487.0" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="36" y="513.0" font-size="20" class="" text-anchor="start">「コーヒーですね。移動ルートを教えてもらえれ</text>
+<text x="36" y="541.0" font-size="20" class="" text-anchor="start">ば、立ち寄りやすい店を探します。」</text>
+<rect x="548" y="358.4" width="272" height="224.6" rx="8" fill="#f2f7fc" stroke="#ccd8e6"/>
+<path d="M524 470.7 L544 470.7" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M539 466.7 L544 470.7 L539 474.7" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="564" y="384.4" font-size="17" class="blue bold" text-anchor="start">AgentOS が会話の下で解決す</text>
+<text x="564" y="408.2" font-size="17" class="blue bold" text-anchor="start">ること</text>
+<text x="564" y="440.0" font-size="18" class="" text-anchor="start">以前の文脈からコーヒーと理</text>
+<text x="564" y="465.2" font-size="18" class="" text-anchor="start">解する。不明な移動ルートを</text>
+<text x="564" y="490.4" font-size="18" class="" text-anchor="start">必要な時にだけ聞く。</text>
+<path d="M270 587.0 L270 601.0" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M266 596.0 L270 601.0 L274 596.0" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="20" y="607.0" width="500" height="252.6" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="36" y="635.0" font-size="19" class="blue bold" text-anchor="start">その後</text>
+<text x="36" y="669.6" font-size="16" class="muted" text-anchor="start">所有者</text>
+<text x="36" y="695.6" font-size="20" class="bold" text-anchor="start">「時間ないな。前と同じものを買っておいて。」</text>
+<text x="36" y="735.6" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="36" y="761.6" font-size="20" class="" text-anchor="start">「前回のコーヒーですね。注文の準備には購入用の</text>
+<text x="36" y="789.6" font-size="20" class="" text-anchor="start">アカウントが必要です。ここで接続してくださ</text>
+<text x="36" y="817.6" font-size="20" class="" text-anchor="start">い。」</text>
+<rect x="548" y="607.0" width="272" height="252.6" rx="8" fill="#f2f7fc" stroke="#ccd8e6"/>
+<path d="M524 733.3 L544 733.3" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M539 729.3 L544 733.3 L539 737.3" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="564" y="633.0" font-size="17" class="blue bold" text-anchor="start">AgentOS が会話の下で解決す</text>
+<text x="564" y="656.8" font-size="17" class="blue bold" text-anchor="start">ること</text>
+<text x="564" y="688.6" font-size="18" class="" text-anchor="start">以前の選択を参照する。購入</text>
+<text x="564" y="713.8000000000001" font-size="18" class="" text-anchor="start">用のアカウント権限がないた</text>
+<text x="564" y="739.0" font-size="18" class="" text-anchor="start">め、この Work を一時停止</text>
+<text x="564" y="764.2" font-size="18" class="" text-anchor="start">する。</text>
+<path d="M270 863.6 L270 877.6" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M266 872.6 L270 877.6 L274 872.6" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="20" y="883.6" width="500" height="224.6" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="36" y="911.6" font-size="19" class="blue bold" text-anchor="start">アカウント接続後</text>
+<text x="36" y="946.2" font-size="16" class="muted" text-anchor="start">所有者</text>
+<text x="36" y="972.2" font-size="20" class="bold" text-anchor="start">「接続したよ。」</text>
+<text x="36" y="1012.2" font-size="16" class="blue bold" text-anchor="start">PA</text>
+<text x="36" y="1038.2" font-size="20" class="" text-anchor="start">「そのコーヒーの注文準備を続けます。支払い前に</text>
+<text x="36" y="1066.2" font-size="20" class="" text-anchor="start">は確認をお願いします。」</text>
+<rect x="548" y="883.6" width="272" height="224.6" rx="8" fill="#f2f7fc" stroke="#ccd8e6"/>
+<path d="M524 995.9 L544 995.9" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M539 991.9 L544 995.9 L539 999.9" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="564" y="909.6" font-size="17" class="blue bold" text-anchor="start">AgentOS が会話の下で解決す</text>
+<text x="564" y="933.4" font-size="17" class="blue bold" text-anchor="start">ること</text>
+<text x="564" y="965.2" font-size="18" class="" text-anchor="start">権限の引き継ぎ後に元の</text>
+<text x="564" y="990.4000000000001" font-size="18" class="" text-anchor="start">Work を再開する。アカウン</text>
+<text x="564" y="1015.6" font-size="18" class="" text-anchor="start">ト接続と支払い承認は別。</text>
+<rect x="20" y="1132.2" width="800" height="54.599999999999994" rx="5" fill="#f2f7fc" stroke="#96b6d6"/>
+<text x="36" y="1160.2" font-size="19" class="bold" text-anchor="start">文脈は残り、権限の引き継ぎ後に元の購入 Work を再開。</text>
+<text x="20" y="1218.8" font-size="17" class="muted" text-anchor="start">製品の方向性を再構成した例。一回の実観測や提供済みの購入機能ではありません。</text>
 </svg>

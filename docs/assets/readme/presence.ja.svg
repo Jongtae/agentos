@@ -34,7 +34,7 @@
 <path d="M546.0 493 L550.0 498 L554.0 493" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <text x="550.0" y="522" font-size="18" class="muted" text-anchor="middle">交換可能な実行機能</text>
 <rect x="280" y="540" width="540" height="76" rx="6" fill="#fff" stroke="#8492a3"/>
-<text x="550.0" y="569" font-size="20" class="bold" text-anchor="middle">AI モデル</text>
+<text x="550.0" y="569" font-size="20" class="bold" text-anchor="middle">AI モデル · A → B</text>
 <text x="550.0" y="597" font-size="18" class="muted" text-anchor="middle">ツール / サービス / スキル</text>
 <text x="420.0" y="680" font-size="23" class="blue bold" text-anchor="middle">同じ PA。別の AI。</text>
 <text x="420.0" y="710" font-size="17" class="muted" text-anchor="middle">関係と状態は所有者の手元に残ります。</text>

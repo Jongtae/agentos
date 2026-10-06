@@ -44,7 +44,7 @@
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence.ko.narrow.svg">
-  <img src="docs/assets/readme/presence.ko.svg" alt="Presence 구조: 소유자는 PA와 대화하고 AgentOS는 Memory, Context, Work, Authority, Evidence, Events를 소유하며 판단 계층이 교체 가능한 AI와 도구를 조율함">
+  <img src="docs/assets/readme/presence.ko.svg" alt="Presence 구조: 소유자는 PA와 대화하고 AgentOS는 Memory, Context, Work, Authority, Evidence, Events를 소유하며 판단 계층이 교체 가능한 AI와 도구를 조율함. 같은 PA와 소유자 상태 아래의 AI A를 AI B로 교체">
 </picture>
 
 그래서 대화 방식도 달라집니다. 사람은 불완전한 사실을 그냥 말해둘 수 있고, 몇 시간 뒤 이어 말할 수 있으며, 필요해진 순간 사진이나 위치를 보내고, 실제 외부 행동에 계정/컴퓨터 권한이 필요할 때만 넘겨줄 수 있습니다. 일상의 의도를 tool·model·workflow·memory 명령으로 번역할 필요가 없습니다.
@@ -53,15 +53,41 @@
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/continuing-conversation.ko.narrow.svg">
-  <img src="docs/assets/readme/continuing-conversation.ko.svg" alt="시간에 걸친 설명용 대화: 커피가 부족하다는 말, 몇 시간 뒤 들를 곳 질문, 나중에 이전 선택 요청. 맥락과 Work를 이어가며 필요할 때 권한을 연결하는 제품 방향으로, 하나의 관찰 실행이 아님.">
+  <img src="docs/assets/readme/continuing-conversation.ko.svg" alt="소유자와 PA의 대표 대화: 커피 이야기에서 몇 시간 뒤 이동 경로 질문, 이전 선택 요청, 계정 권한 연결과 원래 Work 재개로 이어짐. 제품 방향을 재구성한 예시이며 실제 관찰 증거나 배포된 구매 기능이 아님.">
 </picture>
 
-> **아침:** “커피 거의 다 떨어졌네.”  
-> **오후:** “오늘 일이 좀 늦게 끝날 것 같아.”  
-> **저녁:** “이제 나가려고. 가는 길에 살 만한 데 있을까?”  
-> **나중:** “시간 없네. 지난번에 사던 걸로 그냥 사줘.”
+<details>
+<summary>대표 대화 텍스트 보기</summary>
 
-이 평범한 대화 아래에서 AgentOS는 이전 맥락, 일정/시간, 위치, 검색, 이어지는 Work를 필요에 따라 해석하고 실제 행동에 권한이 필요한 순간에만 handoff할 수 있습니다. 위 대화는 설명을 위해 일반화·축약한 예시이며 현재 구현 증거는 아래에서 별도로 분류합니다.
+예시 조건: 지난번 커피 선택은 남아 있고, 이동 경로와 구매 계정 권한은 아직 없습니다.
+
+**처음에**
+
+> **소유자:** “커피 거의 다 떨어졌네.”
+>
+> **PA:** “다음에 장 볼 때 커피도 챙기면 되겠네요.”
+
+**몇 시간 뒤**
+
+> **소유자:** “이제 나가려고. 가는 길에 살 만한 데 있을까?”
+>
+> **PA:** “커피 말씀이죠? 이동 경로를 알려주시면 들르기 편한 곳을 찾아볼게요.”
+
+**나중에**
+
+> **소유자:** “시간 없네. 지난번에 사던 걸로 그냥 사줘.”
+>
+> **PA:** “지난번 커피로요. 주문을 준비하려면 구매 계정이 필요해요. 여기서 연결해주세요.”
+
+**계정 연결 뒤**
+
+> **소유자:** “연결했어.”
+>
+> **PA:** “그 커피로 이어서 주문을 준비할게요. 결제 전에는 확인받을게요.”
+
+</details>
+
+PA는 앞서 말한 커피 맥락을 이어받고, 이동 경로나 계정 권한이 빠졌을 때만 묻고, 연결 뒤 원래 Work를 이어갑니다. 계정 연결이 결제 승인까지 뜻하지는 않습니다. 소유자는 기억 도구·모델·브라우저·워크플로를 직접 선택하지 않습니다. AgentOS가 대화 아래에서 사용 가능한 맥락과 기능을 연결합니다. 이 예시는 제품 방향이며 현재 구현 증거는 아래에서 따로 분류합니다.
 
 **같은 PA, 다른 AI.** 뒤의 모델이 바뀌어도 사용자가 관계를 처음부터 다시 만들 필요가 없는 것이 목표입니다.
 

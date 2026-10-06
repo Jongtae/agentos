@@ -1,8 +1,25 @@
 # Personal AgentOS Presence Experience Contract
 
-## Current goal selection — SECRETARY-01 / #662 resumed (2026-09-28)
+## Current rule index and precedence
 
-The owner resumed SECRETARY-01 / #662 as the current top-level goal on 2026-09-28 (GOV-SECRETARY-04 / #770) after UX-RENEW-01 closed out. This contract remains the owner-facing experience contract; the UX-RENEW-01 presentation below is merged and is regression input.
+This is the owner-facing projection contract. **It does not select the repository's current development goal**; use repository-root [`delivery-plan.yaml`](../delivery-plan.yaml) and the [documentation map](README.md). Dated goal-selection paragraphs below are retained as program history.
+
+| Concern | Current controlling rule | Older text retained only as history where superseded |
+| --- | --- | --- |
+| Presence identity | North Star + Experience principles: one continuous secretary voice over replaceable workers; receipts/details on demand | Worker/tool/AgentOS machinery as the ordinary speaking identity |
+| Owner AI Memory presentation | #918 slice (a): no ask; save, then one quiet notice with exact seven-day undo | #836/#818 ask flow for the owner's own AI |
+| Third-party/delegated Memory presentation | #836 one ask per owner message/Work, natural values not keys; #818 exact approval mechanics underneath | Owner-AI no-ask policy does not apply |
+| Conversation lifecycle | current Telegram rules: no routine acknowledgement/status card; native typing/thinking presence; semantic progress only when useful | received/queued/running/completed narration and fixed wait text |
+| Answer projection | PRESENCE-ANS-01 / #847 plus truth-first outcome rules: the answer is the message; technical causes stay in detail; failed/partial/unknown remain explicit | machinery headers, tool names and raw execution errors in ordinary replies |
+| Settings and management | #880 Pages + #814/#855 conversation-first settings: the agent manages in conversation; pages exist for results text cannot carry or inputs conversation cannot safely carry | web-as-general-management-console framing |
+| Authority handoff | contextual capability/folder/account handoff at the moment of need; local approval owns local authority; successful handoff resumes the original Work exactly once | Settings-first onboarding as the ordinary task path |
+| Worker identity and routing | Main AI / Judgment AI are execution roles; worker changes do not change who the owner is talking to | engine/provider names as separate assistant identities |
+
+The [Secretary Agency Contract](secretary-agency-contract.en.md) controls the underlying Memory/egress/orchestration authority when this contract only changes presentation. Work/Event/Evidence, Grants, approvals, exact external-effect semantics and truthful `unknown` remain kernel truth.
+
+## Historical goal selection — SECRETARY-01 / #662 resumed (2026-09-28)
+
+The owner resumed SECRETARY-01 / #662 on 2026-09-28 (GOV-SECRETARY-04 / #770) after UX-RENEW-01 closed out. This is a dated selection record only. This contract remains the owner-facing experience contract; the UX-RENEW-01 presentation below is merged and is regression input.
 
 ## Amendment — GOV-ASK-LESS-01 / #918 slice (a) (2026-10-02): remembered, told, undoable
 
@@ -40,7 +57,7 @@ Presence requires useful action, not only natural projection. The [execution con
 
 ## Status and purpose
 
-This is the canonical owner-facing experience refinement for conversation, Settings, contextual capability handoff and recovery. It distills the 2026-09-23 focused [Presence and Settings UX research](research/presence-and-settings-ux.ko.md) into implementation and review rules. Experience convergence is tracked by [PRESENCE-01 #508](https://github.com/Jongtae/agentos/issues/508). On 2026-09-24 the owner selected Presence as the next product goal; governance migration is tracked by #523. This document still does not itself authorize runtime execution outside the delivery-plan contract.
+This is the canonical owner-facing experience refinement for conversation, Settings, contextual capability handoff and recovery. It distills the 2026-09-23 focused [Presence and Settings UX research](research/presence-and-settings-ux.ko.md) into implementation and review rules. Experience convergence was tracked by [PRESENCE-01 #508](https://github.com/Jongtae/agentos/issues/508). The 2026-09-24 selection of Presence and governance migration #523 are historical records. This document does not itself authorize runtime execution or select work outside the delivery-plan contract.
 
 It does **not** replace the kernel authority model, the Owner Control Contract, Work/Event/Evidence semantics, Grants/approvals, or the Goal Execution Contract. It does not claim every target behavior is shipped. Current capability claims still require merged implementation and named evidence.
 

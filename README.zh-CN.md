@@ -27,6 +27,8 @@
 
 ## 从助手到个人 Agent 环境
 
+![Assistant、Computer Agent 与 Personal AgentOS 的交互模型对比](docs/assets/readme/interaction-model.zh-CN.svg)
+
 区别不在于 AI 能不能查询股价或点击**加入购物车**。助手已经能回答问题，computer-use agent 也已经能执行命令。Personal AgentOS 把**持续的关系、owner context、authority 和 work state**从 AI provider 中移出来，放在由 owner 控制的环境里。
 
 | Interaction model | Owner 做什么 | 系统主要保留什么 |

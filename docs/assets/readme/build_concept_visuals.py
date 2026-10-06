@@ -240,77 +240,386 @@ def usage(d,mobile):
  f.out[3]=f.out[3].replace('height="3000"',f'height="{int(y)}"')
  return f
 
-OVERVIEW = {
- 'en': {
-  'title':'One assistant. Your context stays with you.',
-  'you':'You', 'pa':'Your PA', 'owned':'Personal AgentOS · in your control',
-  'labels':['Your context','Your current work','What happened'],
-  'terms':['Memory · Context','Work · Grant','Artifact · Event · Evidence'],
-  'judgment':'Judgment: choose capabilities, check results',
-  'replaceable':'Replaceable AI + tools / services', 'engines':'AI A  →  AI B',
-  'desc':'You talk to one PA. AgentOS connects context, work, permissions and evidence. AI and tools can change beneath that continuing relationship.',
- },
- 'ko': {
-  'title':'하나의 비서, 내게 남는 맥락',
-  'you':'나', 'pa':'내 PA', 'owned':'Personal AgentOS · 내가 통제하는 환경',
-  'labels':['나에 대해 아는 것','지금 하고 있는 일','실제로 일어난 일'],
-  'terms':['기억 · 맥락','작업 · 권한','결과 · 이벤트 · 근거'],
-  'judgment':'판단: 필요한 기능 선택, 결과 확인',
-  'replaceable':'교체 가능한 AI + 도구 / 서비스', 'engines':'AI A  →  AI B',
-  'desc':'나는 하나의 PA와 이야기합니다. AgentOS는 맥락과 일, 권한과 근거를 연결합니다. 그 관계 아래의 AI와 도구는 교체할 수 있습니다.',
- },
- 'ja': {
-  'title':'同じ PA。文脈は手元に。',
-  'you':'あなた', 'pa':'あなたの PA', 'owned':'Personal AgentOS · 自分の管理下',
-  'labels':['あなたについて知ること','今取り組んでいること','実際に起きたこと'],
-  'terms':['記憶 · 文脈','作業 · 権限','成果 · イベント · 証拠'],
-  'judgment':'判断：必要な機能を選び、結果を確認',
-  'replaceable':'交換できる AI + ツール / サービス', 'engines':'AI A  →  AI B',
-  'desc':'あなたは一人の PA と話します。AgentOS が文脈、作業、権限、証拠をつなぎ、その関係を保ちながら AI やツールを交換できます。',
- },
- 'zh-CN': {
-  'title':'同一个助手，上下文留在你手中',
-  'you':'你', 'pa':'你的 PA', 'owned':'Personal AgentOS · 由你掌控的环境',
-  'labels':['关于你的了解','正在处理的事','实际发生的事'],
-  'terms':['记忆 · 上下文','工作 · 权限','成果 · 事件 · 证据'],
-  'judgment':'判断：选择所需能力，检查结果',
-  'replaceable':'可替换的 AI + 工具 / 服务', 'engines':'AI A  →  AI B',
-  'desc':'你与同一个 PA 对话。AgentOS 连接上下文、工作、权限和证据；这段关系持续保留，底层 AI 和工具可以替换。',
- },
-}
+OVERVIEW = {'en': {'title': 'Personal AgentOS',
+        'subtitle': 'One assistant. Your context stays with you.',
+        'illustration_label': 'Interaction model · product direction',
+        'comparison_title': 'From answers to a continuing assistant',
+        'cards': [{'name': 'Assistant',
+                   'verb': 'Answers',
+                   'quote': 'What’s the current price of NVIDIA?',
+                   'reply': 'I’ll check the current information.',
+                   'flow': ['Question', 'Search', 'Answer'],
+                   'caption': 'An answer to your question.'},
+                  {'name': 'Computer agent',
+                   'verb': 'Acts',
+                   'quote': 'Add these headphones to my Amazon cart.',
+                   'reply': 'I’ll open the item in the browser.',
+                   'flow': ['Command', 'Browser / tool', 'Action / handoff'],
+                   'caption': 'An explicit task, with access as needed.'},
+                  {'name': 'Personal AgentOS',
+                   'verb': 'Stays with you',
+                   'quote': 'We’re almost out of coffee.',
+                   'reply': 'Coffee for the next shop.',
+                   'flow': ['Conversation', 'Context / judgment', 'Continuing work'],
+                   'caption': 'Pick up the thought—and the work—later.'}],
+        'architecture_title': 'What stays underneath the conversation',
+        'owner': 'You',
+        'pa': 'PA · your personal assistant',
+        'owned': 'Your environment. Your control.',
+        'states': ['Memory', 'Context', 'Work', 'Authority', 'Evidence', 'Events'],
+        'judgment': 'Judgment / orchestration',
+        'replaceable_ai': 'Replaceable AI',
+        'tools': 'Tools',
+        'services': 'Services',
+        'same_pa': 'Same PA.',
+        'different_ai': 'Different AI.',
+        'context_stays': 'Your context stays with you.',
+        'usage_title': 'One conversation, over time',
+        'usage': [{'time': 'First',
+                   'quote': 'We’re almost out of coffee.',
+                   'reply': 'Coffee for the next shop.',
+                   'label': 'A small remark becomes context.'},
+                  {'time': 'Hours later',
+                   'quote': 'I’m heading out now. Is there somewhere on the way I can pick it up?',
+                   'reply': 'The coffee? Share your route and I’ll look.',
+                   'label': 'Earlier context meets the situation now.'},
+                  {'time': 'Later',
+                   'quote': 'No time. Just get the same one as last time.',
+                   'reply': 'The same coffee. I’ll confirm before payment.',
+                   'label': 'Earlier choice · authority when needed'}],
+        'usage_note': 'You keep talking. AgentOS connects the context, work and permitted capabilities.',
+        'footer': 'Illustrative interaction patterns and product direction. No observed live run or shipped '
+                  'integration is claimed.'},
+ 'ko': {'title': 'Personal AgentOS',
+        'subtitle': '하나의 비서. 내 맥락은 내 곁에.',
+        'illustration_label': '상호작용 모델 · 제품 방향',
+        'comparison_title': '답변에서, 함께 이어가는 비서로',
+        'cards': [{'name': 'Assistant',
+                   'verb': '답합니다',
+                   'quote': '지금 NVIDIA 주가는 얼마야?',
+                   'reply': '최신 정보를 확인할게요.',
+                   'flow': ['질문', '검색', '답변'],
+                   'caption': '질문에 필요한 답을 얻습니다.'},
+                  {'name': 'Computer agent',
+                   'verb': '실행합니다',
+                   'quote': '이 헤드폰을 Amazon 장바구니에 넣어줘.',
+                   'reply': '브라우저에서 상품을 열어볼게요.',
+                   'flow': ['명령', '브라우저·도구', '실행·권한 연결'],
+                   'caption': '명시한 일을 하고, 필요한 접근을 요청합니다.'},
+                  {'name': 'Personal AgentOS',
+                   'verb': '곁에서 이어갑니다',
+                   'quote': '커피 거의 다 떨어졌네.',
+                   'reply': '다음에 장 볼 때 커피도 챙기면 되겠네요.',
+                   'flow': ['대화', '맥락·판단', '지속 작업'],
+                   'caption': '나중에 이야기와 하던 일을 이어갑니다.'}],
+        'architecture_title': '대화 아래에서 이어지는 구조',
+        'owner': '나',
+        'pa': 'PA · 나의 개인 비서',
+        'owned': '내 환경. 내가 정하는 범위.',
+        'states': ['기억', '맥락', '일', '권한', '근거', '이벤트'],
+        'judgment': '판단·조율',
+        'replaceable_ai': '교체 가능한 AI',
+        'tools': '도구',
+        'services': '서비스',
+        'same_pa': '같은 PA.',
+        'different_ai': '다른 AI.',
+        'context_stays': '내 맥락은 내 곁에 남습니다.',
+        'usage_title': '시간이 지나도 이어지는 대화',
+        'usage': [{'time': '처음',
+                   'quote': '커피 거의 다 떨어졌네.',
+                   'reply': '다음에 장 볼 때 커피도 챙기면 되겠네요.',
+                   'label': '짧은 일상 이야기가 맥락이 됩니다.'},
+                  {'time': '몇 시간 뒤',
+                   'quote': '이제 나가려고. 가는 길에 살 만한 데 있을까?',
+                   'reply': '커피 말씀이죠? 가는 길을 알려주시면 찾아볼게요.',
+                   'label': '앞선 이야기와 지금 상황을 연결합니다.'},
+                  {'time': '나중에',
+                   'quote': '시간 없네. 지난번에 사던 걸로 그냥 사줘.',
+                   'reply': '지난번 커피로요. 결제 전에는 확인받을게요.',
+                   'label': '이전 선택 · 필요해진 순간의 권한'}],
+        'usage_note': '나는 대화를 이어갑니다. AgentOS가 맥락과 일, 허용된 기능을 연결합니다.',
+        'footer': '상호작용과 제품 방향을 설명하는 예시입니다. 실제 관측 실행이나 배포된 연동 기능을 뜻하지 않습니다.'},
+ 'ja': {'title': 'Personal AgentOS',
+        'subtitle': '同じ PA。文脈は手元に。',
+        'illustration_label': '対話の形 · 製品の方向性',
+        'comparison_title': '答える AI から、続いていくアシスタントへ',
+        'cards': [{'name': 'Assistant',
+                   'verb': '答える',
+                   'quote': 'NVIDIA の今の株価は？',
+                   'reply': '最新の情報を確認します。',
+                   'flow': ['質問', '検索', '回答'],
+                   'caption': '質問への答えを得る。'},
+                  {'name': 'Computer agent',
+                   'verb': '実行する',
+                   'quote': 'このヘッドホンを Amazon のカートに入れて。',
+                   'reply': 'ブラウザーで商品を開きます。',
+                   'flow': ['指示', 'ブラウザー・ツール', '実行・権限の確認'],
+                   'caption': '指示された仕事を、必要な権限で進める。'},
+                  {'name': 'Personal AgentOS',
+                   'verb': '一緒に続ける',
+                   'quote': 'コーヒー、もうなくなりそう。',
+                   'reply': '次の買い物ではコーヒーも必要ですね。',
+                   'flow': ['会話', '文脈・判断', '続く仕事'],
+                   'caption': 'あとで話も仕事も続けられる。'}],
+        'architecture_title': '会話の下で支える仕組み',
+        'owner': 'あなた',
+        'pa': 'PA · 自分のアシスタント',
+        'owned': '自分の環境。自分で管理。',
+        'states': ['記憶', '文脈', '仕事', '権限', '根拠', '出来事'],
+        'judgment': '判断・調整',
+        'replaceable_ai': '交換可能な AI',
+        'tools': 'ツール',
+        'services': 'サービス',
+        'same_pa': '同じ PA。',
+        'different_ai': '変わる AI。',
+        'context_stays': '文脈は自分の手元に残る。',
+        'usage_title': '時間がたっても、話は続く',
+        'usage': [{'time': 'はじめに',
+                   'quote': 'コーヒー、もうなくなりそう。',
+                   'reply': '次の買い物ではコーヒーも必要ですね。',
+                   'label': '何気ない一言が文脈になる。'},
+                  {'time': '数時間後',
+                   'quote': '今から出るんだけど、途中で買えるところあるかな？',
+                   'reply': 'コーヒーですね。通る道を教えてもらえれば探します。',
+                   'label': '前の話と今の状況がつながる。'},
+                  {'time': 'その後',
+                   'quote': '時間ないな。前と同じものを買っておいて。',
+                   'reply': '前回のコーヒーですね。支払い前に確認します。',
+                   'label': '前の選択 · 必要になった時に権限確認'}],
+        'usage_note': '自分は話を続ける。AgentOS が文脈と仕事、許可された機能をつなぐ。',
+        'footer': '対話の形と製品の方向性を説明する例です。実際に観測した動作や提供済みの連携機能ではありません。'},
+ 'zh-CN': {'title': 'Personal AgentOS',
+           'subtitle': '同一个助手，上下文始终属于你。',
+           'illustration_label': '交互方式 · 产品方向',
+           'comparison_title': '从回答问题，到持续协作',
+           'cards': [{'name': 'Assistant',
+                      'verb': '回答问题',
+                      'quote': 'NVIDIA 现在的股价是多少？',
+                      'reply': '我来查一下最新信息。',
+                      'flow': ['提问', '搜索', '回答'],
+                      'caption': '为一个问题找到答案。'},
+                     {'name': 'Computer agent',
+                      'verb': '执行指令',
+                      'quote': '把这款耳机放进我的 Amazon 购物车。',
+                      'reply': '我先在浏览器里打开商品。',
+                      'flow': ['指令', '浏览器与工具', '执行与权限交接'],
+                      'caption': '完成明确的任务，按需获取权限。'},
+                     {'name': 'Personal AgentOS',
+                      'verb': '持续与你协作',
+                      'quote': '咖啡快没了。',
+                      'reply': '下次买东西时，也得补上咖啡。',
+                      'flow': ['对话', '上下文与判断', '继续工作'],
+                      'caption': '稍后接上话题，也接上未完的事。'}],
+           'architecture_title': '对话背后，什么在延续',
+           'owner': '你',
+           'pa': 'PA · 你的个人助手',
+           'owned': '你的环境，由你掌控。',
+           'states': ['记忆', '上下文', '工作', '权限', '依据', '事件'],
+           'judgment': '判断与协调',
+           'replaceable_ai': '可替换的 AI',
+           'tools': '工具',
+           'services': '服务',
+           'same_pa': '同一个 PA。',
+           'different_ai': '不同的 AI。',
+           'context_stays': '上下文始终留在你手中。',
+           'usage_title': '时间过去，对话继续',
+           'usage': [{'time': '起初', 'quote': '咖啡快没了。', 'reply': '下次买东西时，也得补上咖啡。', 'label': '随口一句，成为后续的上下文。'},
+                     {'time': '几小时后',
+                      'quote': '我准备出门了，路上有地方可以买到吗？',
+                      'reply': '是说咖啡吧？告诉我路线，我来找找。',
+                      'label': '接上前文，结合现在的情况。'},
+                     {'time': '之后',
+                      'quote': '没时间了，就买上次那款吧。',
+                      'reply': '上次那款咖啡。付款前会请你确认。',
+                      'label': '先前的选择 · 需要时再请求权限'}],
+           'usage_note': '你继续说话，AgentOS 连接上下文、工作与获准的能力。',
+           'footer': '交互方式与产品方向的示例，并非实际观测的运行，也不代表已发布的集成功能。'}}
+
+class OverviewFigure(Figure):
+ def measure(self, text, width, size=22, gap=None):
+  return Figure(1, 1, '', '').lines(0, 0, text, width, size, gap=gap or size*1.35)
+ def label(self, x, top, text, width, size=22, cls='', anchor='start'):
+  return self.lines(x, top+size, text, width, size, cls, gap=size*1.35, anchor=anchor)
+ def circle(self,x,y,r,fill,stroke='none'):
+  self.out.append(f'<circle cx="{x}" cy="{y}" r="{r}" fill="{fill}" stroke="{stroke}"/>')
+ def icon(self,kind,x,y,size=48,color='#245b92'):
+  shapes={
+   'search':'<path d="M8 45V18m0 27h37M15 35l9-10 9 4 10-15"/><circle cx="43" cy="18" r="10"/><path d="m50 26 8 9"/>',
+   'cart':'<path d="M14 29v-7a18 18 0 0 1 36 0v7M14 21h7v17h-7zm29 0h7v17h-7zM8 42h8l5 12h26l6-12H23"/><circle cx="25" cy="60" r="2"/><circle cx="44" cy="60" r="2"/>',
+   'coffee':'<path d="M12 26h31v18a10 10 0 0 1-10 10H22a10 10 0 0 1-10-10zM43 29h7a8 8 0 0 1 0 16h-7M8 59h41M19 19c-8-8 6-10 0-17M31 19c-8-8 6-10 0-17"/>',
+   'owner':'<circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/>',
+   'pa':'<circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/>',
+   'memory':'<path d="M16 12h34v42H16zM10 20h12m-12 12h12m-12 12h12M29 22h13m-13 9h13m-13 9h9"/>',
+   'context':'<circle cx="32" cy="32" r="8"/><circle cx="12" cy="12" r="5"/><circle cx="52" cy="15" r="5"/><circle cx="13" cy="52" r="5"/><circle cx="51" cy="51" r="5"/><path d="m16 16 10 10m12 0 10-8M17 48l9-10m12 0 9 9"/>',
+   'work':'<rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/>',
+   'authority':'<path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/>',
+   'evidence':'<path d="M14 8h27l9 9v40H14zM41 8v12h9M22 29h19m-19 8h13m-13 8 6 6 13-13"/>',
+   'events':'<circle cx="32" cy="32" r="24"/><path d="M32 16v17l11 7M6 32h5m42 0h5M32 6v5m0 42v5"/>',
+   'model':'<rect x="16" y="16" width="32" height="32" rx="6"/><path d="M24 6v10m16-10v10M24 48v10m16-10v10M6 24h10M6 40h10m32-16h10M48 40h10M26 26h12v12H26z"/>',
+   'tools':'<path d="m12 8 11 11-6 6L6 14c-4 14 6 23 18 17l25 25 7-7-25-25C37 12 28 2 16 6l10 10-7 7"/>',
+   'services':'<path d="M16 45a12 12 0 0 1-3-24 17 17 0 0 1 32-3 13 13 0 0 1 3 27H16zM22 52v8m20-8v8"/>',
+  }
+  self.out.append(f'<g transform="translate({x} {y}) scale({size/64})" fill="none" stroke="{color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">{shapes[kind]}</g>')
+ def dialogue_height(self,text,width):
+  return self.measure(text,width-66,22)+26
+ def dialogue(self,x,y,width,text,reply=False):
+  height=self.dialogue_height(text,width)
+  self.icon('pa' if reply else 'owner',x,y+13,24,'#257a69' if reply else '#53657a')
+  self.rect(x+36,y,width-36,height,'#ffffff' if reply else '#edf4fb','#d3dedf' if reply else '#edf4fb',12)
+  self.label(x+50,y+13,text,width-66,22)
+  return height
+ def section(self,y,number,title,width):
+  self.circle(40,y+21,20,'#e9f0f6')
+  self.text(40,y+28,number,18,'blue bold','middle')
+  return max(42,self.label(74,y,title,width-98,28,'bold'))+22
+ def finish(self,height):
+  self.out[0]=self.out[0].replace('height="6000"',f'height="{height}"').replace('0 0 '+str(self.w)+' 6000',f'0 0 {self.w} {height}')
+  self.out[3]=self.out[3].replace('height="6000"',f'height="{height}"')
+  return self
+
 
 def overview(d,mobile):
- # A small reader-facing overview: conversation, connected owner state,
- # judgment, then replaceable execution. Detailed kernel vocabulary lives
- # in the linked architecture document rather than another README poster.
- w=420 if mobile else 840; h=656 if mobile else 434
- f=Figure(w,h,d['title'],d['desc'])
- f.lines(20,32,d['title'],w-40,23,'bold')
- offset=36 if mobile else 0
- f.rect(20,64+offset,w-40,54,'#fff')
- f.text(w/2-55,99+offset,d['you'],21,'bold','end')
- f.text(w/2-10,99+offset,'⇄',25,'blue','middle')
- f.text(w/2+25,99+offset,d['pa'],21,'bold')
- f.arrow(w/2,122+offset,w/2,140+offset)
- outer_h=364 if mobile else 194
- f.rect(20,148+offset,w-40,outer_h,'#f2f7fc','#96b6d6')
- f.lines(36,176+offset,d['owned'],w-72,18,'bold')
- for i in range(3):
-  x=36 if mobile else 36+i*260
-  y=(210+i*80 if mobile else 196)+offset
-  cw=w-72 if mobile else 248
-  f.rect(x,y,cw,66,'#fff','#ccd8e6',5)
-  f.lines(x+cw/2,y+24,d['labels'][i],cw-24,18,'bold',anchor='middle',gap=23)
-  f.text(x+cw/2,y+51,d['terms'][i],15,'muted','middle')
-  if i<2:
-   if mobile:f.path(f'M{w/2} {y+66}V{y+80}')
-   else:f.path(f'M{x+cw} {y+33}H{x+260}')
- f.lines(w/2,(464 if mobile else 318)+offset,d['judgment'],w-72,17,'blue',anchor='middle',gap=22)
- bottom=148+offset+outer_h
- f.arrow(w/2,bottom+4,w/2,bottom+24)
- f.text(w/2,bottom+52,d['replaceable'],18,'muted','middle')
- f.text(w/2,bottom+81,d['engines'],22,'bold','middle')
- return f
+ w=420 if mobile else 1120
+ f=OverviewFigure(w,6000,d['title'],d['footer'])
+ margin=20 if mobile else 28
+ usable=w-2*margin
+ y=24
+ y+=f.label(margin,y,d['title'],usable,34,'bold')+8
+ y+=f.label(margin,y,d['subtitle'],usable,23,'blue')+14
+ y+=f.label(margin,y,d['illustration_label'],usable,20,'muted')+32
+ y+=f.section(y,'01',d['comparison_title'],w)
+ cw=usable if mobile else (usable-40)/3
+ card_heights=[]
+ for card in d['cards']:
+  height=188
+  height+=f.dialogue_height(card['quote'],cw-36)+12
+  height+=f.dialogue_height(card['reply'],cw-36)+22
+  height+=f.measure(' → '.join(card['flow']),cw-40,20)+20
+  card_heights.append(height)
+ desktop_height=max(card_heights)
+ for index,card in enumerate(d['cards']):
+  x=margin if mobile else margin+index*(cw+20)
+  top=y if mobile else y
+  ch=card_heights[index] if mobile else desktop_height
+  accent='#257a69' if index==2 else '#245b92'
+  fill='#eff7f3' if index==2 else '#f7f9fc'
+  f.rect(x,top,cw,ch,fill,'#b7d1c5' if index==2 else '#d4dce5',16)
+  f.circle(x+cw/2,top+56,39,'#e0eee6' if index==2 else '#e9eff7')
+  f.icon(['search','cart','coffee'][index],x+cw/2-30,top+24,60,accent)
+  f.label(x+20,top+110,card['name'],cw-40,25,'bold')
+  f.label(x+20,top+148,card['verb'],cw-40,22,'blue bold')
+  cy=top+188
+  cy+=f.dialogue(x+18,cy,cw-36,card['quote'])+12
+  cy+=f.dialogue(x+18,cy,cw-36,card['reply'],True)+22
+  f.label(x+20,cy,' → '.join(card['flow']),cw-40,20,'blue bold')
+  if mobile:y+=ch+20
+ if not mobile:y+=desktop_height
+ y+=32
+ y+=f.section(y,'02',d['architecture_title'],w)
+ if mobile:
+  owner_x=110; pa_x=300
+  f.icon('owner',owner_x-23,y,46,'#53657a')
+  f.icon('pa',pa_x-23,y,46,'#257a69')
+  f.path(f'M{owner_x+38} {y+24}H{pa_x-38}','#8296a9')
+  f.path(f'M{owner_x+45} {y+18}L{owner_x+38} {y+24}L{owner_x+45} {y+30}M{pa_x-45} {y+18}L{pa_x-38} {y+24}L{pa_x-45} {y+30}','#8296a9')
+  f.label(owner_x,y+54,d['owner'],130,22,'bold','middle')
+  f.label(pa_x,y+54,d['pa'],175,20,'bold','middle')
+  conversation_bottom=y+54+max(f.measure(d['owner'],130,22),f.measure(d['pa'],175,20))
+  sy=conversation_bottom+44
+  ox=margin; ow=usable
+  f.path(f'M{pa_x} {conversation_bottom+12}V{sy-12}H{w/2}V{sy}','#8296a9')
+ else:
+  ox=220; ow=654; sy=y
+  f.icon('owner',71,sy+97,64,'#53657a')
+  f.label(103,sy+175,d['owner'],160,23,'bold','middle')
+ cells=2 if mobile else 3
+ first_offset=59+f.measure(d['owned'],ow-40,20)+22 if mobile else 179
+ grid_height=(6//cells)*96-14
+ judgment_height=f.measure(d['judgment'],ow-32,21)
+ oh=first_offset+grid_height+24+judgment_height+20
+ f.rect(ox,sy,ow,oh,'#f0f6f9','#b6cad9',18)
+ f.label(ox+20,sy+20,'Personal AgentOS',ow-40,26,'bold')
+ f.label(ox+20,sy+59,d['owned'],ow-40,20,'muted')
+ if not mobile:
+  f.rect(ox+20,sy+102,ow-40,54,'#e3f0e9','#bad3c8',12)
+  f.icon('pa',ox+38,sy+115,28,'#257a69')
+  f.label(ox+ow/2+10,sy+113,d['pa'],ow-120,22,'bold','middle')
+  f.path(f'M153 {sy+129}H{ox+20}','#8296a9')
+  f.path(f'M160 {sy+123}L153 {sy+129}L160 {sy+135}M{ox+13} {sy+123}L{ox+20} {sy+129}L{ox+13} {sy+135}','#8296a9')
+ gap=14
+ cell_w=(ow-40-(cells-1)*gap)/cells
+ cell_h=82
+ first=sy+first_offset
+ kinds=['memory','context','work','authority','evidence','events']
+ for index,state in enumerate(d['states']):
+  col=index%cells; row=index//cells
+  sx=ox+20+col*(cell_w+gap); st=first+row*(cell_h+14)
+  f.rect(sx,st,cell_w,cell_h,'#fff','#d8e1e7',10)
+  f.icon(kinds[index],sx+cell_w/2-17,st+9,34,'#427665' if index in (0,1) else '#496d92')
+  f.label(sx+cell_w/2,st+49,state,cell_w-16,20,'bold','middle')
+  if col<cells-1:f.path(f'M{sx+cell_w} {st+cell_h/2}H{sx+cell_w+gap}','#a7bac6')
+  if col==cells//2 and row<(6//cells)-1:f.path(f'M{sx+cell_w/2} {st+cell_h}V{st+cell_h+14}','#a7bac6')
+ f.label(ox+ow/2,first+grid_height+24,d['judgment'],ow-32,21,'blue bold','middle')
+ f.arrow(ox+ow/2,sy+oh+4,ox+ow/2,sy+oh+27)
+ ey=sy+oh+34
+ if mobile:
+  f.rect(ox,ey,ow,106,'#fafbfd','#d4dce5',12)
+  f.icon('model',ox+20,ey+25,48,'#526b91')
+  f.label(ox+88,ey+15,d['replaceable_ai'],ow-108,22,'bold')
+  f.label(ox+88,ey+54,'AI A  →  AI B',ow-108,22,'blue')
+  f.icon('tools',ox+24,ey+128,30,'#526b91')
+  f.label(ox+68,ey+130,d['tools'],115,20)
+  f.icon('services',ox+208,ey+128,30,'#526b91')
+  f.label(ox+250,ey+130,d['services'],ow-265,20)
+  cy=ey+186
+  cy+=f.label(w/2,cy,d['same_pa']+' '+d['different_ai'],usable,25,'blue bold','middle')+8
+  cy+=f.label(w/2,cy,d['context_stays'],usable,22,'muted','middle')
+  y=cy+36
+ else:
+  ew=(ow-24)/3
+  for index,(label,kind) in enumerate([(d['replaceable_ai'],'model'),(d['tools'],'tools'),(d['services'],'services')]):
+   ex=ox+index*(ew+12)
+   f.rect(ex,ey,ew,109,'#fafbfd','#d4dce5',12)
+   f.icon(kind,ex+ew/2-19,ey+12,38,'#526b91')
+   f.label(ex+ew/2,ey+61,label,ew-20,20,'muted','middle')
+  rx=908; rw=184; cy=sy+102
+  f.icon('pa',rx,cy-56,38,'#257a69')
+  cy+=f.label(rx,cy,d['same_pa'],rw,27,'blue bold')+8
+  cy+=f.label(rx,cy,d['different_ai'],rw,27,'blue bold')+20
+  cy+=f.label(rx,cy,d['context_stays'],rw,22,'muted')+28
+  f.label(rx,cy,'AI A → AI B',rw,22,'blue bold')
+  y=ey+145
+ y+=f.section(y,'03',d['usage_title'],w)
+ usage_heights=[]
+ for scene in d['usage']:
+  height=72+f.dialogue_height(scene['quote'],cw-36)+12
+  height+=f.dialogue_height(scene['reply'],cw-36)+26
+  height+=f.measure(scene['label'],cw-40,20)+20
+  usage_heights.append(height)
+ max_height=max(usage_heights)
+ for index,scene in enumerate(d['usage']):
+  x=margin if mobile else margin+index*(cw+20)
+  ch=usage_heights[index] if mobile else max_height
+  f.rect(x,y,cw,ch,'#f8fafb','#d4dce5',14)
+  f.circle(x+29,y+32,13,'#e1eee8')
+  f.text(x+29,y+39,str(index+1),18,'blue bold','middle')
+  f.label(x+56,y+16,scene['time'],cw-76,22,'bold')
+  cy=y+72
+  cy+=f.dialogue(x+18,cy,cw-36,scene['quote'])+12
+  cy+=f.dialogue(x+18,cy,cw-36,scene['reply'],True)+18
+  f.path(f'M{x+20} {cy}H{x+cw-20}','#d4dce5')
+  f.label(x+20,cy+9,scene['label'],cw-40,20,'muted')
+  if mobile:
+   y+=ch+24
+   if index<2:f.arrow(w/2,y-20,w/2,y-4)
+  elif index<2:
+   f.arrow(x+cw+3,y+34,x+cw+17,y+34)
+ if not mobile:y+=max_height+20
+ y+=f.label(margin,y+8,d['usage_note'],usable,22,'blue')+30
+ f.path(f'M{margin} {y}H{w-margin}','#d4dce5')
+ y+=16
+ y+=f.label(margin,y,d['footer'],usable,20,'muted')+24
+ return f.finish(int(y))
 
 if __name__=='__main__':
  for locale,d in DATA.items():

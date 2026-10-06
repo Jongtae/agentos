@@ -33,7 +33,7 @@ AgentOS 用一组共同的概念及其关系来表达这些内容，这就是它
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.zh-CN.narrow.svg">
-  <img src="docs/assets/readme/presence-overview.zh-CN.svg" alt="你始终与一个 PA 对话。AgentOS 关联并保存记忆与上下文、工作与权限、结果与依据。下方的判断层协调可替换的 AI 和工具，你的状态始终留在你的环境中。">
+  <img src="docs/assets/readme/presence-overview.zh-CN.svg" alt="概念插图：助手回答 NVIDIA 问题，电脑代理执行 Amazon 指令，Personal AgentOS 延续跨越时间的对话。你与同一个 PA 交流，上下文、工作和权限保留在 AgentOS 中，底层 AI 和工具可以替换。咖啡对话用于说明产品方向，并非真实观测或已发布的集成功能。">
 </picture>
 
 AgentOS 通过判断层选择所需的 AI 和工具，并检查它们的结果。你与 PA 交谈，AgentOS 在对话之下维系这套结构。**同一个 PA，不同的 AI。**

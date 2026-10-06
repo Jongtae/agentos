@@ -33,7 +33,7 @@ AgentOS는 이것을 공통된 개념과 관계로 표현합니다. 이 구조�
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.ko.narrow.svg">
-  <img src="docs/assets/readme/presence-overview.ko.svg" alt="나는 하나의 PA와 대화합니다. AgentOS는 기억과 맥락, 일과 권한, 결과와 근거를 연결해 보존합니다. 그 아래에서 판단 계층이 교체 가능한 AI와 도구를 조율하며, 내 상태는 내 환경에 남습니다.">
+  <img src="docs/assets/readme/presence-overview.ko.svg" alt="개념 설명 일러스트: NVIDIA 질문에 답하는 어시스턴트, Amazon 명령을 실행하는 컴퓨터 에이전트, 시간에 걸친 대화를 이어가는 Personal AgentOS. 나는 하나의 PA와 대화하고, 맥락·일·권한은 교체 가능한 AI와 도구 위의 AgentOS에 남습니다. 커피 대화는 제품 방향을 설명하며 실제 관찰 실행이나 배포된 통합 기능을 뜻하지 않습니다.">
 </picture>
 
 AgentOS의 판단 계층이 필요한 AI와 도구를 고르고 결과를 확인합니다. 나는 PA와 이야기하고, AgentOS가 대화 아래에서 이 구조를 이어갑니다. **같은 PA, 다른 AI.**

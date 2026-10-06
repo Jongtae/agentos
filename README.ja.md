@@ -33,7 +33,7 @@ AgentOS は、これらを共通の概念と関係で表します。この構造
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.ja.narrow.svg">
-  <img src="docs/assets/readme/presence-overview.ja.svg" alt="あなたは一つの PA と話します。AgentOS が記憶と文脈、仕事と権限、成果と根拠を結び付けて保持します。その下で判断層が交換可能な AI とツールを調整し、あなたの状態はあなたの環境に残ります。">
+  <img src="docs/assets/readme/presence-overview.ja.svg" alt="概念図：NVIDIA の質問に答えるアシスタント、Amazon の指示を実行するコンピューターエージェント、時間をまたぐ会話を続ける Personal AgentOS。あなたは一人の PA と話し、文脈・作業・権限は交換可能な AI やツールの上にある AgentOS に残ります。コーヒーの会話は製品の方向性を示す例で、実際の観測や提供済みの連携ではありません。">
 </picture>
 
 AgentOS は判断層を通じて必要な AI とツールを選び、その結果を確かめます。あなたは PA と話し、AgentOS が会話の下でこの構造を支えます。**同じ PA。変わる AI。**

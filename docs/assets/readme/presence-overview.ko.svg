@@ -1,30 +1,167 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="840" height="434" viewBox="0 0 840 434" role="img" aria-labelledby="title desc">
-<title id="title">하나의 비서, 내게 남는 맥락</title><desc id="desc">나는 하나의 PA와 이야기합니다. AgentOS는 맥락과 일, 권한과 근거를 연결합니다. 그 관계 아래의 AI와 도구는 교체할 수 있습니다.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="2044" viewBox="0 0 1120 2044" role="img" aria-labelledby="title desc">
+<title id="title">Personal AgentOS</title><desc id="desc">상호작용과 제품 방향을 설명하는 예시입니다. 실제 관측 실행이나 배포된 연동 기능을 뜻하지 않습니다.</desc>
 <style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
-<rect width="840" height="434" fill="#fff"/>
-<text x="20" y="32.0" font-size="23" class="bold" text-anchor="start">하나의 비서, 내게 남는 맥락</text>
-<rect x="20" y="64" width="800" height="54" rx="8" fill="#fff" stroke="#ccd4de"/>
-<text x="365.0" y="99" font-size="21" class="bold" text-anchor="end">나</text>
-<text x="410.0" y="99" font-size="25" class="blue" text-anchor="middle">⇄</text>
-<text x="445.0" y="99" font-size="21" class="bold" text-anchor="start">내 PA</text>
-<path d="M420.0 122 L420.0 140" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M416.0 135 L420.0 140 L424.0 135" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="20" y="148" width="800" height="194" rx="8" fill="#f2f7fc" stroke="#96b6d6"/>
-<text x="36" y="176.0" font-size="18" class="bold" text-anchor="start">Personal AgentOS · 내가 통제하는 환경</text>
-<rect x="36" y="196" width="248" height="66" rx="5" fill="#fff" stroke="#ccd8e6"/>
-<text x="160.0" y="220" font-size="18" class="bold" text-anchor="middle">나에 대해 아는 것</text>
-<text x="160.0" y="247" font-size="15" class="muted" text-anchor="middle">기억 · 맥락</text>
-<path d="M284 229H296" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="296" y="196" width="248" height="66" rx="5" fill="#fff" stroke="#ccd8e6"/>
-<text x="420.0" y="220" font-size="18" class="bold" text-anchor="middle">지금 하고 있는 일</text>
-<text x="420.0" y="247" font-size="15" class="muted" text-anchor="middle">작업 · 권한</text>
-<path d="M544 229H556" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="556" y="196" width="248" height="66" rx="5" fill="#fff" stroke="#ccd8e6"/>
-<text x="680.0" y="220" font-size="18" class="bold" text-anchor="middle">실제로 일어난 일</text>
-<text x="680.0" y="247" font-size="15" class="muted" text-anchor="middle">결과 · 이벤트 · 근거</text>
-<text x="420.0" y="318" font-size="17" class="blue" text-anchor="middle">판단: 필요한 기능 선택, 결과 확인</text>
-<path d="M420.0 346 L420.0 366" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M416.0 361 L420.0 366 L424.0 361" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<text x="420.0" y="394" font-size="18" class="muted" text-anchor="middle">교체 가능한 AI + 도구 / 서비스</text>
-<text x="420.0" y="423" font-size="22" class="bold" text-anchor="middle">AI A  →  AI B</text>
+<rect width="1120" height="2044" fill="#fff"/>
+<text x="28" y="58.0" font-size="34" class="bold" text-anchor="start">Personal AgentOS</text>
+<text x="28" y="100.9" font-size="23" class="blue" text-anchor="start">하나의 비서. 내 맥락은 내 곁에.</text>
+<text x="28" y="142.95" font-size="20" class="muted" text-anchor="start">상호작용 모델 · 제품 방향</text>
+<circle cx="40" cy="202.95" r="20" fill="#e9f0f6" stroke="none"/>
+<text x="40" y="209.95" font-size="18" class="blue bold" text-anchor="middle">01</text>
+<text x="74" y="209.95" font-size="28" class="bold" text-anchor="start">답변에서, 함께 이어가는 비서로</text>
+<rect x="28.0" y="245.95" width="341.3333333333333" height="469.5" rx="16" fill="#f7f9fc" stroke="#d4dce5"/>
+<circle cx="198.66666666666666" cy="301.95" r="39" fill="#e9eff7" stroke="none"/>
+<g transform="translate(168.66666666666666 269.95) scale(0.9375)" fill="none" stroke="#245b92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 45V18m0 27h37M15 35l9-10 9 4 10-15"/><circle cx="43" cy="18" r="10"/><path d="m50 26 8 9"/></g>
+<text x="48.0" y="380.95" font-size="25" class="bold" text-anchor="start">Assistant</text>
+<text x="48.0" y="415.95" font-size="22" class="blue bold" text-anchor="start">답합니다</text>
+<g transform="translate(46.0 446.95) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
+<rect x="82.0" y="433.95" width="269.3333333333333" height="85.4" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
+<text x="96.0" y="468.95" font-size="22" class="" text-anchor="start">지금 NVIDIA 주가는</text>
+<text x="96.0" y="498.65" font-size="22" class="" text-anchor="start">얼마야?</text>
+<g transform="translate(46.0 544.35) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
+<rect x="82.0" y="531.35" width="269.3333333333333" height="85.4" rx="12" fill="#ffffff" stroke="#d3dedf"/>
+<text x="96.0" y="566.35" font-size="22" class="" text-anchor="start">최신 정보를</text>
+<text x="96.0" y="596.0500000000001" font-size="22" class="" text-anchor="start">확인할게요.</text>
+<text x="48.0" y="658.75" font-size="20" class="blue bold" text-anchor="start">질문 → 검색 → 답변</text>
+<rect x="389.3333333333333" y="245.95" width="341.3333333333333" height="469.5" rx="16" fill="#f7f9fc" stroke="#d4dce5"/>
+<circle cx="560.0" cy="301.95" r="39" fill="#e9eff7" stroke="none"/>
+<g transform="translate(530.0 269.95) scale(0.9375)" fill="none" stroke="#245b92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 29v-7a18 18 0 0 1 36 0v7M14 21h7v17h-7zm29 0h7v17h-7zM8 42h8l5 12h26l6-12H23"/><circle cx="25" cy="60" r="2"/><circle cx="44" cy="60" r="2"/></g>
+<text x="409.3333333333333" y="380.95" font-size="25" class="bold" text-anchor="start">Computer agent</text>
+<text x="409.3333333333333" y="415.95" font-size="22" class="blue bold" text-anchor="start">실행합니다</text>
+<g transform="translate(407.3333333333333 446.95) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
+<rect x="443.3333333333333" y="433.95" width="269.3333333333333" height="85.4" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
+<text x="457.3333333333333" y="468.95" font-size="22" class="" text-anchor="start">이 헤드폰을 Amazon</text>
+<text x="457.3333333333333" y="498.65" font-size="22" class="" text-anchor="start">장바구니에 넣어줘.</text>
+<g transform="translate(407.3333333333333 544.35) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
+<rect x="443.3333333333333" y="531.35" width="269.3333333333333" height="85.4" rx="12" fill="#ffffff" stroke="#d3dedf"/>
+<text x="457.3333333333333" y="566.35" font-size="22" class="" text-anchor="start">브라우저에서 상품을</text>
+<text x="457.3333333333333" y="596.0500000000001" font-size="22" class="" text-anchor="start">열어볼게요.</text>
+<text x="409.3333333333333" y="658.75" font-size="20" class="blue bold" text-anchor="start">명령 → 브라우저·도구 →</text>
+<text x="409.3333333333333" y="685.75" font-size="20" class="blue bold" text-anchor="start">실행·권한 연결</text>
+<rect x="750.6666666666666" y="245.95" width="341.3333333333333" height="469.5" rx="16" fill="#eff7f3" stroke="#b7d1c5"/>
+<circle cx="921.3333333333333" cy="301.95" r="39" fill="#e0eee6" stroke="none"/>
+<g transform="translate(891.3333333333333 269.95) scale(0.9375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 26h31v18a10 10 0 0 1-10 10H22a10 10 0 0 1-10-10zM43 29h7a8 8 0 0 1 0 16h-7M8 59h41M19 19c-8-8 6-10 0-17M31 19c-8-8 6-10 0-17"/></g>
+<text x="770.6666666666666" y="380.95" font-size="25" class="bold" text-anchor="start">Personal AgentOS</text>
+<text x="770.6666666666666" y="415.95" font-size="22" class="blue bold" text-anchor="start">곁에서 이어갑니다</text>
+<g transform="translate(768.6666666666666 446.95) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
+<rect x="804.6666666666666" y="433.95" width="269.3333333333333" height="85.4" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
+<text x="818.6666666666666" y="468.95" font-size="22" class="" text-anchor="start">커피 거의 다</text>
+<text x="818.6666666666666" y="498.65" font-size="22" class="" text-anchor="start">떨어졌네.</text>
+<g transform="translate(768.6666666666666 544.35) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
+<rect x="804.6666666666666" y="531.35" width="269.3333333333333" height="115.10000000000001" rx="12" fill="#ffffff" stroke="#d3dedf"/>
+<text x="818.6666666666666" y="566.35" font-size="22" class="" text-anchor="start">다음에 장 볼 때</text>
+<text x="818.6666666666666" y="596.0500000000001" font-size="22" class="" text-anchor="start">커피도 챙기면</text>
+<text x="818.6666666666666" y="625.75" font-size="22" class="" text-anchor="start">되겠네요.</text>
+<text x="770.6666666666666" y="688.45" font-size="20" class="blue bold" text-anchor="start">대화 → 맥락·판단 → 지속 작업</text>
+<circle cx="40" cy="768.45" r="20" fill="#e9f0f6" stroke="none"/>
+<text x="40" y="775.45" font-size="18" class="blue bold" text-anchor="middle">02</text>
+<text x="74" y="775.45" font-size="28" class="bold" text-anchor="start">대화 아래에서 이어지는 구조</text>
+<g transform="translate(71 908.45) scale(1.0)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
+<text x="103" y="1009.45" font-size="23" class="bold" text-anchor="middle">나</text>
+<rect x="220" y="811.45" width="654" height="429.35" rx="18" fill="#f0f6f9" stroke="#b6cad9"/>
+<text x="240" y="857.45" font-size="26" class="bold" text-anchor="start">Personal AgentOS</text>
+<text x="240" y="890.45" font-size="20" class="muted" text-anchor="start">내 환경. 내가 정하는 범위.</text>
+<rect x="240" y="913.45" width="614" height="54" rx="12" fill="#e3f0e9" stroke="#bad3c8"/>
+<g transform="translate(258 926.45) scale(0.4375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
+<text x="557.0" y="946.45" font-size="22" class="bold" text-anchor="middle">PA · 나의 개인 비서</text>
+<path d="M153 940.45H240" fill="none" stroke="#8296a9" stroke-width="1.6"/>
+<path d="M160 934.45L153 940.45L160 946.45M233 934.45L240 940.45L233 946.45" fill="none" stroke="#8296a9" stroke-width="1.6"/>
+<rect x="240.0" y="990.45" width="195.33333333333334" height="82" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(320.6666666666667 999.45) scale(0.53125)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M16 12h34v42H16zM10 20h12m-12 12h12m-12 12h12M29 22h13m-13 9h13m-13 9h9"/></g>
+<text x="337.6666666666667" y="1059.45" font-size="20" class="bold" text-anchor="middle">기억</text>
+<path d="M435.33333333333337 1031.45H449.33333333333337" fill="none" stroke="#a7bac6" stroke-width="1.6"/>
+<rect x="449.33333333333337" y="990.45" width="195.33333333333334" height="82" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(530.0 999.45) scale(0.53125)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="8"/><circle cx="12" cy="12" r="5"/><circle cx="52" cy="15" r="5"/><circle cx="13" cy="52" r="5"/><circle cx="51" cy="51" r="5"/><path d="m16 16 10 10m12 0 10-8M17 48l9-10m12 0 9 9"/></g>
+<text x="547.0" y="1059.45" font-size="20" class="bold" text-anchor="middle">맥락</text>
+<path d="M644.6666666666667 1031.45H658.6666666666667" fill="none" stroke="#a7bac6" stroke-width="1.6"/>
+<path d="M547.0 1072.45V1086.45" fill="none" stroke="#a7bac6" stroke-width="1.6"/>
+<rect x="658.6666666666667" y="990.45" width="195.33333333333334" height="82" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(739.3333333333334 999.45) scale(0.53125)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
+<text x="756.3333333333334" y="1059.45" font-size="20" class="bold" text-anchor="middle">일</text>
+<rect x="240.0" y="1086.45" width="195.33333333333334" height="82" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(320.6666666666667 1095.45) scale(0.53125)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/></g>
+<text x="337.6666666666667" y="1155.45" font-size="20" class="bold" text-anchor="middle">권한</text>
+<path d="M435.33333333333337 1127.45H449.33333333333337" fill="none" stroke="#a7bac6" stroke-width="1.6"/>
+<rect x="449.33333333333337" y="1086.45" width="195.33333333333334" height="82" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(530.0 1095.45) scale(0.53125)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8h27l9 9v40H14zM41 8v12h9M22 29h19m-19 8h13m-13 8 6 6 13-13"/></g>
+<text x="547.0" y="1155.45" font-size="20" class="bold" text-anchor="middle">근거</text>
+<path d="M644.6666666666667 1127.45H658.6666666666667" fill="none" stroke="#a7bac6" stroke-width="1.6"/>
+<rect x="658.6666666666667" y="1086.45" width="195.33333333333334" height="82" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(739.3333333333334 1095.45) scale(0.53125)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><path d="M32 16v17l11 7M6 32h5m42 0h5M32 6v5m0 42v5"/></g>
+<text x="756.3333333333334" y="1155.45" font-size="20" class="bold" text-anchor="middle">이벤트</text>
+<text x="547.0" y="1213.45" font-size="21" class="blue bold" text-anchor="middle">판단·조율</text>
+<path d="M547.0 1244.8000000000002 L547.0 1267.8000000000002" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M543.0 1262.8000000000002 L547.0 1267.8000000000002 L551.0 1262.8000000000002" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="220.0" y="1274.8000000000002" width="210.0" height="109" rx="12" fill="#fafbfd" stroke="#d4dce5"/>
+<g transform="translate(306.0 1286.8000000000002) scale(0.59375)" fill="none" stroke="#526b91" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="32" height="32" rx="6"/><path d="M24 6v10m16-10v10M24 48v10m16-10v10M6 24h10M6 40h10m32-16h10M48 40h10M26 26h12v12H26z"/></g>
+<text x="325.0" y="1355.8000000000002" font-size="20" class="muted" text-anchor="middle">교체 가능한 AI</text>
+<rect x="442.0" y="1274.8000000000002" width="210.0" height="109" rx="12" fill="#fafbfd" stroke="#d4dce5"/>
+<g transform="translate(528.0 1286.8000000000002) scale(0.59375)" fill="none" stroke="#526b91" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m12 8 11 11-6 6L6 14c-4 14 6 23 18 17l25 25 7-7-25-25C37 12 28 2 16 6l10 10-7 7"/></g>
+<text x="547.0" y="1355.8000000000002" font-size="20" class="muted" text-anchor="middle">도구</text>
+<rect x="664.0" y="1274.8000000000002" width="210.0" height="109" rx="12" fill="#fafbfd" stroke="#d4dce5"/>
+<g transform="translate(750.0 1286.8000000000002) scale(0.59375)" fill="none" stroke="#526b91" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M16 45a12 12 0 0 1-3-24 17 17 0 0 1 32-3 13 13 0 0 1 3 27H16zM22 52v8m20-8v8"/></g>
+<text x="769.0" y="1355.8000000000002" font-size="20" class="muted" text-anchor="middle">서비스</text>
+<g transform="translate(908 857.45) scale(0.59375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
+<text x="908" y="940.45" font-size="27" class="blue bold" text-anchor="start">같은 PA.</text>
+<text x="908" y="984.9000000000001" font-size="27" class="blue bold" text-anchor="start">다른 AI.</text>
+<text x="908" y="1036.3500000000001" font-size="22" class="muted" text-anchor="start">내 맥락은 내</text>
+<text x="908" y="1066.0500000000002" font-size="22" class="muted" text-anchor="start">곁에 남습니다.</text>
+<text x="908" y="1123.7500000000002" font-size="22" class="blue bold" text-anchor="start">AI A → AI B</text>
+<circle cx="40" cy="1440.8000000000002" r="20" fill="#e9f0f6" stroke="none"/>
+<text x="40" y="1447.8000000000002" font-size="18" class="blue bold" text-anchor="middle">03</text>
+<text x="74" y="1447.8000000000002" font-size="28" class="bold" text-anchor="start">시간이 지나도 이어지는 대화</text>
+<rect x="28.0" y="1483.8000000000002" width="341.3333333333333" height="414.20000000000005" rx="14" fill="#f8fafb" stroke="#d4dce5"/>
+<circle cx="57.0" cy="1515.8000000000002" r="13" fill="#e1eee8" stroke="none"/>
+<text x="57.0" y="1522.8000000000002" font-size="18" class="blue bold" text-anchor="middle">1</text>
+<text x="84.0" y="1521.8000000000002" font-size="22" class="bold" text-anchor="start">처음</text>
+<g transform="translate(46.0 1568.8000000000002) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
+<rect x="82.0" y="1555.8000000000002" width="269.3333333333333" height="85.4" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
+<text x="96.0" y="1590.8000000000002" font-size="22" class="" text-anchor="start">커피 거의 다</text>
+<text x="96.0" y="1620.5000000000002" font-size="22" class="" text-anchor="start">떨어졌네.</text>
+<g transform="translate(46.0 1666.2000000000003) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
+<rect x="82.0" y="1653.2000000000003" width="269.3333333333333" height="115.10000000000001" rx="12" fill="#ffffff" stroke="#d3dedf"/>
+<text x="96.0" y="1688.2000000000003" font-size="22" class="" text-anchor="start">다음에 장 볼 때</text>
+<text x="96.0" y="1717.9000000000003" font-size="22" class="" text-anchor="start">커피도 챙기면</text>
+<text x="96.0" y="1747.6000000000004" font-size="22" class="" text-anchor="start">되겠네요.</text>
+<path d="M48.0 1786.3000000000002H349.3333333333333" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
+<text x="48.0" y="1815.3000000000002" font-size="20" class="muted" text-anchor="start">짧은 일상 이야기가 맥락이</text>
+<text x="48.0" y="1842.3000000000002" font-size="20" class="muted" text-anchor="start">됩니다.</text>
+<path d="M372.3333333333333 1517.8000000000002 L386.3333333333333 1517.8000000000002" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M381.3333333333333 1513.8000000000002 L386.3333333333333 1517.8000000000002 L381.3333333333333 1521.8000000000002" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="389.3333333333333" y="1483.8000000000002" width="341.3333333333333" height="414.20000000000005" rx="14" fill="#f8fafb" stroke="#d4dce5"/>
+<circle cx="418.3333333333333" cy="1515.8000000000002" r="13" fill="#e1eee8" stroke="none"/>
+<text x="418.3333333333333" y="1522.8000000000002" font-size="18" class="blue bold" text-anchor="middle">2</text>
+<text x="445.3333333333333" y="1521.8000000000002" font-size="22" class="bold" text-anchor="start">몇 시간 뒤</text>
+<g transform="translate(407.3333333333333 1568.8000000000002) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
+<rect x="443.3333333333333" y="1555.8000000000002" width="269.3333333333333" height="115.10000000000001" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
+<text x="457.3333333333333" y="1590.8000000000002" font-size="22" class="" text-anchor="start">이제 나가려고. 가는</text>
+<text x="457.3333333333333" y="1620.5000000000002" font-size="22" class="" text-anchor="start">길에 살 만한 데</text>
+<text x="457.3333333333333" y="1650.2000000000003" font-size="22" class="" text-anchor="start">있을까?</text>
+<g transform="translate(407.3333333333333 1695.9) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
+<rect x="443.3333333333333" y="1682.9" width="269.3333333333333" height="115.10000000000001" rx="12" fill="#ffffff" stroke="#d3dedf"/>
+<text x="457.3333333333333" y="1717.9" font-size="22" class="" text-anchor="start">커피 말씀이죠? 가는</text>
+<text x="457.3333333333333" y="1747.6000000000001" font-size="22" class="" text-anchor="start">길을 알려주시면</text>
+<text x="457.3333333333333" y="1777.3000000000002" font-size="22" class="" text-anchor="start">찾아볼게요.</text>
+<path d="M409.3333333333333 1816.0H710.6666666666666" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
+<text x="409.3333333333333" y="1845.0" font-size="20" class="muted" text-anchor="start">앞선 이야기와 지금 상황을</text>
+<text x="409.3333333333333" y="1872.0" font-size="20" class="muted" text-anchor="start">연결합니다.</text>
+<path d="M733.6666666666666 1517.8000000000002 L747.6666666666666 1517.8000000000002" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M742.6666666666666 1513.8000000000002 L747.6666666666666 1517.8000000000002 L742.6666666666666 1521.8000000000002" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="750.6666666666666" y="1483.8000000000002" width="341.3333333333333" height="414.20000000000005" rx="14" fill="#f8fafb" stroke="#d4dce5"/>
+<circle cx="779.6666666666666" cy="1515.8000000000002" r="13" fill="#e1eee8" stroke="none"/>
+<text x="779.6666666666666" y="1522.8000000000002" font-size="18" class="blue bold" text-anchor="middle">3</text>
+<text x="806.6666666666666" y="1521.8000000000002" font-size="22" class="bold" text-anchor="start">나중에</text>
+<g transform="translate(768.6666666666666 1568.8000000000002) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
+<rect x="804.6666666666666" y="1555.8000000000002" width="269.3333333333333" height="85.4" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
+<text x="818.6666666666666" y="1590.8000000000002" font-size="22" class="" text-anchor="start">시간 없네. 지난번에</text>
+<text x="818.6666666666666" y="1620.5000000000002" font-size="22" class="" text-anchor="start">사던 걸로 그냥 사줘.</text>
+<g transform="translate(768.6666666666666 1666.2000000000003) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
+<rect x="804.6666666666666" y="1653.2000000000003" width="269.3333333333333" height="85.4" rx="12" fill="#ffffff" stroke="#d3dedf"/>
+<text x="818.6666666666666" y="1688.2000000000003" font-size="22" class="" text-anchor="start">지난번 커피로요. 결제</text>
+<text x="818.6666666666666" y="1717.9000000000003" font-size="22" class="" text-anchor="start">전에는 확인받을게요.</text>
+<path d="M770.6666666666666 1756.6000000000004H1072.0" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
+<text x="770.6666666666666" y="1785.6000000000004" font-size="20" class="muted" text-anchor="start">이전 선택 · 필요해진 순간의</text>
+<text x="770.6666666666666" y="1812.6000000000004" font-size="20" class="muted" text-anchor="start">권한</text>
+<text x="28" y="1948.0000000000002" font-size="22" class="blue" text-anchor="start">나는 대화를 이어갑니다. AgentOS가 맥락과 일, 허용된 기능을 연결합니다.</text>
+<path d="M28 1977.7000000000003H1092" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
+<text x="28" y="2013.7000000000003" font-size="20" class="muted" text-anchor="start">상호작용과 제품 방향을 설명하는 예시입니다. 실제 관측 실행이나 배포된 연동 기능을 뜻하지 않습니다.</text>
 </svg>

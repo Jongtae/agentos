@@ -4,9 +4,11 @@ The public READMEs introduce the desired personal-assistant relationship, owner 
 
 ## Current introduction
 
-`presence-overview.{en,ko,ja,zh-CN}.svg` is the single compact architecture illustration used by the four READMEs. It connects the conversation with the PA, related owner state in AgentOS, judgment and replaceable AI/tools. Plain-language labels lead; detailed ontology definitions are linked from the README.
+`presence-overview.{en,ko,ja,zh-CN}.svg` is the illustrated overview used by the four READMEs. Three example cards show answering a question, carrying out an explicit command and continuing a personal conversation. An Owner/PA/AgentOS architecture and a short coffee conversation over time connect that experience to owner-held context, work, authority and evidence above replaceable AI/tools. Original vector icons and dialogue cards carry the explanation; detailed ontology definitions remain in the linked documents.
 
-Each locale has a `.narrow.svg` composition selected by the README's `<picture>` at viewport widths of 600 pixels or less. Desktop and narrow versions carry the same meanings. The desktop canvas is 840 × 434; the narrow canvas is 420 × 656. These are architecture illustrations, not operating evidence. There are no external fonts, images or scripts.
+The visual follows the composition of the owner-provided NVIDIA/Amazon/continuing-conversation reference. It does not reproduce a messaging application, market price or completed purchase. All depicted interactions are illustrative product direction, not observed runs or shipped-integration claims.
+
+Each locale has a `.narrow.svg` composition selected by the README's `<picture>` at viewport widths of 600 pixels or less. Desktop and narrow versions carry the same meanings. Desktop canvases are 1120 pixels wide and narrow canvases are 420 pixels wide; their heights follow the localized content instead of squeezing text into a fixed panel. These are architecture illustrations, not operating evidence. There are no external fonts, images or scripts.
 
 ## Supporting and historical figures
 

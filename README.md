@@ -33,7 +33,7 @@ AgentOS gives these things a shared structure—its **ontology**. A piece of wor
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.en.narrow.svg">
-  <img src="docs/assets/readme/presence-overview.en.svg" alt="You talk to one PA. AgentOS connects your memory and context, work and permissions, and results and evidence. Its judgment layer coordinates replaceable AI and tools underneath; your state stays with you.">
+  <img src="docs/assets/readme/presence-overview.en.svg" alt="Concept illustration: Assistant answers a question about NVIDIA; a computer agent acts on an Amazon command; Personal AgentOS carries a conversation over time. You talk to one PA, with context, work and authority held in AgentOS above replaceable AI and tools. The coffee sequence illustrates product direction, not an observed run or shipped integrations.">
 </picture>
 
 AgentOS uses its judgment layer to choose AI and tools and check their results. You talk to the PA while AgentOS carries that structure underneath the conversation. **Same PA. Different AI.**

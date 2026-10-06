@@ -23,7 +23,10 @@
 
 ## 어시스턴트에서 개인 에이전트 환경으로
 
-![설명용 비교: 질문에 답하는 Assistant, 명령을 실행하는 Computer agent, AI가 바뀌어도 맥락과 작업을 이어가는 Personal AgentOS](docs/assets/readme/interaction-model.ko.svg)
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/interaction-model.ko.narrow.svg">
+  <img src="docs/assets/readme/interaction-model.ko.svg" alt="설명용 비교: 질문에 답하는 Assistant, 명령을 실행하는 Computer agent, AI가 바뀌어도 맥락과 작업을 이어가는 Personal AgentOS">
+</picture>
 
 차이는 AI가 주가를 검색하거나 **장바구니에 담기**를 할 수 있느냐가 아닙니다. 어시스턴트는 이미 질문에 답하고, computer-use agent는 명령을 실행할 수 있습니다. Personal AgentOS는 **지속되는 관계, 소유자의 맥락, 권한과 작업 상태**를 AI 제공자 밖으로 꺼내 소유자가 통제하는 환경에 둡니다.
 
@@ -39,11 +42,19 @@
 
 소유자는 바뀌는 모델·도구·워크플로와 각각 대화하지 않고 하나의 **PA**와 대화합니다.
 
-![Presence 구조: 소유자는 PA와 대화하고 AgentOS는 Memory, Context, Work, Authority, Evidence, Events를 소유하며 판단 계층이 교체 가능한 AI와 도구를 조율함](docs/assets/readme/presence.ko.svg)
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence.ko.narrow.svg">
+  <img src="docs/assets/readme/presence.ko.svg" alt="Presence 구조: 소유자는 PA와 대화하고 AgentOS는 Memory, Context, Work, Authority, Evidence, Events를 소유하며 판단 계층이 교체 가능한 AI와 도구를 조율함">
+</picture>
 
 그래서 대화 방식도 달라집니다. 사람은 불완전한 사실을 그냥 말해둘 수 있고, 몇 시간 뒤 이어 말할 수 있으며, 필요해진 순간 사진이나 위치를 보내고, 실제 외부 행동에 계정/컴퓨터 권한이 필요할 때만 넘겨줄 수 있습니다. 일상의 의도를 tool·model·workflow·memory 명령으로 번역할 필요가 없습니다.
 
 **대표 상호작용 — 제품 방향.** 소유자가 제공한 상호작용 패턴을 축약한 예시이며, 하나의 관찰된 실행을 재현한 것이 아닙니다.
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/continuing-conversation.ko.narrow.svg">
+  <img src="docs/assets/readme/continuing-conversation.ko.svg" alt="시간에 걸친 설명용 대화: 커피가 부족하다는 말, 몇 시간 뒤 들를 곳 질문, 나중에 이전 선택 요청. 맥락과 Work를 이어가며 필요할 때 권한을 연결하는 제품 방향으로, 하나의 관찰 실행이 아님.">
+</picture>
 
 > **아침:** “커피 거의 다 떨어졌네.”  
 > **오후:** “오늘 일이 좀 늦게 끝날 것 같아.”  

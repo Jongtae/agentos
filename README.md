@@ -25,7 +25,10 @@ The author's sentence, in the original Korean. Why the project exists and the do
 
 ## From an assistant to a personal agent environment
 
-![Illustrative progression: Assistant answers; Computer agent acts; Personal AgentOS keeps context and work across AI changes](docs/assets/readme/interaction-model.en.svg)
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/interaction-model.en.narrow.svg">
+  <img src="docs/assets/readme/interaction-model.en.svg" alt="Illustrative progression: Assistant answers; Computer agent acts; Personal AgentOS keeps context and work across AI changes">
+</picture>
 
 The distinction is not whether an AI can search a stock price or click **Add to cart**. Assistants already answer questions, and computer-use agents can already execute commands. Personal AgentOS moves the **persistent relationship, owner context, authority and work state** out of the AI provider and into an environment the owner controls.
 
@@ -41,11 +44,19 @@ The NASDAQ/Amazon examples above are **interaction-model illustrations**, not cl
 
 The owner talks to one **PA**, not to a changing set of models, tools and workflows.
 
-![Presence architecture: Owner talks to PA; Personal AgentOS owns Memory, Context, Work, Authority, Evidence and Events; Judgment orchestrates replaceable AI and tools](docs/assets/readme/presence.en.svg)
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence.en.narrow.svg">
+  <img src="docs/assets/readme/presence.en.svg" alt="Presence architecture: Owner talks to PA; Personal AgentOS owns Memory, Context, Work, Authority, Evidence and Events; Judgment orchestrates replaceable AI and tools">
+</picture>
 
 That changes the conversation. A person can share an incomplete fact, continue it hours later, send a photo or location when it becomes relevant, and grant account/computer access only at the moment an external action needs it. The owner does not have to translate everyday intent into a tool, model, workflow or memory command.
 
 **Representative interaction — product direction.** These owner-supplied interaction patterns are condensed into an example, not a single observed run:
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/continuing-conversation.en.narrow.svg">
+  <img src="docs/assets/readme/continuing-conversation.en.svg" alt="Illustrative continuing conversation: coffee running low, finding a stop hours later, then asking for the previous choice; context and Work continue, authority is resolved when needed. Product direction, not one observed run.">
+</picture>
 
 > **Morning:** “We’re almost out of coffee.”  
 > **Afternoon:** “I may finish work late today.”  

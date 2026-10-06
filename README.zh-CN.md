@@ -25,7 +25,10 @@
 
 ## 从助手到个人 Agent 环境
 
-![示意比较：Assistant 回答问题，Computer agent 执行命令，Personal AgentOS 在 AI 改变后仍保留上下文与工作](docs/assets/readme/interaction-model.zh-CN.svg)
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/interaction-model.zh-CN.narrow.svg">
+  <img src="docs/assets/readme/interaction-model.zh-CN.svg" alt="示意比较：Assistant 回答问题，Computer agent 执行命令，Personal AgentOS 在 AI 改变后仍保留上下文与工作">
+</picture>
 
 区别不在于 AI 能不能查询股价或点击**加入购物车**。助手已经能回答问题，computer-use agent 也已经能执行命令。Personal AgentOS 把**持续的关系、owner context、authority 和 work state**从 AI provider 中移出来，放在由 owner 控制的环境里。
 
@@ -41,11 +44,19 @@
 
 Owner 不需要分别和不断变化的 model、tool、workflow 对话，而是始终和一个 **PA** 对话。
 
-![Presence 架构：所有者与 PA 对话；AgentOS 持有 Memory、Context、Work、Authority、Evidence、Events；判断层编排可替换的 AI 与工具](docs/assets/readme/presence.zh-CN.svg)
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence.zh-CN.narrow.svg">
+  <img src="docs/assets/readme/presence.zh-CN.svg" alt="Presence 架构：所有者与 PA 对话；AgentOS 持有 Memory、Context、Work、Authority、Evidence、Events；判断层编排可替换的 AI 与工具">
+</picture>
 
 因此，人可以只说一个不完整的生活事实，几小时后继续说；在需要时才发送照片或位置；只有真正的外部 action 需要 account/computer authority 时才 handoff。不必把日常 intent 翻译成 tool、model、workflow 或 memory command。
 
 **代表性交互 — 产品方向。** 这是将所有者提供的交互模式浓缩而成的示例，并不是对一次完整观测运行的重现。
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/continuing-conversation.zh-CN.narrow.svg">
+  <img src="docs/assets/readme/continuing-conversation.zh-CN.svg" alt="跨越时间的说明对话：咖啡快没了，数小时后询问顺路购买地点，之后请求之前的选择。上下文与 Work 持续，需要时处理权限。产品方向，并非一次真实观测。">
+</picture>
 
 > **早上：**“咖啡快没了。”  
 > **下午：**“今天工作可能会晚一点结束。”  

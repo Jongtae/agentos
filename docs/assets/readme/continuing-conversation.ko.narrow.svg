@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="980" viewBox="0 0 420 980" role="img" aria-labelledby="title desc">
+<title id="title">시간에 걸쳐 이어지는 대화</title><desc id="desc">축약한 설명용 예시이며, 하나의 실제 관찰 실행이 아닙니다.</desc>
+<style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
+<rect width="420" height="980" fill="#fff"/>
+<text x="20" y="32.0" font-size="23" class="bold" text-anchor="start">시간에 걸쳐 이어지는 대화</text>
+<text x="20" y="68" font-size="16" class="muted" text-anchor="start">대표 상호작용 · 제품 방향</text>
+<rect x="40" y="92" width="360" height="220" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="56" y="122" font-size="18" class="blue bold" text-anchor="start">01  처음에</text>
+<text x="56" y="158.0" font-size="19" class="bold" text-anchor="start">“커피 거의 다 떨어졌네.”</text>
+<path d="M56 250H384" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="56" y="278.0" font-size="17" class="muted" text-anchor="start">저장 가능한 이전 맥락</text>
+<circle cx="20" cy="118" r="4" fill="#245b92"/>
+<path d="M20 127 L20 350" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M16 345 L20 350 L24 345" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="40" y="336" width="360" height="220" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="56" y="366" font-size="18" class="blue bold" text-anchor="start">02  몇 시간 뒤</text>
+<text x="56" y="402.0" font-size="19" class="bold" text-anchor="start">“이제 나가려고. 가는 길에 살 만한</text>
+<text x="56" y="428.6" font-size="19" class="bold" text-anchor="start">데 있을까?”</text>
+<path d="M56 494H384" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="56" y="522.0" font-size="17" class="muted" text-anchor="start">시간 / 경로 / 영업 여부</text>
+<circle cx="20" cy="362" r="4" fill="#245b92"/>
+<path d="M20 371 L20 594" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M16 589 L20 594 L24 589" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="40" y="580" width="360" height="220" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="56" y="610" font-size="18" class="blue bold" text-anchor="start">03  나중에</text>
+<text x="56" y="646.0" font-size="19" class="bold" text-anchor="start">“시간 없네. 지난번에 사던 걸로 그</text>
+<text x="56" y="672.6" font-size="19" class="bold" text-anchor="start">냥 사줘.”</text>
+<path d="M56 738H384" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="56" y="766.0" font-size="17" class="muted" text-anchor="start">이전 선택 / 필요할 때 권한</text>
+<circle cx="20" cy="606" r="4" fill="#245b92"/>
+<rect x="20" y="836" width="380" height="58" rx="5" fill="#f2f7fc" stroke="#96b6d6"/>
+<text x="210.0" y="861" font-size="18" class="bold" text-anchor="middle">대화 아래에서 맥락을 연결하며 이어가는</text>
+<text x="210.0" y="884" font-size="18" class="bold" text-anchor="middle">하나의 Work</text>
+<text x="20" y="934.0" font-size="16" class="muted" text-anchor="start">축약한 설명용 예시이며, 하나의 실제 관찰 실행</text>
+<text x="20" y="956.4" font-size="16" class="muted" text-anchor="start">이 아닙니다.</text>
+</svg>

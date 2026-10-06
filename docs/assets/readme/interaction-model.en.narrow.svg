@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="1240" viewBox="0 0 420 1240" role="img" aria-labelledby="title desc">
+<title id="title">Three interaction models</title><desc id="desc">NASDAQ / Amazon illustrate interaction, not shipped integrations.</desc>
+<style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
+<rect width="420" height="1240" fill="#fff"/>
+<text x="20" y="32.0" font-size="24" class="bold" text-anchor="start">Three interaction models</text>
+<text x="20" y="66" font-size="16" class="muted" text-anchor="start">Concept illustration</text>
+<rect x="20" y="86" width="380" height="340" rx="8" fill="#f6f8fa" stroke="#ccd4de"/>
+<text x="36" y="118" font-size="16" class="blue bold" text-anchor="start">01</text>
+<text x="68" y="118" font-size="20" class="bold" text-anchor="start">Assistant</text>
+<text x="36" y="149.0" font-size="19" class="blue bold" text-anchor="start">Answers</text>
+<rect x="34" y="166" width="352" height="88" rx="5" fill="#ffffff" stroke="#dbe2ea"/>
+<text x="46" y="191.0" font-size="18" class="" text-anchor="start">“What is NVIDIA trading at?”</text>
+<circle cx="44" cy="268" r="3" fill="#245b92"/>
+<text x="58" y="274" font-size="17" class="" text-anchor="start">Question</text>
+<circle cx="44" cy="290" r="3" fill="#245b92"/>
+<path d="M44 274 L44 283" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 278 L44 283 L48 278" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="296" font-size="17" class="" text-anchor="start">Search</text>
+<circle cx="44" cy="312" r="3" fill="#245b92"/>
+<path d="M44 296 L44 305" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 300 L44 305 L48 300" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="318" font-size="17" class="" text-anchor="start">Answer</text>
+<text x="36" y="406.0" font-size="16" class="bold" text-anchor="start">Current conversation + answer</text>
+<rect x="20" y="442" width="380" height="340" rx="8" fill="#f6f8fa" stroke="#ccd4de"/>
+<text x="36" y="474" font-size="16" class="blue bold" text-anchor="start">02</text>
+<text x="68" y="474" font-size="20" class="bold" text-anchor="start">Computer agent</text>
+<text x="36" y="505.0" font-size="19" class="blue bold" text-anchor="start">Acts</text>
+<rect x="34" y="522" width="352" height="88" rx="5" fill="#ffffff" stroke="#dbe2ea"/>
+<text x="46" y="547.0" font-size="18" class="" text-anchor="start">“Add these headphones to my</text>
+<text x="46" y="572.2" font-size="18" class="" text-anchor="start">Amazon cart.”</text>
+<circle cx="44" cy="624" r="3" fill="#245b92"/>
+<text x="58" y="630" font-size="17" class="" text-anchor="start">Explicit command</text>
+<circle cx="44" cy="646" r="3" fill="#245b92"/>
+<path d="M44 630 L44 639" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 634 L44 639 L48 634" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="652" font-size="17" class="" text-anchor="start">Browser / tool</text>
+<circle cx="44" cy="668" r="3" fill="#245b92"/>
+<path d="M44 652 L44 661" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 656 L44 661 L48 656" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="674" font-size="17" class="" text-anchor="start">Action</text>
+<circle cx="44" cy="690" r="3" fill="#245b92"/>
+<path d="M44 674 L44 683" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 678 L44 683 L48 678" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="696" font-size="17" class="" text-anchor="start">Authority if needed</text>
+<circle cx="44" cy="712" r="3" fill="#245b92"/>
+<path d="M44 696 L44 705" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 700 L44 705 L48 700" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="718" font-size="17" class="" text-anchor="start">Handoff</text>
+<text x="36" y="762.0" font-size="16" class="bold" text-anchor="start">Task + browser/tool state</text>
+<rect x="20" y="798" width="380" height="340" rx="8" fill="#f2f7fc" stroke="#96b6d6"/>
+<text x="36" y="830" font-size="16" class="blue bold" text-anchor="start">03</text>
+<text x="68" y="830" font-size="20" class="bold" text-anchor="start">Personal AgentOS</text>
+<text x="36" y="861.0" font-size="19" class="blue bold" text-anchor="start">Stays with the owner</text>
+<rect x="34" y="878" width="352" height="88" rx="5" fill="#ffffff" stroke="#dbe2ea"/>
+<text x="46" y="903.0" font-size="18" class="" text-anchor="start">“We’re almost out of coffee.”</text>
+<text x="46" y="928.2" font-size="18" class="" text-anchor="start">→ later: “Get the same one as</text>
+<text x="46" y="953.4" font-size="18" class="" text-anchor="start">last time.”</text>
+<circle cx="44" cy="980" r="3" fill="#245b92"/>
+<text x="58" y="986" font-size="17" class="" text-anchor="start">Conversation over time</text>
+<circle cx="44" cy="1002" r="3" fill="#245b92"/>
+<path d="M44 986 L44 995" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 990 L44 995 L48 990" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="1008" font-size="17" class="" text-anchor="start">Context</text>
+<circle cx="44" cy="1024" r="3" fill="#245b92"/>
+<path d="M44 1008 L44 1017" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 1012 L44 1017 L48 1012" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="1030" font-size="17" class="" text-anchor="start">Judgment</text>
+<circle cx="44" cy="1046" r="3" fill="#245b92"/>
+<path d="M44 1030 L44 1039" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 1034 L44 1039 L48 1034" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="1052" font-size="17" class="" text-anchor="start">Continuing work</text>
+<circle cx="44" cy="1068" r="3" fill="#245b92"/>
+<path d="M44 1052 L44 1061" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 1056 L44 1061 L48 1056" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="1074" font-size="17" class="" text-anchor="start">Authority if needed</text>
+<circle cx="44" cy="1090" r="3" fill="#245b92"/>
+<path d="M44 1074 L44 1083" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M40 1078 L44 1083 L48 1078" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="58" y="1096" font-size="17" class="" text-anchor="start">Continuous Presence</text>
+<text x="36" y="1118.0" font-size="16" class="bold" text-anchor="start">Owner context + work persist</text>
+<text x="20" y="1183.0" font-size="16" class="muted" text-anchor="start">NASDAQ / Amazon illustrate interaction,</text>
+<text x="20" y="1205.4" font-size="16" class="muted" text-anchor="start">not shipped integrations.</text>
+</svg>

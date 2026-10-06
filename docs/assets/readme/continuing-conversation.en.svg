@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="550" viewBox="0 0 840 550" role="img" aria-labelledby="title desc">
+<title id="title">A conversation over time</title><desc id="desc">Illustrative, condensed; not one observed live run.</desc>
+<style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
+<rect width="840" height="550" fill="#fff"/>
+<text x="20" y="32.0" font-size="23" class="bold" text-anchor="start">A conversation over time</text>
+<text x="20" y="68" font-size="16" class="muted" text-anchor="start">Representative interaction · product direction</text>
+<rect x="20" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="36" y="122" font-size="18" class="blue bold" text-anchor="start">01  Earlier</text>
+<text x="36" y="158.0" font-size="19" class="bold" text-anchor="start">“We’re almost out</text>
+<text x="36" y="184.6" font-size="19" class="bold" text-anchor="start">of coffee.”</text>
+<path d="M36 290H260" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="36" y="318.0" font-size="17" class="muted" text-anchor="start">Eligible prior context</text>
+<path d="M278 210 L290 210" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M285 206 L290 210 L285 214" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="292" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="308" y="122" font-size="18" class="blue bold" text-anchor="start">02  Hours later</text>
+<text x="308" y="158.0" font-size="19" class="bold" text-anchor="start">“I’m heading out</text>
+<text x="308" y="184.6" font-size="19" class="bold" text-anchor="start">now. Is there</text>
+<text x="308" y="211.2" font-size="19" class="bold" text-anchor="start">somewhere on the</text>
+<text x="308" y="237.8" font-size="19" class="bold" text-anchor="start">way I can pick it</text>
+<text x="308" y="264.4" font-size="19" class="bold" text-anchor="start">up?”</text>
+<path d="M308 290H532" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="308" y="318.0" font-size="17" class="muted" text-anchor="start">Time / route /</text>
+<text x="308" y="341.8" font-size="17" class="muted" text-anchor="start">availability</text>
+<path d="M550 210 L562 210" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M557 206 L562 210 L557 214" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="564" y="92" width="256" height="310" rx="8" fill="#fff" stroke="#ccd4de"/>
+<text x="580" y="122" font-size="18" class="blue bold" text-anchor="start">03  Later</text>
+<text x="580" y="158.0" font-size="19" class="bold" text-anchor="start">“No time. Just get</text>
+<text x="580" y="184.6" font-size="19" class="bold" text-anchor="start">the same one as</text>
+<text x="580" y="211.2" font-size="19" class="bold" text-anchor="start">last time.”</text>
+<path d="M580 290H804" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<text x="580" y="318.0" font-size="17" class="muted" text-anchor="start">Prior choice /</text>
+<text x="580" y="341.8" font-size="17" class="muted" text-anchor="start">authority when needed</text>
+<rect x="20" y="422" width="800" height="58" rx="5" fill="#f2f7fc" stroke="#96b6d6"/>
+<text x="420.0" y="447" font-size="18" class="bold" text-anchor="middle">One continuing Work, resolved beneath the conversation</text>
+<text x="20" y="527.0" font-size="16" class="muted" text-anchor="start">Illustrative, condensed; not one observed live run.</text>
+</svg>

@@ -8,7 +8,7 @@ The four public READMEs share the same information order and evidence boundaries
 
 ## Editing and visual verification
 
-The SVGs are editable source files. Keep the same rows, layers and examples in every locale. Use explicit text rows with ordinary glyph widths; do not force text to fit with `textLength` / `spacingAndGlyphs`. The 640-unit canvas and 26–30-unit text keep the new figures readable when GitHub scales them to approximately 343 CSS pixels on a 375-pixel viewport. No external fonts, scripts or image resources are required; system sans-serif and CJK fallbacks render the text.
+The SVGs are editable source files. Keep the same rows, layers and examples in every locale. Use explicit text rows with ordinary glyph widths; do not force text to fit with `textLength` / `spacingAndGlyphs`. The 560-unit canvas and 26–30-unit text keep the new figures readable when GitHub scales them to approximately 309 CSS pixels on GitHub’s 375-pixel viewport (254 pixels at a 320-pixel viewport). No external fonts, scripts or image resources are required; system sans-serif and CJK fallbacks render the text.
 
 After a change:
 

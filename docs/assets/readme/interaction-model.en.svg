@@ -1,24 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="824" viewBox="0 0 640 824" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="824" viewBox="0 0 560 824" role="img" aria-labelledby="title desc">
 <title id="title">Interaction models</title>
 <desc id="desc">Illustrative progression: an assistant answers, a computer agent acts on commands, and Personal AgentOS keeps owner-controlled context over time. Not shipped integrations.</desc>
 <style>
 text{font-family:Arial,"Noto Sans",sans-serif;fill:#1f2328;font-size:26px}
 .heading{font-size:30px;font-weight:700}.label{font-size:28px;font-weight:700}.muted{fill:#3d444d}.center{text-anchor:middle}
 </style>
-<rect width="640" height="824" fill="#ffffff"/>
+<rect width="560" height="824" fill="#ffffff"/>
 <text x="24" y="40" class="heading">Interaction models</text>
-<rect x="20" y="64" width="600" height="210" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
+<rect x="20" y="64" width="520" height="210" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
 <text x="44" y="102" class="heading">1 · Assistant</text>
 <text x="44" y="138" class="label">Answers a question</text>
 <text x="44" y="176" class="">“What is NVIDIA trading at?”</text>
 <text x="44" y="256" class="muted">Current conversation + answer</text>
-<rect x="20" y="290" width="600" height="210" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
+<rect x="20" y="290" width="520" height="210" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
 <text x="44" y="328" class="heading">2 · Computer agent</text>
 <text x="44" y="364" class="label">Acts on a command</text>
 <text x="44" y="402">“Add these headphones</text>
 <text x="44" y="436">to my Amazon cart.”</text>
 <text x="44" y="482" class="muted">Task + browser/tool state</text>
-<rect x="20" y="516" width="600" height="210" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
+<rect x="20" y="516" width="520" height="210" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
 <text x="44" y="554" class="heading">3 · Personal AgentOS</text>
 <text x="44" y="590" class="label">Stays with the owner</text>
 <text x="44" y="628" class="">“We’re almost out of coffee.”</text>

@@ -95,7 +95,7 @@ AgentOS: http://127.0.0.1:8787/
 
 ブラウザがそのアドレスで開きます。**바로 시작하기**（今すぐ始める）を押し、モデルを接続すれば、もう話しかけられます。画面は現在韓国語で、依頼は韓国語か英語で理解されます。
 
-**Homebrew は最新の公開リリース `v1.1.0`（2026-09-23）をインストールします。** 以下の release シーンは、そのビルドに含まれる範囲に限定しています。 その後 `main` にマージされた作業はそのビルドにないため、次のリリースまで Homebrew ビルドは `main` より遅れています。最新のコードを使うにはソースチェックアウトから実行してください（`git clone https://github.com/Jongtae/agentos.git` のあと Python 3.12 以上で `python3 -m pip install -e '.[mcp-host]'`）。すべての手順は [QUICKSTART](QUICKSTART.md) にあります。
+**Homebrew は最新の公開リリース `v1.1.0`（2026-09-23）をインストールします。** [release manifest](docs/release-manifest.json) に、このビルドの内容と制限を記録しています。予定作成は到達不可（J4）、調査は部分対応（J5）です。以下の synthetic 場面は、すべての流れがこのビルドで実行できるという約束ではありません。 その後 `main` にマージされた作業はそのビルドにないため、次のリリースまで Homebrew ビルドは `main` より遅れています。最新のコードを使うにはソースチェックアウトから実行してください（`git clone https://github.com/Jongtae/agentos.git` のあと Python 3.12 以上で `python3 -m pip install -e '.[mcp-host]'`）。すべての手順は [QUICKSTART](QUICKSTART.md) にあります。
 
 <!-- capability:current-supported-slice -->
 <!-- readme-section:scenes-today -->

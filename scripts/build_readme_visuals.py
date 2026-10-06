@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Generate the public README visuals under docs/assets/readme/.
 
-The visuals are messenger-style conversations showing the product doing
-real work. Each panel is written as a small self-contained HTML page (the
+The visuals reconstruct synthetic first-user journeys, not live-account
+screenshots. Each panel is written as a small self-contained HTML page (the
 committed source of truth, one per locale) and screenshotted with headless
 Chrome into a 2x PNG for the README. The Korean panels use the product's
 own prompt strings; the other locales translate them.
@@ -193,16 +193,16 @@ SCENES = {
     for loc, replies in _SCENE_REPLIES.items()
 }
 SCENE_TITLES = {
-    "en": "Five everyday requests that run today, and one after a restart",
-    "ko": "오늘 실제로 되는 다섯 가지 요청과 재시작 후 이어가기",
-    "ja": "今日実際に動く5つの依頼と、再起動後の続き",
-    "zh-CN": "今天就能完成的五个日常请求，以及重启后的继续",
+    "en": 'Synthetic first-user journeys: files, mail, calendar, Memory, research and restart reuse',
+    "ko": 'Synthetic 첫 사용자 여정: 파일, 메일, 일정, Memory, 조사와 재시작 후 이어가기',
+    "ja": 'Synthetic 初回ユーザー検証: ファイル、メール、予定、Memory、調査、再起動後の再利用',
+    "zh-CN": 'Synthetic 首次用户验证：文件、邮件、日程、Memory、调研与重启后复用',
 }
 HERO_TITLES = {
-    "en": "Two real conversations: a calendar draft that waits for approval, and a saved note found again after a restart",
-    "ko": "실제 대화 두 개: 승인을 기다리는 일정 초안, 재시작 후 다시 찾은 저장 메모",
-    "ja": "実際の会話2つ: 承認を待つ予定の下書きと、再起動後に見つけ直した保存メモ",
-    "zh-CN": "两段真实对话：等待批准的日程草稿，以及重启后再次找到的已保存笔记",
+    "en": 'Reconstructed v1 synthetic journeys: calendar draft approval and a saved note found after restart',
+    "ko": '재구성한 v1 synthetic 여정: 일정 초안 승인과 재시작 후 저장 메모 찾기',
+    "ja": '再構成した v1 synthetic 検証: 予定の下書き承認と、再起動後の保存メモ検索',
+    "zh-CN": '重构的 v1 synthetic 验证：日程草稿审批与重启后查找已保存笔记',
 }
 
 

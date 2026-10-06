@@ -1,24 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="824" viewBox="0 0 640 824" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="824" viewBox="0 0 560 824" role="img" aria-labelledby="title desc">
 <title id="title">상호작용 모델</title>
 <desc id="desc">설명용 비교: 질문에 답하는 어시스턴트, 명령을 실행하는 컴퓨터 에이전트, 소유자의 맥락을 지속하는 Personal AgentOS. 배포 통합 기능을 뜻하지 않습니다.</desc>
 <style>
 text{font-family:Arial,"Noto Sans",sans-serif;fill:#1f2328;font-size:26px}
 .heading{font-size:30px;font-weight:700}.label{font-size:28px;font-weight:700}.muted{fill:#3d444d}.center{text-anchor:middle}
 </style>
-<rect width="640" height="824" fill="#ffffff"/>
+<rect width="560" height="824" fill="#ffffff"/>
 <text x="24" y="40" class="heading">상호작용 모델</text>
-<rect x="20" y="64" width="600" height="210" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
+<rect x="20" y="64" width="520" height="210" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
 <text x="44" y="102" class="heading">1 · Assistant</text>
 <text x="44" y="138" class="label">질문에 답한다</text>
 <text x="44" y="176" class="">“NVIDIA 지금 얼마야?”</text>
 <text x="44" y="256" class="muted">현재 대화와 답</text>
-<rect x="20" y="290" width="600" height="210" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
+<rect x="20" y="290" width="520" height="210" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
 <text x="44" y="328" class="heading">2 · Computer agent</text>
 <text x="44" y="364" class="label">명령을 실행한다</text>
 <text x="44" y="402">“이 헤드폰을</text>
 <text x="44" y="436">Amazon 장바구니에 담아줘.”</text>
 <text x="44" y="482" class="muted">작업과 브라우저·도구 상태</text>
-<rect x="20" y="516" width="600" height="210" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
+<rect x="20" y="516" width="520" height="210" rx="8" fill="#f6f8fa" stroke="#8c959f"/>
 <text x="44" y="554" class="heading">3 · Personal AgentOS</text>
 <text x="44" y="590" class="label">소유자와 함께한다</text>
 <text x="44" y="628" class="">“커피 거의 다 떨어졌네.”</text>

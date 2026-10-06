@@ -29,7 +29,7 @@ The repository now contains substantially more than the published v1.1.0 build. 
 
 Evidence is deliberately separated:
 
-- **Published release:** v1.1.0 has installed-smoke and synthetic journey evidence recorded in the release manifest. It does **not** contain everything now on `main`.
+- **Published release:** published release has installed-smoke and synthetic journey evidence recorded in the release manifest. It does **not** contain everything now on `main`.
 - **Current `main`:** merged code and deterministic/fixture evidence support newer Secretary, Presence, Decision and execution contracts. A merged contract or test is not by itself a live-service claim.
 - **Owner pilot:** some newer paths have been exercised in the owner's real Telegram/desktop environment. Public screenshots will be added only when the exact examples are selected, redacted and tied to their observed revision.
 - **Direction:** shopping, booking and other future scenes remain product direction until implementation and evidence support a stronger claim.
@@ -54,7 +54,7 @@ AgentOS: http://127.0.0.1:8787/
 
 The browser opens on that address. Press **바로 시작하기** (Start now), connect a model, and you are talking to it. The interface is in Korean today; it understands requests in Korean or English.
 
-**Homebrew installs the newest published release, `v1.1.0` (2026-09-23).** The release scenes below are limited to what that build carries. Newer Secretary/Presence/orchestration work on `main` is not in v1.1.0; for the newest code run from a source checkout (`git clone https://github.com/Jongtae/agentos.git`, then `python3 -m pip install -e .` on Python 3.12 or newer). [QUICKSTART](QUICKSTART.md) has every step.
+**Homebrew installs the newest published release, `published release` (2026-09-23).** The release scenes below are limited to what that build carries. Newer Secretary/Presence/orchestration work on `main` is not in published release; for the newest code run from a source checkout (`git clone https://github.com/Jongtae/agentos.git`, then `python3 -m pip install -e .` on Python 3.12 or newer). [QUICKSTART](QUICKSTART.md) has every step.
 
 <!-- capability:current-supported-slice -->
 <!-- readme-section:scenes-today -->
@@ -68,7 +68,7 @@ The journeys behind these were run end to end by the project's automated first-u
 - **Files.** *Summarize “Launch review” and save it as “Launch notes”.* It reads the folder you allowed, writes a new note into the workspace folder you chose and leaves the original untouched.
 - **Mail.** *Find anything about the budget in my mail.* It searches only the mailbox you connected and shows what it found.
 - **Calendar.** *Schedule a dentist appointment tomorrow at 3.* It shows an exact draft and creates the event only after you say approve. “Make it 4pm” and “cancel” work on the same draft.
-- **Memory in v1.1.0.** *Remember that I have a peanut allergy.* The published build keeps durable memory and candidate review. **Current `main` has moved on:** the owner's own AI saves an eligible non-secret fact, tells you what it remembered and offers bounded undo; a third-party/delegated writer still uses the candidate/approval path.
+- **Memory in published release.** *Remember that I have a peanut allergy.* The published build keeps durable memory and candidate review. **Current `main` has moved on:** the owner's own AI saves an eligible non-secret fact, tells you what it remembered and offers bounded undo; a third-party/delegated writer still uses the candidate/approval path.
 - **Research.** *Look up these two products and compare them.* It searches, reads up to three public pages from that search, and returns what they say, what stayed unknown, and the links.
 
 Then restart the app and ask *Find “Launch notes” in my saved results.* The saved result, the folders you allowed, memory and Telegram pairing survive the restart.

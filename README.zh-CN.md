@@ -10,6 +10,8 @@
 **一个助手。可替换的 AI。由你掌控的记忆、上下文、工具和权限。**
 
 
+本地优先（local-first）不等于只在本地（local-only）。Personal AgentOS 可以使用本地或托管模型；使用托管模型时，获准的上下文会发送给该提供商。
+
 <!-- readme-section:concept -->
 
 ## 一句话说

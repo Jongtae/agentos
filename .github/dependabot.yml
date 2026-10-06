@@ -6,6 +6,8 @@ version: 2
 updates:
   - package-ecosystem: uv
     directory: /
+    exclude-paths:
+      - evals/**
     schedule:
       interval: weekly
       day: monday

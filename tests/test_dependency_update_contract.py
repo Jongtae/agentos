@@ -49,6 +49,7 @@ def test_dependabot_is_one_bounded_discovery_path_without_auto_merge() -> None:
 
     assert set(updates) == {"uv", "github-actions"}
     assert updates["uv"]["directory"] == "/"
+    assert updates["uv"]["exclude-paths"] == ["evals/**"]
     assert updates["uv"]["open-pull-requests-limit"] == 2
     assert updates["uv"]["versioning-strategy"] == "increase-if-necessary"
     assert updates["uv"]["allow"] == [
@@ -63,6 +64,12 @@ def test_dependabot_is_one_bounded_discovery_path_without_auto_merge() -> None:
     assert updates["github-actions"]["open-pull-requests-limit"] == 1
     assert "groups" not in config
     assert "registries" not in config
+
+    contract = (ROOT / "docs/dependency-update-contract.en.md").read_text(
+        encoding="utf-8"
+    )
+    assert "explicitly excludes `evals/**`" in contract
+    assert "evaluation requirements remain on" in contract
 
 
 def test_validation_uses_the_pinned_resolver_with_read_only_permissions() -> None:

@@ -142,7 +142,8 @@ to turn a bounded update into an unrelated refresh.
 `.github/dependabot.yml` checks the root `uv` resolution weekly at 09:00 Asia
 /Seoul and GitHub Actions at 09:30. It permits at most two routine Python PRs
 and one Actions PR. Routine Python discovery is limited to direct minor/patch
-updates. There is no auto-merge configuration.
+updates and explicitly excludes `evals/**`; evaluation requirements remain on
+their separately authorized manual path. There is no auto-merge configuration.
 
 A bot PR is a discovery candidate, not implementation authority and not an
 exception to issue-first delivery:

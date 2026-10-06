@@ -23,6 +23,50 @@
 
 这是作者的原话，保留韩语原文。这个项目为什么存在，以及定义这个理念的文档，都汇集在一页上：[VISION.md](VISION.md)（英文）
 
+<!-- readme-section:interaction-model -->
+
+## 从助手到个人 Agent 环境
+
+区别不在于 AI 能不能查询股价或点击**加入购物车**。助手已经能回答问题，computer-use agent 也已经能执行命令。Personal AgentOS 把**持续的关系、owner context、authority 和 work state**从 AI provider 中移出来，放在由 owner 控制的环境里。
+
+| Interaction model | Owner 做什么 | 系统主要保留什么 |
+| --- | --- | --- |
+| **Assistant — answers** | 像“现在 NVIDIA 的价格是多少？”这样提问 | 当前会话和答案 |
+| **Computer agent — acts** | 像“把这个耳机加入 Amazon 购物车”这样下命令 | task、browser/tool state 和 action/handoff |
+| **Personal AgentOS — stays with you** | 像“咖啡快没了。”→之后“就买上次那个吧。”这样跨时间自然交谈 | 独立于某个 AI 持续存在的 Memory、Context、Work、Authority、Evidence |
+
+上面的 NASDAQ/Amazon 是**交互模型示例**，并不表示这些服务已经作为当前 shipped integration 提供。
+
+### Presence 不是语气，而是 architecture
+
+Owner 不需要分别和不断变化的 model、tool、workflow 对话，而是始终和一个 **PA** 对话。
+
+```text
+Owner  ⇄  PA (continuous presence)
+             │
+     Personal AgentOS
+  ┌──────────┼───────────┐
+Memory    Context      Work
+Authority  Evidence     Events
+  └──────────┼───────────┘
+       Judgment / orchestration
+             │
+   replaceable AI + tools/services
+```
+
+因此，人可以只说一个不完整的生活事实，几小时后继续说；在需要时才发送照片或位置；只有真正的外部 action 需要 account/computer authority 时才 handoff。不必把日常 intent 翻译成 tool、model、workflow 或 memory command。
+
+把 owner-pilot 中反复出现的 interaction pattern 一般化，可以是这样的：
+
+> **早上：**“咖啡快没了。”  
+> **下午：**“今天工作可能会晚一点结束。”  
+> **晚上：**“我现在要走了，路上有地方可以买到吗？”  
+> **稍后：**“没时间了，就买上次那个吧。”
+
+在这段普通对话下面，AgentOS 可以按需解析 prior context、calendar/time、location、search 和持续中的 Work，并且只在真正需要 authority 时进行 handoff。这段对话是为了说明而一般化、压缩的示例；当前 implementation evidence 会在下文单独分类。
+
+**Same PA. Different AI.** 即使底层 model 改变，目标也是让 owner 不必从头重建关系。
+
 <!-- readme-section:working-software -->
 
 ## 不只是一个概念

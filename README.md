@@ -33,7 +33,7 @@ Evidence is deliberately separated:
 
 - **Published release:** published release has installed-smoke and synthetic journey evidence recorded in the release manifest. It does **not** contain everything now on `main`.
 - **Current `main`:** merged code and deterministic/fixture evidence support newer Secretary, Presence, Decision and execution contracts. A merged contract or test is not by itself a live-service claim.
-- **Owner pilot:** some newer paths have been exercised in the owner's real Telegram/desktop environment. Public screenshots will be added only when the exact examples are selected, redacted and tied to their observed revision.
+- **Owner pilot evidence:** public owner-live claims are intentionally pending until exact Telegram/desktop observations are selected, redacted and tied to a revision/evidence record.
 - **Direction:** shopping, booking and other future scenes remain product direction until implementation and evidence support a stronger claim.
 
 See [what works and how we know](docs/product-status.en.md), the [release manifest](docs/release-manifest.json), and the [documentation map](docs/README.md).

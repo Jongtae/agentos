@@ -95,7 +95,7 @@ agentos start
 ```
 
 1. Browser setup opens at [http://127.0.0.1:8787](http://127.0.0.1:8787/). Choose **바로 시작하기** (Start now).
-2. Connect and test your own model: a tool-capable local Ollama model, or OpenAI, an OpenAI-compatible service or Anthropic with your API access. A Codex or Claude Code subscription can do the work instead of an API key; [QUICKSTART](QUICKSTART.md) shows how AgentOS records that connection without reading the login. The setup interface is currently Korean.
+2. Connect and test your own model: a tool-capable local Ollama model, or OpenAI, an OpenAI-compatible service or Anthropic with your API access. A Codex or Claude Code subscription can do the work instead of an API key ([QUICKSTART](QUICKSTART.md)). The setup interface is currently Korean.
 3. In **설정 → 외부 연결** (Settings → External connections), connect your own bot using its BotFather token. Open the generated pairing link in Telegram and press **Start**.
 4. In that Telegram chat, say: **“I need to finish a proposal this week. Help me break it into the next few steps.”**
 

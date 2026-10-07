@@ -95,7 +95,7 @@ agentos start
 ```
 
 1. 浏览器打开 [http://127.0.0.1:8787](http://127.0.0.1:8787/) 的设置页面后，选择 **바로 시작하기**（立即开始）。
-2. 连接自己的模型并完成连接测试。可以使用支持工具调用的本地 Ollama 模型，或凭自己的 API 访问权限连接 OpenAI、OpenAI 兼容服务或 Anthropic。也可以用 Codex 或 Claude Code 订阅代替 API 密钥来承担工作；[QUICKSTART](QUICKSTART.md) 说明了 AgentOS 如何在不读取登录信息的情况下仅记录该连接。目前设置界面为韩语。
+2. 连接自己的模型并完成连接测试。可以使用支持工具调用的本地 Ollama 模型，或凭自己的 API 访问权限连接 OpenAI、OpenAI 兼容服务或 Anthropic。也可以用 Codex 或 Claude Code 订阅代替 API 密钥（[QUICKSTART](QUICKSTART.md)）。目前设置界面为韩语。
 3. 在 **설정 → 외부 연결**（设置 → 外部连接）中，填入自己通过 BotFather 创建的机器人的令牌并连接。在 Telegram 中打开生成的配对链接，点击**开始**。
 4. 在这个 Telegram 对话里试着说：**“我这周要完成提案初稿。帮我把接下来要做的事分成几个步骤。”**
 

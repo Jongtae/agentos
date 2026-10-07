@@ -95,7 +95,7 @@ agentos start
 ```
 
 1. 브라우저에서 [http://127.0.0.1:8787](http://127.0.0.1:8787/) 설정 화면이 열리면 **바로 시작하기**를 누릅니다.
-2. 내 모델을 연결하고 연결 테스트를 마칩니다. 도구 호출을 지원하는 로컬 Ollama 모델이나 내 API 접근 권한으로 OpenAI·OpenAI 호환 서비스·Anthropic을 사용할 수 있습니다. API 키 대신 Codex나 Claude Code 구독이 일을 맡을 수도 있습니다. AgentOS가 로그인 정보를 읽지 않고 그 연결만 기록하는 방법은 [QUICKSTART](QUICKSTART.md)에 있습니다. 설정 화면은 현재 한국어입니다.
+2. 내 모델을 연결하고 연결 테스트를 마칩니다. 도구 호출을 지원하는 로컬 Ollama 모델이나 내 API 접근 권한으로 OpenAI·OpenAI 호환 서비스·Anthropic을 사용할 수 있습니다. API 키 대신 Codex나 Claude Code 구독이 일을 맡을 수도 있습니다([QUICKSTART](QUICKSTART.md)). 설정 화면은 현재 한국어입니다.
 3. **설정 → 외부 연결**에서 BotFather로 만든 내 봇의 토큰을 입력해 연결합니다. 표시된 연결 링크를 Telegram에서 열고 **시작**을 누릅니다.
 4. 그 Telegram 대화에서 **“이번 주에 제안서 초안을 마무리해야 해. 다음 할 일을 몇 단계로 정리해줘.”** 하고 말을 걸어보세요.
 

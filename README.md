@@ -21,6 +21,8 @@ Think of the conversations and unfinished work Tony Stark shared with Jarvis. If
 
 AgentOS keeps memory, work and authority in your environment. You choose the AI, the information it can use and the access you give it. Different expertise can serve the same owner; better AI should expand what your agent can do without making you start over.
 
+Two of those controls ship in the current release: when your own AI saves a fact to Memory it tells you afterwards and offers an exact undo, and each piece of work records which of your information it used and where that information went.
+
 Local-first is not local-only: you can use a local or hosted model. With a hosted model, the context used for a request is sent to that provider.
 
 <!-- readme-section:presence -->
@@ -46,17 +48,13 @@ That takes more than a long chat history. **One meeting** has time, place and at
 
 These are relationships attached to one sourced meeting, not three different meetings. Its identity, time and invitation come from records; a role's assessment of urgency or responsibility is an interpretation with its own scope and grounds. An invitation is not an accepted commitment. Missing information is not proof that something did not happen; conflicting sources remain visible rather than being silently reconciled. Open decisions continue as work; unconfirmed permission never becomes permission to act; evidence distinguishes a proposal or draft from an action that occurred.
 
-Beyond meetings, AgentOS should not recreate reality for each role. An account's total balance of 100 million won and immediately available 80 million won may measure different things, so they are not automatically contradictory. Compare the account, measure, unit, scope, time and source; if those match and the values still differ, retain the source conflict.
-
-The same balance can inform readiness for planned spending, asset liquidity or funds available under an investment mandate, but none of those interpretations overwrites the record. Likewise, **asset management** relates a sourced stock holding to total assets, liabilities, cash flow and goals; **discretionary investment** checks whether it is a managed position and which mandate, constraints and permitted actions apply. Neither a role name nor a useful inference grants permission to trade.
-
-AgentOS aims to connect facts, role-specific interpretations, delegated work, permissions and evidence in a structure the owner controls. This is how a paused task or a different AI could pick up the right next step without making you reconstruct it. These are design illustrations, not released financial services or observed runs. Proactive attention to changing circumstances is a direction beyond the current reactive Presence work, not a claim of always-on monitoring today.
+AgentOS aims to connect facts, role-specific interpretations, delegated work, permissions and evidence in a structure the owner controls. This is how a paused task or a different AI could pick up the right next step without making you reconstruct it. The same rule applies beyond meetings; [Architecture and ontology](docs/personal-agentos-architecture.en.md#facts-and-role-interpretations) shows it on an account balance. These are design illustrations, not observed runs. Proactive attention to changing circumstances is a direction beyond the current reactive Presence work, not a claim of always-on monitoring today.
 
 <!-- readme-section:conversation -->
 
 ## Ordinary moments, the same PA
 
-*Illustrative product direction, not an observed live run or a shipped shopping integration.*
+*A condensed, redacted reconstruction based on owner-pilot conversations. It is not an evidence record of those conversations, and the map and shopping integrations shown are product direction, not shipped features.*
 
 The illustration below condenses three PA conversations: sharing a location to find dinner on the way home, comparing a golf belt and pausing for account login before a cart action, and continuing from a restaurant photo to a nearby walk. It is an edited illustrative reconstruction, not a verbatim product screenshot or proof of those integrations.
 
@@ -70,7 +68,7 @@ The illustration below condenses three PA conversations: sharing a location to f
 The image condenses the conversations. For the choices to make sense, the PA would need relevant information the owner has allowed it to use, and would need to ask again when information is missing or stale.
 
 1. **Dinner on the way home:** “Dinner on my way back?” means a route from the current location toward home. The PA must check whether work/home locations are available and permitted, where the owner is now, the time and whether someone is coming along. In the image it asks for a current location, offers three options using route, distance and opening hours, and the owner picks the second.
-2. **Find this belt:** A visual match alone may be a poor choice. If the owner has shared wardrobe styles and colors, preferences or a budget, the PA should use them; otherwise it asks only for what matters. In the image it compares three belts, then requests an account login for the chosen cart action. Adding to a cart and paying are different actions.
+2. **Find this belt:** A visual match alone may be a poor choice. If the owner has shared wardrobe styles and colors, preferences or a budget, the PA should use them; otherwise it asks only for what matters. In the image it compares three belts, then requests an account login for the chosen cart action. Adding to a cart and paying are different actions. The cart step itself is what a task agent does too; the difference is that the PA brings your context and preferences to the choice and stops at your account and authority boundary, not at the click.
 3. **Here at dinner. What next?** The restaurant photo and shared current place are only a start. The companion, occasion, time and weather may change a good suggestion. The PA should check what it does not know before offering a walk, café or bar. After the owner picks a walk, it would verify the route and opening hours.
 
 All three need the same path: **what you say or show → allowed context with a source and time → a useful question or tool → the boundary for action → an observed result**. The image explains that relationship; it does not claim all that context is already collected or those map and shopping integrations are shipped.
@@ -97,7 +95,7 @@ agentos start
 ```
 
 1. Browser setup opens at [http://127.0.0.1:8787](http://127.0.0.1:8787/). Choose **바로 시작하기** (Start now).
-2. Connect and test your own model: a tool-capable local Ollama model, or OpenAI, an OpenAI-compatible service or Anthropic with your API access. The setup interface is currently Korean.
+2. Connect and test your own model: a tool-capable local Ollama model, or OpenAI, an OpenAI-compatible service or Anthropic with your API access. A Codex or Claude Code subscription can do the work instead of an API key; [QUICKSTART](QUICKSTART.md) shows how AgentOS records that connection without reading the login. The setup interface is currently Korean.
 3. In **설정 → 외부 연결** (Settings → External connections), connect your own bot using its BotFather token. Open the generated pairing link in Telegram and press **Start**.
 4. In that Telegram chat, say: **“I need to finish a proposal this week. Help me break it into the next few steps.”**
 

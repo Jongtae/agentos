@@ -12,7 +12,7 @@ This is the evidence and boundary page behind the [README](../README.md). It sep
 <!-- readme-section:status -->
 ## What works, what still has friction
 
-The v1 journey table below is backed by the synthetic first-user audit [#472](https://github.com/Jongtae/agentos/issues/472), with injected transports; **live provider operation was not run**, so fixture success is not live-service proof. Newer `main` Secretary/Presence/Decision/execution work is tracked by its current contracts and merged tests and must not be attributed to the published release without a new release record.
+The v1 journey table below is backed by the synthetic first-user audit [#472](https://github.com/Jongtae/agentos/issues/472), with injected transports; **live provider operation was not run**, so fixture success is not live-service proof. The current release tag includes later Presence/Decision/execution source work, but this historical table does not validate the combined experience in live services. Current contracts and merged tests describe that later work at their own evidence levels.
 
 | Area | Current evidence |
 | --- | --- |
@@ -88,7 +88,7 @@ For installable agents the same rule holds: `downloaded != installed != enabled 
 <!-- readme-section:release -->
 ## The Homebrew release
 
-**The Homebrew package installs the newest published release, `v1.1.0` (2026-09-23).** The [release manifest](release-manifest.json) records what it contains and what was observed: calendar creation is unavailable and research is partial in that build. Newer Presence work on `main` is not included until another release. The README’s representative conversation describes product direction, not functionality supplied by this package.
+**The Homebrew package installs the newest published release, `v1.1.1` (2026-10-07), from its tagged main commit.** The [release manifest](release-manifest.json) records source coverage and local installed checks. Those checks establish package installation and foreground operation, not live Telegram, Google, shopping or the complete README meeting scene. The README’s representative conversation remains product direction.
 
 ```sh
 brew install jongtae/agentos/agentos

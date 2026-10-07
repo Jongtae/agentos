@@ -87,7 +87,7 @@ AgentOS는 사실, 역할별 해석, 맡긴 일, 실제 권한과 실행 근거�
 
 ## 가볍게 시작하기
 
-이전 프리뷰에서 내 모델을 연결해 대화를 시작해 볼 수 있습니다. 위 미팅 장면을 그대로 재현하는 체험은 아닙니다.
+공개 배포본에서 내 모델을 연결해 대화를 시작해 볼 수 있습니다. 위 미팅 장면 전체가 배포본에서 검증된 여정은 아닙니다.
 
 macOS에서 [Homebrew](https://brew.sh)를 사용한다면:
 
@@ -103,7 +103,7 @@ agentos start
 
 Python은 Homebrew가 함께 설치하며, 모델 이용 권한은 별도로 준비합니다. 대화하는 동안 `agentos start`를 실행한 상태로 둡니다. 모델 설정, 파일 작업, Telegram, 최신 소스 실행은 [QUICKSTART](QUICKSTART.md)에 안내되어 있습니다.
 
-**현재 단계:** Homebrew는 이전 프리뷰인 **v1.1.0**(2026-09-23)을 설치합니다. 이후 `main`의 Presence 구현은 이 배포판에 포함되지 않습니다. 해당 배포판에서는 일정 생성이 불가능하고 조사는 부분 지원입니다. 자세한 범위는 [release manifest](docs/release-manifest.json)를 보세요. [현재 상태](docs/product-status.ko.md)에서 사용할 수 있는 것, 검증한 것, 앞으로의 목표를 구분해 설명합니다.
+**현재 단계:** Homebrew는 태그가 붙은 main 커밋의 **v1.1.1**(2026-10-07)을 설치합니다. 위 미팅·쇼핑 장면은 이 배포본의 실제 종단 간 동작으로 검증된 것이 아닌 제품 방향 예시입니다. [release manifest](docs/release-manifest.json)에 포함 소스와 설치 검증을 기록하고, [현재 상태](docs/product-status.ko.md)에서 사용 가능한 동작·fixture 근거·owner-pilot 근거·앞으로의 방향을 구분합니다.
 
 <!-- readme-section:more -->
 

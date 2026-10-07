@@ -35,19 +35,32 @@
         "J8": "covered"
       },
       "not_claimed": "No live Google, OpenRouter or Telegram operation has been observed for any journey.",
-      "observed": "Tap PR Jongtae/homebrew-agentos#17. On the owner's Mac: `brew upgrade` 1.0.4 -> 1.1.0, `brew test` passed, `scripts/quickstart_install_check.py --executable <Cellar>/1.1.0/bin/agentos` reported installed_foreground_smoke with every field true and background_service owner_validation_pending. Local operating observation, not a clean-machine install."
+      "observed": "Tap PR Jongtae/homebrew-agentos#17. On the owner's Mac: `brew upgrade` 1.0.4 -> 1.1.0, `brew test` passed, `scripts/quickstart_install_check.py --executable <Cellar>/1.1.0/bin/agentos` reported installed_foreground_smoke with every field true and background_service owner_validation_pending. Local operating observation, not a clean-machine install.",
+      "currently_served_archive_sha256": "3a5303e9a05890eb1c263d856fd1790ac870319d2c40c5ee01a39a1ecaf4a322",
+      "archive_sha256_note": "The original publication checksum is retained above. Checked on 2026-10-07 after the repository rename, GitHub serves the same v1.1.0 tag URL with the checksum in currently_served_archive_sha256; the former tap formula used that served checksum. The change in archive bytes is not a source-change claim."
+    },
+    {
+      "version": "1.1.1",
+      "tag": "v1.1.1",
+      "commit": "febaa5b1fec7224aced53e105dee005e834e9408",
+      "archive_sha256": "fbd95903819ecaff4ac1f0d5bfa0e4131008657edae03465014cda8325c25510",
+      "state": "published",
+      "carries": "Current main source since v1.1.0 through febaa5b1: owner-context and Work continuity, model switching, browser/sign-in handoff, skill routing, Presence conversation behavior, and four-language public README/ontology work (#1120, #1123). Source PR #1121 aligned the formula template and traceability checks with the existing pinned mcp-host extra. Tap PR Jongtae/homebrew-agentos#20 installs this tag with that extra and validates its import. Source coverage and deterministic checks do not prove live external integrations.",
+      "tag_date": "2026-10-07",
+      "observed": "On the owner Mac, Homebrew upgraded agentos 1.1.0 -> 1.1.1 from tap PR Jongtae/homebrew-agentos#20. The served tag archive SHA-256 matched the formula. brew test passed CLI help and mcp.server.stdio import; explicit /opt/homebrew/Cellar/agentos/1.1.1/bin/agentos foreground quickstart smoke reported installed_cli, foreground_start, loopback_host, http_setup, authenticated_note, restart_persistence and single_instance true, with background_service owner_validation_pending. Local installed observation, not a clean-machine install or owner-live provider operation.",
+      "not_claimed": "No live Telegram, Google OAuth, shopping, financial service, or end-to-end README meeting journey was observed for this release. Background service persistence after a machine reboot remains owner validation."
     }
   ],
   "unpublished": [
     {
-      "version": "1.1.1",
+      "version": "1.1.2",
       "tag": null,
       "commit": null,
-      "why_no_commit": "The commit that gets tagged is the squash-merge commit on main, which does not exist while this entry is unpublished. Recording any earlier SHA here is wrong the moment the PR merges.",
+      "why_no_commit": "The future tagged main merge commit does not exist; no earlier source SHA can stand in for it.",
       "archive_sha256": null,
       "state": "unpublished",
-      "why_no_checksum": "The GitHub tag archive does not exist until the tag is pushed, and its gzip output is not byte-reproducible from a local `git archive`. A fabricated checksum would produce a formula that reviews as valid and installs nothing.",
-      "carries": "Changes on main since v1.1.0 through the eventual tagged commit: owner-context and Work continuity, model switching, browser/sign-in handoff, skill routing, Presence conversation behavior, and public ontology/README documentation. #1119 also updates the in-repo Homebrew formula reference to test the already-pinned mcp-host extra; the public tap package does not gain that dependency until its separate formula PR is merged and installed. This is source coverage, not live owner-pilot or external-integration validation."
+      "why_no_checksum": "No v1.1.2 GitHub tag archive exists; its served SHA-256 must be measured only after publication.",
+      "carries": "Next development-source version after v1.1.1. This bookkeeping bump does not claim a new product capability or release."
     }
   ]
 }

@@ -12,7 +12,7 @@
 <!-- readme-section:status -->
 ## 지금 되는 것과 아직 마찰이 있는 것
 
-아래 v1 journey 표의 근거는 synthetic first-user audit [#472](https://github.com/Jongtae/agentos/issues/472)입니다. 실제 제품 구성에 injected transport를 사용해 검증했으며, **실제 외부 제공자 운영은 실행하지 않았습니다.** fixture 성공은 live service 성공의 증거가 아닙니다. 더 새로운 `main`의 Secretary/Presence/Decision/execution 작업은 현재 계약과 병합된 테스트로 추적하며, 새 release 기록 없이 공개 배포본의 기능으로 돌려 말하지 않습니다.
+아래 v1 journey 표의 근거는 synthetic first-user audit [#472](https://github.com/Jongtae/agentos/issues/472)입니다. 실제 제품 구성에 injected transport를 사용해 검증했으며, **실제 외부 제공자 운영은 실행하지 않았습니다.** 현재 배포 태그에는 이후의 Presence/Decision/execution 소스가 포함되지만, 이 역사적 표가 통합된 경험을 실제 서비스에서 검증한 것은 아닙니다. 이후 작업의 계약과 병합 테스트는 각각의 근거 수준에서 읽어야 합니다.
 
 | 영역 | 현재 근거 |
 | --- | --- |
@@ -88,7 +88,7 @@
 <!-- readme-section:release -->
 ## Homebrew 배포본
 
-**Homebrew 패키지는 최신 공개 배포본 `v1.1.0`(2026-09-23)을 설치합니다.** 포함된 기능과 관찰 기록은 [release manifest](release-manifest.json)에 있으며, 이 빌드에서는 일정 생성이 불가능하고 조사는 부분 동작합니다. 이후 `main`의 Presence 구현은 다음 배포 전까지 포함되지 않습니다. README의 대표 대화는 이 패키지가 제공하는 기능이 아니라 제품 방향을 설명합니다.
+**Homebrew 패키지는 태그가 붙은 main 커밋의 최신 공개 배포본 `v1.1.1`(2026-10-07)을 설치합니다.** [release manifest](release-manifest.json)에 포함 소스와 로컬 설치 검증을 기록했습니다. 그 검증은 패키지 설치와 포그라운드 동작에 대한 것이며 실제 Telegram·Google·쇼핑이나 README의 미팅 장면 전체를 입증하지 않습니다. README의 대표 대화는 제품 방향 예시입니다.
 
 ```sh
 brew install jongtae/agentos/agentos

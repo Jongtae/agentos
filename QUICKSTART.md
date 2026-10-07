@@ -52,7 +52,7 @@ all natural-language requests work. Share redacted observations, not private doc
 
 ## Telegram
 
-Create your own bot using Telegram’s BotFather. In the browser, open **설정 → 외부 연결** (Settings → External connections), open the Telegram connection form and paste the bot token. In `v1.1.0`, the form opens with **Telegram 연결 설정**, and **Telegram 연결** saves the token and produces a pairing link. Open **Telegram 열기** in your own Telegram account and press **Start** to pair it. Only that paired private account can submit Telegram work. Send requests in that chat; use the browser to configure connections and inspect the resulting task records. AgentOS uses outbound polling, so no public inbound port is needed for Telegram. Use a dedicated bot without an existing webhook.
+Create your own bot using Telegram’s BotFather. In `v1.1.0` and later, open **설정 → 외부 연결** (Settings → External connections) in the browser, open **Telegram 연결 설정**, and paste the bot token. **Telegram 연결** saves the token and produces a pairing link. Open **Telegram 열기** in your own Telegram account and press **Start** to pair it. Only that paired private account can submit Telegram work. Send requests in that chat; use the browser to configure connections and inspect the resulting task records. AgentOS uses outbound polling, so no public inbound port is needed for Telegram. Use a dedicated bot without an existing webhook.
 
 The computer must remain running and awake for remote requests to be processed. From a source checkout you can register a background login service instead of holding a terminal open; see [Background service (macOS)](#background-service-macos) for exactly what that does and does not cover. Without that service, keep the terminal open; Ctrl-C stops AgentOS.
 
@@ -114,9 +114,10 @@ What this does **not** yet cover, stated exactly:
   earlier do not. See [the release procedure](docs/release.en.md).
 - **Not covered by automated tests of real launchd.** Repository CI runs on Linux and cannot
   execute launchd. The automated evidence for these commands is injected-runner tests that
-  substitute `launchctl`. A real Homebrew install, a real login service surviving a machine
-  restart, and an end-to-end Telegram result with no terminal open are owner operating
-  validation that this repository has not performed.
+  substitute `launchctl`. The v1.1.1 Homebrew upgrade and foreground smoke were observed
+  on the owner's Mac ([release manifest](docs/release-manifest.json)); a real login service
+  surviving a machine restart and an end-to-end Telegram result with no terminal open
+  remain owner operating validation.
 
 ## An agent for a family member (macOS)
 

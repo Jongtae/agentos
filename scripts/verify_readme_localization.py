@@ -108,10 +108,10 @@ STATUS_ROW_EVIDENCE_TOKEN = "Synthetic **pass-with-friction**"
 # This scene explains the intended experience; it cannot silently become
 # a shipped integration claim when the README narrative changes.
 README_DIRECTION_DISCLAIMERS = {
-    "README.md": "Illustrative product direction, not an observed live run or a shipped shopping integration.",
-    "README.ko.md": "제품 방향을 설명하는 예시이며, 실제 관찰 실행이나 배포된 구매 기능을 뜻하지 않습니다.",
-    "README.ja.md": "製品の方向性を説明する例であり、実際に観測した動作や提供済みの購入機能ではありません。",
-    "README.zh-CN.md": "这是产品方向示例，并非实际观测的运行，也不代表已发布的购物功能。",
+    "README.md": "A condensed, redacted reconstruction based on owner-pilot conversations. It is not an evidence record of those conversations, and the map and shopping integrations shown are product direction, not shipped features.",
+    "README.ko.md": "소유자 파일럿 대화를 바탕으로 압축·비식별화해 재구성한 그림입니다. 그 대화의 증거 기록은 아니며, 그림 속 지도·쇼핑 연동은 배포된 기능이 아니라 제품 방향입니다.",
+    "README.ja.md": "オーナーのパイロット会話をもとに、要約と匿名化を加えて再構成した図です。その会話の証拠記録ではなく、図中の地図・ショッピング連携は提供済みの機能ではなく製品の方向性です。",
+    "README.zh-CN.md": "这是基于所有者试点对话浓缩并脱敏后的重构图。它不是那些对话的证据记录；图中的地图和购物集成属于产品方向，并非已发布的功能。",
 }
 
 README_RELEASE_BOUNDARIES = {

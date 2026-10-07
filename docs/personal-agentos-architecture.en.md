@@ -144,6 +144,12 @@ AgentOS builds a Work-scoped **ContextSnapshot** from authorized sources. Packag
 
 A third party returns a **MemoryCandidate** with source/confidence/sensitivity/expiry/retention/supersession. Policy/owner decides its canonical disposition. Declared package/runtime-local memory stays subordinate and removable/exportable. Revoked/deleted sources must not reappear through stale caches or replacement context. External sharing remains separate from local retrieval.
 
+### Facts and role interpretations
+
+A sourced record is one thing; a role's reading of it is another, and AgentOS does not recreate reality for each role. An account's total balance of 100 million won and immediately available 80 million won may measure different things, so they are not automatically contradictory. Compare the account, measure, unit, scope, time and source; if those match and the values still differ, retain the source conflict rather than reconciling it silently.
+
+The same balance can inform readiness for planned spending, asset liquidity or funds available under an investment mandate, but none of those interpretations overwrites the record. Likewise, an asset-management role relates a sourced stock holding to total assets, liabilities, cash flow and goals, while a discretionary-investment role checks whether it is a managed position and which mandate, constraints and permitted actions apply. Neither a role name nor a useful inference grants permission to trade; action authority still comes from a Grant. These are design illustrations, not released financial services or observed runs.
+
 ## Capability and Runtime contract
 
 One capability can have several runtimes; one runtime can expose multiple capabilities. Minimum common semantic boundary:

@@ -17,7 +17,7 @@ We call that continuing relationship **Presence**. Helping like an assistant is 
 
 ## What if Jarvis belonged to another company?
 
-Think of the conversations and unfinished work Tony Stark shared with Jarvis. If Jarvis were another company's AI service, should Tony lose that context and delegated work when the company changed its model or closed the service? This [whitepaper thought experiment](docs/whitepapers/whose-agent.ko.md) asks us to separate where intelligence comes from from who keeps the owner's memory, work and authority.
+Think of the conversations and unfinished work Tony Stark shared with Jarvis. If Jarvis were another company's AI service, should Tony lose that context and delegated work when the company changed its model or closed the service? This [whitepaper thought experiment](docs/whitepapers/whose-agent.ko.md) asks who supplies the intelligence and who keeps the owner's memory, work and authority.
 
 AgentOS keeps memory, work and authority in your environment. You choose the AI, the information it can use and the access you give it. Different expertise can serve the same owner; better AI should expand what your agent can do without making you start over.
 
@@ -87,7 +87,7 @@ The aspiration is simple: the PA follows what “it” and “the same one” me
 
 ## Try it
 
-This earlier preview lets you start a conversation with your own model; it does not reproduce the meeting scene above.
+The published build lets you connect your own model and start a conversation. The meeting scene above is not an end-to-end verified release journey.
 
 On macOS with [Homebrew](https://brew.sh):
 
@@ -103,7 +103,7 @@ agentos start
 
 Homebrew installs Python for you; model access is separate. Keep `agentos start` running while you talk. [QUICKSTART](QUICKSTART.md) covers model setup, file work, Telegram and running the newest code from source.
 
-**Where it stands:** Homebrew installs **v1.1.0** (2026-09-23), an earlier preview. Newer Presence work on `main` is not included in this release. Calendar creation is unavailable in that release and research is partial; see the [release manifest](docs/release-manifest.json). [Product status](docs/product-status.en.md) separates what is available, what has been tested and what remains a goal.
+**Where it stands:** Homebrew installs **v1.1.1** (2026-10-07), built from the tagged main commit. The meeting and shopping scenes above remain illustrative product direction, not verified end-to-end behavior of this release. The [release manifest](docs/release-manifest.json) records source coverage and installed checks; [product status](docs/product-status.en.md) separates available behavior, fixture evidence, owner-pilot evidence and future direction.
 
 <!-- readme-section:more -->
 

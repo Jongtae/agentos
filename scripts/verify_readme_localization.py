@@ -115,10 +115,10 @@ README_DIRECTION_DISCLAIMERS = {
 }
 
 README_RELEASE_BOUNDARIES = {
-    "README.md": "Homebrew installs **v{version}** ({date}), an earlier preview. Newer Presence work on `main` is not included in this release.",
-    "README.ko.md": "Homebrew는 이전 프리뷰인 **v{version}**({date})을 설치합니다. 이후 `main`의 Presence 구현은 이 배포판에 포함되지 않습니다.",
-    "README.ja.md": "Homebrew で入るのは以前のプレビュー版 **v{version}**（{date}）です。その後の `main` の Presence 実装は、このリリースには含まれていません。",
-    "README.zh-CN.md": "Homebrew 安装的是较早的预览版 **v{version}**（{date}），后续 `main` 中的 Presence 实现尚未包含在此版本中。",
+    "README.md": "Homebrew installs **v{version}** ({date}), built from the tagged main commit. The meeting and shopping scenes above remain illustrative product direction, not verified end-to-end behavior of this release.",
+    "README.ko.md": "Homebrew는 태그가 붙은 main 커밋의 **v{version}**({date})을 설치합니다. 위 미팅·쇼핑 장면은 이 배포본의 실제 종단 간 동작으로 검증된 것이 아닌 제품 방향 예시입니다.",
+    "README.ja.md": "Homebrew からは、タグを付けた main コミットの **v{version}**（{date}）が入ります。上の会議や買い物の場面は、この版で一連の動作が検証済みという意味ではなく、製品の方向性を示す例です。",
+    "README.zh-CN.md": "Homebrew 安装的是从已打标签的 main 提交构建的 **v{version}**（{date}）。上面的会议和购物场景仍是产品方向示例，并非该版本已完成端到端验证的功能。",
 }
 
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")

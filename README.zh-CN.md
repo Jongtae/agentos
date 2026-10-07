@@ -87,7 +87,7 @@ AgentOS 希望在由你掌控的结构中，把事实、各角色的解释、受
 
 ## 先试试看
 
-这个较早的预览版可以让你连接自己的模型并开始对话；它还不能重现上面的会议场景。
+公开版本可以让你连接自己的模型并开始对话；上面的完整会议场景尚未作为该版本的端到端旅程得到验证。
 
 在 macOS 上使用 [Homebrew](https://brew.sh)：
 
@@ -103,7 +103,7 @@ agentos start
 
 Homebrew 会一起安装 Python，模型的使用权限需另行准备。对话期间请保持 `agentos start` 运行。[QUICKSTART](QUICKSTART.md) 介绍了模型设置、文件处理、Telegram，以及如何从源码运行最新版本。
 
-**当前阶段：** Homebrew 安装的是较早的预览版 **v1.1.0**（2026-09-23），后续 `main` 中的 Presence 实现尚未包含在此版本中。该版本无法创建日程，调研功能仅部分可用。具体范围见[版本清单](docs/release-manifest.json)。[当前状态](docs/product-status.en.md)区分了哪些功能可以使用、哪些经过验证、哪些仍是目标。
+**当前阶段：** Homebrew 安装的是从已打标签的 main 提交构建的 **v1.1.1**（2026-10-07）。上面的会议和购物场景仍是产品方向示例，并非该版本已完成端到端验证的功能。[版本清单](docs/release-manifest.json)记录所含源码和安装检查；[当前状态](docs/product-status.en.md)区分可用行为、测试依据、所有者试用依据和未来方向。
 
 <!-- readme-section:more -->
 

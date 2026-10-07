@@ -709,6 +709,9 @@ class PhoneButton(_flow_harness()):
 
     def setUp(self):
         super().setUp()
+        # Most cases exercise the button path. The automatic-link case opts in
+        # explicitly; the service default now starts that flow with the prompt.
+        self.service.AUTO_PHONE_LOGIN = False
         self.tunnel = FakeTunnel()
         self.service.remote_login_popen = self.tunnel
         self.service.local_server_port = 8787

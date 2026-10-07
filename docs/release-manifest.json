@@ -47,7 +47,7 @@
       "archive_sha256": null,
       "state": "unpublished",
       "why_no_checksum": "The GitHub tag archive does not exist until the tag is pushed, and its gzip output is not byte-reproducible from a local `git archive`. A fabricated checksum would produce a formula that reviews as valid and installs nothing.",
-      "carries": "Nothing beyond v1.1.0 yet."
+      "carries": "Changes on main since v1.1.0 through the eventual tagged commit: owner-context and Work continuity, model switching, browser/sign-in handoff, skill routing, Presence conversation behavior, and public ontology/README documentation. #1119 also updates the in-repo Homebrew formula reference to test the already-pinned mcp-host extra; the public tap package does not gain that dependency until its separate formula PR is merged and installed. This is source coverage, not live owner-pilot or external-integration validation."
     }
   ]
 }

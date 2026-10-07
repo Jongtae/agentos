@@ -29,18 +29,18 @@ Local-first is not local-only: you can use a local or hosted model. With a hoste
 
 Imagine saying, “Keep track of next week's project meeting. We still need to settle the proposal.” The direction for a PA is to connect that meeting to the open decision and prepare a useful brief before it happens. After you share the meeting notes, it should distinguish an accepted follow-up from a suggestion, carry the unfinished work forward and ask before sending anything outside your environment. **This is an illustrative product direction, not an observed run or a capability promised by today's Homebrew release.**
 
-That takes more than a long chat history. Metadata can record the meeting's time, place and attendees. An **ontology** describes how the meeting relates to people, goals, decisions and commitments: an invitation is not an accepted task. A calendar view can arrange time while a project view tracks the decision, both grounded in the same sourced event. Durable work records what is still open; authority limits what the PA may do; evidence shows what actually happened.
-
-The same distinction extends beyond meetings. A sourced stock holding can inform an asset-management view of the owner's finances; a discretionary-investment view must also check the explicit mandate and its constraints. Neither a role name nor a useful inference grants permission to trade.
-
-AgentOS aims to connect facts, role-specific interpretations, delegated work, permissions and evidence in a structure the owner controls. This is how a paused task or a different AI could pick up the right next step without making you reconstruct it. These are design illustrations, not released financial services or observed runs. Proactive attention to changing circumstances is a direction beyond the current reactive Presence work, not a claim of always-on monitoring today.
-
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.en.narrow.svg">
   <img src="docs/assets/readme/presence-overview.en.svg" alt="Concept illustration: Assistant answers a question about NVIDIA; a computer agent acts on an Amazon command; Personal AgentOS carries a conversation over time. You talk to one PA, with context, work and authority held in AgentOS above replaceable AI and tools. The examples illustrate product direction, not observed runs or shipped integrations.">
 </picture>
 
 AgentOS uses its judgment layer to choose AI and tools and check their results. You talk to the PA while AgentOS carries that structure underneath the conversation. **Same PA. Different AI.**
+
+That takes more than a long chat history. Metadata can record the meeting's time, place and attendees. An **ontology** describes how the meeting relates to people, goals, decisions and commitments: an invitation is not an accepted task. A calendar view can arrange time while a project view tracks the decision, both grounded in the same sourced event. Durable work records what is still open; authority limits what the PA may do; evidence shows what actually happened.
+
+The same distinction extends beyond meetings. A sourced stock holding can inform an asset-management view of the owner's finances; a discretionary-investment view must also check the explicit mandate and its constraints. Neither a role name nor a useful inference grants permission to trade.
+
+AgentOS aims to connect facts, role-specific interpretations, delegated work, permissions and evidence in a structure the owner controls. This is how a paused task or a different AI could pick up the right next step without making you reconstruct it. These are design illustrations, not released financial services or observed runs. Proactive attention to changing circumstances is a direction beyond the current reactive Presence work, not a claim of always-on monitoring today.
 
 <!-- readme-section:conversation -->
 

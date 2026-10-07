@@ -5,13 +5,21 @@
 <!-- readme-parity:v1 -->
 <!-- readme-section:hero -->
 
-## Your AI can change. Your personal agent should not have to start over.
+## What if Jarvis belonged to another company?
 
-Chats end. Models change. Services come and go. But the context you have built, the work you have left unfinished, and the authority you have delegated should not disappear with them.
+Imagine Tony Stark had spent years working with Jarvis — sharing context, leaving decisions open, delegating work and learning how to work together.
 
-**Personal AgentOS is an open-source, self-hosted environment for a personal agent (PA) that carries your context and unfinished work forward while letting you choose the AI underneath.**
+Now imagine a better AI appears.
 
-The goal is not another chatbot with a longer history. It is one continuing PA whose memory, work, authority and evidence remain in an environment you control.
+**Should Tony have to lose Jarvis to use it?**
+
+Should he lose what Jarvis remembers about him, the work they have not finished, the authority he has delegated, and the way they have learned to work together — simply because the intelligence provider changes?
+
+**The AI can change. Your personal agent should remain yours.**
+
+Personal AgentOS is an open-source, self-hosted environment exploring that idea: keep the PA's context, unfinished work, authority and evidence in an environment you control, while letting different AI systems work underneath it.
+
+The goal is not another chatbot with a longer history. It is one continuing personal agent.
 
 **Same PA. Different AI.**
 

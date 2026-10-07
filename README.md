@@ -134,7 +134,7 @@ For the exact boundary, see [Product status](docs/product-status.en.md). For rel
 
 ## Open source
 
-Personal AgentOS is a working exploration, open for others to run, question and improve. It does not have to be the final answer to be a useful beginning.
+Personal AgentOS is a working exploration, open for others to run, question, and improve. It does not have to be the final answer to be a useful beginning.
 
 Code: [AGPL-3.0-only](LICENSE). The Personal AgentOS name and logo follow the [trademark notice](TRADEMARKS.md). Third-party work is credited in [acknowledgements](docs/acknowledgements.en.md).
 

@@ -5,21 +5,31 @@
 <!-- readme-parity:v1 -->
 <!-- readme-section:hero -->
 
-## A personal agent that carries your work forward
+## What if Jarvis belonged to another company?
 
-An assistant answers a question. A task agent follows an explicit instruction, such as adding an item to a cart. But much of life does not arrive as a complete question or a one-off task. You mention a meeting, leave a decision open, return to it days later, and expect the work to have a next step.
+Imagine Tony Stark had spent years working with Jarvis — sharing context, leaving decisions open, delegating work and learning how to work together.
 
-**Personal AgentOS explores how to build a personal agent (PA) that stays with you and your unfinished work, in an environment you install and control.** It should keep track of what you meant, what remains unresolved and what it is waiting for. As the project grows, it should be able to prepare what comes next and bring a matter back when it needs your attention, while asking before an action needs your authority.
+Now imagine a better AI appears.
 
-We call that continuing relationship **Presence**. Helping like an assistant is the starting role; the aim reaches across different kinds of work and survives a change of AI. Presence has to come from retained context, work and authority, not from a friendly tone.
+**Should Tony have to lose Jarvis to use it?**
+
+Should he lose what Jarvis remembers about him, the work they have not finished, the authority he has delegated, and the way they have learned to work together — simply because the intelligence provider changes?
+
+**The AI can change. Your personal agent should remain yours.**
+
+Personal AgentOS explores that idea in an open-source environment you install and control. The PA's context, unfinished work, authority and evidence stay with you while the AI underneath can change.
+
+The goal is not another chatbot with a longer history. It is one continuing personal agent.
+
+**Same PA. Different AI.**
 
 Want to run it before reading further? Skip to [Try it](#try-it); the rest of this page explains what the project is reaching for.
 
 <!-- readme-section:ownership -->
 
-## What if Jarvis belonged to another company?
+## What should remain yours?
 
-Think of the conversations and unfinished work Tony Stark shared with Jarvis. If Jarvis were another company's AI service, should Tony lose that context and delegated work when the company changed its model or closed the service? This [whitepaper thought experiment](docs/whitepapers/whose-agent.ko.md) asks who supplies the intelligence and who keeps the owner's memory, work and authority.
+The thought experiment becomes a concrete design question: when the intelligence underneath changes, what should remain with the owner? The [strategy whitepaper](docs/whitepapers/whose-agent.ko.md) develops that question across product and industry structure.
 
 AgentOS keeps memory, work and authority in your environment. You choose the AI, the information it can use and the access you give it. Different expertise can serve the same owner; better AI should expand what your agent can do without making you start over.
 

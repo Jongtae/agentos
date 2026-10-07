@@ -1,10 +1,10 @@
 # Public README visuals
 
-The public READMEs introduce the desired personal-assistant relationship, owner control, the structure that makes continuity possible, a short representative conversation, and a first trial. [The documentation map](../../README.md) remains the documentation authority map.
+The public READMEs introduce the desired personal-agent relationship, owner control, the structure that makes continuity possible, a short representative conversation, and a first trial. [The documentation map](../../README.md) remains the documentation authority map.
 
 ## Current introduction
 
-`presence-overview.{en,ko,ja,zh-CN}.svg` is the illustrated overview used by the four READMEs. Three example cards show answering a question, carrying out an explicit command and continuing a personal conversation. An Owner/PA/AgentOS architecture connects that experience to owner-held context, work, authority and evidence above replaceable AI/tools. Original vector icons and dialogue cards carry the explanation; detailed ontology definitions remain in the linked documents.
+`presence-overview.{en,ko,ja,zh-CN}.svg` is the illustrated overview used by the four READMEs. Three example cards show answering a question, carrying out an explicit command and carrying a delegated meeting decision toward its next preparation. A separate short coffee conversation illustrates ordinary context over time. The Owner/PA/AgentOS architecture shows how the same meeting has different calendar, project and commitment relationships; open work, actual authority and evidence remain in the owner's environment above replaceable AI/tools. Original vector icons and dialogue cards carry the explanation; detailed ontology definitions remain in the linked documents.
 
 The visual follows the composition of the owner-provided NVIDIA/Amazon/continuing-conversation reference. It does not reproduce a messaging application, market price or completed purchase. All depicted interactions are illustrative product direction, not observed runs or shipped-integration claims.
 

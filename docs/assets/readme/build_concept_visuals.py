@@ -241,9 +241,9 @@ def usage(d,mobile):
  return f
 
 OVERVIEW = {'en': {'title': 'Personal AgentOS',
-        'subtitle': 'One assistant. Your context stays with you.',
+        'subtitle': 'One PA. Your work and context stay yours.',
         'illustration_label': 'Interaction model · product direction',
-        'comparison_title': 'From answers to a continuing assistant',
+        'comparison_title': 'From answers and commands to continuing work',
         'cards': [{'name': 'Assistant',
                    'verb': 'Answers',
                    'quote': 'What’s the current price of NVIDIA?',
@@ -257,23 +257,26 @@ OVERVIEW = {'en': {'title': 'Personal AgentOS',
                    'flow': ['Command', 'Browser / tool', 'Action / handoff'],
                    'caption': 'An explicit task, with access as needed.'},
                   {'name': 'Personal AgentOS',
-                   'verb': 'Stays with you',
-                   'quote': 'We’re almost out of coffee.',
-                   'reply': 'Coffee for the next shop.',
-                   'flow': ['Conversation', 'Context / judgment', 'Continuing work'],
-                   'caption': 'Pick up the thought—and the work—later.'}],
-        'architecture_title': 'What stays underneath the conversation',
+                   'verb': 'Carries work forward',
+                   'quote': 'Keep track of next week’s meeting.',
+                   'reply': 'I’ll keep the open decision and next step in view.',
+                   'flow': ['Intent', 'Open work', 'Next preparation'],
+                   'caption': 'Delegated work has a next step over time.'}],
+        'architecture_title': 'One PA, with work and authority held by you',
         'owner': 'You',
-        'pa': 'PA · your personal assistant',
-        'owned': 'Your environment. Your control.',
-        'states': ['Memory', 'Context', 'Work', 'Authority', 'Evidence', 'Events'],
+        'pa': 'PA · the agent you talk to',
+        'owned': 'Your environment holds the PA’s state.',
+        'links': [('One meeting, different links', 'Calendar → time; project → decision; invite ≠ commitment'),
+                  ('Open work', 'Unsettled decision → next preparation'),
+                  ('Authority', 'A role does not grant permission to act'),
+                  ('Evidence & events', 'Proposed ≠ done; record when to revisit')],
         'judgment': 'Judgment / orchestration',
         'replaceable_ai': 'Replaceable AI',
         'tools': 'Tools',
         'services': 'Services',
         'same_pa': 'Same PA.',
         'different_ai': 'Different AI.',
-        'context_stays': 'Your context stays with you.',
+        'context_stays': 'Open work and evidence stay with you.',
         'usage_title': 'One conversation, over time',
         'usage': [{'time': 'First',
                    'quote': 'We’re almost out of coffee.',
@@ -291,9 +294,9 @@ OVERVIEW = {'en': {'title': 'Personal AgentOS',
         'footer': 'Illustrative interaction patterns and product direction. No observed live run or shipped '
                   'integration is claimed.'},
  'ko': {'title': 'Personal AgentOS',
-        'subtitle': '하나의 비서. 내 맥락은 내 곁에.',
+        'subtitle': '하나의 PA. 내 일과 맥락은 내 환경에.',
         'illustration_label': '상호작용 모델 · 제품 방향',
-        'comparison_title': '답변에서, 함께 이어가는 비서로',
+        'comparison_title': '답변과 명령을 넘어, 이어지는 일로',
         'cards': [{'name': 'Assistant',
                    'verb': '답합니다',
                    'quote': '지금 NVIDIA 주가는 얼마야?',
@@ -307,23 +310,26 @@ OVERVIEW = {'en': {'title': 'Personal AgentOS',
                    'flow': ['명령', '브라우저·도구', '실행·권한 연결'],
                    'caption': '명시한 일을 하고, 필요한 접근을 요청합니다.'},
                   {'name': 'Personal AgentOS',
-                   'verb': '곁에서 이어갑니다',
-                   'quote': '커피 거의 다 떨어졌네.',
-                   'reply': '다음에 장 볼 때 커피도 챙기면 되겠네요.',
-                   'flow': ['대화', '맥락·판단', '지속 작업'],
-                   'caption': '나중에 이야기와 하던 일을 이어갑니다.'}],
-        'architecture_title': '대화 아래에서 이어지는 구조',
+                   'verb': '맡긴 일을 이어갑니다',
+                   'quote': '다음 주 미팅 좀 챙겨줘.',
+                   'reply': '남은 결정과 다음 준비를 이어갈게요.',
+                   'flow': ['의도', '남은 일', '다음 준비'],
+                   'caption': '맡긴 일의 다음 단계가 이어집니다.'}],
+        'architecture_title': '하나의 PA, 내 환경에 남는 일과 권한',
         'owner': '나',
-        'pa': 'PA · 나의 개인 비서',
-        'owned': '내 환경. 내가 정하는 범위.',
-        'states': ['기억', '맥락', '일', '권한', '근거', '이벤트'],
+        'pa': 'PA · 나와 대화하는 에이전트',
+        'owned': '내 환경이 PA의 상태를 이어갑니다.',
+        'links': [('같은 미팅, 다른 관계', '일정 → 시간; 프로젝트 → 결정; 초대 ≠ 약속'),
+                  ('이어지는 일', '남은 결정 → 다음 준비'),
+                  ('권한', '역할만으로 실행할 수는 없음'),
+                  ('근거·이벤트', '제안 ≠ 실행; 다시 볼 때를 기록')],
         'judgment': '판단·조율',
         'replaceable_ai': '교체 가능한 AI',
         'tools': '도구',
         'services': '서비스',
         'same_pa': '같은 PA.',
         'different_ai': '다른 AI.',
-        'context_stays': '내 맥락은 내 곁에 남습니다.',
+        'context_stays': '남은 일과 근거는 내 환경에 남습니다.',
         'usage_title': '시간이 지나도 이어지는 대화',
         'usage': [{'time': '처음',
                    'quote': '커피 거의 다 떨어졌네.',
@@ -342,7 +348,7 @@ OVERVIEW = {'en': {'title': 'Personal AgentOS',
  'ja': {'title': 'Personal AgentOS',
         'subtitle': '同じ PA。文脈は手元に。',
         'illustration_label': '対話の形 · 製品の方向性',
-        'comparison_title': '答える AI から、続いていくアシスタントへ',
+        'comparison_title': '答えと指示の先へ、続く仕事',
         'cards': [{'name': 'Assistant',
                    'verb': '答える',
                    'quote': 'NVIDIA の今の株価は？',
@@ -356,23 +362,26 @@ OVERVIEW = {'en': {'title': 'Personal AgentOS',
                    'flow': ['指示', 'ブラウザー・ツール', '実行・権限の確認'],
                    'caption': '指示された仕事を、必要な権限で進める。'},
                   {'name': 'Personal AgentOS',
-                   'verb': '一緒に続ける',
-                   'quote': 'コーヒー、もうなくなりそう。',
-                   'reply': '次の買い物ではコーヒーも必要ですね。',
-                   'flow': ['会話', '文脈・判断', '続く仕事'],
-                   'caption': 'あとで話も仕事も続けられる。'}],
-        'architecture_title': '会話の下で支える仕組み',
+                   'verb': '任せた仕事を引き継ぐ',
+                   'quote': '来週の会議、気にかけておいて。',
+                   'reply': '未決のことと次の準備を引き継ぎます。',
+                   'flow': ['意図', '残る仕事', '次の準備'],
+                   'caption': '任せた仕事は時間をまたいで続く。'}],
+        'architecture_title': '一人の PA、仕事と権限は自分の環境に',
         'owner': 'あなた',
-        'pa': 'PA · 自分のアシスタント',
-        'owned': '自分の環境。自分で管理。',
-        'states': ['記憶', '文脈', '仕事', '権限', '根拠', '出来事'],
+        'pa': 'PA · 会話するエージェント',
+        'owned': '自分の環境が PA の状態を保つ。',
+        'links': [('同じ会議、異なる関係', '予定 → 時間；プロジェクト → 決定；招待 ≠ 約束'),
+                  ('続く仕事', '未決の事項 → 次の準備'),
+                  ('権限', '役割だけでは実行できない'),
+                  ('根拠・出来事', '提案 ≠ 実行；見直す時を記録')],
         'judgment': '判断・調整',
         'replaceable_ai': '交換可能な AI',
         'tools': 'ツール',
         'services': 'サービス',
         'same_pa': '同じ PA。',
         'different_ai': '変わる AI。',
-        'context_stays': '文脈は自分の手元に残る。',
+        'context_stays': '残る仕事と根拠は自分の環境に。',
         'usage_title': '時間がたっても、話は続く',
         'usage': [{'time': 'はじめに',
                    'quote': 'コーヒー、もうなくなりそう。',
@@ -389,9 +398,9 @@ OVERVIEW = {'en': {'title': 'Personal AgentOS',
         'usage_note': '自分は話を続ける。AgentOS が文脈と仕事、許可された機能をつなぐ。',
         'footer': '対話の形と製品の方向性を説明する例です。実際に観測した動作や提供済みの連携機能ではありません。'},
  'zh-CN': {'title': 'Personal AgentOS',
-           'subtitle': '同一个助手，上下文始终属于你。',
+           'subtitle': '同一个 PA，工作与上下文由你掌控。',
            'illustration_label': '交互方式 · 产品方向',
-           'comparison_title': '从回答问题，到持续协作',
+           'comparison_title': '从回答和执行，到持续推进工作',
            'cards': [{'name': 'Assistant',
                       'verb': '回答问题',
                       'quote': 'NVIDIA 现在的股价是多少？',
@@ -405,23 +414,26 @@ OVERVIEW = {'en': {'title': 'Personal AgentOS',
                       'flow': ['指令', '浏览器与工具', '执行与权限交接'],
                       'caption': '完成明确的任务，按需获取权限。'},
                      {'name': 'Personal AgentOS',
-                      'verb': '持续与你协作',
-                      'quote': '咖啡快没了。',
-                      'reply': '下次买东西时，也得补上咖啡。',
-                      'flow': ['对话', '上下文与判断', '继续工作'],
-                      'caption': '稍后接上话题，也接上未完的事。'}],
-           'architecture_title': '对话背后，什么在延续',
+                      'verb': '持续推进受托工作',
+                      'quote': '下周的会议帮我留意一下。',
+                      'reply': '我会记下未决事项，准备下一步。',
+                      'flow': ['意图', '未完工作', '下一步准备'],
+                      'caption': '受托的工作跨越时间继续。'}],
+           'architecture_title': '同一个 PA，工作与权限由你掌控',
            'owner': '你',
-           'pa': 'PA · 你的个人助手',
-           'owned': '你的环境，由你掌控。',
-           'states': ['记忆', '上下文', '工作', '权限', '依据', '事件'],
+           'pa': 'PA · 与你对话的智能体',
+           'owned': '你的环境保留 PA 的状态。',
+           'links': [('同一会议，不同关联', '日程 → 时间；项目 → 决定；邀请 ≠ 承诺'),
+                     ('持续中的工作', '未决事项 → 下一步准备'),
+                     ('权限', '角色本身不等于行动授权'),
+                     ('证据与事件', '建议 ≠ 执行；记录何时再看')],
            'judgment': '判断与协调',
            'replaceable_ai': '可替换的 AI',
            'tools': '工具',
            'services': '服务',
            'same_pa': '同一个 PA。',
            'different_ai': '不同的 AI。',
-           'context_stays': '上下文始终留在你手中。',
+           'context_stays': '未完工作与证据留在你的环境中。',
            'usage_title': '时间过去，对话继续',
            'usage': [{'time': '起初', 'quote': '咖啡快没了。', 'reply': '下次买东西时，也得补上咖啡。', 'label': '随口一句，成为后续的上下文。'},
                      {'time': '几小时后',
@@ -505,7 +517,7 @@ def overview(d,mobile):
   fill='#eff7f3' if index==2 else '#f7f9fc'
   f.rect(x,top,cw,ch,fill,'#b7d1c5' if index==2 else '#d4dce5',16)
   f.circle(x+cw/2,top+56,39,'#e0eee6' if index==2 else '#e9eff7')
-  f.icon(['search','cart','coffee'][index],x+cw/2-30,top+24,60,accent)
+  f.icon(['search','cart','work'][index],x+cw/2-30,top+24,60,accent)
   f.label(x+20,top+110,card['name'],cw-40,25,'bold')
   f.label(x+20,top+148,card['verb'],cw-40,22,'blue bold')
   cy=top+188
@@ -532,9 +544,12 @@ def overview(d,mobile):
   ox=220; ow=654; sy=y
   f.icon('owner',71,sy+97,64,'#53657a')
   f.label(103,sy+175,d['owner'],160,23,'bold','middle')
- cells=2 if mobile else 3
  first_offset=59+f.measure(d['owned'],ow-40,20)+22 if mobile else 179
- grid_height=(6//cells)*96-14
+ row_gap=14
+ title_width=ow-112
+ detail_width=ow-134
+ row_heights=[max(94,30+f.measure(title,title_width,20)+f.measure(detail,detail_width,18)) for title,detail in d['links']]
+ grid_height=sum(row_heights)+(len(row_heights)-1)*row_gap
  judgment_height=f.measure(d['judgment'],ow-32,21)
  oh=first_offset+grid_height+24+judgment_height+20
  f.rect(ox,sy,ow,oh,'#f0f6f9','#b6cad9',18)
@@ -546,19 +561,18 @@ def overview(d,mobile):
   f.label(ox+ow/2+10,sy+113,d['pa'],ow-120,22,'bold','middle')
   f.path(f'M153 {sy+129}H{ox+20}','#8296a9')
   f.path(f'M160 {sy+123}L153 {sy+129}L160 {sy+135}M{ox+13} {sy+123}L{ox+20} {sy+129}L{ox+13} {sy+135}','#8296a9')
- gap=14
- cell_w=(ow-40-(cells-1)*gap)/cells
- cell_h=82
  first=sy+first_offset
- kinds=['memory','context','work','authority','evidence','events']
- for index,state in enumerate(d['states']):
-  col=index%cells; row=index//cells
-  sx=ox+20+col*(cell_w+gap); st=first+row*(cell_h+14)
-  f.rect(sx,st,cell_w,cell_h,'#fff','#d8e1e7',10)
-  f.icon(kinds[index],sx+cell_w/2-17,st+9,34,'#427665' if index in (0,1) else '#496d92')
-  f.label(sx+cell_w/2,st+49,state,cell_w-16,20,'bold','middle')
-  if col<cells-1:f.path(f'M{sx+cell_w} {st+cell_h/2}H{sx+cell_w+gap}','#a7bac6')
-  if col==cells//2 and row<(6//cells)-1:f.path(f'M{sx+cell_w/2} {st+cell_h}V{st+cell_h+14}','#a7bac6')
+ st=first
+ kinds=['context','work','authority','evidence']
+ for index,((title,detail),row_height) in enumerate(zip(d['links'],row_heights)):
+  sx=ox+20
+  f.rect(sx,st,ow-40,row_height,'#fff','#d8e1e7',10)
+  f.icon(kinds[index],sx+15,st+21,38,'#427665' if index<2 else '#496d92')
+  title_height=f.label(sx+72,st+10,title,title_width,20,'bold')
+  f.label(sx+72,st+18+title_height,detail,detail_width,18,'muted')
+  if index<len(row_heights)-1:
+   f.arrow(ox+ow/2,st+row_height+1,ox+ow/2,st+row_height+row_gap-2)
+  st+=row_height+row_gap
  f.label(ox+ow/2,first+grid_height+24,d['judgment'],ow-32,21,'blue bold','middle')
  f.arrow(ox+ow/2,sy+oh+4,ox+ow/2,sy+oh+27)
  ey=sy+oh+34

@@ -42,12 +42,6 @@ AgentOS uses its judgment layer to choose AI and tools and check their results. 
 
 ## A conversation that carries on
 
-> “We’re almost out of coffee.”<br>
-> Hours later: “I’m heading out. Is there somewhere on the way I can pick it up?”<br>
-> Later: “No time. Just get the same one as last time.”
-
-The aspiration is simple: the PA follows what “it” and “the same one” mean, brings in relevant context, and asks for missing information or authority when needed. You keep talking; you do not assemble a workflow.
-
 *Illustrative product direction, not an observed live run or a shipped shopping integration.*
 
 The image below adapts the owner's Korean visual reference into three shorter conversations: sharing a location to find dinner on the way home, comparing a golf belt and pausing for account login before a cart action, and continuing from a restaurant photo to a nearby walk. It is an edited illustrative reconstruction, not a verbatim product screenshot or proof of those integrations.
@@ -58,6 +52,14 @@ The image below adapts the owner's Korean visual reference into three shorter co
 </picture>
 
 [Open the image at full size](docs/assets/readme/owner-pilot-conversation-edited.png) · [See the owner's original reference](docs/assets/readme/owner-pilot-conversation-reference.jpg).
+
+The same continuity matters in smaller moments, hours apart:
+
+> “We’re almost out of coffee.”<br>
+> Hours later: “I’m heading out. Is there somewhere on the way I can pick it up?”<br>
+> Later: “No time. Just get the same one as last time.”
+
+The aspiration is simple: the PA follows what “it” and “the same one” mean, brings in relevant context, and asks for missing information or authority when needed. You keep talking; you do not assemble a workflow.
 
 <!-- readme-section:try-today -->
 

@@ -5,13 +5,13 @@
 <!-- readme-parity:v1 -->
 <!-- readme-section:hero -->
 
-## A personal agent that stays yours
+## A personal agent that carries your work forward
 
-We should be able to pick up yesterday’s conversation, share half a thought, and carry unfinished work forward without explaining our lives all over again. Whether we are planning a week, researching a question or preparing a purchase, we should be able to trust the environment that holds that context.
+An assistant answers when you ask. A computer agent acts when you give it a command. But much of life does not arrive as a complete question or a one-off task. You mention a meeting, leave a decision open, return to it days later, and expect the work to have a next step.
 
-**Personal AgentOS explores how to build a continuing personal agent (PA) in an environment you install and control.** Helping like a good assistant is an important starting role, but it does not define the limits of the agent.
+**Personal AgentOS explores how to build a personal agent (PA) that stays with you and your unfinished work, in an environment you install and control.** It should keep track of what you meant, what remains unresolved and what it is waiting for. As the project grows, it should be able to prepare what comes next and bring a matter back when it needs your attention, while asking before an action needs your authority.
 
-Assistants answer questions. Computer agents carry out commands. A personal agent should also stay with you across conversations, kinds of work and changes of AI. We call that continuity **Presence**.
+We call that continuing relationship **Presence**. Helping like an assistant is the starting role; the aim reaches across different kinds of work and survives a change of AI. Presence has to come from retained context, work and authority, not from a friendly tone.
 
 <!-- readme-section:ownership -->
 
@@ -25,15 +25,15 @@ Local-first is not local-only: you can use a local or hosted model. With a hoste
 
 <!-- readme-section:presence -->
 
-## What makes continuity possible
+## Why the work can continue
 
-Presence needs more than a long chat history. The agent needs to connect what it knows about you, what is happening now, what you are working on, what you have allowed and what actually happened.
+Imagine saying, “Keep track of next week's project meeting. We still need to settle the proposal.” The direction for a PA is to connect that meeting to the open decision and prepare a useful brief before it happens. After you share the meeting notes, it should distinguish an accepted follow-up from a suggestion, carry the unfinished work forward and ask before sending anything outside your environment. **This is an illustrative product direction, not an observed run or a capability promised by today's Homebrew release.**
 
-Metadata can list a meeting's time, place and attendees. An **ontology** also relates that event to people, goals and commitments: was it merely an invitation, or did someone accept a follow-up? A calendar view may use it to arrange time; a project view may use it to track a decision. Both should refer to the same meeting and its source, without turning an invitation into a promise.
+That takes more than a long chat history. Metadata can record the meeting's time, place and attendees. An **ontology** describes how the meeting relates to people, goals, decisions and commitments: an invitation is not an accepted task. A calendar view can arrange time while a project view tracks the decision, both grounded in the same sourced event. Durable work records what is still open; authority limits what the PA may do; evidence shows what actually happened.
 
-The distinction matters beyond scheduling. Imagine the owner holds 1,000 shares. An asset-management view asks how that holding fits the owner's overall finances. A discretionary-investment view first asks whether it falls within a specific mandate and its constraints. Both use the same sourced position, but a role name alone never grants permission to trade.
+The same distinction extends beyond meetings. A sourced stock holding can inform an asset-management view of the owner's finances; a discretionary-investment view must also check the explicit mandate and its constraints. Neither a role name nor a useful inference grants permission to trade.
 
-AgentOS aims to connect these facts, role-specific interpretations, the work you delegated, actual permissions and evidence in one shared structure. That is how a change of AI or an interruption could leave a place to continue. These are design illustrations, not released financial services or observed runs.
+AgentOS aims to connect facts, role-specific interpretations, delegated work, permissions and evidence in a structure the owner controls. This is how a paused task or a different AI could pick up the right next step without making you reconstruct it. These are design illustrations, not released financial services or observed runs. Proactive attention to changing circumstances is a direction beyond the current reactive Presence work, not a claim of always-on monitoring today.
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.en.narrow.svg">
@@ -44,7 +44,7 @@ AgentOS uses its judgment layer to choose AI and tools and check their results. 
 
 <!-- readme-section:conversation -->
 
-## A conversation that carries on
+## Ordinary moments, the same PA
 
 *Illustrative product direction, not an observed live run or a shipped shopping integration.*
 
@@ -63,7 +63,7 @@ The image shows three separate conversations:
 2. **Find this for me:** The owner shares a belt photo. The PA compares three options and asks which one to use. When the owner asks to add the first to a cart, the PA asks for a shopping-account login before proceeding.
 3. **I’m here. What next?** The owner shares a restaurant photo and asks what to do afterward. The PA offers a walk, café or bar nearby. The owner chooses the walk; the PA says it will check the route and hours.
 
-The same continuity matters in smaller moments, hours apart:
+Continuity also matters in smaller moments, hours apart:
 
 > “We’re almost out of coffee.”<br>
 > Hours later: “I’m heading out. Is there somewhere on the way I can pick it up?”<br>
@@ -75,6 +75,8 @@ The aspiration is simple: the PA follows what “it” and “the same one” me
 
 ## Try it
 
+This earlier preview lets you start a conversation with your own model; it does not reproduce the meeting scene above.
+
 On macOS with [Homebrew](https://brew.sh):
 
 ```sh
@@ -85,7 +87,7 @@ agentos start
 1. Browser setup opens at [http://127.0.0.1:8787](http://127.0.0.1:8787/). Choose **바로 시작하기** (Start now).
 2. Connect and test your own model: a tool-capable local Ollama model, or OpenAI, an OpenAI-compatible service or Anthropic with your API access. The setup interface is currently Korean.
 3. In **설정 → 외부 연결** (Settings → External connections), connect your own bot using its BotFather token. Open the generated pairing link in Telegram and press **Start**.
-4. In that Telegram chat, ask: **“Help me think through what to focus on this week.”**
+4. In that Telegram chat, say: **“I need to finish a proposal this week. Help me break it into the next few steps.”**
 
 Homebrew installs Python for you; model access is separate. Keep `agentos start` running while you talk. [QUICKSTART](QUICKSTART.md) covers model setup, file work, Telegram and running the newest code from source.
 

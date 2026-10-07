@@ -5,21 +5,21 @@
 <!-- readme-parity:v1 -->
 <!-- readme-section:hero -->
 
-## The personal assistant we wanted
+## A personal agent that stays yours
 
-We should be able to pick up yesterday’s conversation, share half a thought, and carry unfinished work forward without explaining our lives all over again. And we should be able to trust the environment that holds that knowledge.
+We should be able to pick up yesterday’s conversation, share half a thought, and carry unfinished work forward without explaining our lives all over again. Whether we are planning a week, researching a question or preparing a purchase, we should be able to trust the environment that holds that context.
 
-**Personal AgentOS explores how to build that kind of personal assistant (PA) in an environment you install and control.**
+**Personal AgentOS explores how to build a continuing personal agent (PA) in an environment you install and control.** Helping like a good assistant is an important starting role, but it does not define the limits of the agent.
 
-Assistants answer questions. Computer agents carry out commands. A personal agent should also stay with you across conversations, tasks and changes of AI. We call that continuity **Presence**.
+Assistants answer questions. Computer agents carry out commands. A personal agent should also stay with you across conversations, kinds of work and changes of AI. We call that continuity **Presence**.
 
 <!-- readme-section:ownership -->
 
-## Your assistant, on your terms
+## Your agent, on your terms
 
-The more an assistant knows about your life, the more it matters who holds its memory and decides what it can do. Your relationship with it should outlast a provider, a model or a chat session.
+The more kinds of work an agent helps with, the more it matters who holds its memory and decides what it can do. Your relationship with it should outlast a provider, a model or a chat session.
 
-AgentOS keeps memory, work and authority in your environment. You choose the AI, the information it can use and the access you give it. Better AI should make your assistant more capable without making you start over.
+AgentOS keeps memory, work and authority in your environment. You choose the AI, the information it can use and the access you give it. Different expertise can serve the same owner; better AI should expand what your agent can do without making you start over.
 
 Local-first is not local-only: you can use a local or hosted model. With a hosted model, the context used for a request is sent to that provider.
 
@@ -27,9 +27,11 @@ Local-first is not local-only: you can use a local or hosted model. With a hoste
 
 ## What makes continuity possible
 
-Presence needs more than a long chat history. The assistant needs to connect what it knows about you, what is happening now, what you are working on, what you have allowed and what actually happened.
+Presence needs more than a long chat history. The agent needs to connect what it knows about you, what is happening now, what you are working on, what you have allowed and what actually happened.
 
-AgentOS gives these things a shared structure—its **ontology**. A piece of work links its context, permissions, results and evidence. A new event or correction can inform what happens next. So when the AI changes or work is interrupted, what it knew and where to continue can remain available.
+AgentOS gives these things a shared structure—its **ontology**. The same meeting may be a calendar appointment or a project commitment; its source stays connected while its meaning for the work changes.
+
+A role shapes how the agent helps, what you delegate sets the scope of the work, and permission determines what it may actually do. Work and evidence keep track of what happened, so a change of AI or an interruption need not erase where to continue. Working across specialist roles this way is a design direction, not a claim that those roles all ship today.
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.en.narrow.svg">
@@ -91,8 +93,8 @@ Homebrew installs Python for you; model access is separate. Keep `agentos start`
 
 ## Explore the ideas
 
-- [Why this project exists](VISION.md) — the relationship with computers this project is trying to make possible.
-- [Architecture and ontology](docs/personal-agentos-architecture.en.md) · [Presence](docs/presence-experience-contract.en.md) — how personal state, work and control support one continuing assistant.
+- [Why this project exists](VISION.md) · [Whose agent?](docs/whitepapers/whose-agent.ko.md) (Korean strategy whitepaper) — why the agent's continuity should stay with the owner when AI changes.
+- [Architecture and ontology](docs/personal-agentos-architecture.en.md) · [Presence](docs/presence-experience-contract.en.md) · [Roles and delegation](docs/research/role-ontology-and-mandate-2026-10-05.ko.md) (Korean research proposal) — how personal state, work and control can support one agent across different roles.
 - [Research and references](docs/acknowledgements.en.md) — the work on personal agents, memory, owner models and provenance that informed the design.
 - [Documentation map](docs/README.md) · [Contributing](CONTRIBUTING.md) — find the current contracts, inspect the implementation and help develop it.
 

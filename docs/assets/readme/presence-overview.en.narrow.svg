@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="3111" viewBox="0 0 420 3111" role="img" aria-labelledby="title desc">
+<title id="title">Personal AgentOS</title><desc id="desc">Illustrative interaction patterns and product direction. No observed live run or shipped integration is claimed.</desc>
+<style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
+<rect width="420" height="3111" fill="#fff"/>
+<text x="20" y="58.0" font-size="34" class="bold" text-anchor="start">Personal AgentOS</text>
+<text x="20" y="100.9" font-size="23" class="blue" text-anchor="start">One assistant. Your context</text>
+<text x="20" y="131.95000000000002" font-size="23" class="blue" text-anchor="start">stays with you.</text>
+<text x="20" y="174.0" font-size="20" class="muted" text-anchor="start">Interaction model · product</text>
+<text x="20" y="201.0" font-size="20" class="muted" text-anchor="start">direction</text>
+<circle cx="40" cy="261.0" r="20" fill="#e9f0f6" stroke="none"/>
+<text x="40" y="268.0" font-size="18" class="blue bold" text-anchor="middle">01</text>
+<text x="74" y="268.0" font-size="28" class="bold" text-anchor="start">From answers to a</text>
+<text x="74" y="305.8" font-size="28" class="bold" text-anchor="start">continuing</text>
+<text x="74" y="343.6" font-size="28" class="bold" text-anchor="start">assistant</text>
+<rect x="20" y="375.4" width="380" height="439.79999999999995" rx="16" fill="#f7f9fc" stroke="#d4dce5"/>
+<circle cx="210.0" cy="431.4" r="39" fill="#e9eff7" stroke="none"/>
+<g transform="translate(180.0 399.4) scale(0.9375)" fill="none" stroke="#245b92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 45V18m0 27h37M15 35l9-10 9 4 10-15"/><circle cx="43" cy="18" r="10"/><path d="m50 26 8 9"/></g>
+<text x="40" y="510.4" font-size="25" class="bold" text-anchor="start">Assistant</text>
+<text x="40" y="545.4" font-size="22" class="blue bold" text-anchor="start">Answers</text>
+<g transform="translate(38 576.4) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
+<rect x="74" y="563.4" width="308" height="85.4" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
+<text x="88" y="598.4" font-size="22" class="" text-anchor="start">What’s the current</text>
+<text x="88" y="628.1" font-size="22" class="" text-anchor="start">price of NVIDIA?</text>
+<g transform="translate(38 673.8) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
+<rect x="74" y="660.8" width="308" height="85.4" rx="12" fill="#ffffff" stroke="#d3dedf"/>
+<text x="88" y="695.8" font-size="22" class="" text-anchor="start">I’ll check the</text>
+<text x="88" y="725.5" font-size="22" class="" text-anchor="start">current information.</text>
+<text x="40" y="788.1999999999999" font-size="20" class="blue bold" text-anchor="start">Question → Search → Answer</text>
+<rect x="20" y="835.1999999999999" width="380" height="466.79999999999995" rx="16" fill="#f7f9fc" stroke="#d4dce5"/>
+<circle cx="210.0" cy="891.1999999999999" r="39" fill="#e9eff7" stroke="none"/>
+<g transform="translate(180.0 859.1999999999999) scale(0.9375)" fill="none" stroke="#245b92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 29v-7a18 18 0 0 1 36 0v7M14 21h7v17h-7zm29 0h7v17h-7zM8 42h8l5 12h26l6-12H23"/><circle cx="25" cy="60" r="2"/><circle cx="44" cy="60" r="2"/></g>
+<text x="40" y="970.1999999999999" font-size="25" class="bold" text-anchor="start">Computer agent</text>
+<text x="40" y="1005.1999999999999" font-size="22" class="blue bold" text-anchor="start">Acts</text>
+<g transform="translate(38 1036.1999999999998) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
+<rect x="74" y="1023.1999999999999" width="308" height="85.4" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
+<text x="88" y="1058.1999999999998" font-size="22" class="" text-anchor="start">Add these headphones</text>
+<text x="88" y="1087.8999999999999" font-size="22" class="" text-anchor="start">to my Amazon cart.</text>
+<g transform="translate(38 1133.6) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
+<rect x="74" y="1120.6" width="308" height="85.4" rx="12" fill="#ffffff" stroke="#d3dedf"/>
+<text x="88" y="1155.6" font-size="22" class="" text-anchor="start">I’ll open the item in</text>
+<text x="88" y="1185.3" font-size="22" class="" text-anchor="start">the browser.</text>
+<text x="40" y="1248.0" font-size="20" class="blue bold" text-anchor="start">Command → Browser / tool →</text>
+<text x="40" y="1275.0" font-size="20" class="blue bold" text-anchor="start">Action / handoff</text>
+<rect x="20" y="1322.0" width="380" height="466.79999999999995" rx="16" fill="#eff7f3" stroke="#b7d1c5"/>
+<circle cx="210.0" cy="1378.0" r="39" fill="#e0eee6" stroke="none"/>
+<g transform="translate(180.0 1346.0) scale(0.9375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 26h31v18a10 10 0 0 1-10 10H22a10 10 0 0 1-10-10zM43 29h7a8 8 0 0 1 0 16h-7M8 59h41M19 19c-8-8 6-10 0-17M31 19c-8-8 6-10 0-17"/></g>
+<text x="40" y="1457.0" font-size="25" class="bold" text-anchor="start">Personal AgentOS</text>
+<text x="40" y="1492.0" font-size="22" class="blue bold" text-anchor="start">Stays with you</text>
+<g transform="translate(38 1523.0) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
+<rect x="74" y="1510.0" width="308" height="85.4" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
+<text x="88" y="1545.0" font-size="22" class="" text-anchor="start">We’re almost out of</text>
+<text x="88" y="1574.7" font-size="22" class="" text-anchor="start">coffee.</text>
+<g transform="translate(38 1620.4) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
+<rect x="74" y="1607.4" width="308" height="85.4" rx="12" fill="#ffffff" stroke="#d3dedf"/>
+<text x="88" y="1642.4" font-size="22" class="" text-anchor="start">Coffee for the next</text>
+<text x="88" y="1672.1000000000001" font-size="22" class="" text-anchor="start">shop.</text>
+<text x="40" y="1734.8000000000002" font-size="20" class="blue bold" text-anchor="start">Conversation → Context /</text>
+<text x="40" y="1761.8000000000002" font-size="20" class="blue bold" text-anchor="start">judgment → Continuing work</text>
+<circle cx="40" cy="1861.8" r="20" fill="#e9f0f6" stroke="none"/>
+<text x="40" y="1868.8" font-size="18" class="blue bold" text-anchor="middle">02</text>
+<text x="74" y="1868.8" font-size="28" class="bold" text-anchor="start">What stays</text>
+<text x="74" y="1906.6" font-size="28" class="bold" text-anchor="start">underneath the</text>
+<text x="74" y="1944.3999999999999" font-size="28" class="bold" text-anchor="start">conversation</text>
+<g transform="translate(87 1976.2) scale(0.71875)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
+<g transform="translate(277 1976.2) scale(0.71875)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
+<path d="M148 2000.2H262" fill="none" stroke="#8296a9" stroke-width="1.6"/>
+<path d="M155 1994.2L148 2000.2L155 2006.2M255 1994.2L262 2000.2L255 2006.2" fill="none" stroke="#8296a9" stroke-width="1.6"/>
+<text x="110" y="2052.2" font-size="22" class="bold" text-anchor="middle">You</text>
+<text x="300" y="2050.2" font-size="20" class="bold" text-anchor="middle">PA · your</text>
+<text x="300" y="2077.2" font-size="20" class="bold" text-anchor="middle">personal</text>
+<text x="300" y="2104.2" font-size="20" class="bold" text-anchor="middle">assistant</text>
+<path d="M300 2123.2V2143.2H210.0V2155.2" fill="none" stroke="#8296a9" stroke-width="1.6"/>
+<rect x="20" y="2155.2" width="380" height="481.35" rx="18" fill="#f0f6f9" stroke="#b6cad9"/>
+<text x="40" y="2201.2" font-size="26" class="bold" text-anchor="start">Personal AgentOS</text>
+<text x="40" y="2234.2" font-size="20" class="muted" text-anchor="start">Your environment. Your</text>
+<text x="40" y="2261.2" font-size="20" class="muted" text-anchor="start">control.</text>
+<rect x="40.0" y="2290.2" width="163.0" height="82" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(104.5 2299.2) scale(0.53125)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M16 12h34v42H16zM10 20h12m-12 12h12m-12 12h12M29 22h13m-13 9h13m-13 9h9"/></g>
+<text x="121.5" y="2359.2" font-size="20" class="bold" text-anchor="middle">Memory</text>
+<path d="M203.0 2331.2H217.0" fill="none" stroke="#a7bac6" stroke-width="1.6"/>
+<rect x="217.0" y="2290.2" width="163.0" height="82" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(281.5 2299.2) scale(0.53125)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="8"/><circle cx="12" cy="12" r="5"/><circle cx="52" cy="15" r="5"/><circle cx="13" cy="52" r="5"/><circle cx="51" cy="51" r="5"/><path d="m16 16 10 10m12 0 10-8M17 48l9-10m12 0 9 9"/></g>
+<text x="298.5" y="2359.2" font-size="20" class="bold" text-anchor="middle">Context</text>
+<path d="M298.5 2372.2V2386.2" fill="none" stroke="#a7bac6" stroke-width="1.6"/>
+<rect x="40.0" y="2386.2" width="163.0" height="82" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(104.5 2395.2) scale(0.53125)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
+<text x="121.5" y="2455.2" font-size="20" class="bold" text-anchor="middle">Work</text>
+<path d="M203.0 2427.2H217.0" fill="none" stroke="#a7bac6" stroke-width="1.6"/>
+<rect x="217.0" y="2386.2" width="163.0" height="82" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(281.5 2395.2) scale(0.53125)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/></g>
+<text x="298.5" y="2455.2" font-size="20" class="bold" text-anchor="middle">Authority</text>
+<path d="M298.5 2468.2V2482.2" fill="none" stroke="#a7bac6" stroke-width="1.6"/>
+<rect x="40.0" y="2482.2" width="163.0" height="82" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(104.5 2491.2) scale(0.53125)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8h27l9 9v40H14zM41 8v12h9M22 29h19m-19 8h13m-13 8 6 6 13-13"/></g>
+<text x="121.5" y="2551.2" font-size="20" class="bold" text-anchor="middle">Evidence</text>
+<path d="M203.0 2523.2H217.0" fill="none" stroke="#a7bac6" stroke-width="1.6"/>
+<rect x="217.0" y="2482.2" width="163.0" height="82" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(281.5 2491.2) scale(0.53125)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><path d="M32 16v17l11 7M6 32h5m42 0h5M32 6v5m0 42v5"/></g>
+<text x="298.5" y="2551.2" font-size="20" class="bold" text-anchor="middle">Events</text>
+<text x="210.0" y="2609.2" font-size="21" class="blue bold" text-anchor="middle">Judgment / orchestration</text>
+<path d="M210.0 2640.5499999999997 L210.0 2663.5499999999997" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M206.0 2658.5499999999997 L210.0 2663.5499999999997 L214.0 2658.5499999999997" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="20" y="2670.5499999999997" width="380" height="106" rx="12" fill="#fafbfd" stroke="#d4dce5"/>
+<g transform="translate(40 2695.5499999999997) scale(0.75)" fill="none" stroke="#526b91" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="32" height="32" rx="6"/><path d="M24 6v10m16-10v10M24 48v10m16-10v10M6 24h10M6 40h10m32-16h10M48 40h10M26 26h12v12H26z"/></g>
+<text x="108" y="2707.5499999999997" font-size="22" class="bold" text-anchor="start">Replaceable AI</text>
+<text x="108" y="2746.5499999999997" font-size="22" class="blue" text-anchor="start">AI A  →  AI B</text>
+<g transform="translate(44 2798.5499999999997) scale(0.46875)" fill="none" stroke="#526b91" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m12 8 11 11-6 6L6 14c-4 14 6 23 18 17l25 25 7-7-25-25C37 12 28 2 16 6l10 10-7 7"/></g>
+<text x="88" y="2820.5499999999997" font-size="20" class="" text-anchor="start">Tools</text>
+<g transform="translate(228 2798.5499999999997) scale(0.46875)" fill="none" stroke="#526b91" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M16 45a12 12 0 0 1-3-24 17 17 0 0 1 32-3 13 13 0 0 1 3 27H16zM22 52v8m20-8v8"/></g>
+<text x="270" y="2820.5499999999997" font-size="20" class="" text-anchor="start">Services</text>
+<text x="210.0" y="2881.5499999999997" font-size="25" class="blue bold" text-anchor="middle">Same PA. Different AI.</text>
+<text x="210.0" y="2920.2999999999997" font-size="22" class="muted" text-anchor="middle">Your context stays with you.</text>
+<path d="M20 2963.9999999999995H400" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
+<text x="20" y="2999.9999999999995" font-size="20" class="muted" text-anchor="start">Illustrative interaction</text>
+<text x="20" y="3026.9999999999995" font-size="20" class="muted" text-anchor="start">patterns and product direction.</text>
+<text x="20" y="3053.9999999999995" font-size="20" class="muted" text-anchor="start">No observed live run or shipped</text>
+<text x="20" y="3080.9999999999995" font-size="20" class="muted" text-anchor="start">integration is claimed.</text>
+</svg>

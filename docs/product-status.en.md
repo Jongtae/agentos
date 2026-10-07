@@ -2,6 +2,13 @@
 
 This is the evidence and boundary page behind the [README](../README.md). It separates the newest published release from newer `main` implementation, and distinguishes synthetic/fixture, installed-smoke, owner-live and product-direction evidence.
 
+## How to read the evidence
+
+- **Published release:** the release manifest records installed-smoke and synthetic journey evidence for that build.
+- **Current main:** merged code and deterministic/fixture checks support newer contracts; they do not establish the complete experience in live services.
+- **Owner pilot:** public owner-live claims remain pending until specific observations are selected, redacted and linked to a revision and evidence record.
+- **Product direction:** the README's continuing conversation and the example below describe the intended experience, not one observed run or shipped shopping integrations.
+
 <!-- readme-section:status -->
 ## What works, what still has friction
 
@@ -20,6 +27,15 @@ The v1 journey table below is backed by the synthetic first-user audit [#472](ht
 
 There is **no current claim** of autonomous purchasing, arbitrary computer use, universal web verification, live inventory/checkout verification, arbitrary third-party package execution or a public agent marketplace.
 
+<!-- readme-section:release-illustrations -->
+## Published-release journey illustrations
+
+These reconstructed, condensed v1 calendar and file scenes explain synthetic journeys with stand-in services. They are not screenshots of live accounts or a promise that every journey is reachable in the published build. Replies are translated from Korean; release-specific limits are recorded in the [release manifest](release-manifest.json).
+
+![Reconstructed synthetic v1 calendar and file journeys](assets/readme/hero.en.png)
+
+![Synthetic first-user journeys: files, mail, calendar, Memory, research and restart reuse](assets/readme/scenes.en.png)
+
 <!-- readme-section:everyday-scene -->
 ## Where this is going
 
@@ -36,7 +52,7 @@ There is **no current claim** of autonomous purchasing, arbitrary computer use, 
 <!-- readme-section:delegation-flow -->
 ## What just happened
 
-After any of the scenes in the [README](../README.md), this is what took place underneath.
+In the synthetic v1 journeys above, this is the intended delegation pattern. Exact reachability and friction are recorded in the evidence table and release manifest; the README’s representative conversation remains product direction.
 
 **Delegate the work. Keep the control.**
 
@@ -72,7 +88,7 @@ For installable agents the same rule holds: `downloaded != installed != enabled 
 <!-- readme-section:release -->
 ## The Homebrew release
 
-**The Homebrew package installs the newest published release, `v1.1.0` (2026-09-23).** It carries the release-scoped scenes described in the README; the README now separately labels newer `main` behavior. See the [release manifest](release-manifest.json) for exactly what the published build contains and what was observed. Work merged to `main` after that tag is not in it until the next release.
+**The Homebrew package installs the newest published release, `v1.1.0` (2026-09-23).** The [release manifest](release-manifest.json) records what it contains and what was observed: calendar creation is unavailable and research is partial in that build. Newer Presence work on `main` is not included until another release. The README’s representative conversation describes product direction, not functionality supplied by this package.
 
 ```sh
 brew install jongtae/agentos/agentos

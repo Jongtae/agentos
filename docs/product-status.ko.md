@@ -2,6 +2,13 @@
 
 [README](../README.ko.md) 뒤에 있는 근거와 경계 페이지입니다. 최신 공개 배포본과 더 새로운 `main` 구현을 구분하고 synthetic/fixture, installed-smoke, owner-live, product-direction 증거를 서로 섞지 않습니다.
 
+## 증거를 읽는 기준
+
+- **공개 배포본:** 해당 빌드의 설치 smoke와 synthetic 여정 증거는 release manifest에 기록합니다.
+- **현재 main:** 병합된 코드와 모의 환경·fixture 점검이 새 계약을 뒷받침합니다. 전체 경험을 실제 외부 서비스에서 관찰했다는 뜻은 아닙니다.
+- **소유자 파일럿:** 구체적인 관찰을 선정하고 개인정보를 가린 뒤 revision과 증거 기록에 연결하기 전까지 공개적인 실제 소유자 환경의 동작 주장은 보류합니다.
+- **제품 방향:** README의 이어지는 대화와 아래 예시는 지향하는 경험을 설명합니다. 하나의 관찰된 실행이나 배포된 구매 통합 기능이 아닙니다.
+
 <!-- readme-section:status -->
 ## 지금 되는 것과 아직 마찰이 있는 것
 
@@ -20,6 +27,15 @@
 
 자율 구매, 임의의 컴퓨터 사용, 범용 웹 검증, 실시간 재고/결제 검증, 임의의 제3자 패키지 실행, 공개 에이전트 마켓플레이스에 대한 **현재 주장은 없습니다.**
 
+<!-- readme-section:release-illustrations -->
+## 공개 배포본의 여정 설명
+
+아래 그림은 모의 서비스를 사용한 v1 일정·파일 여정을 재구성하고 축약한 설명입니다. 실제 계정의 스크린샷이나 공개 배포본에서 모든 여정을 실행할 수 있다는 약속은 아닙니다. 한국어 답변을 바탕으로 작성했으며, 배포본별 한계는 [release manifest](release-manifest.json)에 기록되어 있습니다.
+
+![재구성한 synthetic v1 일정·파일 여정](assets/readme/hero.ko.png)
+
+![Synthetic 첫 사용자 여정: 파일, 메일, 일정, 기억, 조사와 재시작 후 이어가기](assets/readme/scenes.ko.png)
+
 <!-- readme-section:everyday-scene -->
 ## 앞으로 가려는 곳
 
@@ -36,7 +52,7 @@
 <!-- readme-section:delegation-flow -->
 ## 방금 무슨 일이 있었나
 
-[README](../README.ko.md)의 장면 어느 것이든, 그 밑에서 일어난 일은 이렇습니다.
+위의 synthetic v1 여정이 지향하는 위임 방식은 다음과 같습니다. 정확히 실행 가능한 범위와 마찰은 근거 표와 release manifest에 기록되어 있으며, README의 대표 대화는 제품 방향을 설명합니다.
 
 **일은 맡기고, 통제는 내가.**
 
@@ -72,7 +88,7 @@
 <!-- readme-section:release -->
 ## Homebrew 배포본
 
-**Homebrew 패키지는 최신 공개 배포본 `v1.1.0`(2026-09-23)을 설치하며, README의 모든 장면이 그 안에 들어 있습니다**(정확한 내용과 관측 기록은 [release manifest](release-manifest.json)에 있습니다). 그 태그 이후 `main`에 병합된 작업은 다음 배포 전까지 그 빌드에 없습니다.
+**Homebrew 패키지는 최신 공개 배포본 `v1.1.0`(2026-09-23)을 설치합니다.** 포함된 기능과 관찰 기록은 [release manifest](release-manifest.json)에 있으며, 이 빌드에서는 일정 생성이 불가능하고 조사는 부분 동작합니다. 이후 `main`의 Presence 구현은 다음 배포 전까지 포함되지 않습니다. README의 대표 대화는 이 패키지가 제공하는 기능이 아니라 제품 방향을 설명합니다.
 
 ```sh
 brew install jongtae/agentos/agentos

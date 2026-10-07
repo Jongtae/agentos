@@ -105,7 +105,7 @@ The image below is a condensed, redacted reconstruction based on owner-pilot con
 
 [Open the image at full size](docs/assets/readme/owner-pilot-conversation.en.png) · [View the original reference image](docs/assets/readme/owner-pilot-conversation-reference.jpg)
 
-The common path is:
+The common path is simple:
 
 **what you say or show → allowed context with source and time → useful question or tool → authority boundary → observed result**
 

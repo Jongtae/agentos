@@ -29,9 +29,11 @@ Local-first is not local-only: you can use a local or hosted model. With a hoste
 
 Presence needs more than a long chat history. The agent needs to connect what it knows about you, what is happening now, what you are working on, what you have allowed and what actually happened.
 
-AgentOS gives these things a shared structure—its **ontology**. The same meeting may be a calendar appointment or a project commitment; its source stays connected while its meaning for the work changes.
+Metadata can list a meeting's time, place and attendees. An **ontology** also relates that event to people, goals and commitments: was it merely an invitation, or did someone accept a follow-up? A calendar view may use it to arrange time; a project view may use it to track a decision. Both should refer to the same meeting and its source, without turning an invitation into a promise.
 
-A role shapes how the agent helps, what you delegate sets the scope of the work, and permission determines what it may actually do. Work and evidence keep track of what happened, so a change of AI or an interruption need not erase where to continue. Working across specialist roles this way is a design direction, not a claim that those roles all ship today.
+The distinction matters beyond scheduling. Imagine the owner holds 1,000 shares. An asset-management view asks how that holding fits the owner's overall finances. A discretionary-investment view first asks whether it falls within a specific mandate and its constraints. Both use the same sourced position, but a role name alone never grants permission to trade.
+
+AgentOS aims to connect these facts, role-specific interpretations, the work you delegated, actual permissions and evidence in one shared structure. That is how a change of AI or an interruption could leave a place to continue. These are design illustrations, not released financial services or observed runs.
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.en.narrow.svg">

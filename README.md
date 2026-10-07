@@ -25,6 +25,25 @@ The goal is not another chatbot with a longer history. It is one continuing pers
 
 Want to run it before reading further? Skip to [Try it](#try-it); the rest of this page explains what the project is reaching for.
 
+<!-- readme-section:real-use -->
+
+## Four moments from real use
+
+These are screen recordings from the owner's own use of Personal AgentOS, edited into four distinct scenes. Korean dialogue remains visible, with English translations below the matching dialogue excerpts. Taps, scrolling and emoji reactions play continuously at 20fps.
+
+![Four recorded owner-use scenes: a Dongtan meeting and dinner conversation, an E-Mart cart inquiry, a request for one small can of Spam, and a separate Kyobo book-cart session. Korean dialogue is accompanied by English translations.](docs/assets/readme/owner-use/owner-use.en.gif)
+
+[Open the GIF at full size](docs/assets/readme/owner-use/owner-use.en.gif).
+
+1. **Meeting a friend in Dongtan:** departure point, GTX and dinner preferences become part of the same conversation. The PA also corrects an earlier route suggestion.
+2. **Checking an E-Mart / SSG cart:** after sign-in, the PA replies that the cart contains 22 items and no Spam.
+3. **“Just one small can”:** the owner asks for one small can because his wife would dislike buying too much. The PA reports adding one 200g can and a cart count of **22 → 23**.
+4. **A separate Kyobo session:** the recording shows the owner's book cart; the PA lists four books, then discusses points and discounts and says one step was not verified.
+
+The thread is **conversation → the owner's context → account state → a requested action → a reported result**. These are separate moments, not one continuous shopping transaction. Sign-in, waiting time and session persistence remain rough edges.
+
+This owner-pilot recording does not identify the application revision or model. It shows neither an AI switch nor completed payment. [Recording provenance and editing details](docs/assets/readme/owner-use/README.md) distinguish visible screens, the PA's replies and release-specific validation.
+
 <!-- readme-section:ownership -->
 
 ## What should remain yours?
@@ -113,7 +132,7 @@ agentos start
 
 Homebrew installs Python for you; model access is separate. Keep `agentos start` running while you talk. [QUICKSTART](QUICKSTART.md) covers model setup, file work, Telegram and running the newest code from source.
 
-**Where it stands:** Homebrew installs **v1.1.1** (2026-10-07), built from the tagged main commit. The meeting and shopping scenes above remain illustrative product direction, not verified end-to-end behavior of this release. The [release manifest](docs/release-manifest.json) records source coverage and installed checks; [product status](docs/product-status.en.md) separates available behavior, fixture evidence, owner-pilot evidence and future direction.
+**Where it stands:** Homebrew installs **v1.1.1** (2026-10-07), built from the tagged main commit. The meeting illustration and reconstructed conversations are product direction. The owner-use GIF records separate pilot sessions and is not release-specific end-to-end validation. The [release manifest](docs/release-manifest.json) records source coverage and installed checks; [product status](docs/product-status.en.md) separates available behavior, fixture evidence, owner-pilot evidence and future direction.
 
 <!-- readme-section:more -->
 

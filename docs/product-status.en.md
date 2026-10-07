@@ -6,8 +6,15 @@ This is the evidence and boundary page behind the [README](../README.md). It sep
 
 - **Published release:** the release manifest records installed-smoke and synthetic journey evidence for that build.
 - **Current main:** merged code and deterministic/fixture checks support newer contracts; they do not establish the complete experience in live services.
-- **Owner pilot:** public owner-live claims remain pending until specific observations are selected, redacted and linked to a revision and evidence record.
+- **Owner pilot:** selected owner-supplied recordings have their own provenance and visible-observation scope. Revision-specific repeatability and release validation remain separate.
 - **Product direction:** the README's continuing conversation and the example below describe the intended experience, not one observed run or shipped shopping integrations.
+
+<!-- readme-section:owner-use-recording -->
+## Selected owner-use recording
+
+The owner supplied `PA Use Case Video.mp4` and selected its GIF derivatives for the public README on 2026-10-08. [The recording provenance](assets/readme/owner-use/README.md) records the preserved continuous-export digests, original-source limitation, cuts and localized files. The visible scenes cover a Dongtan conversation, E-Mart/SSG cart replies, a small-can request and a separate Kyobo account/cart session.
+
+This is **owner-supplied screen-recording evidence**. The Kyobo cart is visible; the E-Mart counts and Spam update are shown in the PA's replies. No independent backend/tool trace, application revision or model identity accompanies the recording. It does not show an AI switch, completed payment or a repeatability check of the published release. This documentation session ran no live account/provider operation. The historical synthetic audit and reconstructed illustrations below keep their original evidence class.
 
 <!-- readme-section:status -->
 ## What works, what still has friction

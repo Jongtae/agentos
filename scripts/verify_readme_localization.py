@@ -115,10 +115,10 @@ README_DIRECTION_DISCLAIMERS = {
 }
 
 README_RELEASE_BOUNDARIES = {
-    "README.md": "Homebrew installs **v{version}** ({date}), built from the tagged main commit. The meeting and shopping scenes above remain illustrative product direction, not verified end-to-end behavior of this release.",
-    "README.ko.md": "Homebrew는 태그가 붙은 main 커밋의 **v{version}**({date})을 설치합니다. 위 미팅·쇼핑 장면은 이 배포본의 실제 종단 간 동작으로 검증된 것이 아닌 제품 방향 예시입니다.",
-    "README.ja.md": "Homebrew からは、タグを付けた main コミットの **v{version}**（{date}）が入ります。上の会議や買い物の場面は、この版で一連の動作が検証済みという意味ではなく、製品の方向性を示す例です。",
-    "README.zh-CN.md": "Homebrew 安装的是从已打标签的 main 提交构建的 **v{version}**（{date}）。上面的会议和购物场景仍是产品方向示例，并非该版本已完成端到端验证的功能。",
+    "README.md": "Homebrew installs **v{version}** ({date}), built from the tagged main commit. The meeting illustration and reconstructed conversations are product direction. The owner-use GIF records separate pilot sessions and is not release-specific end-to-end validation.",
+    "README.ko.md": "Homebrew는 태그가 붙은 main 커밋의 **v{version}**({date})을 설치합니다. 미팅 설명 그림과 재구성 대화는 제품 방향 예시입니다. 실제 사용 GIF는 별도 소유자 파일럿 기록이며, 이 배포본의 종단 간 검증은 아닙니다.",
+    "README.ja.md": "Homebrew からは、タグを付けた main コミットの **v{version}**（{date}）が入ります。会議の説明図と再構成した会話は製品の方向性です。実際の利用GIFは別のオーナー・パイロット記録であり、この版の一連の動作を検証したものではありません。",
+    "README.zh-CN.md": "Homebrew 安装的是从已打标签的 main 提交构建的 **v{version}**（{date}）。会议示意图和重构对话属于产品方向。真实使用GIF记录的是独立的所有者试点会话，并非该发行版本的端到端验证。",
 }
 
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")

@@ -48,14 +48,14 @@ AgentOS uses its judgment layer to choose AI and tools and check their results. 
 
 *Illustrative product direction, not an observed live run or a shipped shopping integration.*
 
-The English image below adapts the owner's Korean visual reference into three shorter conversations: sharing a location to find dinner on the way home, comparing a golf belt and pausing for account login before a cart action, and continuing from a restaurant photo to a nearby walk. It is an edited illustrative reconstruction, not a verbatim product screenshot or proof of those integrations.
+The illustration below condenses three PA conversations: sharing a location to find dinner on the way home, comparing a golf belt and pausing for account login before a cart action, and continuing from a restaurant photo to a nearby walk. It is an edited illustrative reconstruction, not a verbatim product screenshot or proof of those integrations.
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation.en.png">
-  <img src="docs/assets/readme/owner-pilot-conversation.en.png" alt="English three-panel image with three reconstructed PA conversations: finding dinner after sharing a location, comparing golf belts before an account-login handoff, and continuing from a restaurant photo to a nearby walk. Illustrative, not a verbatim product screenshot.">
+  <img src="docs/assets/readme/owner-pilot-conversation.en.png" alt="Three reconstructed PA conversations in English: finding dinner after sharing a location, comparing golf belts before an account-login handoff, and continuing from a restaurant photo to a nearby walk. Illustrative, not a verbatim product screenshot.">
 </picture>
 
-[Open the English image at full size](docs/assets/readme/owner-pilot-conversation.en.png) · [See the owner's original reference](docs/assets/readme/owner-pilot-conversation-reference.jpg).
+[Open the English image at full size](docs/assets/readme/owner-pilot-conversation.en.png) · [View the original reference image](docs/assets/readme/owner-pilot-conversation-reference.jpg).
 
 The image shows three separate conversations:
 

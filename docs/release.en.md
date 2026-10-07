@@ -60,8 +60,12 @@ authorized by EPIC-PA1 / #386, which explicitly excludes public deployment.
    `https://github.com/Jongtae/agentos/archive/refs/tags/vX.Y.Z.tar.gz`.
    `scripts/dev/delivery.py` `_archive_sha256` is the repository-only reference implementation.
 7. **Update the tap formula in place.** Clone `Jongtae/homebrew-agentos`, and
-   rewrite the two lines of the existing `Formula/agentos.rb` — the `url` tag
-   and the `sha256` — then open a PR. The release helper in
+   rewrite the `url` tag and `sha256` only after the archive exists. Compare
+   the live formula's executable body with `deploy/homebrew/agentos.rb.template`
+   before opening a PR. In particular, `pip install` must include the
+   `[mcp-host]` extra and the formula test must import `mcp.server.stdio`;
+   a plain `pip install buildpath` leaves the CLI bridge dependency absent.
+   The release helper in
    `scripts/dev/delivery.py` is the repository-only reference implementation.
 
    **Do not paste `deploy/homebrew/agentos.rb.template` into the tap.** That
@@ -74,7 +78,7 @@ authorized by EPIC-PA1 / #386, which explicitly excludes public deployment.
    from the published formula while this repository's suite stays green,
    which is the one failure mode this file has.
 8. **Verify the install**: `brew update`, `brew upgrade jongtae/agentos/agentos`,
-   `brew test jongtae/agentos/agentos`, then
+   `brew test jongtae/agentos/agentos` (which also checks the bridge import), then
    `python3 scripts/quickstart_install_check.py`.
 
 9. **Record the published release.** Add the computed `sha256`, the tag and

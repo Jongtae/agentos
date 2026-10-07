@@ -70,6 +70,7 @@ EXPECTED_FORMULA = '''class Agentos < Formula
 
   test do
     assert_match "personal agent", shell_output("#{bin}/agentos --help")
+    system libexec/"bin/python", "-c", "from mcp.server.stdio import stdio_server"
   end
 end'''
 

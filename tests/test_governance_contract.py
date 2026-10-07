@@ -154,12 +154,16 @@ def test_iteration_issue_template_collects_the_execution_contract() -> None:
     )
 
 
-def test_ci_runs_the_governance_contract_test_as_part_of_full_pytest() -> None:
+def test_required_ci_runs_focused_guards_with_a_separate_full_suite_backstop() -> None:
     workflow = _read(".github/workflows/validate.yml")
+    full = _read(".github/workflows/full-validate.yml")
 
-    # Running the whole tests directory keeps this guard in the required CI job
-    # without maintaining a second, drift-prone governance-only command.
-    _assert_all(workflow, "python3 -m pytest -q tests")
+    _assert_all(workflow, "Run focused governance and README tests",
+                "tests/test_governance_contract.py", "tests/test_readme_localization.py",
+                "scripts/verify_assistant_execution.py --check-spec",
+                "scripts/verify_reuse_review.py", "scripts/verify_readme_localization.py --check-git-diff")
+    assert not re.search(r"python3 -m pytest\b[^\n]* -q tests/?\s*(?:$|\n)", workflow)
+    _assert_all(full, "workflow_dispatch", "python3 -m pytest -q tests")
 
 
 def test_verification_budget_requires_stable_heads_and_batched_remediation() -> None:

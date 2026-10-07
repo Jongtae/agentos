@@ -2,6 +2,12 @@
 
 The public READMEs introduce the desired personal-agent relationship, owner control, the structure that makes continuity possible, a short representative conversation, and a first trial. [The documentation map](../../README.md) remains the documentation authority map.
 
+## Recorded owner use
+
+The four public READMEs now also lead with localized [owner-use GIFs](owner-use/README.md), selected from the owner's supplied screen recording on 2026-10-08. They show separate Dongtan, E-Mart/SSG cart-read, small-can request and Kyobo scenes at continuous 20fps. Screen observations and the PA's reported results are distinguished from backend verification and a named release; the recording does not demonstrate an AI switch or completed payment. Short-lived sign-in link text is omitted from the public edit.
+
+Public front-page derivatives live in `docs/assets/readme/owner-use/`. Full-size GIFs, scene exports, earlier edits and validation receipts are local editing material under the already ignored `output/readme-media/2026-10-08/`; they are not duplicated in Git. The existing overview and reconstructed conversations below retain their illustrative evidence class.
+
 ## Current introduction
 
 `presence-overview.{en,ko,ja,zh-CN}.svg` is the illustrated overview used by the four READMEs. Three example cards show answering a question, handling an explicit cart request and carrying a delegated meeting decision toward its next preparation. The Owner/PA/AgentOS architecture follows one sourced meeting through its invitation, proposal, earlier decisions, differing relationships, continuing work, authority check and verified result. It distinguishes invitation from acceptance and draft from send. A separate short coffee conversation in the preserved concept figure illustrates ordinary context over time. Original vector icons and dialogue cards carry the explanation; detailed ontology definitions remain in the linked documents.
@@ -25,6 +31,6 @@ The overview has locale-specific `.narrow.svg` compositions selected by the READ
 1. Read the whole README as a newcomer: desired relationship → why owner control matters → how continuity works → first trial → references/licence. Diagrams should shorten the explanation.
 2. Run `python3 scripts/verify_readme_localization.py` and check local links. This protects semantic parity, localized assets and factual boundaries without requiring the old screenshot sections.
 3. Inspect text against the viewport, cards and other text under sans-serif and serif fallback. Check native GitHub desktop width, 375px and 320px in all four locales. Verify image decoding, selected `currentSrc`, alt text and legibility, then read the entire page in order.
-4. Keep representative interaction explicitly illustrative. Published-release evidence, current-main fixture checks, owner-pilot observations and product direction remain distinct in the linked status documentation.
+4. Keep the reconstructed interactions explicitly illustrative and selected recordings explicitly owner-supplied observations. Published-release evidence, current-main fixture checks, owner-pilot observations and product direction remain distinct in the linked status documentation.
 
 Browser captures and layout measurements establish documentation rendering only. They do not establish live AgentOS behavior.

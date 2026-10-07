@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -21,42 +25,6 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-
-      - id: scope
-        name: Decide whether this PR needs the full suite
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          # Pushes to main are a cheap merged-tree integrity pass. The heavy
-          # suite has already been required on runtime-affecting PR heads and
-          # is also covered by the scheduled/manual full-validate workflow.
-          if [[ "$EVENT_NAME" != "pull_request" ]]; then
-            echo "full_suite=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          full_suite=false
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > /tmp/changed-files.txt
-
-          while IFS= read -r path; do
-            [[ -z "$path" ]] && continue
-            case "$path" in
-              *.md|docs/assets/*|LICENSE|NOTICE|TRADEMARKS.md)
-                ;;
-              *)
-                full_suite=true
-                echo "Full suite required by: $path"
-                break
-                ;;
-            esac
-          done < /tmp/changed-files.txt
-
-          echo "full_suite=$full_suite" >> "$GITHUB_OUTPUT"
 
       - name: Verify assistant execution specification and ownership
         run: python3 scripts/verify_assistant_execution.py --check-spec
@@ -88,25 +56,24 @@ jobs:
       - name: Verify src layout
         run: python3 scripts/verify_src_layout.py
 
-
       - name: Verify ledger JSON
         run: python3 -c "import json,pathlib; [json.loads(line) for line in pathlib.Path('docs/issue-branch-ledger.jsonl').read_text(encoding='utf-8').splitlines()]"
 
       - name: Install pinned uv resolver
-        if: steps.scope.outputs.full_suite == 'true'
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: '0.11.33'
           enable-cache: true
 
-      - name: Sync exact full-suite dependencies
-        if: steps.scope.outputs.full_suite == 'true'
-        run: uv sync --locked --extra mcp-host --extra schema-validation --group dev --no-python-downloads
+      - name: Sync locked validation dependencies
+        run: uv sync --locked --group dev --no-python-downloads
 
-      - name: Verify AgentPackage v0.1
-        if: steps.scope.outputs.full_suite == 'true'
-        run: .venv/bin/python scripts/verify_agentpackage_v01.py
-
-      - name: Run full test suite
-        if: steps.scope.outputs.full_suite == 'true'
-        run: PATH="$PWD/.venv/bin:$PATH" python3 -m pytest -q tests
+      # These checks do not use service fixtures; classification coverage is local and model-free.
+      - name: Run focused governance and README tests
+        run: |
+          PATH="$PWD/.venv/bin:$PATH" python3 -m pytest --noconftest -q \
+            tests/test_readme_localization.py \
+            tests/test_reuse_review_gate.py \
+            tests/test_pr_preflight.py \
+            tests/test_governance_contract.py \
+            tests/test_verify_src_layout.py

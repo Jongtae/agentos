@@ -53,6 +53,12 @@ The image below adapts the owner's Korean visual reference into three shorter co
 
 [Open the image at full size](docs/assets/readme/owner-pilot-conversation-edited.png) · [See the owner's original reference](docs/assets/readme/owner-pilot-conversation-reference.jpg).
 
+The Korean dialogue in the image, in English:
+
+1. **On the way home:** “Dinner on my way back?” The PA asks for the current location, then offers three places with distance and open status. The owner picks the second.
+2. **Get this for me:** The owner shares a belt photo. The PA compares three options and asks which one to use. When the owner asks to add the first to a cart, the PA asks for a shopping-account login before proceeding.
+3. **I’m here. What next?** The owner shares a restaurant photo and asks what to do afterward. The PA offers a walk, café or bar nearby. The owner chooses the walk; the PA says it will check the route and hours.
+
 The same continuity matters in smaller moments, hours apart:
 
 > “We’re almost out of coffee.”<br>

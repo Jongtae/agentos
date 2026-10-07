@@ -50,10 +50,14 @@ The aspiration is simple: the PA follows what “it” and “the same one” me
 
 *Illustrative product direction, not an observed live run or a shipped shopping integration.*
 
+The image below adapts the owner's Korean visual reference into three shorter conversations: sharing a location to find dinner on the way home, comparing a golf belt and pausing for account login before a cart action, and continuing from a restaurant photo to a nearby walk. It is an edited illustrative reconstruction, not a verbatim product screenshot or proof of those integrations.
+
 <picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-scenes.en.narrow.svg">
-  <img src="docs/assets/readme/presence-scenes.en.svg" alt="Illustrative reconstruction of three PA conversations: sharing a location to find dinner on the way home; choosing headphones from a photo and connecting a shopping account before action; sharing a restaurant photo and continuing with a nearby walk. These fictional screens explain context, continuity and authority when needed; they are not product screenshots or observed runs.">
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation-edited.png">
+  <img src="docs/assets/readme/owner-pilot-conversation-edited.png" alt="Edited Korean visual reference with three reconstructed PA conversations: finding dinner after sharing a location, comparing golf belts before an account-login handoff, and continuing from a restaurant photo to a nearby walk. Illustrative, not a verbatim product screenshot.">
 </picture>
+
+[Open the image at full size](docs/assets/readme/owner-pilot-conversation-edited.png) · [See the owner's original reference](docs/assets/readme/owner-pilot-conversation-reference.jpg).
 
 <!-- readme-section:try-today -->
 

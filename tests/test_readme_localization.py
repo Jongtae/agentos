@@ -21,11 +21,12 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             shutil.copyfile(ROOT / name, root / name)
         assets = tuple(
             path
-            for locales in verifier.SECTION_VISUALS.values()
+            for section_id, locales in verifier.SECTION_VISUALS.items()
             for desktop in locales.values()
-            for path in (desktop, desktop.removesuffix(".svg") + ".narrow.svg")
+            for path in ((desktop,) if section_id == "conversation"
+                         else (desktop, desktop.removesuffix(".svg") + ".narrow.svg"))
         )
-        for rel in ("docs/release-manifest.json", *verifier.STATUS_DOCS, *assets):
+        for rel in set(("docs/release-manifest.json", *verifier.STATUS_DOCS, *assets)):
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / rel, root / rel)
 
@@ -377,7 +378,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             )
 
     def test_localized_picture_sources_cannot_use_another_locale(self):
-        for section_id, locales in verifier.SECTION_VISUALS.items():
+        for section_id, locales in (("presence", verifier.LOCALE_PRESENCE_VISUALS),):
             for suffix in (".svg", ".narrow.svg"):
                 with self.subTest(section=section_id, source=suffix):
                     tmp, root = self.temp_root()
@@ -393,7 +394,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                                             for error in errors), errors)
 
     def test_missing_picture_asset_is_detected(self):
-        for section_id, locales in verifier.SECTION_VISUALS.items():
+        for section_id, locales in (("presence", verifier.LOCALE_PRESENCE_VISUALS),):
             for suffix in (".svg", ".narrow.svg"):
                 with self.subTest(section=section_id, source=suffix):
                     tmp, root = self.temp_root()
@@ -403,6 +404,14 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                         errors = verifier.validate_readmes(root)
                         self.assertTrue(any(f"missing {section_id} asset" in error and asset in error
                                             for error in errors), errors)
+
+        tmp, root = self.temp_root()
+        with tmp:
+            asset = verifier.LOCALE_SCENE_VISUALS["README.md"]
+            (root / asset).unlink()
+            errors = verifier.validate_readmes(root)
+            self.assertTrue(any("missing conversation asset" in error and asset in error
+                                for error in errors), errors)
 
     def test_conversation_picture_must_render_in_its_own_section(self):
         for mutation in ("missing", "commented", "duplicated", "wrong section"):
@@ -631,8 +640,8 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
         committed = sorted(path.name for path in visuals.OUT.glob("*.html"))
         self.assertEqual(sorted(expected), committed)
 
-    def test_committed_public_figures_match_generator(self):
-        """Keep both responsive figures synchronized across all four locales."""
+    def test_committed_generated_figures_match_generator(self):
+        """Keep current overview and preserved scene SVGs synchronized."""
         assets = ROOT / "docs" / "assets" / "readme"
         spec = importlib.util.spec_from_file_location(
             "readme_concept_visuals", assets / "build_concept_visuals.py"
@@ -640,10 +649,11 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
         visuals = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(visuals)
         expected = {
-            Path(path).name
-            for locales in verifier.SECTION_VISUALS.values()
-            for desktop in locales.values()
-            for path in (desktop, desktop.removesuffix(".svg") + ".narrow.svg")
+            f"{kind}.{locale}{suffix}.svg"
+            for kind, translations in (("presence-overview", visuals.OVERVIEW),
+                                       ("presence-scenes", visuals.SCENES))
+            for locale in translations
+            for suffix in ("", ".narrow")
         }
         with tempfile.TemporaryDirectory() as tmp:
             generated = Path(tmp)

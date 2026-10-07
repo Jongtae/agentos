@@ -50,10 +50,14 @@ AgentOS의 판단 계층이 필요한 AI와 도구를 고르고 결과를 확인
 
 *제품 방향을 설명하는 예시이며, 실제 관찰 실행이나 배포된 구매 기능을 뜻하지 않습니다.*
 
+아래 이미지는 제공하신 한국어 화면을 바탕으로 대화를 짧게 각색한 것입니다. 귀갓길 식사를 찾기 위한 위치 공유, 골프 벨트 비교와 장바구니 작업 전 계정 로그인 요청, 식당 사진에서 이어지는 근처 산책 대화를 보여줍니다. 설명을 위해 편집한 재구성 화면이며, 제품을 그대로 캡처한 기록이나 해당 연동 기능의 배포 증거는 아닙니다.
+
 <picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-scenes.ko.narrow.svg">
-  <img src="docs/assets/readme/presence-scenes.ko.svg" alt="세 가지 PA 대화를 설명용으로 재구성한 화면: 귀갓길 식사를 위해 위치를 공유하고, 사진으로 찾은 헤드폰을 선택한 뒤 실행에 필요한 쇼핑 계정을 연결하며, 식당 사진에서 근처 산책 이야기로 이어갑니다. 맥락·연속성·필요한 순간의 권한을 보여주는 가상 화면이며 실제 제품 캡처나 관찰 기록이 아닙니다.">
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation-edited.png">
+  <img src="docs/assets/readme/owner-pilot-conversation-edited.png" alt="제공된 한국어 화면을 각색한 PA 대화 세 장면: 위치를 공유해 귀갓길 식당을 찾고, 골프 벨트를 비교한 뒤 계정 로그인을 요청하고, 식당 사진에서 근처 산책으로 이어갑니다. 설명용 재구성이며 제품 화면 그대로의 캡처는 아닙니다.">
 </picture>
+
+[이미지 원본 크기로 보기](docs/assets/readme/owner-pilot-conversation-edited.png) · [제공하신 원본 화면 보기](docs/assets/readme/owner-pilot-conversation-reference.jpg).
 
 <!-- readme-section:try-today -->
 

@@ -50,10 +50,14 @@ AgentOS は判断層を通じて必要な AI とツールを選び、その結�
 
 *製品の方向性を説明する例であり、実際に観測した動作や提供済みの購入機能ではありません。*
 
+下の画像は、オーナー提供の韓国語の画面をもとに、会話を短く編集したものです。位置を共有して帰り道の夕食を探す場面、ゴルフベルトを比較してカート操作前にアカウントへのログインを求める場面、レストランの写真から近くの散歩へ話が続く場面を示します。説明用に編集した再構成画像であり、製品画面そのものの撮影や連携機能の提供実績ではありません。
+
 <picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-scenes.ja.narrow.svg">
-  <img src="docs/assets/readme/presence-scenes.ja.svg" alt="三つの PA 会話を説明用に再構成した画面。帰り道の食事のために位置を共有し、写真から探したヘッドホンを選んで実行前に買い物用アカウントを接続し、レストランの写真から近くの散歩の話へ続けます。文脈、継続性、必要な時の権限を示す架空の画面で、製品の実画面や観測記録ではありません。">
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation-edited.png">
+  <img src="docs/assets/readme/owner-pilot-conversation-edited.png" alt="オーナー提供の韓国語画面を編集した PA 会話三場面。位置を共有して帰り道の食事先を探し、ゴルフベルトを比較してログインを求め、レストランの写真から散歩の話へ続く。説明用の再構成で、製品画面そのものの撮影ではありません。">
 </picture>
+
+[画像をフルサイズで見る](docs/assets/readme/owner-pilot-conversation-edited.png) · [オーナー提供の原本を見る](docs/assets/readme/owner-pilot-conversation-reference.jpg)。
 
 <!-- readme-section:try-today -->
 

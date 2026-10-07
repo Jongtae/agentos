@@ -308,8 +308,8 @@ LOCALE_PRESENCE_VISUALS = {
     "README.zh-CN.md": "docs/assets/readme/presence-overview.zh-CN.svg",
 }
 LOCALE_SCENE_VISUALS = {
-    name: path.replace("presence-overview.", "presence-scenes.")
-    for name, path in LOCALE_PRESENCE_VISUALS.items()
+    name: "docs/assets/readme/owner-pilot-conversation-edited.png"
+    for name in LOCALE_PRESENCE_VISUALS
 }
 SECTION_VISUALS = {
     "presence": LOCALE_PRESENCE_VISUALS,
@@ -369,7 +369,9 @@ def validate_localized_picture(
 ) -> list[str]:
     errors: list[str] = []
     desktop = SECTION_VISUALS[section_id][name]
-    narrow = desktop.removesuffix(".svg") + ".narrow.svg"
+    # The edited conversation image uses one source at every width;
+    # the architecture SVG still has a separate narrow composition.
+    narrow = desktop if section_id == "conversation" else desktop.removesuffix(".svg") + ".narrow.svg"
     parser = PictureParser()
     parser.feed(standalone_picture_html(section))
     if len(parser.pictures) != 1:
@@ -390,7 +392,7 @@ def validate_localized_picture(
     if (len(sources) != 1 or sources[0].get("srcset") != narrow
             or sources[0].get("media") != "(max-width: 600px)"):
         errors.append(f"{name}: {section_id} picture needs narrow source {narrow!r} at 600px")
-    for visual in (desktop, narrow):
+    for visual in set((desktop, narrow)):
         if not (root / visual).is_file():
             errors.append(f"{name}: missing {section_id} asset {visual!r}")
     return errors

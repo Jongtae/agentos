@@ -50,10 +50,14 @@ AgentOS 通过判断层选择所需的 AI 和工具，并检查它们的结果�
 
 *这是产品方向示例，并非实际观测的运行，也不代表已发布的购物功能。*
 
+下图以所有者提供的韩语画面为基础，缩短并改写了对话。三个场景分别是分享位置后寻找回家路上的晚餐、比较高尔夫腰带并在加入购物车前请求登录账户，以及从餐厅照片接着聊附近的散步地点。它是经过编辑的说明性重构图，不是产品画面的原样截图，也不能证明这些集成功能已经发布。
+
 <picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-scenes.zh-CN.narrow.svg">
-  <img src="docs/assets/readme/presence-scenes.zh-CN.svg" alt="三个 PA 对话的说明性重构画面：分享位置以寻找回家路上的餐厅；从照片寻找并选择耳机，在操作前连接购物账户；分享餐厅照片并接着聊附近的散步路线。这些虚构画面说明上下文、持续对话和需要时取得权限，并非产品截图或实际运行记录。">
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation-edited.png">
+  <img src="docs/assets/readme/owner-pilot-conversation-edited.png" alt="根据所有者提供的韩语画面改写的三段 PA 对话：分享位置后寻找回家路上的餐厅，比较高尔夫腰带并请求登录账户，再从餐厅照片延续到附近散步。说明性重构图，不是产品画面的原样截图。">
 </picture>
+
+[以完整尺寸查看图片](docs/assets/readme/owner-pilot-conversation-edited.png) · [查看所有者提供的原图](docs/assets/readme/owner-pilot-conversation-reference.jpg)。
 
 <!-- readme-section:try-today -->
 

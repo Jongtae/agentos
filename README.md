@@ -27,9 +27,9 @@ Want to run it before reading further? Skip to [Try it](#try-it); the rest of th
 
 <!-- readme-section:ownership -->
 
-## What if Jarvis belonged to another company?
+## What should remain yours?
 
-Think of the conversations and unfinished work Tony Stark shared with Jarvis. If Jarvis were another company's AI service, should Tony lose that context and delegated work when the company changed its model or closed the service? This [whitepaper thought experiment](docs/whitepapers/whose-agent.ko.md) asks who supplies the intelligence and who keeps the owner's memory, work and authority.
+The thought experiment becomes a concrete design question: when the intelligence underneath changes, what should remain with the owner? The [strategy whitepaper](docs/whitepapers/whose-agent.ko.md) develops that question across product and industry structure.
 
 AgentOS keeps memory, work and authority in your environment. You choose the AI, the information it can use and the access you give it. Different expertise can serve the same owner; better AI should expand what your agent can do without making you start over.
 

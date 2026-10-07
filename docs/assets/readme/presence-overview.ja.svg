@@ -66,25 +66,25 @@
 <path d="M153 967.45H240" fill="none" stroke="#8296a9" stroke-width="1.6"/>
 <path d="M160 961.45L153 967.45L160 973.45M233 961.45L240 967.45L233 973.45" fill="none" stroke="#8296a9" stroke-width="1.6"/>
 <rect x="240" y="1017.45" width="614" height="94" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(255 1038.45) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="8"/><circle cx="12" cy="12" r="5"/><circle cx="52" cy="15" r="5"/><circle cx="13" cy="52" r="5"/><circle cx="51" cy="51" r="5"/><path d="m16 16 10 10m12 0 10-8M17 48l9-10m12 0 9 9"/></g>
+<g transform="translate(255 1038.45) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M16 12h34v42H16zM10 20h12m-12 12h12m-12 12h12M29 22h13m-13 9h13m-13 9h9"/></g>
 <text x="312" y="1047.45" font-size="20" class="bold" text-anchor="start">出典のある一つの会議</text>
 <text x="312" y="1080.45" font-size="18" class="muted" text-anchor="start">予定の招待 + 提案書 + 以前の決定</text>
 <path d="M547.0 1112.45 L547.0 1123.45" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M543.0 1118.45 L547.0 1123.45 L551.0 1118.45" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="240" y="1125.45" width="614" height="94" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(255 1146.45) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
+<g transform="translate(255 1146.45) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="8"/><circle cx="12" cy="12" r="5"/><circle cx="52" cy="15" r="5"/><circle cx="13" cy="52" r="5"/><circle cx="51" cy="51" r="5"/><path d="m16 16 10 10m12 0 10-8M17 48l9-10m12 0 9 9"/></g>
 <text x="312" y="1155.45" font-size="20" class="bold" text-anchor="start">異なる関係</text>
 <text x="312" y="1188.45" font-size="18" class="muted" text-anchor="start">予定: 時間; プロジェクト: 決定; 招待 ≠ 受諾</text>
 <path d="M547.0 1220.45 L547.0 1231.45" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M543.0 1226.45 L547.0 1231.45 L551.0 1226.45" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="240" y="1233.45" width="614" height="94" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(255 1254.45) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/></g>
+<g transform="translate(255 1254.45) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
 <text x="312" y="1263.45" font-size="20" class="bold" text-anchor="start">続く仕事</text>
 <text x="312" y="1296.45" font-size="18" class="muted" text-anchor="start">事前資料 → メモ → 次の段階</text>
 <path d="M547.0 1328.45 L547.0 1339.45" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M543.0 1334.45 L547.0 1339.45 L551.0 1334.45" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="240" y="1341.45" width="614" height="94" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(255 1362.45) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8h27l9 9v40H14zM41 8v12h9M22 29h19m-19 8h13m-13 8 6 6 13-13"/></g>
+<g transform="translate(255 1362.45) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/></g>
 <text x="312" y="1371.45" font-size="20" class="bold" text-anchor="start">権限と根拠</text>
 <text x="312" y="1404.45" font-size="18" class="muted" text-anchor="start">下書き ≠ 送信; 許可と実際の結果を確認</text>
 <text x="547.0" y="1480.45" font-size="21" class="blue bold" text-anchor="middle">判断・調整</text>

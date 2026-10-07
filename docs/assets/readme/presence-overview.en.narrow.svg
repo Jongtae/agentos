@@ -75,7 +75,7 @@
 <text x="40" y="2236.9" font-size="20" class="muted" text-anchor="start">Your environment holds the</text>
 <text x="40" y="2263.9" font-size="20" class="muted" text-anchor="start">PA’s state.</text>
 <rect x="40" y="2292.9" width="340" height="140.7" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(55 2313.9) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="8"/><circle cx="12" cy="12" r="5"/><circle cx="52" cy="15" r="5"/><circle cx="13" cy="52" r="5"/><circle cx="51" cy="51" r="5"/><path d="m16 16 10 10m12 0 10-8M17 48l9-10m12 0 9 9"/></g>
+<g transform="translate(55 2313.9) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M16 12h34v42H16zM10 20h12m-12 12h12m-12 12h12M29 22h13m-13 9h13m-13 9h9"/></g>
 <text x="112" y="2324.9" font-size="22" class="bold" text-anchor="start">One sourced meeting</text>
 <text x="112" y="2360.6" font-size="20" class="muted" text-anchor="start">Invitation +</text>
 <text x="112" y="2387.6" font-size="20" class="muted" text-anchor="start">proposal + earlier</text>
@@ -83,7 +83,7 @@
 <path d="M210.0 2434.6 L210.0 2445.6" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M206.0 2440.6 L210.0 2445.6 L214.0 2440.6" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="40" y="2447.6" width="340" height="170.4" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(55 2468.6) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
+<g transform="translate(55 2468.6) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="8"/><circle cx="12" cy="12" r="5"/><circle cx="52" cy="15" r="5"/><circle cx="13" cy="52" r="5"/><circle cx="51" cy="51" r="5"/><path d="m16 16 10 10m12 0 10-8M17 48l9-10m12 0 9 9"/></g>
 <text x="112" y="2479.6" font-size="22" class="bold" text-anchor="start">Different</text>
 <text x="112" y="2509.2999999999997" font-size="22" class="bold" text-anchor="start">relationships</text>
 <text x="112" y="2545.0" font-size="20" class="muted" text-anchor="start">Calendar: time;</text>
@@ -92,7 +92,7 @@
 <path d="M210.0 2619.0 L210.0 2630.0" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M206.0 2625.0 L210.0 2630.0 L214.0 2625.0" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="40" y="2632.0" width="340" height="140.7" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(55 2653.0) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/></g>
+<g transform="translate(55 2653.0) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
 <text x="112" y="2664.0" font-size="22" class="bold" text-anchor="start">Work continues</text>
 <text x="112" y="2699.7" font-size="20" class="muted" text-anchor="start">Prepare brief →</text>
 <text x="112" y="2726.7" font-size="20" class="muted" text-anchor="start">receive notes → next</text>
@@ -100,7 +100,7 @@
 <path d="M210.0 2773.7 L210.0 2784.7" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M206.0 2779.7 L210.0 2784.7 L214.0 2779.7" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="40" y="2786.7" width="340" height="140.7" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(55 2807.7) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8h27l9 9v40H14zM41 8v12h9M22 29h19m-19 8h13m-13 8 6 6 13-13"/></g>
+<g transform="translate(55 2807.7) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/></g>
 <text x="112" y="2818.7" font-size="22" class="bold" text-anchor="start">Authority + evidence</text>
 <text x="112" y="2854.3999999999996" font-size="20" class="muted" text-anchor="start">Draft ≠ sent; check</text>
 <text x="112" y="2881.3999999999996" font-size="20" class="muted" text-anchor="start">permission and</text>

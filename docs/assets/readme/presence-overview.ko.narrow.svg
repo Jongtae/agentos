@@ -68,28 +68,28 @@
 <text x="40" y="2018.1999999999998" font-size="20" class="muted" text-anchor="start">내 환경이 PA의 상태를</text>
 <text x="40" y="2045.1999999999998" font-size="20" class="muted" text-anchor="start">이어갑니다.</text>
 <rect x="40" y="2074.2" width="340" height="113.7" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(55 2095.2) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="8"/><circle cx="12" cy="12" r="5"/><circle cx="52" cy="15" r="5"/><circle cx="13" cy="52" r="5"/><circle cx="51" cy="51" r="5"/><path d="m16 16 10 10m12 0 10-8M17 48l9-10m12 0 9 9"/></g>
+<g transform="translate(55 2095.2) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M16 12h34v42H16zM10 20h12m-12 12h12m-12 12h12M29 22h13m-13 9h13m-13 9h9"/></g>
 <text x="112" y="2106.2" font-size="22" class="bold" text-anchor="start">출처가 있는 미팅 하나</text>
 <text x="112" y="2141.8999999999996" font-size="20" class="muted" text-anchor="start">일정 초대 + 제안서 +</text>
 <text x="112" y="2168.8999999999996" font-size="20" class="muted" text-anchor="start">이전 결정</text>
 <path d="M210.0 2188.8999999999996 L210.0 2199.8999999999996" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M206.0 2194.8999999999996 L210.0 2199.8999999999996 L214.0 2194.8999999999996" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="40" y="2201.8999999999996" width="340" height="113.7" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(55 2222.8999999999996) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
+<g transform="translate(55 2222.8999999999996) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="8"/><circle cx="12" cy="12" r="5"/><circle cx="52" cy="15" r="5"/><circle cx="13" cy="52" r="5"/><circle cx="51" cy="51" r="5"/><path d="m16 16 10 10m12 0 10-8M17 48l9-10m12 0 9 9"/></g>
 <text x="112" y="2233.8999999999996" font-size="22" class="bold" text-anchor="start">서로 다른 관계</text>
 <text x="112" y="2269.5999999999995" font-size="20" class="muted" text-anchor="start">일정: 시간; 프로젝트:</text>
 <text x="112" y="2296.5999999999995" font-size="20" class="muted" text-anchor="start">결정; 초대 ≠ 수락</text>
 <path d="M210.0 2316.5999999999995 L210.0 2327.5999999999995" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M206.0 2322.5999999999995 L210.0 2327.5999999999995 L214.0 2322.5999999999995" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="40" y="2329.5999999999995" width="340" height="113.7" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(55 2350.5999999999995) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/></g>
+<g transform="translate(55 2350.5999999999995) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
 <text x="112" y="2361.5999999999995" font-size="22" class="bold" text-anchor="start">이어지는 일</text>
 <text x="112" y="2397.2999999999993" font-size="20" class="muted" text-anchor="start">준비 자료 → 메모 → 다음</text>
 <text x="112" y="2424.2999999999993" font-size="20" class="muted" text-anchor="start">단계</text>
 <path d="M210.0 2444.2999999999993 L210.0 2455.2999999999993" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M206.0 2450.2999999999993 L210.0 2455.2999999999993 L214.0 2450.2999999999993" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="40" y="2457.2999999999993" width="340" height="113.7" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(55 2478.2999999999993) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8h27l9 9v40H14zM41 8v12h9M22 29h19m-19 8h13m-13 8 6 6 13-13"/></g>
+<g transform="translate(55 2478.2999999999993) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/></g>
 <text x="112" y="2489.2999999999993" font-size="22" class="bold" text-anchor="start">권한과 근거</text>
 <text x="112" y="2524.999999999999" font-size="20" class="muted" text-anchor="start">초안 ≠ 발송; 허용</text>
 <text x="112" y="2551.999999999999" font-size="20" class="muted" text-anchor="start">범위와 실제 결과 확인</text>

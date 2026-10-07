@@ -565,7 +565,7 @@ def overview(d,mobile):
   f.path(f'M160 {sy+123}L153 {sy+129}L160 {sy+135}M{ox+13} {sy+123}L{ox+20} {sy+129}L{ox+13} {sy+135}','#8296a9')
  first=sy+first_offset
  st=first
- kinds=['context','work','authority','evidence']
+ kinds=['memory','context','work','authority']
  for index,((title,detail),row_height) in enumerate(zip(d['links'],row_heights)):
   sx=ox+20
   f.rect(sx,st,ow-40,row_height,'#fff','#d8e1e7',10)

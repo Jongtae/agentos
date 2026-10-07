@@ -66,28 +66,28 @@
 <text x="40" y="1955.5" font-size="26" class="bold" text-anchor="start">Personal AgentOS</text>
 <text x="40" y="1988.5" font-size="20" class="muted" text-anchor="start">你的环境保留 PA 的状态。</text>
 <rect x="40" y="2017.5" width="340" height="113.7" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(55 2038.5) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="8"/><circle cx="12" cy="12" r="5"/><circle cx="52" cy="15" r="5"/><circle cx="13" cy="52" r="5"/><circle cx="51" cy="51" r="5"/><path d="m16 16 10 10m12 0 10-8M17 48l9-10m12 0 9 9"/></g>
+<g transform="translate(55 2038.5) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M16 12h34v42H16zM10 20h12m-12 12h12m-12 12h12M29 22h13m-13 9h13m-13 9h9"/></g>
 <text x="112" y="2049.5" font-size="22" class="bold" text-anchor="start">一场有来源的会议</text>
 <text x="112" y="2085.2" font-size="20" class="muted" text-anchor="start">日程邀请 + 提案 + 此前</text>
 <text x="112" y="2112.2" font-size="20" class="muted" text-anchor="start">的决定</text>
 <path d="M210.0 2132.2 L210.0 2143.2" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M206.0 2138.2 L210.0 2143.2 L214.0 2138.2" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="40" y="2145.2" width="340" height="113.7" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(55 2166.2) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
+<g transform="translate(55 2166.2) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="8"/><circle cx="12" cy="12" r="5"/><circle cx="52" cy="15" r="5"/><circle cx="13" cy="52" r="5"/><circle cx="51" cy="51" r="5"/><path d="m16 16 10 10m12 0 10-8M17 48l9-10m12 0 9 9"/></g>
 <text x="112" y="2177.2" font-size="22" class="bold" text-anchor="start">不同的关系</text>
 <text x="112" y="2212.8999999999996" font-size="20" class="muted" text-anchor="start">日程: 时间; 项目: 决定;</text>
 <text x="112" y="2239.8999999999996" font-size="20" class="muted" text-anchor="start">邀请 ≠ 接受</text>
 <path d="M210.0 2259.8999999999996 L210.0 2270.8999999999996" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M206.0 2265.8999999999996 L210.0 2270.8999999999996 L214.0 2265.8999999999996" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="40" y="2272.8999999999996" width="340" height="113.7" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(55 2293.8999999999996) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/></g>
+<g transform="translate(55 2293.8999999999996) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
 <text x="112" y="2304.8999999999996" font-size="22" class="bold" text-anchor="start">持续中的工作</text>
 <text x="112" y="2340.5999999999995" font-size="20" class="muted" text-anchor="start">会前材料 → 会议记录 →</text>
 <text x="112" y="2367.5999999999995" font-size="20" class="muted" text-anchor="start">下一步</text>
 <path d="M210.0 2387.5999999999995 L210.0 2398.5999999999995" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M206.0 2393.5999999999995 L210.0 2398.5999999999995 L214.0 2393.5999999999995" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="40" y="2400.5999999999995" width="340" height="113.7" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(55 2421.5999999999995) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8h27l9 9v40H14zM41 8v12h9M22 29h19m-19 8h13m-13 8 6 6 13-13"/></g>
+<g transform="translate(55 2421.5999999999995) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/></g>
 <text x="112" y="2432.5999999999995" font-size="22" class="bold" text-anchor="start">权限与证据</text>
 <text x="112" y="2468.2999999999993" font-size="20" class="muted" text-anchor="start">草稿 ≠ 发送; 核对授权与</text>
 <text x="112" y="2495.2999999999993" font-size="20" class="muted" text-anchor="start">实际结果</text>

@@ -64,25 +64,25 @@
 <path d="M153 937.75H240" fill="none" stroke="#8296a9" stroke-width="1.6"/>
 <path d="M160 931.75L153 937.75L160 943.75M233 931.75L240 937.75L233 943.75" fill="none" stroke="#8296a9" stroke-width="1.6"/>
 <rect x="240" y="987.75" width="614" height="94" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(255 1008.75) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="8"/><circle cx="12" cy="12" r="5"/><circle cx="52" cy="15" r="5"/><circle cx="13" cy="52" r="5"/><circle cx="51" cy="51" r="5"/><path d="m16 16 10 10m12 0 10-8M17 48l9-10m12 0 9 9"/></g>
+<g transform="translate(255 1008.75) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M16 12h34v42H16zM10 20h12m-12 12h12m-12 12h12M29 22h13m-13 9h13m-13 9h9"/></g>
 <text x="312" y="1017.75" font-size="20" class="bold" text-anchor="start">一场有来源的会议</text>
 <text x="312" y="1050.75" font-size="18" class="muted" text-anchor="start">日程邀请 + 提案 + 此前的决定</text>
 <path d="M547.0 1082.75 L547.0 1093.75" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M543.0 1088.75 L547.0 1093.75 L551.0 1088.75" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="240" y="1095.75" width="614" height="94" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(255 1116.75) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
+<g transform="translate(255 1116.75) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="8"/><circle cx="12" cy="12" r="5"/><circle cx="52" cy="15" r="5"/><circle cx="13" cy="52" r="5"/><circle cx="51" cy="51" r="5"/><path d="m16 16 10 10m12 0 10-8M17 48l9-10m12 0 9 9"/></g>
 <text x="312" y="1125.75" font-size="20" class="bold" text-anchor="start">不同的关系</text>
 <text x="312" y="1158.75" font-size="18" class="muted" text-anchor="start">日程: 时间; 项目: 决定; 邀请 ≠ 接受</text>
 <path d="M547.0 1190.75 L547.0 1201.75" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M543.0 1196.75 L547.0 1201.75 L551.0 1196.75" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="240" y="1203.75" width="614" height="94" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(255 1224.75) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/></g>
+<g transform="translate(255 1224.75) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
 <text x="312" y="1233.75" font-size="20" class="bold" text-anchor="start">持续中的工作</text>
 <text x="312" y="1266.75" font-size="18" class="muted" text-anchor="start">会前材料 → 会议记录 → 下一步</text>
 <path d="M547.0 1298.75 L547.0 1309.75" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M543.0 1304.75 L547.0 1309.75 L551.0 1304.75" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="240" y="1311.75" width="614" height="94" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(255 1332.75) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8h27l9 9v40H14zM41 8v12h9M22 29h19m-19 8h13m-13 8 6 6 13-13"/></g>
+<g transform="translate(255 1332.75) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/></g>
 <text x="312" y="1341.75" font-size="20" class="bold" text-anchor="start">权限与证据</text>
 <text x="312" y="1374.75" font-size="18" class="muted" text-anchor="start">草稿 ≠ 发送; 核对授权与实际结果</text>
 <text x="547.0" y="1450.75" font-size="21" class="blue bold" text-anchor="middle">判断与协调</text>

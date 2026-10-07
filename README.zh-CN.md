@@ -44,16 +44,16 @@ AgentOS 通过判断层选择所需的 AI 和工具，并检查它们的结果�
 
 *这是产品方向示例，并非实际观测的运行，也不代表已发布的购物功能。*
 
-下图以所有者提供的韩语画面为基础，缩短并改写了对话。三个场景分别是分享位置后寻找回家路上的晚餐、比较高尔夫腰带并在加入购物车前请求登录账户，以及从餐厅照片接着聊附近的散步地点。它是经过编辑的说明性重构图，不是产品画面的原样截图，也不能证明这些集成功能已经发布。
+下方中文版图片以所有者提供的韩语画面为基础，缩短并改写了对话。三个场景分别是分享位置后寻找回家路上的晚餐、比较高尔夫腰带并在加入购物车前请求登录账户，以及从餐厅照片接着聊附近的散步地点。它是经过编辑的说明性重构图，不是产品画面的原样截图，也不能证明这些集成功能已经发布。
 
 <picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation-edited.png">
-  <img src="docs/assets/readme/owner-pilot-conversation-edited.png" alt="根据所有者提供的韩语画面改写的三段 PA 对话：分享位置后寻找回家路上的餐厅，比较高尔夫腰带并请求登录账户，再从餐厅照片延续到附近散步。说明性重构图，不是产品画面的原样截图。">
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation.zh-CN.png">
+  <img src="docs/assets/readme/owner-pilot-conversation.zh-CN.png" alt="根据所有者提供的画面改写的中文版三段 PA 对话：分享位置后寻找回家路上的餐厅，比较高尔夫腰带并请求登录账户，再从餐厅照片延续到附近散步。说明性重构图，不是产品画面的原样截图。">
 </picture>
 
-[以完整尺寸查看图片](docs/assets/readme/owner-pilot-conversation-edited.png) · [查看所有者提供的原图](docs/assets/readme/owner-pilot-conversation-reference.jpg)。
+[以完整尺寸查看中文版图片](docs/assets/readme/owner-pilot-conversation.zh-CN.png) · [查看所有者提供的原图](docs/assets/readme/owner-pilot-conversation-reference.jpg)。
 
-图中的韩语对话大意如下：
+图中的对话是：
 
 1. **回家路上的晚餐：**“下班路上要不要吃个晚饭？”PA 先询问当前位置，再列出三家店的距离和营业状态。所有者选了第二家。
 2. **帮我找这条腰带：** 所有者发来照片，PA 比较三款腰带。所有者请它把第一款放进购物车时，PA 先要求登录购物账户，然后才会继续。

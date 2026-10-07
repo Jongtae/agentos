@@ -378,15 +378,16 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             )
 
     def test_localized_picture_sources_cannot_use_another_locale(self):
-        for section_id, locales in (("presence", verifier.LOCALE_PRESENCE_VISUALS),):
-            for suffix in (".svg", ".narrow.svg"):
+        for section_id, locales in verifier.SECTION_VISUALS.items():
+            for suffix in ((".png",) if section_id == "conversation"
+                           else (".svg", ".narrow.svg")):
                 with self.subTest(section=section_id, source=suffix):
                     tmp, root = self.temp_root()
                     with tmp:
                         target = root / "README.ja.md"
                         body = target.read_text(encoding="utf-8")
-                        wrong = locales["README.md"].removesuffix(".svg") + suffix
-                        expected = locales["README.ja.md"].removesuffix(".svg") + suffix
+                        wrong = locales["README.md"] if section_id == "conversation" else locales["README.md"].removesuffix(".svg") + suffix
+                        expected = locales["README.ja.md"] if section_id == "conversation" else locales["README.ja.md"].removesuffix(".svg") + suffix
                         self.assertIn(expected, body)
                         target.write_text(body.replace(expected, wrong, 1), encoding="utf-8")
                         errors = verifier.validate_readmes(root)
@@ -405,13 +406,14 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                         self.assertTrue(any(f"missing {section_id} asset" in error and asset in error
                                             for error in errors), errors)
 
-        tmp, root = self.temp_root()
-        with tmp:
-            asset = verifier.LOCALE_SCENE_VISUALS["README.md"]
-            (root / asset).unlink()
-            errors = verifier.validate_readmes(root)
-            self.assertTrue(any("missing conversation asset" in error and asset in error
-                                for error in errors), errors)
+        for name, asset in verifier.LOCALE_SCENE_VISUALS.items():
+            with self.subTest(readme=name):
+                tmp, root = self.temp_root()
+                with tmp:
+                    (root / asset).unlink()
+                    errors = verifier.validate_readmes(root)
+                    self.assertTrue(any(f"{name}: missing conversation asset" in error and asset in error
+                                        for error in errors), errors)
 
     def test_conversation_picture_must_render_in_its_own_section(self):
         for mutation in ("missing", "commented", "duplicated", "wrong section"):

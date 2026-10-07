@@ -13,6 +13,8 @@ An assistant answers a question. A task agent follows an explicit instruction, s
 
 We call that continuing relationship **Presence**. Helping like an assistant is the starting role; the aim reaches across different kinds of work and survives a change of AI. Presence has to come from retained context, work and authority, not from a friendly tone.
 
+Want to run it before reading further? Skip to [Try it](#try-it); the rest of this page explains what the project is reaching for.
+
 <!-- readme-section:ownership -->
 
 ## What if Jarvis belonged to another company?

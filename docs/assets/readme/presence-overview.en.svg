@@ -27,7 +27,7 @@
 <rect x="389.3333333333333" y="245.95" width="341.3333333333333" height="496.5" rx="16" fill="#f7f9fc" stroke="#d4dce5"/>
 <circle cx="560.0" cy="301.95" r="39" fill="#e9eff7" stroke="none"/>
 <g transform="translate(530.0 269.95) scale(0.9375)" fill="none" stroke="#245b92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 29v-7a18 18 0 0 1 36 0v7M14 21h7v17h-7zm29 0h7v17h-7zM8 42h8l5 12h26l6-12H23"/><circle cx="25" cy="60" r="2"/><circle cx="44" cy="60" r="2"/></g>
-<text x="409.3333333333333" y="380.95" font-size="25" class="bold" text-anchor="start">Computer agent</text>
+<text x="409.3333333333333" y="380.95" font-size="25" class="bold" text-anchor="start">Task agent</text>
 <text x="409.3333333333333" y="415.95" font-size="22" class="blue bold" text-anchor="start">Acts</text>
 <g transform="translate(407.3333333333333 446.95) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
 <rect x="443.3333333333333" y="433.95" width="269.3333333333333" height="115.10000000000001" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
@@ -69,29 +69,29 @@
 <text x="557.0" y="973.45" font-size="22" class="bold" text-anchor="middle">PA · the agent you talk to</text>
 <path d="M153 967.45H240" fill="none" stroke="#8296a9" stroke-width="1.6"/>
 <path d="M160 961.45L153 967.45L160 973.45M233 961.45L240 967.45L233 973.45" fill="none" stroke="#8296a9" stroke-width="1.6"/>
-<rect x="240" y="1017.45" width="614" height="105.6" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<rect x="240" y="1017.45" width="614" height="94" rx="10" fill="#fff" stroke="#d8e1e7"/>
 <g transform="translate(255 1038.45) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="8"/><circle cx="12" cy="12" r="5"/><circle cx="52" cy="15" r="5"/><circle cx="13" cy="52" r="5"/><circle cx="51" cy="51" r="5"/><path d="m16 16 10 10m12 0 10-8M17 48l9-10m12 0 9 9"/></g>
-<text x="312" y="1047.45" font-size="20" class="bold" text-anchor="start">One meeting, different links</text>
-<text x="312" y="1080.45" font-size="18" class="muted" text-anchor="start">Calendar → time; project → decision; invite ≠</text>
-<text x="312" y="1104.75" font-size="18" class="muted" text-anchor="start">commitment</text>
-<path d="M547.0 1124.05 L547.0 1135.05" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M543.0 1130.05 L547.0 1135.05 L551.0 1130.05" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="240" y="1137.05" width="614" height="94" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(255 1158.05) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
-<text x="312" y="1167.05" font-size="20" class="bold" text-anchor="start">Open work</text>
-<text x="312" y="1200.05" font-size="18" class="muted" text-anchor="start">Unsettled decision → next preparation</text>
+<text x="312" y="1047.45" font-size="20" class="bold" text-anchor="start">One sourced meeting</text>
+<text x="312" y="1080.45" font-size="18" class="muted" text-anchor="start">Invitation + proposal + earlier decisions</text>
+<path d="M547.0 1112.45 L547.0 1123.45" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M543.0 1118.45 L547.0 1123.45 L551.0 1118.45" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="240" y="1125.45" width="614" height="105.6" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(255 1146.45) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
+<text x="312" y="1155.45" font-size="20" class="bold" text-anchor="start">Different relationships</text>
+<text x="312" y="1188.45" font-size="18" class="muted" text-anchor="start">Calendar: time; project: decision; invite ≠</text>
+<text x="312" y="1212.75" font-size="18" class="muted" text-anchor="start">acceptance</text>
 <path d="M547.0 1232.05 L547.0 1243.05" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M543.0 1238.05 L547.0 1243.05 L551.0 1238.05" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="240" y="1245.05" width="614" height="94" rx="10" fill="#fff" stroke="#d8e1e7"/>
 <g transform="translate(255 1266.05) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/></g>
-<text x="312" y="1275.05" font-size="20" class="bold" text-anchor="start">Authority</text>
-<text x="312" y="1308.05" font-size="18" class="muted" text-anchor="start">A role does not grant permission to act</text>
+<text x="312" y="1275.05" font-size="20" class="bold" text-anchor="start">Work continues</text>
+<text x="312" y="1308.05" font-size="18" class="muted" text-anchor="start">Prepare brief → receive notes → next step</text>
 <path d="M547.0 1340.05 L547.0 1351.05" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M543.0 1346.05 L547.0 1351.05 L551.0 1346.05" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <rect x="240" y="1353.05" width="614" height="94" rx="10" fill="#fff" stroke="#d8e1e7"/>
 <g transform="translate(255 1374.05) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8h27l9 9v40H14zM41 8v12h9M22 29h19m-19 8h13m-13 8 6 6 13-13"/></g>
-<text x="312" y="1383.05" font-size="20" class="bold" text-anchor="start">Evidence &amp; events</text>
-<text x="312" y="1416.05" font-size="18" class="muted" text-anchor="start">Proposed ≠ done; record when to revisit</text>
+<text x="312" y="1383.05" font-size="20" class="bold" text-anchor="start">Authority + evidence</text>
+<text x="312" y="1416.05" font-size="18" class="muted" text-anchor="start">Draft ≠ sent; check permission and actual result</text>
 <text x="547.0" y="1492.0500000000002" font-size="21" class="blue bold" text-anchor="middle">Judgment / orchestration</text>
 <path d="M547.0 1523.4 L547.0 1546.4" fill="none" stroke="#8492a3" stroke-width="1.6"/>
 <path d="M543.0 1541.4 L547.0 1546.4 L551.0 1541.4" fill="none" stroke="#8492a3" stroke-width="1.6"/>

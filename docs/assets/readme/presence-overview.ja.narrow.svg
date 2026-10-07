@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="420" height="2978" viewBox="0 0 420 2978" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="3033" viewBox="0 0 420 3033" role="img" aria-labelledby="title desc">
 <title id="title">Personal AgentOS</title><desc id="desc">対話の形と製品の方向性を説明する例です。実際に観測した動作や提供済みの連携機能ではありません。</desc>
 <style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
-<rect width="420" height="2978" fill="#fff"/>
+<rect width="420" height="3033" fill="#fff"/>
 <text x="20" y="58.0" font-size="34" class="bold" text-anchor="start">Personal AgentOS</text>
 <text x="20" y="100.9" font-size="23" class="blue" text-anchor="start">同じ PA。文脈は手元に。</text>
 <text x="20" y="142.95" font-size="20" class="muted" text-anchor="start">対話の形 · 製品の方向性</text>
@@ -24,7 +24,7 @@
 <rect x="20" y="679.95" width="380" height="466.79999999999995" rx="16" fill="#f7f9fc" stroke="#d4dce5"/>
 <circle cx="210.0" cy="735.95" r="39" fill="#e9eff7" stroke="none"/>
 <g transform="translate(180.0 703.95) scale(0.9375)" fill="none" stroke="#245b92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 29v-7a18 18 0 0 1 36 0v7M14 21h7v17h-7zm29 0h7v17h-7zM8 42h8l5 12h26l6-12H23"/><circle cx="25" cy="60" r="2"/><circle cx="44" cy="60" r="2"/></g>
-<text x="40" y="814.95" font-size="25" class="bold" text-anchor="start">Computer agent</text>
+<text x="40" y="814.95" font-size="25" class="bold" text-anchor="start">実行型エージェント</text>
 <text x="40" y="849.95" font-size="22" class="blue bold" text-anchor="start">実行する</text>
 <g transform="translate(38 880.95) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
 <rect x="74" y="867.95" width="308" height="85.4" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
@@ -62,48 +62,50 @@
 <text x="300" y="1830.1499999999999" font-size="20" class="bold" text-anchor="middle">PA · 会話するエ</text>
 <text x="300" y="1857.1499999999999" font-size="20" class="bold" text-anchor="middle">ージェント</text>
 <path d="M300 1876.1499999999999V1896.1499999999999H210.0V1908.1499999999999" fill="none" stroke="#8296a9" stroke-width="1.6"/>
-<rect x="20" y="1908.1499999999999" width="380" height="621.5500000000001" rx="18" fill="#f0f6f9" stroke="#b6cad9"/>
+<rect x="20" y="1908.1499999999999" width="380" height="677.15" rx="18" fill="#f0f6f9" stroke="#b6cad9"/>
 <text x="40" y="1954.1499999999999" font-size="26" class="bold" text-anchor="start">Personal AgentOS</text>
 <text x="40" y="1987.1499999999999" font-size="20" class="muted" text-anchor="start">自分の環境が PA の状態を保つ。</text>
-<rect x="40" y="2016.1499999999999" width="340" height="105.6" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<rect x="40" y="2016.1499999999999" width="340" height="113.7" rx="10" fill="#fff" stroke="#d8e1e7"/>
 <g transform="translate(55 2037.1499999999999) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="8"/><circle cx="12" cy="12" r="5"/><circle cx="52" cy="15" r="5"/><circle cx="13" cy="52" r="5"/><circle cx="51" cy="51" r="5"/><path d="m16 16 10 10m12 0 10-8M17 48l9-10m12 0 9 9"/></g>
-<text x="112" y="2046.1499999999999" font-size="20" class="bold" text-anchor="start">同じ会議、異なる関係</text>
-<text x="112" y="2079.1499999999996" font-size="18" class="muted" text-anchor="start">予定 → 時間；プロジェクト</text>
-<text x="112" y="2103.45" font-size="18" class="muted" text-anchor="start">→ 決定；招待 ≠ 約束</text>
-<path d="M210.0 2122.75 L210.0 2133.75" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M206.0 2128.75 L210.0 2133.75 L214.0 2128.75" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="40" y="2135.75" width="340" height="94" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(55 2156.75) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
-<text x="112" y="2165.75" font-size="20" class="bold" text-anchor="start">続く仕事</text>
-<text x="112" y="2198.75" font-size="18" class="muted" text-anchor="start">未決の事項 → 次の準備</text>
-<path d="M210.0 2230.75 L210.0 2241.75" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M206.0 2236.75 L210.0 2241.75 L214.0 2236.75" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="40" y="2243.75" width="340" height="94" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(55 2264.75) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/></g>
-<text x="112" y="2273.75" font-size="20" class="bold" text-anchor="start">権限</text>
-<text x="112" y="2306.75" font-size="18" class="muted" text-anchor="start">役割だけでは実行できない</text>
-<path d="M210.0 2338.75 L210.0 2349.75" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M206.0 2344.75 L210.0 2349.75 L214.0 2344.75" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="40" y="2351.75" width="340" height="105.6" rx="10" fill="#fff" stroke="#d8e1e7"/>
-<g transform="translate(55 2372.75) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8h27l9 9v40H14zM41 8v12h9M22 29h19m-19 8h13m-13 8 6 6 13-13"/></g>
-<text x="112" y="2381.75" font-size="20" class="bold" text-anchor="start">根拠・出来事</text>
-<text x="112" y="2414.75" font-size="18" class="muted" text-anchor="start">提案 ≠ 実行；見直す時を記</text>
-<text x="112" y="2439.05" font-size="18" class="muted" text-anchor="start">録</text>
-<text x="210.0" y="2502.35" font-size="21" class="blue bold" text-anchor="middle">判断・調整</text>
-<path d="M210.0 2533.7 L210.0 2556.7" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M206.0 2551.7 L210.0 2556.7 L214.0 2551.7" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="20" y="2563.7" width="380" height="106" rx="12" fill="#fafbfd" stroke="#d4dce5"/>
-<g transform="translate(40 2588.7) scale(0.75)" fill="none" stroke="#526b91" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="32" height="32" rx="6"/><path d="M24 6v10m16-10v10M24 48v10m16-10v10M6 24h10M6 40h10m32-16h10M48 40h10M26 26h12v12H26z"/></g>
-<text x="108" y="2600.7" font-size="22" class="bold" text-anchor="start">交換可能な AI</text>
-<text x="108" y="2639.7" font-size="22" class="blue" text-anchor="start">AI A  →  AI B</text>
-<g transform="translate(44 2691.7) scale(0.46875)" fill="none" stroke="#526b91" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m12 8 11 11-6 6L6 14c-4 14 6 23 18 17l25 25 7-7-25-25C37 12 28 2 16 6l10 10-7 7"/></g>
-<text x="88" y="2713.7" font-size="20" class="" text-anchor="start">ツール</text>
-<g transform="translate(228 2691.7) scale(0.46875)" fill="none" stroke="#526b91" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M16 45a12 12 0 0 1-3-24 17 17 0 0 1 32-3 13 13 0 0 1 3 27H16zM22 52v8m20-8v8"/></g>
-<text x="270" y="2713.7" font-size="20" class="" text-anchor="start">サービス</text>
-<text x="210.0" y="2774.7" font-size="25" class="blue bold" text-anchor="middle">同じ PA。 変わる AI。</text>
-<text x="210.0" y="2813.45" font-size="22" class="muted" text-anchor="middle">残る仕事と根拠は自分の環境に。</text>
-<path d="M20 2857.1499999999996H400" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
-<text x="20" y="2893.1499999999996" font-size="20" class="muted" text-anchor="start">対話の形と製品の方向性を説明する例で</text>
-<text x="20" y="2920.1499999999996" font-size="20" class="muted" text-anchor="start">す。実際に観測した動作や提供済みの連携</text>
-<text x="20" y="2947.1499999999996" font-size="20" class="muted" text-anchor="start">機能ではありません。</text>
+<text x="112" y="2048.1499999999996" font-size="22" class="bold" text-anchor="start">出典のある一つの会議</text>
+<text x="112" y="2083.85" font-size="20" class="muted" text-anchor="start">予定の招待 + 提案書 +</text>
+<text x="112" y="2110.85" font-size="20" class="muted" text-anchor="start">以前の決定</text>
+<path d="M210.0 2130.85 L210.0 2141.85" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M206.0 2136.85 L210.0 2141.85 L214.0 2136.85" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="40" y="2143.85" width="340" height="113.7" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(55 2164.85) scale(0.59375)" fill="none" stroke="#427665" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="12" y="10" width="40" height="46" rx="5"/><path d="m20 24 3 3 5-7m5 5h11M20 38h7m6 0h11M20 47h7m6 0h11"/></g>
+<text x="112" y="2175.85" font-size="22" class="bold" text-anchor="start">異なる関係</text>
+<text x="112" y="2211.5499999999997" font-size="20" class="muted" text-anchor="start">予定: 時間; プロジェク</text>
+<text x="112" y="2238.5499999999997" font-size="20" class="muted" text-anchor="start">ト: 決定; 招待 ≠ 受諾</text>
+<path d="M210.0 2258.5499999999997 L210.0 2269.5499999999997" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M206.0 2264.5499999999997 L210.0 2269.5499999999997 L214.0 2264.5499999999997" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="40" y="2271.5499999999997" width="340" height="113.7" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(55 2292.5499999999997) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M32 6 52 14v16c0 13-9 21-20 28-11-7-20-15-20-28V14z"/><circle cx="32" cy="28" r="6"/><path d="M32 34v10"/></g>
+<text x="112" y="2303.5499999999997" font-size="22" class="bold" text-anchor="start">続く仕事</text>
+<text x="112" y="2339.2499999999995" font-size="20" class="muted" text-anchor="start">事前資料 → メモ → 次の</text>
+<text x="112" y="2366.2499999999995" font-size="20" class="muted" text-anchor="start">段階</text>
+<path d="M210.0 2386.2499999999995 L210.0 2397.2499999999995" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M206.0 2392.2499999999995 L210.0 2397.2499999999995 L214.0 2392.2499999999995" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="40" y="2399.2499999999995" width="340" height="113.7" rx="10" fill="#fff" stroke="#d8e1e7"/>
+<g transform="translate(55 2420.2499999999995) scale(0.59375)" fill="none" stroke="#496d92" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M14 8h27l9 9v40H14zM41 8v12h9M22 29h19m-19 8h13m-13 8 6 6 13-13"/></g>
+<text x="112" y="2431.2499999999995" font-size="22" class="bold" text-anchor="start">権限と根拠</text>
+<text x="112" y="2466.9499999999994" font-size="20" class="muted" text-anchor="start">下書き ≠ 送信; 許可と実</text>
+<text x="112" y="2493.9499999999994" font-size="20" class="muted" text-anchor="start">際の結果を確認</text>
+<text x="210.0" y="2557.95" font-size="21" class="blue bold" text-anchor="middle">判断・調整</text>
+<path d="M210.0 2589.2999999999997 L210.0 2612.2999999999997" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<path d="M206.0 2607.2999999999997 L210.0 2612.2999999999997 L214.0 2607.2999999999997" fill="none" stroke="#8492a3" stroke-width="1.6"/>
+<rect x="20" y="2619.2999999999997" width="380" height="106" rx="12" fill="#fafbfd" stroke="#d4dce5"/>
+<g transform="translate(40 2644.2999999999997) scale(0.75)" fill="none" stroke="#526b91" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="32" height="32" rx="6"/><path d="M24 6v10m16-10v10M24 48v10m16-10v10M6 24h10M6 40h10m32-16h10M48 40h10M26 26h12v12H26z"/></g>
+<text x="108" y="2656.2999999999997" font-size="22" class="bold" text-anchor="start">交換可能な AI</text>
+<text x="108" y="2695.2999999999997" font-size="22" class="blue" text-anchor="start">AI A  →  AI B</text>
+<g transform="translate(44 2747.2999999999997) scale(0.46875)" fill="none" stroke="#526b91" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m12 8 11 11-6 6L6 14c-4 14 6 23 18 17l25 25 7-7-25-25C37 12 28 2 16 6l10 10-7 7"/></g>
+<text x="88" y="2769.2999999999997" font-size="20" class="" text-anchor="start">ツール</text>
+<g transform="translate(228 2747.2999999999997) scale(0.46875)" fill="none" stroke="#526b91" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M16 45a12 12 0 0 1-3-24 17 17 0 0 1 32-3 13 13 0 0 1 3 27H16zM22 52v8m20-8v8"/></g>
+<text x="270" y="2769.2999999999997" font-size="20" class="" text-anchor="start">サービス</text>
+<text x="210.0" y="2830.2999999999997" font-size="25" class="blue bold" text-anchor="middle">同じ PA。 変わる AI。</text>
+<text x="210.0" y="2869.0499999999997" font-size="22" class="muted" text-anchor="middle">残る仕事と根拠は自分の環境に。</text>
+<path d="M20 2912.7499999999995H400" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
+<text x="20" y="2948.7499999999995" font-size="20" class="muted" text-anchor="start">対話の形と製品の方向性を説明する例で</text>
+<text x="20" y="2975.7499999999995" font-size="20" class="muted" text-anchor="start">す。実際に観測した動作や提供済みの連携</text>
+<text x="20" y="3002.7499999999995" font-size="20" class="muted" text-anchor="start">機能ではありません。</text>
 </svg>

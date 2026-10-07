@@ -42,18 +42,30 @@ AgentOS 通过判断层选择所需的 AI 和工具，并检查它们的结果�
 
 ## 话可以很短，前后仍能接上
 
+*这是产品方向示例，并非实际观测的运行，也不代表已发布的购物功能。*
+
+下图以所有者提供的韩语画面为基础，缩短并改写了对话。三个场景分别是分享位置后寻找回家路上的晚餐、比较高尔夫腰带并在加入购物车前请求登录账户，以及从餐厅照片接着聊附近的散步地点。它是经过编辑的说明性重构图，不是产品画面的原样截图，也不能证明这些集成功能已经发布。
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation-edited.png">
+  <img src="docs/assets/readme/owner-pilot-conversation-edited.png" alt="根据所有者提供的韩语画面改写的三段 PA 对话：分享位置后寻找回家路上的餐厅，比较高尔夫腰带并请求登录账户，再从餐厅照片延续到附近散步。说明性重构图，不是产品画面的原样截图。">
+</picture>
+
+[以完整尺寸查看图片](docs/assets/readme/owner-pilot-conversation-edited.png) · [查看所有者提供的原图](docs/assets/readme/owner-pilot-conversation-reference.jpg)。
+
+图中的韩语对话大意如下：
+
+1. **回家路上的晚餐：**“下班路上要不要吃个晚饭？”PA 先询问当前位置，再列出三家店的距离和营业状态。所有者选了第二家。
+2. **帮我找这条腰带：** 所有者发来照片，PA 比较三款腰带。所有者请它把第一款放进购物车时，PA 先要求登录购物账户，然后才会继续。
+3. **我在这里，接下来呢？** 所有者发来餐厅照片，问饭后做什么。PA 提供附近的散步、咖啡馆和酒吧选项。所有者选择散步，PA 表示会核对路线和营业时间。
+
+隔了几个小时才说出的简短一句话，也需要这样的连续性。
+
 > “咖啡快没了。”<br>
 > 几小时后：“我准备出门了，路上有地方可以买到吗？”<br>
 > 之后：“没时间了，就买上次那款吧。”
 
 想要的体验很简单：PA 能接上前文，理解要买的是什么、“上次那款”指什么，结合相关的上下文，只在需要时询问缺少的信息或权限。你继续说话就好，不必自己编排工作流程。
-
-*这是产品方向示例，并非实际观测的运行，也不代表已发布的购物功能。*
-
-<picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-scenes.zh-CN.narrow.svg">
-  <img src="docs/assets/readme/presence-scenes.zh-CN.svg" alt="三个 PA 对话的说明性重构画面：分享位置以寻找回家路上的餐厅；从照片寻找并选择耳机，在操作前连接购物账户；分享餐厅照片并接着聊附近的散步路线。这些虚构画面说明上下文、持续对话和需要时取得权限，并非产品截图或实际运行记录。">
-</picture>
 
 <!-- readme-section:try-today -->
 

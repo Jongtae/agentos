@@ -31,14 +31,20 @@ Imagine saying, “Keep track of next week's project meeting. We still need to s
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.en.narrow.svg">
-  <img src="docs/assets/readme/presence-overview.en.svg" alt="Concept illustration: Assistant answers a question about NVIDIA; a computer agent acts on an Amazon command; Personal AgentOS carries a conversation over time. You talk to one PA, with context, work and authority held in AgentOS above replaceable AI and tools. The examples illustrate product direction, not observed runs or shipped integrations.">
+  <img src="docs/assets/readme/presence-overview.en.svg" alt="Concept illustration: an Assistant answers a question about NVIDIA, a computer agent acts on an Amazon command, and a PA carries an open meeting decision toward the next preparation. In the owner's AgentOS, the same meeting links to time, decisions and commitments; open work, actual authority and evidence stay above replaceable AI and tools. Product direction, not an observed run or shipped integration.">
 </picture>
 
-AgentOS uses its judgment layer to choose AI and tools and check their results. You talk to the PA while AgentOS carries that structure underneath the conversation. **Same PA. Different AI.**
+**The PA is the personal agent you talk to; AgentOS is the environment you control that carries its context, open work, authority and evidence.** Its judgment layer delegates to AI and tools and checks their results. The aim is for your PA and its work to continue when the AI underneath changes. **Same PA. Different AI.**
 
-That takes more than a long chat history. Metadata can record the meeting's time, place and attendees. An **ontology** describes how the meeting relates to people, goals, decisions and commitments: an invitation is not an accepted task. A calendar view can arrange time while a project view tracks the decision, both grounded in the same sourced event. Durable work records what is still open; authority limits what the PA may do; evidence shows what actually happened.
+That takes more than a long chat history. A meeting's time, place and attendees are **metadata**. An **ontology** distinguishes how different views relate the same sourced meeting:
 
-The same distinction extends beyond meetings. A sourced stock holding can inform an asset-management view of the owner's finances; a discretionary-investment view must also check the explicit mandate and its constraints. Neither a role name nor a useful inference grants permission to trade.
+- **Calendar:** meeting → time, participants and preparation.
+- **Project:** meeting → goal, open decision and follow-up responsibility.
+- **Commitment:** request → acceptance → obligation. An invitation alone creates no commitment.
+
+Open decisions continue as work. Actual authority bounds what the PA may do; evidence distinguishes a proposal from an action that occurred.
+
+The same fact can connect differently beyond meetings. **Asset management** relates a sourced stock holding to total assets, liabilities, cash flow, planned spending and goals. **Discretionary investment** must first check whether it is a managed position, and which mandate, constraints and permitted actions apply. Neither a role name nor a useful inference grants permission to trade.
 
 AgentOS aims to connect facts, role-specific interpretations, delegated work, permissions and evidence in a structure the owner controls. This is how a paused task or a different AI could pick up the right next step without making you reconstruct it. These are design illustrations, not released financial services or observed runs. Proactive attention to changing circumstances is a direction beyond the current reactive Presence work, not a claim of always-on monitoring today.
 

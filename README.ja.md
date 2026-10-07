@@ -48,14 +48,14 @@ AgentOS は判断層を通じて必要な AI とツールを選び、その結�
 
 *製品の方向性を説明する例であり、実際に観測した動作や提供済みの購入機能ではありません。*
 
-下の日本語画像は、オーナー提供の韓国語の画面をもとに、会話を短く編集したものです。位置を共有して帰り道の夕食を探す場面、ゴルフベルトを比較してカート操作前にアカウントへのログインを求める場面、レストランの写真から近くの散歩へ話が続く場面を示します。説明用に編集した再構成画像であり、製品画面そのものの撮影や連携機能の提供実績ではありません。
+下の図は、PA との会話を三つの場面にまとめたものです。位置を共有して帰り道の夕食を探す場面、ゴルフベルトを比較してカート操作前にアカウントへのログインを求める場面、レストランの写真から近くの散歩へ話が続く場面を示します。説明用に編集した再構成画像であり、製品画面そのものの撮影や連携機能の提供実績ではありません。
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation.ja.png">
-  <img src="docs/assets/readme/owner-pilot-conversation.ja.png" alt="オーナー提供の画面を日本語に編集した PA 会話三場面。位置を共有して帰り道の食事先を探し、ゴルフベルトを比較してログインを求め、レストランの写真から散歩の話へ続く。説明用の再構成で、製品画面そのものの撮影ではありません。">
+  <img src="docs/assets/readme/owner-pilot-conversation.ja.png" alt="PA 会話三場面の説明用再構成。位置を共有して帰り道の食事先を探し、ゴルフベルトを比較してログインを求め、レストランの写真から散歩の話へ続く。製品画面そのものの撮影ではありません。">
 </picture>
 
-[日本語画像をフルサイズで見る](docs/assets/readme/owner-pilot-conversation.ja.png) · [オーナー提供の原本を見る](docs/assets/readme/owner-pilot-conversation-reference.jpg)。
+[日本語画像をフルサイズで見る](docs/assets/readme/owner-pilot-conversation.ja.png) · [元の参考画像を見る](docs/assets/readme/owner-pilot-conversation-reference.jpg)。
 
 画像内の会話は、次の内容です。
 

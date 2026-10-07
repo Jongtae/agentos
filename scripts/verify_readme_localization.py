@@ -131,8 +131,98 @@ def text_without_hidden_markup(section: str) -> str:
     return HTML_TAG_RE.sub("", IMAGE_RE.sub("", COMMENT_RE.sub("", section)))
 
 
-def inline_code_atoms(paragraph: str) -> str:
-    """Normalize matched code spans as opaque tokens, never as prose words."""
+def fence_state(line: str, char: str | None, length: int) -> tuple[str | None, int, bool]:
+    """Share the existing fence rules between Markdown and HTML-code scans."""
+    fence = FENCE_RE.match(line)
+    if fence is None:
+        return char, length, False
+    token = fence.group(1)
+    if char is None:
+        return token[0], len(token), True
+    if token[0] == char and len(token) >= length and not line[fence.end():].strip():
+        return None, 0, True
+    return char, length, True
+
+
+class HTMLCodeMasker(HTMLParser):
+    """Locate HTML code elements without interpreting literal fenced samples."""
+
+    def __init__(self, source: str):
+        super().__init__(convert_charrefs=False)
+        self.offsets = [0]
+        for line in source.splitlines(keepends=True):
+            self.offsets.append(self.offsets[-1] + len(line))
+        self.tags: list[str] = []
+        self.start = 0
+        self.ranges: list[tuple[int, int]] = []
+
+    def source_offset(self) -> int:
+        line, column = self.getpos()
+        return self.offsets[line - 1] + column
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("pre", "code"):
+            if not self.tags:
+                self.start = self.source_offset()
+            self.tags.append(tag)
+
+    # In HTML these are non-void elements: a trailing slash does not close them.
+    handle_startendtag = handle_starttag
+
+    def handle_endtag(self, tag):
+        if tag in self.tags:
+            index = len(self.tags) - 1 - self.tags[::-1].index(tag)
+            del self.tags[index:]
+            if not self.tags:
+                self.ranges.append((self.start, self.source_offset()))
+
+
+def without_html_code(section: str) -> str:
+    """Mask entire pre/code contents, retaining line positions and separation."""
+    parser = HTMLCodeMasker(section)
+    parts = re.split(r"(\n[ \t]*\n)", section)
+    inline_mask = "".join(inline_code_atoms(part, mask=True) if index % 2 == 0 else part
+                          for index, part in enumerate(parts))
+    char: str | None = None
+    length = 0
+    previous_blank = True
+    indented = False
+    for line, masked_line in zip(section.splitlines(keepends=True), inline_mask.splitlines(keepends=True)):
+        hidden = False
+        if not parser.tags:
+            indented = char is None and (
+                ((previous_blank or indented) and line.startswith(("    ", "\t")))
+                or (indented and not line.strip())
+            )
+            if indented:
+                hidden = True
+            else:
+                candidate = line.lstrip(" \t")
+                while prefix := CONTAINER_PREFIX_RE.match(candidate):
+                    candidate = candidate[prefix.end():].lstrip(" \t")
+                char, length, is_fence = fence_state(candidate, char, length)
+                hidden = is_fence or char is not None
+        previous_blank = not line.strip()
+        # Preserve parser offsets, but do not parse HTML written in Markdown
+        # code. Within an actual HTML code element, backticks remain literal.
+        if hidden:
+            parser.feed(re.sub(r"[^\n]", " ", line))
+        else:
+            for part in re.finditer(r"\0+|[^\0]+", masked_line):
+                text = line[part.start():part.end()]
+                parser.feed(text if parser.tags or not part[0].startswith("\0")
+                            else part[0].replace("\0", " "))
+    parser.close()
+    if parser.tags:
+        parser.ranges.append((parser.start, len(section)))
+    chars = list(section)
+    for start, end in parser.ranges:
+        chars[start:end] = ["\n" if char == "\n" else "\0" for char in section[start:end]]
+    return "".join(chars)
+
+
+def inline_code_atoms(paragraph: str, *, mask: bool = False) -> str:
+    """Normalize code spans as opaque atoms, or mask with positions intact."""
     ticks = re.compile(r"`+")
     result: list[str] = []
     cursor = 0
@@ -151,7 +241,8 @@ def inline_code_atoms(paragraph: str) -> str:
         if content.startswith(" ") and content.endswith(" ") and content.strip(" "):
             content = content[1:-1]
         result.append(paragraph[cursor:opening.start()])
-        result.append("\0code:" + content.encode("utf-8").hex() + "\0")
+        result.append(re.sub(r"[^\n]", "\0", paragraph[opening.start():closing.end()]) if mask
+                      else "\0code:" + content.encode("utf-8").hex() + "\0")
         cursor = closing.end()
     result.append(paragraph[cursor:])
     return "".join(result)
@@ -167,7 +258,7 @@ def standalone_claim_text(section: str) -> str:
     closing fences keeps later standalone prose outside those examples.
     """
     container = CONTAINER_PREFIX_RE
-    lines = text_without_hidden_markup(section).splitlines()
+    lines = text_without_hidden_markup(without_html_code(section)).splitlines()
     normalized: list[str] = []
     standalone: list[bool] = []
     for line in lines:
@@ -188,7 +279,7 @@ def standalone_claim_text(section: str) -> str:
 
 
 def visible_prose(section: str) -> str:
-    """Normalize claim prose while excluding Markdown code examples.
+    """Normalize claim prose while excluding Markdown and HTML code examples.
 
     An inline identifier such as `main` remains an opaque atom, so comparing
     equally normalized required copy permits that formatting but cannot find
@@ -255,7 +346,7 @@ def standalone_picture_html(section: str) -> str:
     ends it, as it does for this CommonMark HTML-block form.
     """
     lines = without_fenced_code(
-        COMMENT_RE.sub("", section), normalize_containers=True
+        without_html_code(COMMENT_RE.sub("", section)), normalize_containers=True
     ).splitlines()
     opening = re.compile(r" {0,3}<picture>[ \t]*", re.I)
     closing = re.compile(r" {0,3}</picture>[ \t]*", re.I)
@@ -284,6 +375,8 @@ def validate_localized_picture(
     if len(parser.pictures) != 1:
         return [f"{name}: {section_id} must contain exactly one localized picture"]
     entries = parser.pictures[0]
+    if [tag for tag, _attrs in entries] != ["source", "img"]:
+        errors.append(f"{name}: {section_id} picture needs source before img")
     images = [attrs for tag, attrs in entries if tag == "img"]
     sources = [attrs for tag, attrs in entries if tag == "source"]
     if len(images) != 1 or images[0].get("src") != desktop:
@@ -362,17 +455,8 @@ def without_fenced_code(body: str, *, normalize_containers: bool = False) -> str
             candidate = candidate.lstrip(" \t")
             while prefix := CONTAINER_PREFIX_RE.match(candidate):
                 candidate = candidate[prefix.end():].lstrip(" \t")
-        fence = FENCE_RE.match(candidate)
-        if fence:
-            token = fence.group(1)
-            char = token[0]
-            rest = candidate[fence.end():].strip()
-            if fence_char is None:
-                fence_char = char
-                fence_len = len(token)
-            elif char == fence_char and len(token) >= fence_len and not rest:
-                fence_char = None
-                fence_len = 0
+        fence_char, fence_len, is_fence = fence_state(candidate, fence_char, fence_len)
+        if is_fence:
             visible_lines.append("")
             continue
         visible_lines.append(line if fence_char is None else "")

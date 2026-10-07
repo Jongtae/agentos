@@ -446,6 +446,30 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                         self.assertTrue(any(f"{section_id} picture needs narrow source" in error
                                             for error in errors), errors)
 
+    def test_each_picture_source_must_precede_its_img(self):
+        for section_id, locales in verifier.SECTION_VISUALS.items():
+            for name, desktop in locales.items():
+                with self.subTest(section=section_id, readme=name):
+                    tmp, root = self.temp_root()
+                    with tmp:
+                        target = root / name
+                        body = target.read_text(encoding="utf-8")
+
+                        def swap(match):
+                            if desktop not in match[0]:
+                                return match[0]
+                            lines = match[0].splitlines()
+                            self.assertIn("<source ", lines[1])
+                            self.assertIn("<img ", lines[2])
+                            lines[1], lines[2] = lines[2], lines[1]
+                            return "\n".join(lines)
+
+                        target.write_text(re.sub(r"<picture>.*?</picture>", swap, body, flags=re.S),
+                                          encoding="utf-8")
+                        errors = verifier.validate_readmes(root)
+                        self.assertTrue(any(name in error and f"{section_id} picture needs source before img" in error
+                                            for error in errors), errors)
+
     def test_presence_paths_hidden_in_comment_are_not_a_picture(self):
         tmp, root = self.temp_root()
         with tmp:
@@ -755,7 +779,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             self.assertTrue(any("try-today is missing its visible published-release/main boundary" in error
                                 for error in errors), errors)
 
-    def test_required_claims_cannot_be_markdown_code(self):
+    def test_required_claims_cannot_be_code(self):
         release = verifier.newest_published_release(ROOT)
         wrappers = {
             "backtick fence": lambda text: "\n\n```text\n" + text + "\n```\n\n",
@@ -767,6 +791,13 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             "multiline span": lambda text: "``\n" + text + "\n``",
             "indented inline delimiters": lambda text: "\n\n  ``\n" + text + "\n  ``\n\n",
             "indented line inside span": lambda text: "\n\n``example\n  line\n" + text + "\n``\n\n",
+            "HTML pre": lambda text: "<pre>" + text + "</pre>",
+            "HTML code": lambda text: "<code>" + text + "</code>",
+            "HTML mixed case attributes": lambda text: '<CoDe class="example" data-x=">">' + text + "</cOdE>",
+            "HTML multiline pre": lambda text: '<PRE\n class="example">\n\n' + text + "\n\n</PRE>",
+            "HTML nested pre code": lambda text: '<pre><code class="language-text">\n' + text + "\n</code></pre>",
+            "HTML unclosed code": lambda text: "<code>" + text,
+            "HTML non-void trailing slash": lambda text: "<code/>" + text,
         }
         for name in verifier.READMES:
             claims = (
@@ -788,6 +819,45 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                             errors = verifier.validate_readmes(root)
                             self.assertTrue(any(name in error and expected_error in error
                                                 for error in errors), errors)
+
+    def test_html_code_examples_do_not_hide_later_claims(self):
+        samples = (
+            "<pre>Example only.</pre>",
+            '<CODE class="example">Example only.</CODE>',
+            '<pre><code>Example only.</code></pre>',
+            '<pre>\n~~~\nExample only.\n</pre>',
+            '```html\n<pre>\n```',
+            '~~~html\n<code>\n~~~',
+            '> ~~~html\n> <pre>\n> ~~~',
+            '- ~~~html\n  <code>\n  ~~~',
+            'Use `<code>` for an inline example.',
+            'Use ``<pre>`` for an inline example.',
+            '    <code>',
+            '\t<pre>',
+            '<pre>`example</pre>`',
+        )
+        release = verifier.newest_published_release(ROOT)
+        for name in verifier.READMES:
+            for token in (
+                verifier.README_RELEASE_BOUNDARIES[name].format(
+                    version=release["version"], date=release["tag_date"]
+                ),
+                verifier.README_DIRECTION_DISCLAIMERS[name],
+            ):
+                for sample in samples:
+                    with self.subTest(readme=name, sample=sample, claim=token[:20]):
+                        tmp, root = self.temp_root()
+                        with tmp:
+                            target = root / name
+                            body = target.read_text(encoding="utf-8")
+                            target.write_text(body.replace(token, "\n\n" + sample + "\n\n" + token, 1),
+                                              encoding="utf-8")
+                            self.assertEqual([], verifier.validate_readmes(root))
+
+    def test_html_code_removal_cannot_join_claim_fragments(self):
+        token = verifier.README_DIRECTION_DISCLAIMERS["README.md"]
+        first, rest = token.split(" ", 1)
+        self.assertNotIn(token, verifier.visible_prose(first + "<code>example</code> " + rest))
 
     def test_container_fences_cannot_supply_required_claims(self):
         release = verifier.newest_published_release(ROOT)

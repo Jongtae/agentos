@@ -308,8 +308,10 @@ LOCALE_PRESENCE_VISUALS = {
     "README.zh-CN.md": "docs/assets/readme/presence-overview.zh-CN.svg",
 }
 LOCALE_SCENE_VISUALS = {
-    name: "docs/assets/readme/owner-pilot-conversation-edited.png"
-    for name in LOCALE_PRESENCE_VISUALS
+    "README.md": "docs/assets/readme/owner-pilot-conversation.en.png",
+    "README.ko.md": "docs/assets/readme/owner-pilot-conversation.ko.png",
+    "README.ja.md": "docs/assets/readme/owner-pilot-conversation.ja.png",
+    "README.zh-CN.md": "docs/assets/readme/owner-pilot-conversation.zh-CN.png",
 }
 SECTION_VISUALS = {
     "presence": LOCALE_PRESENCE_VISUALS,
@@ -369,7 +371,7 @@ def validate_localized_picture(
 ) -> list[str]:
     errors: list[str] = []
     desktop = SECTION_VISUALS[section_id][name]
-    # The edited conversation image uses one source at every width;
+    # Each localized conversation image uses one source at every width;
     # the architecture SVG still has a separate narrow composition.
     narrow = desktop if section_id == "conversation" else desktop.removesuffix(".svg") + ".narrow.svg"
     parser = PictureParser()

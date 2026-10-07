@@ -44,19 +44,19 @@ AgentOS uses its judgment layer to choose AI and tools and check their results. 
 
 *Illustrative product direction, not an observed live run or a shipped shopping integration.*
 
-The image below adapts the owner's Korean visual reference into three shorter conversations: sharing a location to find dinner on the way home, comparing a golf belt and pausing for account login before a cart action, and continuing from a restaurant photo to a nearby walk. It is an edited illustrative reconstruction, not a verbatim product screenshot or proof of those integrations.
+The English image below adapts the owner's Korean visual reference into three shorter conversations: sharing a location to find dinner on the way home, comparing a golf belt and pausing for account login before a cart action, and continuing from a restaurant photo to a nearby walk. It is an edited illustrative reconstruction, not a verbatim product screenshot or proof of those integrations.
 
 <picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation-edited.png">
-  <img src="docs/assets/readme/owner-pilot-conversation-edited.png" alt="Edited Korean visual reference with three reconstructed PA conversations: finding dinner after sharing a location, comparing golf belts before an account-login handoff, and continuing from a restaurant photo to a nearby walk. Illustrative, not a verbatim product screenshot.">
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation.en.png">
+  <img src="docs/assets/readme/owner-pilot-conversation.en.png" alt="English three-panel image with three reconstructed PA conversations: finding dinner after sharing a location, comparing golf belts before an account-login handoff, and continuing from a restaurant photo to a nearby walk. Illustrative, not a verbatim product screenshot.">
 </picture>
 
-[Open the image at full size](docs/assets/readme/owner-pilot-conversation-edited.png) · [See the owner's original reference](docs/assets/readme/owner-pilot-conversation-reference.jpg).
+[Open the English image at full size](docs/assets/readme/owner-pilot-conversation.en.png) · [See the owner's original reference](docs/assets/readme/owner-pilot-conversation-reference.jpg).
 
-The Korean dialogue in the image, in English:
+The image shows three separate conversations:
 
 1. **On the way home:** “Dinner on my way back?” The PA asks for the current location, then offers three places with distance and open status. The owner picks the second.
-2. **Get this for me:** The owner shares a belt photo. The PA compares three options and asks which one to use. When the owner asks to add the first to a cart, the PA asks for a shopping-account login before proceeding.
+2. **Find this for me:** The owner shares a belt photo. The PA compares three options and asks which one to use. When the owner asks to add the first to a cart, the PA asks for a shopping-account login before proceeding.
 3. **I’m here. What next?** The owner shares a restaurant photo and asks what to do afterward. The PA offers a walk, café or bar nearby. The owner chooses the walk; the PA says it will check the route and hours.
 
 The same continuity matters in smaller moments, hours apart:

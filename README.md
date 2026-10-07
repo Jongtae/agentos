@@ -27,7 +27,7 @@ Local-first is not local-only: you can use a local or hosted model. With a hoste
 
 ## Why the work can continue
 
-Imagine saying, “Keep track of next week's project meeting. We still need to settle the proposal.” The direction for a PA is to connect that meeting to the open decision and prepare a useful brief before it happens. After you share the meeting notes, it should distinguish an accepted follow-up from a suggestion, carry the unfinished work forward and ask before sending anything outside your environment. **This is an illustrative product direction, not an observed run or a capability promised by today's Homebrew release.**
+Imagine saying, “Keep track of next week's project meeting. We still need to settle the proposal.” The direction for a PA is to connect that meeting to the open decision and prepare a useful brief before it happens. After you share the meeting notes, it should distinguish an accepted follow-up from a suggestion and carry the unfinished work forward. It can prepare a follow-up message; if sending it to another person exceeds the authority you granted, it asks first. **This is an illustrative product direction, not an observed run or a capability promised by today's Homebrew release.**
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.en.narrow.svg">

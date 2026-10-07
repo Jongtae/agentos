@@ -27,9 +27,9 @@ The goal is not another chatbot with a longer history. It is one continuing pers
 
 <!-- readme-section:ownership -->
 
-## What is different?
+## What stays yours?
 
-Most AI products make the assistant and the intelligence provider feel like the same thing. Personal AgentOS explores separating them.
+The Jarvis thought experiment becomes a concrete design question here: which parts should survive when the intelligence underneath changes?
 
 | | Personal AgentOS |
 | --- | --- |

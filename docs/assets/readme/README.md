@@ -4,11 +4,13 @@ The public READMEs introduce the desired personal-assistant relationship, owner 
 
 ## Current introduction
 
-`presence-overview.{en,ko,ja,zh-CN}.svg` is the illustrated overview used by the four READMEs. Three example cards show answering a question, carrying out an explicit command and continuing a personal conversation. An Owner/PA/AgentOS architecture and a short coffee conversation over time connect that experience to owner-held context, work, authority and evidence above replaceable AI/tools. Original vector icons and dialogue cards carry the explanation; detailed ontology definitions remain in the linked documents.
+`presence-overview.{en,ko,ja,zh-CN}.svg` is the illustrated overview used by the four READMEs. Three example cards show answering a question, carrying out an explicit command and continuing a personal conversation. An Owner/PA/AgentOS architecture connects that experience to owner-held context, work, authority and evidence above replaceable AI/tools. Original vector icons and dialogue cards carry the explanation; detailed ontology definitions remain in the linked documents.
 
 The visual follows the composition of the owner-provided NVIDIA/Amazon/continuing-conversation reference. It does not reproduce a messaging application, market price or completed purchase. All depicted interactions are illustrative product direction, not observed runs or shipped-integration claims.
 
-Each locale has a `.narrow.svg` composition selected by the README's `<picture>` at viewport widths of 600 pixels or less. Desktop and narrow versions carry the same meanings. Desktop canvases are 1120 pixels wide and narrow canvases are 420 pixels wide; their heights follow the localized content instead of squeezing text into a fixed panel. These are architecture illustrations, not operating evidence. There are no external fonts, images or scripts.
+`presence-scenes.{en,ko,ja,zh-CN}.svg` adds three separate, reconstructed conversations in a neutral PA interface: sharing a location to find a meal on the way home; continuing a product choice into a shopping-account handoff; and carrying a restaurant photo and place into a walking suggestion. Photos, a schematic map and result cards make those interactions tangible. The reconstruction and product-direction labels are part of every figure; these are not product screenshots or a combined observed run.
+
+Each locale has a `.narrow.svg` composition selected by the README's `<picture>` at viewport widths of 600 pixels or less. Desktop and narrow versions carry the same meanings. Desktop canvases are 1120 pixels wide and narrow canvases are 420 pixels wide; their heights follow the localized content instead of squeezing text into a fixed panel. The overview is an architecture illustration, and the scenes are product-direction reconstructions. Neither is operating evidence. There are no external fonts, image requests or scripts. The scene SVGs embed the repository-owned `illustrative-headphones.jpg` and `illustrative-restaurant.jpg` as data URIs. These generated photos contain no personal account details; their [source prompts and provenance](scene-photo-prompts.md) are recorded alongside them.
 
 ## Supporting and historical figures
 
@@ -17,7 +19,7 @@ Each locale has a `.narrow.svg` composition selected by the README's `<picture>`
 
 ## Editing and visual verification
 
-[build_concept_visuals.py](build_concept_visuals.py) is the standard-library source for the eight current overview SVGs and 24 preserved concept SVGs. Run `python3 docs/assets/readme/build_concept_visuals.py` after editing content or layout. Keep the same relationships and evidence boundaries across locales and screen sizes. Do not squeeze glyphs with `textLength` or `spacingAndGlyphs`.
+[build_concept_visuals.py](build_concept_visuals.py) is the standard-library source for the 16 current overview/scene SVGs and 24 preserved concept SVGs. Run `python3 docs/assets/readme/build_concept_visuals.py` after editing content or layout. Keep the same relationships and evidence boundaries across locales and screen sizes. Do not squeeze glyphs with `textLength` or `spacingAndGlyphs`.
 
 1. Read the whole README as a newcomer: desired relationship → why owner control matters → how continuity works → first trial → references/licence. Diagrams should shorten the explanation.
 2. Run `python3 scripts/verify_readme_localization.py` and check local links. This protects semantic parity, localized assets and factual boundaries without requiring the old screenshot sections.

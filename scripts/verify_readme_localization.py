@@ -63,6 +63,7 @@ SECTION_MARKER_RE = re.compile(
 ATX_H2_RE = re.compile(r"^ {0,3}##(?!#)(?:[ \t]+|$)")
 SETEXT_H2_RE = re.compile(r"^ {0,3}-+[ \t]*$")
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+CONTAINER_PREFIX_RE = re.compile(r"(?:>[ \t]?|[-+*][ \t]+|[0-9]{1,9}[.)][ \t]+)")
 
 CAPABILITY_MARKERS = (
     "<!-- capability:illustrative-product-direction -->",
@@ -156,6 +157,36 @@ def inline_code_atoms(paragraph: str) -> str:
     return "".join(result)
 
 
+def standalone_claim_text(section: str) -> str:
+    """Required claims use wholly unindented, non-container paragraphs.
+
+    Normalize quote/list prefixes solely for the conservative fence scan;
+    this is not a general Markdown renderer. Decide eligibility on original
+    paragraphs before removing lines: deleting an indented inline-code
+    delimiter must not expose its contents as prose. Normalizing container
+    closing fences keeps later standalone prose outside those examples.
+    """
+    container = CONTAINER_PREFIX_RE
+    lines = text_without_hidden_markup(section).splitlines()
+    normalized: list[str] = []
+    standalone: list[bool] = []
+    for line in lines:
+        plain = line.lstrip(" \t")
+        standalone.append(plain == line and not container.match(plain))
+        while prefix := container.match(plain):
+            plain = plain[prefix.end():].lstrip(" \t")
+        normalized.append(plain)
+    start = 0
+    for index, line in enumerate(lines + [""]):
+        if not line.strip():
+            if not all(standalone[start:index]):
+                standalone[start:index] = [False] * (index - start)
+            start = index + 1
+    scanned = without_fenced_code("\n".join(normalized)).splitlines()
+    return "\n".join(line if eligible else ""
+                     for line, eligible in zip(scanned, standalone))
+
+
 def visible_prose(section: str) -> str:
     """Normalize claim prose while excluding Markdown code examples.
 
@@ -164,8 +195,7 @@ def visible_prose(section: str) -> str:
     a whole disclaimer hidden inside one code span. Spans stop at paragraph
     breaks; unmatched or escaped backticks remain literal.
     """
-    text = without_fenced_code(text_without_hidden_markup(section))
-    text = re.sub(r"(?m)^(?: {4}| {0,3}\t).*$", "", text)
+    text = standalone_claim_text(section)
     parts = re.split(r"(\n[ \t]*\n)", text)
     return "".join(inline_code_atoms(part) if index % 2 == 0 else part
                    for index, part in enumerate(parts))
@@ -185,6 +215,14 @@ LOCALE_PRESENCE_VISUALS = {
     "README.ko.md": "docs/assets/readme/presence-overview.ko.svg",
     "README.ja.md": "docs/assets/readme/presence-overview.ja.svg",
     "README.zh-CN.md": "docs/assets/readme/presence-overview.zh-CN.svg",
+}
+LOCALE_SCENE_VISUALS = {
+    name: path.replace("presence-overview.", "presence-scenes.")
+    for name, path in LOCALE_PRESENCE_VISUALS.items()
+}
+SECTION_VISUALS = {
+    "presence": LOCALE_PRESENCE_VISUALS,
+    "conversation": LOCALE_SCENE_VISUALS,
 }
 
 
@@ -216,7 +254,9 @@ def standalone_picture_html(section: str) -> str:
     Child tags may be indented freely inside that HTML block; a blank line
     ends it, as it does for this CommonMark HTML-block form.
     """
-    lines = without_fenced_code(COMMENT_RE.sub("", section)).splitlines()
+    lines = without_fenced_code(
+        COMMENT_RE.sub("", section), normalize_containers=True
+    ).splitlines()
     opening = re.compile(r" {0,3}<picture>[ \t]*", re.I)
     closing = re.compile(r" {0,3}</picture>[ \t]*", re.I)
     blocks: list[str] = []
@@ -233,27 +273,33 @@ def standalone_picture_html(section: str) -> str:
     return "\n".join(blocks)
 
 
-def validate_presence_picture(name: str, section: str, root: Path) -> list[str]:
+def validate_localized_picture(
+    name: str, section_id: str, section: str, root: Path
+) -> list[str]:
     errors: list[str] = []
-    desktop = LOCALE_PRESENCE_VISUALS[name]
+    desktop = SECTION_VISUALS[section_id][name]
     narrow = desktop.removesuffix(".svg") + ".narrow.svg"
     parser = PictureParser()
     parser.feed(standalone_picture_html(section))
     if len(parser.pictures) != 1:
-        return [f"{name}: presence must contain exactly one localized picture"]
+        return [f"{name}: {section_id} must contain exactly one localized picture"]
     entries = parser.pictures[0]
     images = [attrs for tag, attrs in entries if tag == "img"]
     sources = [attrs for tag, attrs in entries if tag == "source"]
     if len(images) != 1 or images[0].get("src") != desktop:
-        errors.append(f"{name}: presence picture must use localized img src {desktop!r}")
-    if len(images) == 1 and not (images[0].get("alt") or "").strip():
-        errors.append(f"{name}: presence picture needs meaningful alt text")
+        errors.append(f"{name}: {section_id} picture must use localized img src {desktop!r}")
+    if len(images) == 1:
+        alt = (images[0].get("alt") or "").strip()
+        # Detect empty/path-only placeholders; the description's actual meaning
+        # is reviewed with the rendered figure instead of pinned word-for-word.
+        if not alt or alt in (desktop, narrow, Path(desktop).name, Path(narrow).name):
+            errors.append(f"{name}: {section_id} picture needs meaningful alt text")
     if (len(sources) != 1 or sources[0].get("srcset") != narrow
             or sources[0].get("media") != "(max-width: 600px)"):
-        errors.append(f"{name}: presence picture needs narrow source {narrow!r} at 600px")
+        errors.append(f"{name}: {section_id} picture needs narrow source {narrow!r} at 600px")
     for visual in (desktop, narrow):
         if not (root / visual).is_file():
-            errors.append(f"{name}: missing presence asset {visual!r}")
+            errors.append(f"{name}: missing {section_id} asset {visual!r}")
     return errors
 
 
@@ -299,19 +345,28 @@ def section_markers(body: str) -> tuple[str, ...]:
     return tuple(match.group(1) for match in SECTION_MARKER_RE.finditer(body))
 
 
-def without_fenced_code(body: str) -> str:
-    """Blank fenced code while retaining line numbers for heading diagnostics."""
+def without_fenced_code(body: str, *, normalize_containers: bool = False) -> str:
+    """Blank fenced code while retaining original non-code lines.
+
+    Picture validation scans container fences too, so an example's indented
+    closing fence cannot accidentally hide a later standalone picture.
+    """
     lines = body.splitlines()
     fence_char: str | None = None
     fence_len = 0
     visible_lines: list[str] = []
 
     for line in lines:
-        fence = FENCE_RE.match(line)
+        candidate = line
+        if normalize_containers:
+            candidate = candidate.lstrip(" \t")
+            while prefix := CONTAINER_PREFIX_RE.match(candidate):
+                candidate = candidate[prefix.end():].lstrip(" \t")
+        fence = FENCE_RE.match(candidate)
         if fence:
             token = fence.group(1)
             char = token[0]
-            rest = line[fence.end():].strip()
+            rest = candidate[fence.end():].strip()
             if fence_char is None:
                 fence_char = char
                 fence_len = len(token)
@@ -426,7 +481,8 @@ def validate_body(
         errors.append(
             f"{name}: conversation is missing its visible illustrative product-direction boundary"
         )
-    errors.extend(validate_presence_picture(name, section("presence"), root))
+    for section_id in SECTION_VISUALS:
+        errors.extend(validate_localized_picture(name, section_id, section(section_id), root))
 
     installation = section("try-today")
     command_text = text_without_hidden_markup(installation)

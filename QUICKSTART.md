@@ -1,6 +1,6 @@
 # AgentOS — install, configure, talk
 
-AgentOS is a self-hosted personal agent preview. One local process serves a Korean web setup and chat interface. Docker and Kubernetes are not required. Homebrew installs Python automatically; model runtimes and model weights are separate.
+AgentOS is a self-hosted personal agent preview. One local process serves browser setup and task records; conversations take place in your paired Telegram chat. The Homebrew release interface is Korean. Docker and Kubernetes are not required. Homebrew installs Python automatically; model runtimes and model weights are separate.
 
 ## Current use versus planned work
 
@@ -19,26 +19,26 @@ brew install jongtae/agentos/agentos
 agentos start
 ```
 
-The browser opens at `http://127.0.0.1:8787`. Click **바로 시작하기** (Start now). There is no setup code to enter. A login password is optional for local use; expand **비밀번호 설정 · 선택** to set one (12+ characters). Without a password, anyone using this computer can access the agent through its local address.
+The browser opens at `http://127.0.0.1:8787`. Click **바로 시작하기** (Start now). There is no setup code to enter. A login password is optional for local use; expand **비밀번호 설정** to set one (12+ characters). Without a password, anyone using this computer can access the agent through its local address.
 
-For a ChatGPT/Codex subscription, install and log in to the official Codex CLI first (`codex login`), then select **Codex 로그인 완료 · 연결** in AgentOS. AgentOS records only your confirmation; it does not request, read, or store the Codex login. A connected subscription engine receives only the bounded AgentOS tools, not your local files, credentials, or arbitrary shell access. Alternatively, choose a model provider, endpoint and model name, then use Save and Test connection. API keys stay in a private local file. Cloud requests send conversation content to your selected provider.
+For a ChatGPT/Codex subscription, install and log in to the official Codex CLI first (`codex login`), then select **Codex 로그인 완료 · 선택** in AgentOS (**전환** when switching from another subscription engine). AgentOS records only your confirmation; it does not request, read, or store the Codex login. A connected subscription engine receives only the bounded AgentOS tools, not your local files, credentials, or arbitrary shell access. Alternatively, choose a model provider, endpoint and model name, then test the settings and apply the successful configuration. API keys stay in a private local file. Cloud requests send conversation content to your selected provider.
 
 Supported connections: Ollama (an already running local model server), OpenAI-compatible Chat Completions endpoints, and Anthropic Messages. Bring your own model access; no paid model subscription is included.
 
 ## First task
 
-In web chat, enter `/note Review the launch on Friday`, then `/notes`. These work without a model. After connecting a model, try `/summarize` or a normal conversation.
+After connecting and testing your model, [pair your Telegram bot](#telegram), then ask in that Telegram chat: “Help me think through what to focus on this week.” The browser is where you configure connections and inspect task records. For a model-free check after pairing, `/note Review the launch on Friday` followed by `/notes` saves and lists a note.
 
 ## Recommended owner dogfood task
 
 Create two dedicated local folders (for example, `/Users/your-name/AgentOS-dogfood/reference`
 and `/Users/your-name/AgentOS-dogfood/workspace`) and place one small Markdown or text note in the
-reference folder. Put the words `Launch review` in that note. In **내 에이전트
-관리 → 내 자료**, enter the reference folder and workspace folder, then choose a
+reference folder. Put the words `Launch review` in that note. In **설정 → 파일 · 저장**
+(Settings → Files · storage), enter the reference folder and workspace folder, then choose a
 direct model-provider connection (OpenAI-compatible, OpenAI, Anthropic, or
 Ollama) and complete its connection test; subscription engines do not run this
 file-workspace path. If the selected provider is external, approve document
-sharing before submitting the task. Ask the chat:
+sharing before submitting the task. Ask in your paired Telegram chat:
 `“Launch review” 자료를 요약해 “Launch notes”로 저장해줘`. Confirm that a
 Markdown result appears only in the managed workspace and that the original note
 is unchanged. Stop AgentOS with Ctrl-C, run `agentos start` again, and ask
@@ -52,7 +52,7 @@ all natural-language requests work. Share redacted observations, not private doc
 
 ## Telegram
 
-Create your own bot using Telegram's BotFather, paste its token into Settings, and open the generated pairing link in your own Telegram account. Only the paired private account can submit work. The web interface and Telegram share conversation history and notes. AgentOS uses outbound polling, so no public inbound port is needed for Telegram. Use a dedicated bot without an existing webhook.
+Create your own bot using Telegram’s BotFather. In the browser, open **설정 → 외부 연결** (Settings → External connections), open the Telegram connection form and paste the bot token. In `v1.1.0`, the form opens with **Telegram 연결 설정**, and **Telegram 연결** saves the token and produces a pairing link. Open **Telegram 열기** in your own Telegram account and press **Start** to pair it. Only that paired private account can submit Telegram work. Send requests in that chat; use the browser to configure connections and inspect the resulting task records. AgentOS uses outbound polling, so no public inbound port is needed for Telegram. Use a dedicated bot without an existing webhook.
 
 The computer must remain running and awake for remote requests to be processed. From a source checkout you can register a background login service instead of holding a terminal open; see [Background service (macOS)](#background-service-macos) for exactly what that does and does not cover. Without that service, keep the terminal open; Ctrl-C stops AgentOS.
 

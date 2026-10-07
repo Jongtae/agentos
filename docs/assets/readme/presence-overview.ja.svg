@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="2044" viewBox="0 0 1120 2044" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="1513" viewBox="0 0 1120 1513" role="img" aria-labelledby="title desc">
 <title id="title">Personal AgentOS</title><desc id="desc">対話の形と製品の方向性を説明する例です。実際に観測した動作や提供済みの連携機能ではありません。</desc>
 <style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
-<rect width="1120" height="2044" fill="#fff"/>
+<rect width="1120" height="1513" fill="#fff"/>
 <text x="28" y="58.0" font-size="34" class="bold" text-anchor="start">Personal AgentOS</text>
 <text x="28" y="100.9" font-size="23" class="blue" text-anchor="start">同じ PA。文脈は手元に。</text>
 <text x="28" y="142.95" font-size="20" class="muted" text-anchor="start">対話の形 · 製品の方向性</text>
@@ -106,60 +106,6 @@
 <text x="908" y="1063.3500000000001" font-size="22" class="muted" text-anchor="start">文脈は自分の手元</text>
 <text x="908" y="1093.0500000000002" font-size="22" class="muted" text-anchor="start">に残る。</text>
 <text x="908" y="1150.7500000000002" font-size="22" class="blue bold" text-anchor="start">AI A → AI B</text>
-<circle cx="40" cy="1467.8000000000002" r="20" fill="#e9f0f6" stroke="none"/>
-<text x="40" y="1474.8000000000002" font-size="18" class="blue bold" text-anchor="middle">03</text>
-<text x="74" y="1474.8000000000002" font-size="28" class="bold" text-anchor="start">時間がたっても、話は続く</text>
-<rect x="28.0" y="1510.8000000000002" width="341.3333333333333" height="387.20000000000005" rx="14" fill="#f8fafb" stroke="#d4dce5"/>
-<circle cx="57.0" cy="1542.8000000000002" r="13" fill="#e1eee8" stroke="none"/>
-<text x="57.0" y="1549.8000000000002" font-size="18" class="blue bold" text-anchor="middle">1</text>
-<text x="84.0" y="1548.8000000000002" font-size="22" class="bold" text-anchor="start">はじめに</text>
-<g transform="translate(46.0 1595.8000000000002) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
-<rect x="82.0" y="1582.8000000000002" width="269.3333333333333" height="85.4" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
-<text x="96.0" y="1617.8000000000002" font-size="22" class="" text-anchor="start">コーヒー、もうなくな</text>
-<text x="96.0" y="1647.5000000000002" font-size="22" class="" text-anchor="start">りそう。</text>
-<g transform="translate(46.0 1693.2000000000003) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
-<rect x="82.0" y="1680.2000000000003" width="269.3333333333333" height="85.4" rx="12" fill="#ffffff" stroke="#d3dedf"/>
-<text x="96.0" y="1715.2000000000003" font-size="22" class="" text-anchor="start">次の買い物ではコーヒ</text>
-<text x="96.0" y="1744.9000000000003" font-size="22" class="" text-anchor="start">ーも必要ですね。</text>
-<path d="M48.0 1783.6000000000004H349.3333333333333" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
-<text x="48.0" y="1812.6000000000004" font-size="20" class="muted" text-anchor="start">何気ない一言が文脈になる。</text>
-<path d="M372.3333333333333 1544.8000000000002 L386.3333333333333 1544.8000000000002" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M381.3333333333333 1540.8000000000002 L386.3333333333333 1544.8000000000002 L381.3333333333333 1548.8000000000002" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="389.3333333333333" y="1510.8000000000002" width="341.3333333333333" height="387.20000000000005" rx="14" fill="#f8fafb" stroke="#d4dce5"/>
-<circle cx="418.3333333333333" cy="1542.8000000000002" r="13" fill="#e1eee8" stroke="none"/>
-<text x="418.3333333333333" y="1549.8000000000002" font-size="18" class="blue bold" text-anchor="middle">2</text>
-<text x="445.3333333333333" y="1548.8000000000002" font-size="22" class="bold" text-anchor="start">数時間後</text>
-<g transform="translate(407.3333333333333 1595.8000000000002) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
-<rect x="443.3333333333333" y="1582.8000000000002" width="269.3333333333333" height="115.10000000000001" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
-<text x="457.3333333333333" y="1617.8000000000002" font-size="22" class="" text-anchor="start">今から出るんだけど、</text>
-<text x="457.3333333333333" y="1647.5000000000002" font-size="22" class="" text-anchor="start">途中で買えるところあ</text>
-<text x="457.3333333333333" y="1677.2000000000003" font-size="22" class="" text-anchor="start">るかな？</text>
-<g transform="translate(407.3333333333333 1722.9) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
-<rect x="443.3333333333333" y="1709.9" width="269.3333333333333" height="115.10000000000001" rx="12" fill="#ffffff" stroke="#d3dedf"/>
-<text x="457.3333333333333" y="1744.9" font-size="22" class="" text-anchor="start">コーヒーですね。通る</text>
-<text x="457.3333333333333" y="1774.6000000000001" font-size="22" class="" text-anchor="start">道を教えてもらえれば</text>
-<text x="457.3333333333333" y="1804.3000000000002" font-size="22" class="" text-anchor="start">探します。</text>
-<path d="M409.3333333333333 1843.0H710.6666666666666" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
-<text x="409.3333333333333" y="1872.0" font-size="20" class="muted" text-anchor="start">前の話と今の状況がつながる。</text>
-<path d="M733.6666666666666 1544.8000000000002 L747.6666666666666 1544.8000000000002" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M742.6666666666666 1540.8000000000002 L747.6666666666666 1544.8000000000002 L742.6666666666666 1548.8000000000002" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="750.6666666666666" y="1510.8000000000002" width="341.3333333333333" height="387.20000000000005" rx="14" fill="#f8fafb" stroke="#d4dce5"/>
-<circle cx="779.6666666666666" cy="1542.8000000000002" r="13" fill="#e1eee8" stroke="none"/>
-<text x="779.6666666666666" y="1549.8000000000002" font-size="18" class="blue bold" text-anchor="middle">3</text>
-<text x="806.6666666666666" y="1548.8000000000002" font-size="22" class="bold" text-anchor="start">その後</text>
-<g transform="translate(768.6666666666666 1595.8000000000002) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
-<rect x="804.6666666666666" y="1582.8000000000002" width="269.3333333333333" height="85.4" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
-<text x="818.6666666666666" y="1617.8000000000002" font-size="22" class="" text-anchor="start">時間ないな。前と同じ</text>
-<text x="818.6666666666666" y="1647.5000000000002" font-size="22" class="" text-anchor="start">ものを買っておいて。</text>
-<g transform="translate(768.6666666666666 1693.2000000000003) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
-<rect x="804.6666666666666" y="1680.2000000000003" width="269.3333333333333" height="115.10000000000001" rx="12" fill="#ffffff" stroke="#d3dedf"/>
-<text x="818.6666666666666" y="1715.2000000000003" font-size="22" class="" text-anchor="start">前回のコーヒーです</text>
-<text x="818.6666666666666" y="1744.9000000000003" font-size="22" class="" text-anchor="start">ね。支払い前に確認し</text>
-<text x="818.6666666666666" y="1774.6000000000004" font-size="22" class="" text-anchor="start">ます。</text>
-<path d="M770.6666666666666 1813.3000000000002H1072.0" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
-<text x="770.6666666666666" y="1842.3000000000002" font-size="20" class="muted" text-anchor="start">前の選択 · 必要になった時に権</text>
-<text x="770.6666666666666" y="1869.3000000000002" font-size="20" class="muted" text-anchor="start">限確認</text>
-<text x="28" y="1948.0000000000002" font-size="22" class="blue" text-anchor="start">自分は話を続ける。AgentOS が文脈と仕事、許可された機能をつなぐ。</text>
-<path d="M28 1977.7000000000003H1092" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
-<text x="28" y="2013.7000000000003" font-size="20" class="muted" text-anchor="start">対話の形と製品の方向性を説明する例です。実際に観測した動作や提供済みの連携機能ではありません。</text>
+<path d="M28 1446.8000000000002H1092" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
+<text x="28" y="1482.8000000000002" font-size="20" class="muted" text-anchor="start">対話の形と製品の方向性を説明する例です。実際に観測した動作や提供済みの連携機能ではありません。</text>
 </svg>

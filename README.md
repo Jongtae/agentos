@@ -33,7 +33,7 @@ AgentOS gives these things a shared structure—its **ontology**. A piece of wor
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.en.narrow.svg">
-  <img src="docs/assets/readme/presence-overview.en.svg" alt="Concept illustration: Assistant answers a question about NVIDIA; a computer agent acts on an Amazon command; Personal AgentOS carries a conversation over time. You talk to one PA, with context, work and authority held in AgentOS above replaceable AI and tools. The coffee sequence illustrates product direction, not an observed run or shipped integrations.">
+  <img src="docs/assets/readme/presence-overview.en.svg" alt="Concept illustration: Assistant answers a question about NVIDIA; a computer agent acts on an Amazon command; Personal AgentOS carries a conversation over time. You talk to one PA, with context, work and authority held in AgentOS above replaceable AI and tools. The examples illustrate product direction, not observed runs or shipped integrations.">
 </picture>
 
 AgentOS uses its judgment layer to choose AI and tools and check their results. You talk to the PA while AgentOS carries that structure underneath the conversation. **Same PA. Different AI.**
@@ -50,6 +50,11 @@ The aspiration is simple: the PA follows what “it” and “the same one” me
 
 *Illustrative product direction, not an observed live run or a shipped shopping integration.*
 
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-scenes.en.narrow.svg">
+  <img src="docs/assets/readme/presence-scenes.en.svg" alt="Illustrative reconstruction of three PA conversations: sharing a location to find dinner on the way home; choosing headphones from a photo and connecting a shopping account before action; sharing a restaurant photo and continuing with a nearby walk. These fictional screens explain context, continuity and authority when needed; they are not product screenshots or observed runs.">
+</picture>
+
 <!-- readme-section:try-today -->
 
 ## Try it
@@ -61,11 +66,12 @@ brew install jongtae/agentos/agentos
 agentos start
 ```
 
-1. The browser opens at [http://127.0.0.1:8787](http://127.0.0.1:8787/). Choose **바로 시작하기** (Start now).
+1. Browser setup opens at [http://127.0.0.1:8787](http://127.0.0.1:8787/). Choose **바로 시작하기** (Start now).
 2. Connect and test your own model: a tool-capable local Ollama model, or OpenAI, an OpenAI-compatible service or Anthropic with your API access. The setup interface is currently Korean.
-3. Start a conversation: **“Help me think through what to focus on this week.”**
+3. In **설정 → 외부 연결** (Settings → External connections), connect your own bot using its BotFather token. Open the generated pairing link in Telegram and press **Start**.
+4. In that Telegram chat, ask: **“Help me think through what to focus on this week.”**
 
-Homebrew installs Python for you; model access is separate. [QUICKSTART](QUICKSTART.md) covers model setup, file work, Telegram and running the newest code from source.
+Homebrew installs Python for you; model access is separate. Keep `agentos start` running while you talk. [QUICKSTART](QUICKSTART.md) covers model setup, file work, Telegram and running the newest code from source.
 
 **Where it stands:** Homebrew installs **v1.1.0** (2026-09-23), an earlier preview. Newer Presence work on `main` is not included in this release. Calendar creation is unavailable in that release and research is partial; see the [release manifest](docs/release-manifest.json). [Product status](docs/product-status.en.md) separates what is available, what has been tested and what remains a goal.
 

@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="420" height="3866" viewBox="0 0 420 3866" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="2687" viewBox="0 0 420 2687" role="img" aria-labelledby="title desc">
 <title id="title">Personal AgentOS</title><desc id="desc">交互方式与产品方向的示例，并非实际观测的运行，也不代表已发布的集成功能。</desc>
 <style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
-<rect width="420" height="3866" fill="#fff"/>
+<rect width="420" height="2687" fill="#fff"/>
 <text x="20" y="58.0" font-size="34" class="bold" text-anchor="start">Personal AgentOS</text>
 <text x="20" y="100.9" font-size="23" class="blue" text-anchor="start">同一个助手，上下文始终属于你。</text>
 <text x="20" y="142.95" font-size="20" class="muted" text-anchor="start">交互方式 · 产品方向</text>
@@ -98,57 +98,7 @@
 <text x="270" y="2449.6" font-size="20" class="" text-anchor="start">服务</text>
 <text x="210.0" y="2510.6" font-size="25" class="blue bold" text-anchor="middle">同一个 PA。 不同的 AI。</text>
 <text x="210.0" y="2549.35" font-size="22" class="muted" text-anchor="middle">上下文始终留在你手中。</text>
-<circle cx="40" cy="2614.0499999999997" r="20" fill="#e9f0f6" stroke="none"/>
-<text x="40" y="2621.0499999999997" font-size="18" class="blue bold" text-anchor="middle">03</text>
-<text x="74" y="2621.0499999999997" font-size="28" class="bold" text-anchor="start">时间过去，对话继续</text>
-<rect x="20" y="2657.0499999999997" width="380" height="298.1" rx="14" fill="#f8fafb" stroke="#d4dce5"/>
-<circle cx="49" cy="2689.0499999999997" r="13" fill="#e1eee8" stroke="none"/>
-<text x="49" y="2696.0499999999997" font-size="18" class="blue bold" text-anchor="middle">1</text>
-<text x="76" y="2695.0499999999997" font-size="22" class="bold" text-anchor="start">起初</text>
-<g transform="translate(38 2742.0499999999997) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
-<rect x="74" y="2729.0499999999997" width="308" height="55.7" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
-<text x="88" y="2764.0499999999997" font-size="22" class="" text-anchor="start">咖啡快没了。</text>
-<g transform="translate(38 2809.7499999999995) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
-<rect x="74" y="2796.7499999999995" width="308" height="85.4" rx="12" fill="#ffffff" stroke="#d3dedf"/>
-<text x="88" y="2831.7499999999995" font-size="22" class="" text-anchor="start">下次买东西时，也得补上咖</text>
-<text x="88" y="2861.4499999999994" font-size="22" class="" text-anchor="start">啡。</text>
-<path d="M40 2900.1499999999996H380" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
-<text x="40" y="2929.1499999999996" font-size="20" class="muted" text-anchor="start">随口一句，成为后续的上下文。</text>
-<path d="M210.0 2959.1499999999996 L210.0 2975.1499999999996" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M206.0 2970.1499999999996 L210.0 2975.1499999999996 L214.0 2970.1499999999996" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="20" y="2979.1499999999996" width="380" height="327.8" rx="14" fill="#f8fafb" stroke="#d4dce5"/>
-<circle cx="49" cy="3011.1499999999996" r="13" fill="#e1eee8" stroke="none"/>
-<text x="49" y="3018.1499999999996" font-size="18" class="blue bold" text-anchor="middle">2</text>
-<text x="76" y="3017.1499999999996" font-size="22" class="bold" text-anchor="start">几小时后</text>
-<g transform="translate(38 3064.1499999999996) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
-<rect x="74" y="3051.1499999999996" width="308" height="85.4" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
-<text x="88" y="3086.1499999999996" font-size="22" class="" text-anchor="start">我准备出门了，路上有地方</text>
-<text x="88" y="3115.8499999999995" font-size="22" class="" text-anchor="start">可以买到吗？</text>
-<g transform="translate(38 3161.5499999999997) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
-<rect x="74" y="3148.5499999999997" width="308" height="85.4" rx="12" fill="#ffffff" stroke="#d3dedf"/>
-<text x="88" y="3183.5499999999997" font-size="22" class="" text-anchor="start">是说咖啡吧？告诉我路线，</text>
-<text x="88" y="3213.2499999999995" font-size="22" class="" text-anchor="start">我来找找。</text>
-<path d="M40 3251.95H380" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
-<text x="40" y="3280.95" font-size="20" class="muted" text-anchor="start">接上前文，结合现在的情况。</text>
-<path d="M210.0 3310.95 L210.0 3326.95" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M206.0 3321.95 L210.0 3326.95 L214.0 3321.95" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="20" y="3330.95" width="380" height="327.8" rx="14" fill="#f8fafb" stroke="#d4dce5"/>
-<circle cx="49" cy="3362.95" r="13" fill="#e1eee8" stroke="none"/>
-<text x="49" y="3369.95" font-size="18" class="blue bold" text-anchor="middle">3</text>
-<text x="76" y="3368.95" font-size="22" class="bold" text-anchor="start">之后</text>
-<g transform="translate(38 3415.95) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
-<rect x="74" y="3402.95" width="308" height="85.4" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
-<text x="88" y="3437.95" font-size="22" class="" text-anchor="start">没时间了，就买上次那款</text>
-<text x="88" y="3467.6499999999996" font-size="22" class="" text-anchor="start">吧。</text>
-<g transform="translate(38 3513.35) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
-<rect x="74" y="3500.35" width="308" height="85.4" rx="12" fill="#ffffff" stroke="#d3dedf"/>
-<text x="88" y="3535.35" font-size="22" class="" text-anchor="start">上次那款咖啡。付款前会请</text>
-<text x="88" y="3565.0499999999997" font-size="22" class="" text-anchor="start">你确认。</text>
-<path d="M40 3603.75H380" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
-<text x="40" y="3632.75" font-size="20" class="muted" text-anchor="start">先前的选择 · 需要时再请求权限</text>
-<text x="20" y="3712.75" font-size="22" class="blue" text-anchor="start">你继续说话，AgentOS 连接上下文、</text>
-<text x="20" y="3742.45" font-size="22" class="blue" text-anchor="start">工作与获准的能力。</text>
-<path d="M20 3772.15H400" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
-<text x="20" y="3808.15" font-size="20" class="muted" text-anchor="start">交互方式与产品方向的示例，并非实际观测</text>
-<text x="20" y="3835.15" font-size="20" class="muted" text-anchor="start">的运行，也不代表已发布的集成功能。</text>
+<path d="M20 2593.0499999999997H400" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
+<text x="20" y="2629.0499999999997" font-size="20" class="muted" text-anchor="start">交互方式与产品方向的示例，并非实际观测</text>
+<text x="20" y="2656.0499999999997" font-size="20" class="muted" text-anchor="start">的运行，也不代表已发布的集成功能。</text>
 </svg>

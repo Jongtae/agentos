@@ -21,7 +21,8 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             shutil.copyfile(ROOT / name, root / name)
         assets = tuple(
             path
-            for desktop in verifier.LOCALE_PRESENCE_VISUALS.values()
+            for locales in verifier.SECTION_VISUALS.values()
+            for desktop in locales.values()
             for path in (desktop, desktop.removesuffix(".svg") + ".narrow.svg")
         )
         for rel in ("docs/release-manifest.json", *verifier.STATUS_DOCS, *assets):
@@ -375,31 +376,75 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                 errors,
             )
 
-    def test_localized_presence_sources_cannot_use_another_locale(self):
-        for suffix in (".svg", ".narrow.svg"):
-            with self.subTest(source=suffix):
+    def test_localized_picture_sources_cannot_use_another_locale(self):
+        for section_id, locales in verifier.SECTION_VISUALS.items():
+            for suffix in (".svg", ".narrow.svg"):
+                with self.subTest(section=section_id, source=suffix):
+                    tmp, root = self.temp_root()
+                    with tmp:
+                        target = root / "README.ja.md"
+                        body = target.read_text(encoding="utf-8")
+                        wrong = locales["README.md"].removesuffix(".svg") + suffix
+                        expected = locales["README.ja.md"].removesuffix(".svg") + suffix
+                        self.assertIn(expected, body)
+                        target.write_text(body.replace(expected, wrong, 1), encoding="utf-8")
+                        errors = verifier.validate_readmes(root)
+                        self.assertTrue(any("README.ja.md" in error and expected in error
+                                            for error in errors), errors)
+
+    def test_missing_picture_asset_is_detected(self):
+        for section_id, locales in verifier.SECTION_VISUALS.items():
+            for suffix in (".svg", ".narrow.svg"):
+                with self.subTest(section=section_id, source=suffix):
+                    tmp, root = self.temp_root()
+                    with tmp:
+                        asset = locales["README.ko.md"].removesuffix(".svg") + suffix
+                        (root / asset).unlink()
+                        errors = verifier.validate_readmes(root)
+                        self.assertTrue(any(f"missing {section_id} asset" in error and asset in error
+                                            for error in errors), errors)
+
+    def test_conversation_picture_must_render_in_its_own_section(self):
+        for mutation in ("missing", "commented", "duplicated", "wrong section"):
+            with self.subTest(mutation=mutation):
                 tmp, root = self.temp_root()
                 with tmp:
-                    target = root / "README.ja.md"
+                    target = root / "README.md"
                     body = target.read_text(encoding="utf-8")
-                    wrong = "docs/assets/readme/presence-overview.en" + suffix
-                    expected = "docs/assets/readme/presence-overview.ja" + suffix
-                    self.assertIn(expected, body)
-                    target.write_text(body.replace(expected, wrong, 1), encoding="utf-8")
+                    pictures = re.findall(r"<picture>.*?</picture>", body, flags=re.S)
+                    scene = next(picture for picture in pictures
+                                 if verifier.LOCALE_SCENE_VISUALS["README.md"] in picture)
+                    replacement = {"missing": "", "commented": "<!-- " + scene + " -->",
+                                   "duplicated": scene + "\n\n" + scene, "wrong section": ""}[mutation]
+                    body = body.replace(scene, replacement, 1)
+                    if mutation == "wrong section":
+                        body += "\n\n" + scene
+                    target.write_text(body, encoding="utf-8")
                     errors = verifier.validate_readmes(root)
-                    self.assertTrue(any("README.ja.md" in error and expected in error
+                    self.assertTrue(any("conversation must contain exactly one localized picture" in error
                                         for error in errors), errors)
 
-    def test_missing_presence_asset_is_detected(self):
-        for suffix in (".svg", ".narrow.svg"):
-            with self.subTest(source=suffix):
-                tmp, root = self.temp_root()
-                with tmp:
-                    asset = "docs/assets/readme/presence-overview.ko" + suffix
-                    (root / asset).unlink()
-                    errors = verifier.validate_readmes(root)
-                    self.assertTrue(any("missing presence asset" in error and asset in error
-                                        for error in errors), errors)
+    def test_each_picture_keeps_its_narrow_breakpoint(self):
+        for section_id, locales in verifier.SECTION_VISUALS.items():
+            for mutation in ("missing source", "wrong breakpoint"):
+                with self.subTest(section=section_id, mutation=mutation):
+                    tmp, root = self.temp_root()
+                    with tmp:
+                        target = root / "README.md"
+                        body = target.read_text(encoding="utf-8")
+
+                        def alter(match):
+                            if locales["README.md"] not in match[0]:
+                                return match[0]
+                            if mutation == "missing source":
+                                return re.sub(r"(?m)^[ \t]*<source[^>]+>\n?", "", match[0])
+                            return match[0].replace("(max-width: 600px)", "(max-width: 300px)")
+
+                        target.write_text(re.sub(r"<picture>.*?</picture>", alter, body, flags=re.S),
+                                          encoding="utf-8")
+                        errors = verifier.validate_readmes(root)
+                        self.assertTrue(any(f"{section_id} picture needs narrow source" in error
+                                            for error in errors), errors)
 
     def test_presence_paths_hidden_in_comment_are_not_a_picture(self):
         tmp, root = self.temp_root()
@@ -506,16 +551,24 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                     target.write_text(body, encoding="utf-8")
                     self.assertEqual([], verifier.validate_readmes(root))
 
-    def test_presence_picture_must_have_alt_text(self):
-        tmp, root = self.temp_root()
-        with tmp:
-            target = root / "README.md"
-            body = target.read_text(encoding="utf-8")
-            body = re.sub(r'alt="[^"]*"', 'alt=""', body, count=1)
-            target.write_text(body, encoding="utf-8")
-            errors = verifier.validate_readmes(root)
-            self.assertTrue(any("presence picture needs meaningful alt text" in error
-                                for error in errors), errors)
+    def test_picture_alt_cannot_be_empty_or_a_filename(self):
+        for section_id, locales in verifier.SECTION_VISUALS.items():
+            for alt in ("", "   ", Path(locales["README.md"]).name):
+                with self.subTest(section=section_id, alt=alt):
+                    tmp, root = self.temp_root()
+                    with tmp:
+                        target = root / "README.md"
+                        body = target.read_text(encoding="utf-8")
+                        body = re.sub(
+                            r"<picture>.*?</picture>",
+                            lambda match: re.sub(r'alt="[^"]*"', f'alt="{alt}"', match[0])
+                            if locales["README.md"] in match[0] else match[0],
+                            body, flags=re.S,
+                        )
+                        target.write_text(body, encoding="utf-8")
+                        errors = verifier.validate_readmes(root)
+                        self.assertTrue(any(f"{section_id} picture needs meaningful alt text" in error
+                                            for error in errors), errors)
 
     def test_license_fact_drift_is_detected(self):
         tmp, root = self.temp_root()
@@ -554,8 +607,8 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
         committed = sorted(path.name for path in visuals.OUT.glob("*.html"))
         self.assertEqual(sorted(expected), committed)
 
-    def test_committed_presence_overviews_match_generator(self):
-        """Keep the eight public SVGs synchronized with their localized source."""
+    def test_committed_public_figures_match_generator(self):
+        """Keep both responsive figures synchronized across all four locales."""
         assets = ROOT / "docs" / "assets" / "readme"
         spec = importlib.util.spec_from_file_location(
             "readme_concept_visuals", assets / "build_concept_visuals.py"
@@ -564,20 +617,25 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
         spec.loader.exec_module(visuals)
         expected = {
             Path(path).name
-            for desktop in verifier.LOCALE_PRESENCE_VISUALS.values()
+            for locales in verifier.SECTION_VISUALS.values()
+            for desktop in locales.values()
             for path in (desktop, desktop.removesuffix(".svg") + ".narrow.svg")
         }
         with tempfile.TemporaryDirectory() as tmp:
             generated = Path(tmp)
             with patch.object(visuals, "ROOT", generated):
-                for locale, data in visuals.OVERVIEW.items():
-                    for mobile in (False, True):
-                        suffix = ".narrow" if mobile else ""
-                        visuals.overview(data, mobile).write(
-                            f"presence-overview.{locale}{suffix}.svg"
-                        )
+                for kind, translations, builder in (
+                    ("presence-overview", visuals.OVERVIEW, visuals.overview),
+                    ("presence-scenes", visuals.SCENES, visuals.scenes),
+                ):
+                    for locale, data in translations.items():
+                        for mobile in (False, True):
+                            suffix = ".narrow" if mobile else ""
+                            builder(data, mobile).write(f"{kind}.{locale}{suffix}.svg")
             self.assertEqual(expected, {path.name for path in generated.glob("*.svg")})
-            self.assertEqual(expected, {path.name for path in assets.glob("presence-overview.*.svg")})
+            committed = {path.name for pattern in ("presence-overview.*.svg", "presence-scenes.*.svg")
+                         for path in assets.glob(pattern)}
+            self.assertEqual(expected, committed)
             for name in sorted(expected):
                 with self.subTest(asset=name):
                     self.assertEqual(
@@ -707,6 +765,8 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             "inline backticks": lambda text: "`" + text + "`",
             "double backticks": lambda text: "``" + text + "``",
             "multiline span": lambda text: "``\n" + text + "\n``",
+            "indented inline delimiters": lambda text: "\n\n  ``\n" + text + "\n  ``\n\n",
+            "indented line inside span": lambda text: "\n\n``example\n  line\n" + text + "\n``\n\n",
         }
         for name in verifier.READMES:
             claims = (
@@ -728,6 +788,43 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                             errors = verifier.validate_readmes(root)
                             self.assertTrue(any(name in error and expected_error in error
                                                 for error in errors), errors)
+
+    def test_container_fences_cannot_supply_required_claims(self):
+        release = verifier.newest_published_release(ROOT)
+        wrappers = {
+            "quoted": lambda text: "> ~~~text\n> " + text + "\n> ~~~",
+            "nested quote": lambda text: ">> ~~~text\n>> " + text + "\n>> ~~~",
+            "bullet list": lambda text: "- ~~~text\n  " + text + "\n  ~~~",
+            "ordered list": lambda text: "1. ~~~text\n   " + text + "\n   ~~~",
+            "nested list": lambda text: "- Example:\n  - ~~~text\n    " + text + "\n    ~~~",
+            "list paragraph": lambda text: "- Example:\n\n  ~~~text\n  " + text + "\n  ~~~",
+            "quoted list": lambda text: "> - ~~~text\n>   " + text + "\n>   ~~~",
+        }
+        for name in verifier.READMES:
+            claims = (
+                (verifier.README_RELEASE_BOUNDARIES[name].format(
+                    version=release["version"], date=release["tag_date"]
+                 ), "visible published-release/main boundary"),
+                (verifier.README_DIRECTION_DISCLAIMERS[name],
+                 "visible illustrative product-direction boundary"),
+            )
+            for token, expected_error in claims:
+                for markup, wrap in wrappers.items():
+                    with self.subTest(readme=name, claim=expected_error, markup=markup):
+                        tmp, root = self.temp_root()
+                        with tmp:
+                            target = root / name
+                            body = target.read_text(encoding="utf-8")
+                            hidden = "\n\n" + wrap(token) + "\n\n"
+                            target.write_text(body.replace(token, hidden, 1), encoding="utf-8")
+                            errors = verifier.validate_readmes(root)
+                            self.assertTrue(any(name in error and expected_error in error
+                                                for error in errors), errors)
+                            # A completed container example must not hide the
+                            # real standalone claim immediately after it.
+                            visible = "\n\n" + wrap("Example only.") + "\n\n" + token
+                            target.write_text(body.replace(token, visible, 1), encoding="utf-8")
+                            self.assertEqual([], verifier.validate_readmes(root))
 
     def test_inline_main_and_fenced_install_commands_remain_valid(self):
         tmp, root = self.temp_root()

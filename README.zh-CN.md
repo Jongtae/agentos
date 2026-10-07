@@ -33,7 +33,7 @@ AgentOS 用一组共同的概念及其关系来表达这些内容，这就是它
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.zh-CN.narrow.svg">
-  <img src="docs/assets/readme/presence-overview.zh-CN.svg" alt="概念插图：助手回答 NVIDIA 问题，电脑代理执行 Amazon 指令，Personal AgentOS 延续跨越时间的对话。你与同一个 PA 交流，上下文、工作和权限保留在 AgentOS 中，底层 AI 和工具可以替换。咖啡对话用于说明产品方向，并非真实观测或已发布的集成功能。">
+  <img src="docs/assets/readme/presence-overview.zh-CN.svg" alt="概念插图：助手回答 NVIDIA 问题，电脑代理执行 Amazon 指令，Personal AgentOS 延续跨越时间的对话。你与同一个 PA 交流，上下文、工作和权限保留在 AgentOS 中，底层 AI 和工具可以替换。这些示例用于说明产品方向，并非真实观测或已发布的集成功能。">
 </picture>
 
 AgentOS 通过判断层选择所需的 AI 和工具，并检查它们的结果。你与 PA 交谈，AgentOS 在对话之下维系这套结构。**同一个 PA，不同的 AI。**
@@ -50,6 +50,11 @@ AgentOS 通过判断层选择所需的 AI 和工具，并检查它们的结果�
 
 *这是产品方向示例，并非实际观测的运行，也不代表已发布的购物功能。*
 
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-scenes.zh-CN.narrow.svg">
+  <img src="docs/assets/readme/presence-scenes.zh-CN.svg" alt="三个 PA 对话的说明性重构画面：分享位置以寻找回家路上的餐厅；从照片寻找并选择耳机，在操作前连接购物账户；分享餐厅照片并接着聊附近的散步路线。这些虚构画面说明上下文、持续对话和需要时取得权限，并非产品截图或实际运行记录。">
+</picture>
+
 <!-- readme-section:try-today -->
 
 ## 先试试看
@@ -61,11 +66,12 @@ brew install jongtae/agentos/agentos
 agentos start
 ```
 
-1. 浏览器打开 [http://127.0.0.1:8787](http://127.0.0.1:8787/) 后，选择 **바로 시작하기**（立即开始）。
+1. 浏览器打开 [http://127.0.0.1:8787](http://127.0.0.1:8787/) 的设置页面后，选择 **바로 시작하기**（立即开始）。
 2. 连接自己的模型并完成连接测试。可以使用支持工具调用的本地 Ollama 模型，或凭自己的 API 访问权限连接 OpenAI、OpenAI 兼容服务或 Anthropic。目前设置界面为韩语。
-3. 试着说：**“帮我一起想想，这周应该重点做些什么。”**
+3. 在 **설정 → 외부 연결**（设置 → 外部连接）中，填入自己通过 BotFather 创建的机器人的令牌并连接。在 Telegram 中打开生成的配对链接，点击**开始**。
+4. 在这个 Telegram 对话里试着说：**“帮我一起想想，这周应该重点做些什么。”**
 
-Homebrew 会一起安装 Python，模型的使用权限需另行准备。[QUICKSTART](QUICKSTART.md) 介绍了模型设置、文件处理、Telegram，以及如何从源码运行最新版本。
+Homebrew 会一起安装 Python，模型的使用权限需另行准备。对话期间请保持 `agentos start` 运行。[QUICKSTART](QUICKSTART.md) 介绍了模型设置、文件处理、Telegram，以及如何从源码运行最新版本。
 
 **当前阶段：** Homebrew 安装的是较早的预览版 **v1.1.0**（2026-09-23），后续 `main` 中的 Presence 实现尚未包含在此版本中。该版本无法创建日程，调研功能仅部分可用。具体范围见[版本清单](docs/release-manifest.json)。[当前状态](docs/product-status.en.md)区分了哪些功能可以使用、哪些经过验证、哪些仍是目标。
 

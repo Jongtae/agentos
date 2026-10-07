@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="420" height="4613" viewBox="0 0 420 4613" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="3111" viewBox="0 0 420 3111" role="img" aria-labelledby="title desc">
 <title id="title">Personal AgentOS</title><desc id="desc">Illustrative interaction patterns and product direction. No observed live run or shipped integration is claimed.</desc>
 <style>text{font-family:Arial,"Noto Sans",sans-serif;fill:#243247} .bold{font-weight:700} .muted{fill:#526174} .blue{fill:#245b92}</style>
-<rect width="420" height="4613" fill="#fff"/>
+<rect width="420" height="3111" fill="#fff"/>
 <text x="20" y="58.0" font-size="34" class="bold" text-anchor="start">Personal AgentOS</text>
 <text x="20" y="100.9" font-size="23" class="blue" text-anchor="start">One assistant. Your context</text>
 <text x="20" y="131.95000000000002" font-size="23" class="blue" text-anchor="start">stays with you.</text>
@@ -110,70 +110,9 @@
 <text x="270" y="2820.5499999999997" font-size="20" class="" text-anchor="start">Services</text>
 <text x="210.0" y="2881.5499999999997" font-size="25" class="blue bold" text-anchor="middle">Same PA. Different AI.</text>
 <text x="210.0" y="2920.2999999999997" font-size="22" class="muted" text-anchor="middle">Your context stays with you.</text>
-<circle cx="40" cy="2984.9999999999995" r="20" fill="#e9f0f6" stroke="none"/>
-<text x="40" y="2991.9999999999995" font-size="18" class="blue bold" text-anchor="middle">03</text>
-<text x="74" y="2991.9999999999995" font-size="28" class="bold" text-anchor="start">One conversation,</text>
-<text x="74" y="3029.7999999999997" font-size="28" class="bold" text-anchor="start">over time</text>
-<rect x="20" y="3061.5999999999995" width="380" height="354.8" rx="14" fill="#f8fafb" stroke="#d4dce5"/>
-<circle cx="49" cy="3093.5999999999995" r="13" fill="#e1eee8" stroke="none"/>
-<text x="49" y="3100.5999999999995" font-size="18" class="blue bold" text-anchor="middle">1</text>
-<text x="76" y="3099.5999999999995" font-size="22" class="bold" text-anchor="start">First</text>
-<g transform="translate(38 3146.5999999999995) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
-<rect x="74" y="3133.5999999999995" width="308" height="85.4" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
-<text x="88" y="3168.5999999999995" font-size="22" class="" text-anchor="start">We’re almost out of</text>
-<text x="88" y="3198.2999999999993" font-size="22" class="" text-anchor="start">coffee.</text>
-<g transform="translate(38 3243.9999999999995) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
-<rect x="74" y="3230.9999999999995" width="308" height="85.4" rx="12" fill="#ffffff" stroke="#d3dedf"/>
-<text x="88" y="3265.9999999999995" font-size="22" class="" text-anchor="start">Coffee for the next</text>
-<text x="88" y="3295.6999999999994" font-size="22" class="" text-anchor="start">shop.</text>
-<path d="M40 3334.3999999999996H380" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
-<text x="40" y="3363.3999999999996" font-size="20" class="muted" text-anchor="start">A small remark becomes</text>
-<text x="40" y="3390.3999999999996" font-size="20" class="muted" text-anchor="start">context.</text>
-<path d="M210.0 3420.3999999999996 L210.0 3436.3999999999996" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M206.0 3431.3999999999996 L210.0 3436.3999999999996 L214.0 3431.3999999999996" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="20" y="3440.3999999999996" width="380" height="443.90000000000003" rx="14" fill="#f8fafb" stroke="#d4dce5"/>
-<circle cx="49" cy="3472.3999999999996" r="13" fill="#e1eee8" stroke="none"/>
-<text x="49" y="3479.3999999999996" font-size="18" class="blue bold" text-anchor="middle">2</text>
-<text x="76" y="3478.3999999999996" font-size="22" class="bold" text-anchor="start">Hours later</text>
-<g transform="translate(38 3525.3999999999996) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
-<rect x="74" y="3512.3999999999996" width="308" height="144.8" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
-<text x="88" y="3547.3999999999996" font-size="22" class="" text-anchor="start">I’m heading out now.</text>
-<text x="88" y="3577.0999999999995" font-size="22" class="" text-anchor="start">Is there somewhere on</text>
-<text x="88" y="3606.7999999999997" font-size="22" class="" text-anchor="start">the way I can pick it</text>
-<text x="88" y="3636.4999999999995" font-size="22" class="" text-anchor="start">up?</text>
-<g transform="translate(38 3682.2) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
-<rect x="74" y="3669.2" width="308" height="115.10000000000001" rx="12" fill="#ffffff" stroke="#d3dedf"/>
-<text x="88" y="3704.2" font-size="22" class="" text-anchor="start">The coffee? Share</text>
-<text x="88" y="3733.8999999999996" font-size="22" class="" text-anchor="start">your route and I’ll</text>
-<text x="88" y="3763.6" font-size="22" class="" text-anchor="start">look.</text>
-<path d="M40 3802.2999999999997H380" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
-<text x="40" y="3831.2999999999997" font-size="20" class="muted" text-anchor="start">Earlier context meets the</text>
-<text x="40" y="3858.2999999999997" font-size="20" class="muted" text-anchor="start">situation now.</text>
-<path d="M210.0 3888.2999999999997 L210.0 3904.2999999999997" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<path d="M206.0 3899.2999999999997 L210.0 3904.2999999999997 L214.0 3899.2999999999997" fill="none" stroke="#8492a3" stroke-width="1.6"/>
-<rect x="20" y="3908.2999999999997" width="380" height="414.20000000000005" rx="14" fill="#f8fafb" stroke="#d4dce5"/>
-<circle cx="49" cy="3940.2999999999997" r="13" fill="#e1eee8" stroke="none"/>
-<text x="49" y="3947.2999999999997" font-size="18" class="blue bold" text-anchor="middle">3</text>
-<text x="76" y="3946.2999999999997" font-size="22" class="bold" text-anchor="start">Later</text>
-<g transform="translate(38 3993.2999999999997) scale(0.375)" fill="none" stroke="#53657a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="17" r="10"/><path d="M13 57v-9a19 19 0 0 1 38 0v9"/></g>
-<rect x="74" y="3980.2999999999997" width="308" height="115.10000000000001" rx="12" fill="#edf4fb" stroke="#edf4fb"/>
-<text x="88" y="4015.2999999999997" font-size="22" class="" text-anchor="start">No time. Just get the</text>
-<text x="88" y="4044.9999999999995" font-size="22" class="" text-anchor="start">same one as last</text>
-<text x="88" y="4074.7" font-size="22" class="" text-anchor="start">time.</text>
-<g transform="translate(38 4120.4) scale(0.375)" fill="none" stroke="#257a69" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="32" cy="32" r="24"/><circle cx="32" cy="32" r="9"/><path d="M32 0v8m0 48v8M0 32h8m48 0h8"/></g>
-<rect x="74" y="4107.4" width="308" height="115.10000000000001" rx="12" fill="#ffffff" stroke="#d3dedf"/>
-<text x="88" y="4142.4" font-size="22" class="" text-anchor="start">The same coffee. I’ll</text>
-<text x="88" y="4172.099999999999" font-size="22" class="" text-anchor="start">confirm before</text>
-<text x="88" y="4201.799999999999" font-size="22" class="" text-anchor="start">payment.</text>
-<path d="M40 4240.5H380" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
-<text x="40" y="4269.5" font-size="20" class="muted" text-anchor="start">Earlier choice · authority</text>
-<text x="40" y="4296.5" font-size="20" class="muted" text-anchor="start">when needed</text>
-<text x="20" y="4376.5" font-size="22" class="blue" text-anchor="start">You keep talking. AgentOS</text>
-<text x="20" y="4406.2" font-size="22" class="blue" text-anchor="start">connects the context, work</text>
-<text x="20" y="4435.9" font-size="22" class="blue" text-anchor="start">and permitted capabilities.</text>
-<path d="M20 4465.6H400" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
-<text x="20" y="4501.6" font-size="20" class="muted" text-anchor="start">Illustrative interaction</text>
-<text x="20" y="4528.6" font-size="20" class="muted" text-anchor="start">patterns and product direction.</text>
-<text x="20" y="4555.6" font-size="20" class="muted" text-anchor="start">No observed live run or shipped</text>
-<text x="20" y="4582.6" font-size="20" class="muted" text-anchor="start">integration is claimed.</text>
+<path d="M20 2963.9999999999995H400" fill="none" stroke="#d4dce5" stroke-width="1.6"/>
+<text x="20" y="2999.9999999999995" font-size="20" class="muted" text-anchor="start">Illustrative interaction</text>
+<text x="20" y="3026.9999999999995" font-size="20" class="muted" text-anchor="start">patterns and product direction.</text>
+<text x="20" y="3053.9999999999995" font-size="20" class="muted" text-anchor="start">No observed live run or shipped</text>
+<text x="20" y="3080.9999999999995" font-size="20" class="muted" text-anchor="start">integration is claimed.</text>
 </svg>

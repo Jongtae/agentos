@@ -33,7 +33,7 @@ AgentOS は、これらを共通の概念と関係で表します。この構造
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.ja.narrow.svg">
-  <img src="docs/assets/readme/presence-overview.ja.svg" alt="概念図：NVIDIA の質問に答えるアシスタント、Amazon の指示を実行するコンピューターエージェント、時間をまたぐ会話を続ける Personal AgentOS。あなたは一人の PA と話し、文脈・作業・権限は交換可能な AI やツールの上にある AgentOS に残ります。コーヒーの会話は製品の方向性を示す例で、実際の観測や提供済みの連携ではありません。">
+  <img src="docs/assets/readme/presence-overview.ja.svg" alt="概念図：NVIDIA の質問に答えるアシスタント、Amazon の指示を実行するコンピューターエージェント、時間をまたぐ会話を続ける Personal AgentOS。あなたは一人の PA と話し、文脈・作業・権限は交換可能な AI やツールの上にある AgentOS に残ります。これらは製品の方向性を示す例で、実際の観測や提供済みの連携ではありません。">
 </picture>
 
 AgentOS は判断層を通じて必要な AI とツールを選び、その結果を確かめます。あなたは PA と話し、AgentOS が会話の下でこの構造を支えます。**同じ PA。変わる AI。**
@@ -50,6 +50,11 @@ AgentOS は判断層を通じて必要な AI とツールを選び、その結�
 
 *製品の方向性を説明する例であり、実際に観測した動作や提供済みの購入機能ではありません。*
 
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-scenes.ja.narrow.svg">
+  <img src="docs/assets/readme/presence-scenes.ja.svg" alt="三つの PA 会話を説明用に再構成した画面。帰り道の食事のために位置を共有し、写真から探したヘッドホンを選んで実行前に買い物用アカウントを接続し、レストランの写真から近くの散歩の話へ続けます。文脈、継続性、必要な時の権限を示す架空の画面で、製品の実画面や観測記録ではありません。">
+</picture>
+
 <!-- readme-section:try-today -->
 
 ## まずは試してみる
@@ -61,11 +66,12 @@ brew install jongtae/agentos/agentos
 agentos start
 ```
 
-1. ブラウザーで [http://127.0.0.1:8787](http://127.0.0.1:8787/) が開いたら、**바로 시작하기**（今すぐ始める）を選びます。
+1. ブラウザーで [http://127.0.0.1:8787](http://127.0.0.1:8787/) の設定画面が開いたら、**바로 시작하기**（今すぐ始める）を選びます。
 2. 自分のモデルを接続し、接続テストを完了します。ツール呼び出しに対応したローカルの Ollama モデル、または自分の API 利用権限で OpenAI、OpenAI 互換サービス、Anthropic を使えます。設定画面は現在韓国語です。
-3. **「今週、何に集中するとよさそうか、一緒に考えてほしい。」** と話しかけてみてください。
+3. **설정 → 외부 연결**（設定 → 外部接続）で、BotFather で作った自分のボットのトークンを入力して接続します。表示されたペアリングリンクを Telegram で開き、**開始**を押します。
+4. その Telegram のチャットで、**「今週、何に集中するとよさそうか、一緒に考えてほしい。」** と話しかけてみてください。
 
-Python は Homebrew が一緒にインストールします。モデルの利用環境は別途用意してください。モデルの設定、ファイル作業、Telegram、最新ソースからの実行手順は [QUICKSTART](QUICKSTART.md) にあります。
+Python は Homebrew が一緒にインストールします。モデルの利用環境は別途用意してください。会話中は `agentos start` を実行したままにします。モデルの設定、ファイル作業、Telegram、最新ソースからの実行手順は [QUICKSTART](QUICKSTART.md) にあります。
 
 **現在の段階：** Homebrew で入るのは以前のプレビュー版 **v1.1.0**（2026-09-23）です。その後の `main` の Presence 実装は、このリリースには含まれていません。このリリースでは予定の作成は利用できず、調査は一部対応です。詳しい範囲は[リリース内容](docs/release-manifest.json)を参照してください。[現在の状態](docs/product-status.en.md)では、利用できるもの、検証済みのもの、今後の目標を分けて説明しています。
 

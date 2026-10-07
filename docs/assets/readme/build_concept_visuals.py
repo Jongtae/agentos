@@ -589,36 +589,326 @@ def overview(d,mobile):
   cy+=f.label(rx,cy,d['context_stays'],rw,22,'muted')+28
   f.label(rx,cy,'AI A → AI B',rw,22,'blue bold')
   y=ey+145
- y+=f.section(y,'03',d['usage_title'],w)
- usage_heights=[]
- for scene in d['usage']:
-  height=72+f.dialogue_height(scene['quote'],cw-36)+12
-  height+=f.dialogue_height(scene['reply'],cw-36)+26
-  height+=f.measure(scene['label'],cw-40,20)+20
-  usage_heights.append(height)
- max_height=max(usage_heights)
- for index,scene in enumerate(d['usage']):
-  x=margin if mobile else margin+index*(cw+20)
-  ch=usage_heights[index] if mobile else max_height
-  f.rect(x,y,cw,ch,'#f8fafb','#d4dce5',14)
-  f.circle(x+29,y+32,13,'#e1eee8')
-  f.text(x+29,y+39,str(index+1),18,'blue bold','middle')
-  f.label(x+56,y+16,scene['time'],cw-76,22,'bold')
-  cy=y+72
-  cy+=f.dialogue(x+18,cy,cw-36,scene['quote'])+12
-  cy+=f.dialogue(x+18,cy,cw-36,scene['reply'],True)+18
-  f.path(f'M{x+20} {cy}H{x+cw-20}','#d4dce5')
-  f.label(x+20,cy+9,scene['label'],cw-40,20,'muted')
-  if mobile:
-   y+=ch+24
-   if index<2:f.arrow(w/2,y-20,w/2,y-4)
-  elif index<2:
-   f.arrow(x+cw+3,y+34,x+cw+17,y+34)
- if not mobile:y+=max_height+20
- y+=f.label(margin,y+8,d['usage_note'],usable,22,'blue')+30
  f.path(f'M{margin} {y}H{w-margin}','#d4dce5')
  y+=16
  y+=f.label(margin,y,d['footer'],usable,20,'muted')+24
+ return f.finish(int(y))
+
+SCENES = {'en': {'title': 'Everyday conversation, continuing context',
+        'label': 'Illustrative reconstruction · product direction',
+        'pa_header': 'PA',
+        'owner_label': 'You',
+        'footer': 'Separate representative scenes. Not product screenshots, observed runs or claims of shipped '
+                  'integrations.',
+        'scenes': [{'id': 'way-home',
+                    'title': 'On the way home',
+                    'visual_title': 'Current location shared',
+                    'visual_meta': 'Shared when needed',
+                    'owner': 'Somewhere to eat on my way home?',
+                    'reply': 'Where are you now? Share your location.',
+                    'followup': '',
+                    'response': 'Here are two places on your way home.',
+                    'cards': [{'title': 'Restaurant A', 'detail': 'A quick meal'},
+                              {'title': 'Restaurant B', 'detail': 'A relaxed meal'}],
+                    'action': '',
+                    'takeaway': 'Ask for context when it becomes useful.'},
+                   {'id': 'product-choice',
+                    'title': 'From a choice to the next step',
+                    'visual_title': 'Headphone photo',
+                    'visual_meta': 'A product to compare',
+                    'owner': 'Something like this, within my budget.',
+                    'reply': 'Two options within that budget.',
+                    'followup': 'The first one. Add it to my cart.',
+                    'response': 'Connect your shopping account to continue with Model A.',
+                    'cards': [{'title': 'Model A', 'detail': 'Lighter to carry'},
+                              {'title': 'Model B', 'detail': 'Longer battery life'}],
+                    'action': 'Connect shopping account',
+                    'takeaway': 'Keep the choice; ask for access when needed.'},
+                   {'id': 'place-continuation',
+                    'title': 'A photo, then the next thought',
+                    'visual_title': 'Restaurant photo · current place shared',
+                    'visual_meta': 'The starting point stays in context',
+                    'owner': 'Here now. A walk afterwards?',
+                    'reply': 'Two walks from the place you shared.',
+                    'followup': 'The riverside one. How do I get there?',
+                    'response': 'Starting from this restaurant, then.',
+                    'cards': [{'title': 'Riverside walk', 'detail': 'Along the water'},
+                              {'title': 'Neighborhood loop', 'detail': 'Around the local streets'}],
+                    'action': 'Route from here',
+                    'takeaway': 'The photo, place and next question stay connected.'}],
+        'screen_badge': 'Reconstruction',
+        'composer': 'Message PA'},
+ 'ko': {'title': '짧게 말해도, 앞뒤는 이어지도록',
+        'label': '설명을 위해 재구성한 대화 · 제품 방향',
+        'pa_header': 'PA',
+        'owner_label': '나',
+        'footer': '서로 독립된 대표 장면입니다. 실제 제품 캡처나 관측 실행이 아니며, 배포된 연동 기능을 뜻하지 않습니다.',
+        'scenes': [{'id': 'way-home',
+                    'title': '집에 가는 길에',
+                    'visual_title': '현재 위치 공유',
+                    'visual_meta': '필요해진 순간에 공유',
+                    'owner': '집에 가는 길에 밥 먹을 만한 데 있을까?',
+                    'reply': '지금 어디 계세요? 현재 위치를 알려주세요.',
+                    'followup': '',
+                    'response': '집에 가는 길에 들를 만한 곳 두 곳이에요.',
+                    'cards': [{'title': '식당 A', 'detail': '간단한 한 끼'}, {'title': '식당 B', 'detail': '여유 있게 식사'}],
+                    'action': '',
+                    'takeaway': '맥락이 필요해진 순간에 묻습니다.'},
+                   {'id': 'product-choice',
+                    'title': '고른 뒤에 이어지는 일',
+                    'visual_title': '헤드폰 사진',
+                    'visual_meta': '비교할 상품의 모습',
+                    'owner': '이런 걸로, 내 예산 안에서 찾아봐줘.',
+                    'reply': '그 예산이면 이 두 가지를 비교해볼 만해요.',
+                    'followup': '첫 번째 걸로. 장바구니에 넣어줘.',
+                    'response': '모델 A로 이어갈게요. 쇼핑 계정을 연결해주세요.',
+                    'cards': [{'title': '모델 A', 'detail': '가볍게 들고 다니기'},
+                              {'title': '모델 B', 'detail': '더 긴 배터리 사용 시간'}],
+                    'action': '쇼핑 계정 연결',
+                    'takeaway': '선택은 이어받고, 필요한 접근만 요청합니다.'},
+                   {'id': 'place-continuation',
+                    'title': '사진에서 다음 이야기로',
+                    'visual_title': '식당 사진 · 현재 장소 공유',
+                    'visual_meta': '출발할 장소도 맥락에 남습니다',
+                    'owner': '지금 여기야. 먹고 나서 산책할까?',
+                    'reply': '알려주신 곳에서 가볼 만한 산책 코스 두 곳이에요.',
+                    'followup': '강변 쪽으로. 어떻게 가면 돼?',
+                    'response': '지금 계신 식당에서 출발하는 길로요.',
+                    'cards': [{'title': '강변 산책', 'detail': '물가를 따라 걷기'},
+                              {'title': '동네 한 바퀴', 'detail': '주변 골목을 걷기'}],
+                    'action': '여기서 가는 길',
+                    'takeaway': '사진과 장소, 다음 질문을 연결합니다.'}],
+        'screen_badge': '재구성',
+        'composer': 'PA에게 이야기하기'},
+ 'ja': {'title': '短い言葉でも、話はつながる',
+        'title_narrow': ['短い言葉でも、', '話はつながる'],
+        'label': '説明用に再構成した対話 · 製品の方向性',
+        'pa_header': 'PA',
+        'owner_label': 'あなた',
+        'footer': 'それぞれ独立した代表例です。実際の製品画面や観測済みの動作ではなく、提供済みの連携機能を示すものでもありません。',
+        'scenes': [{'id': 'way-home',
+                    'title': '家に帰る途中で',
+                    'visual_title': '現在地を共有',
+                    'visual_meta': '必要になった時に共有',
+                    'owner': '家に帰る途中で、ご飯を食べられるところある？',
+                    'reply': '今どの辺りですか？現在地を教えてください。',
+                    'followup': '',
+                    'response': '帰り道に立ち寄れる候補が二つあります。',
+                    'cards': [{'title': 'お店 A', 'detail': '手軽に食事'}, {'title': 'お店 B', 'detail': 'ゆっくり食事'}],
+                    'action': '',
+                    'takeaway': '必要になった時に、状況を尋ねる。'},
+                   {'id': 'product-choice',
+                    'title': '選んだ後も、続けられる',
+                    'visual_title': 'ヘッドホンの写真',
+                    'visual_meta': '比べたい商品のイメージ',
+                    'owner': 'こんな感じで、予算内のものを探して。',
+                    'reply': 'その予算なら、この二つが候補です。',
+                    'followup': '最初のほうをカートに入れて。',
+                    'response': 'モデル A ですね。続けるには購入用アカウントを接続してください。',
+                    'cards': [{'title': 'モデル A', 'detail': '軽くて持ち運びやすい'},
+                              {'title': 'モデル B', 'detail': 'バッテリーが長持ち'}],
+                    'action': '購入用アカウントを接続',
+                    'takeaway': '選択を引き継ぎ、必要な時に権限を確認。'},
+                   {'id': 'place-continuation',
+                    'title': '写真から、次の話へ',
+                    'visual_title': 'お店の写真 · 現在地を共有',
+                    'visual_meta': '出発する場所も文脈に残る',
+                    'owner': '今ここ。食べた後に散歩しようかな？',
+                    'reply': '教えてもらった場所から歩ける候補が二つあります。',
+                    'followup': '川沿いのほう。どう行けばいい？',
+                    'response': '今いるお店を出発点にしますね。',
+                    'cards': [{'title': '川沿いの散歩', 'detail': '水辺を歩く'},
+                              {'title': '近所をひと回り', 'detail': '周りの通りを歩く'}],
+                    'action': 'ここからの道順',
+                    'takeaway': '写真、場所、次の質問をつなぐ。'}],
+        'screen_badge': '再構成',
+        'composer': 'PA に話しかける'},
+ 'zh-CN': {'title': '话可以很短，前后仍能接上',
+           'label': '为说明而重构的对话 · 产品方向',
+           'pa_header': 'PA',
+           'owner_label': '你',
+           'footer': '三个独立的代表性场景，并非实际产品截图或观测运行，也不代表已发布的集成功能。',
+           'scenes': [{'id': 'way-home',
+                       'title': '回家的路上',
+                       'visual_title': '已分享当前位置',
+                       'visual_meta': '需要时再分享',
+                       'owner': '回家路上有什么地方可以吃点东西？',
+                       'reply': '你现在在哪里？分享一下当前位置吧。',
+                       'followup': '',
+                       'response': '这两家可以顺路去。',
+                       'cards': [{'title': '餐馆 A', 'detail': '简单吃一顿'}, {'title': '餐馆 B', 'detail': '坐下来慢慢吃'}],
+                       'action': '',
+                       'takeaway': '需要上下文时，再向你询问。'},
+                      {'id': 'product-choice',
+                       'title': '选好以后，接着往下做',
+                       'visual_title': '耳机照片',
+                       'visual_meta': '想比较的商品类型',
+                       'owner': '找个类似的，在我的预算内。',
+                       'reply': '这个预算内，可以比较这两款。',
+                       'followup': '第一款。帮我放进购物车。',
+                       'response': '选型号 A。连接购物账户后，就能继续。',
+                       'cards': [{'title': '型号 A', 'detail': '更轻便'}, {'title': '型号 B', 'detail': '电池续航更长'}],
+                       'action': '连接购物账户',
+                       'takeaway': '接住你的选择，需要时再请求权限。'},
+                      {'id': 'place-continuation',
+                       'title': '从照片，聊到下一件事',
+                       'visual_title': '餐馆照片 · 已分享所在地点',
+                       'visual_meta': '出发地点也留在上下文中',
+                       'owner': '现在在这里。吃完去散散步？',
+                       'reply': '从你分享的位置出发，可以考虑这两条路线。',
+                       'followup': '河边那条。怎么过去？',
+                       'response': '就从你现在这家餐馆出发。',
+                       'cards': [{'title': '河边散步', 'detail': '沿着水边走'}, {'title': '街区小环线', 'detail': '逛逛周围的街道'}],
+                       'action': '从这里出发',
+                       'takeaway': '照片、地点和接下来的问题连在一起。'}],
+           'screen_badge': '重构',
+           'composer': '与 PA 交谈'}}
+
+class SceneFigure(OverviewFigure):
+ def message_height(self,text,width):
+  return self.measure(text,width-44,20)+24
+ def message(self,x,y,width,text,owner=False):
+  bubble_width=width-16
+  height=self.message_height(text,width)
+  bx=x+16 if owner else x
+  self.rect(bx,y,bubble_width,height,'#deecfa' if owner else '#ffffff','#deecfa' if owner else '#dbe3e9',12)
+  self.label(bx+14,y+12,text,bubble_width-28,20)
+  return height
+ def photo(self,x,y,width,height,name,identity):
+  # Keep input assets independent of ROOT: tests redirect ROOT for outputs.
+  import base64
+  source=Path(__file__).resolve().parent/name
+  data=base64.b64encode(source.read_bytes()).decode('ascii')
+  self.out.append(f'<defs><clipPath id="{identity}"><rect x="{x}" y="{y}" width="{width}" height="{height}" rx="10"/></clipPath></defs>')
+  self.out.append(f'<image x="{x}" y="{y}" width="{width}" height="{height}" preserveAspectRatio="xMidYMid slice" clip-path="url(#{identity})" href="data:image/jpeg;base64,{data}"/>')
+ def map(self,x,y,width,height,identity):
+  self.out.append(f'<defs><clipPath id="{identity}"><rect x="{x}" y="{y}" width="{width}" height="{height}" rx="10"/></clipPath></defs><g clip-path="url(#{identity})">')
+  self.rect(x,y,width,height,'#f1efe8','none',0)
+  self.out.append(f'<path d="M{x+width*.76} {y-10}Q{x+width*.57} {y+height/2} {x+width*.82} {y+height+20}" stroke="#c7dfeb" stroke-width="35" fill="none"/>')
+  self.rect(x+20,y+14,width*.31,40,'#dce9d6','none',6)
+  self.rect(x+width*.77,y+height*.6,width*.3,height*.5,'#dce9d6','none',6)
+  for dy in (height*.33,height*.7):
+   self.out.append(f'<path d="M{x} {y+dy}H{x+width}" stroke="#fff" stroke-width="14"/>')
+  for dx in (width*.2,width*.5,width*.88):
+   self.out.append(f'<path d="M{x+dx} {y}V{y+height}" stroke="#fff" stroke-width="12"/>')
+  self.out.append(f'<path d="M{x+width*.2} {y+height*.82}V{y+height*.7}H{x+width*.5}V{y+height*.33}H{x+width*.68}" stroke="#4c83bc" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" fill="none"/>')
+  self.circle(x+width*.2,y+height*.82,11,'#5088c0','#fff')
+  for label,px,py in [('A',x+width*.5,y+height*.37),('B',x+width*.68,y+height*.26)]:
+   self.circle(px,py,14,'#fff','#43846c')
+   self.text(px,py+7,label,20,'blue bold','middle')
+  self.out.append('</g>')
+ def results_height(self,scene,width):
+  total=self.measure(scene['reply'],width-28,20)+26
+  for card in scene['cards']:
+   total+=max(58,self.measure(card['title'],width-82,20)+self.measure(card['detail'],width-82,20)+8)+12
+  return total+4
+ def results(self,x,y,width,scene):
+  height=self.results_height(scene,width)
+  self.rect(x,y,width,height,'#fff','#dbe3e9',12)
+  cy=y+13
+  cy+=self.label(x+14,cy,scene['reply'],width-28,20)+16
+  for index,card in enumerate(scene['cards']):
+   row_h=max(58,self.measure(card['title'],width-82,20)+self.measure(card['detail'],width-82,20)+8)
+   self.circle(x+34,cy+24,17,'#e7f1ec')
+   self.text(x+34,cy+31,chr(65+index),20,'blue bold','middle')
+   tx=x+64
+   th=self.label(tx,cy,card['title'],width-82,20,'bold')
+   self.label(tx,cy+th+4,card['detail'],width-82,20,'muted')
+   cy+=row_h+12
+  return height
+ def handoff_height(self,scene,width):
+  return self.measure(scene['response'],width-32,20)+self.measure(scene['action'],width-48,20)+54
+ def handoff(self,x,y,width,scene):
+  height=self.handoff_height(scene,width)
+  self.rect(x,y,width,height,'#edf5f0','#bfd6c8',12)
+  cy=y+14
+  cy+=self.label(x+16,cy,scene['response'],width-32,20)+16
+  button_h=self.measure(scene['action'],width-48,20)+18
+  self.rect(x+12,cy,width-24,button_h,'#fff','#8bad9b',8)
+  self.label(x+width/2,cy+9,scene['action'],width-48,20,'blue bold','middle')
+  return height
+
+
+def scenes(d,mobile):
+ w=420 if mobile else 1120
+ f=SceneFigure(w,6000,d['title'],d['footer'])
+ margin=20 if mobile else 28; usable=w-2*margin
+ cw=usable if mobile else (usable-40)/3
+ y=24
+ for line in d.get('title_narrow',[d['title']]) if mobile else [d['title']]:
+  y+=f.label(margin,y,line,usable,30,'bold')
+ y+=10
+ label_lines=d['label'].split(' · ') if mobile else [d['label']]
+ for line in label_lines:
+  y+=f.label(margin,y,line,usable,21,'blue bold')
+ y+=30
+ badge=d['screen_badge']
+ headings=[f.measure(scene['title'],cw-44,24) for scene in d['scenes']]
+ screen_heights=[]
+ content_width=cw-32
+ for index,scene in enumerate(d['scenes']):
+  height=80
+  if index:
+   height+=172+10+f.measure(scene['visual_title'],content_width-28,20)+18
+  height+=f.message_height(scene['owner'],content_width)+12
+  if not index:
+   height+=f.message_height(scene['reply'],content_width)+14
+   height+=172+12+f.measure(scene['visual_title'],content_width-28,20)+18
+   result_scene=dict(scene,reply=scene['response'])
+  else:result_scene=scene
+  height+=f.results_height(result_scene,content_width)+14
+  if scene['followup']:
+   height+=f.message_height(scene['followup'],content_width)+12
+  if scene['action']:height+=f.handoff_height(scene,content_width)+14
+  height+=68
+  screen_heights.append(height)
+ max_height=max(screen_heights)
+ max_heading=max(headings)
+ for index,scene in enumerate(d['scenes']):
+  x=margin if mobile else margin+index*(cw+20)
+  f.out.append(f'<g id="scene-{scene["id"]}">')
+  heading_height=headings[index] if mobile else max_heading
+  f.circle(x+13,y+17,12,'#e5edf4')
+  f.text(x+13,y+23,str(index+1),18,'blue bold','middle')
+  f.label(x+38,y,scene['title'],cw-44,24,'bold')
+  top=y+heading_height+18
+  sh=screen_heights[index] if mobile else max_height
+  f.rect(x,top,cw,sh,'#f2f6f7','#aebdc8',26)
+  f.rect(x+1,top+1,cw-2,62,'#fff','none',25)
+  f.path(f'M{x+1} {top+62}H{x+cw-1}','#dbe3e9')
+  f.icon('pa',x+17,top+18,27,'#3b7c69')
+  f.label(x+54,top+17,d['pa_header'],60,22,'bold')
+  f.label(x+cw-17,top+19,badge,cw-110,20,'muted','end')
+  bx=x+16; bw=content_width; cy=top+80
+  if index:
+   photo='illustrative-headphones.jpg' if index==1 else 'illustrative-restaurant.jpg'
+   f.photo(bx+16,cy,bw-16,172,photo,f'photo-{index}')
+   cy+=184
+   cy+=f.label(bx+22,cy,scene['visual_title'],bw-28,20,'muted')+16
+  cy+=f.message(bx,cy,bw,scene['owner'],True)+12
+  if not index:
+   cy+=f.message(bx,cy,bw,scene['reply'])+14
+   f.map(bx+16,cy,bw-16,172,'location-map')
+   cy+=184
+   cy+=f.label(bx+22,cy,scene['visual_title'],bw-28,20,'blue bold')+16
+   result_scene=dict(scene,reply=scene['response'])
+  else:result_scene=scene
+  cy+=f.results(bx,cy,bw,result_scene)+14
+  if scene['followup']:cy+=f.message(bx,cy,bw,scene['followup'],True)+12
+  if scene['action']:cy+=f.handoff(bx,cy,bw,scene)+14
+  composer_y=top+sh-54
+  f.rect(bx,composer_y,bw,40,'#fff','#d0dce3',20)
+  f.text(bx+21,composer_y+28,'+',25,'muted','middle')
+  f.label(bx+42,composer_y+8,d['composer'],bw-56,20,'muted')
+  takeaway_y=top+sh+15
+  takeaway_h=f.label(x,takeaway_y,scene['takeaway'],cw,21,'blue')
+  f.out.append('</g>')
+  if mobile:y=takeaway_y+takeaway_h+34
+ if not mobile:
+  y=top+max_height+15+max(f.measure(scene['takeaway'],cw,21) for scene in d['scenes'])+30
+ f.path(f'M{margin} {y}H{w-margin}','#d4dce5')
+ y+=18
+ y+=f.label(margin,y,d['footer'],usable,20,'muted')+22
  return f.finish(int(y))
 
 if __name__=='__main__':
@@ -630,3 +920,7 @@ if __name__=='__main__':
  for locale,d in OVERVIEW.items():
   for mobile in [False,True]:
    overview(d,mobile).write(f'presence-overview.{locale}{".narrow" if mobile else ""}.svg')
+
+ for locale,d in SCENES.items():
+  for mobile in [False,True]:
+   scenes(d,mobile).write(f'presence-scenes.{locale}{".narrow" if mobile else ""}.svg')

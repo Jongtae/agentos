@@ -33,7 +33,7 @@ AgentOS는 이것을 공통된 개념과 관계로 표현합니다. 이 구조�
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.ko.narrow.svg">
-  <img src="docs/assets/readme/presence-overview.ko.svg" alt="개념 설명 일러스트: NVIDIA 질문에 답하는 어시스턴트, Amazon 명령을 실행하는 컴퓨터 에이전트, 시간에 걸친 대화를 이어가는 Personal AgentOS. 나는 하나의 PA와 대화하고, 맥락·일·권한은 교체 가능한 AI와 도구 위의 AgentOS에 남습니다. 커피 대화는 제품 방향을 설명하며 실제 관찰 실행이나 배포된 통합 기능을 뜻하지 않습니다.">
+  <img src="docs/assets/readme/presence-overview.ko.svg" alt="개념 설명 일러스트: NVIDIA 질문에 답하는 어시스턴트, Amazon 명령을 실행하는 컴퓨터 에이전트, 시간에 걸친 대화를 이어가는 Personal AgentOS. 나는 하나의 PA와 대화하고, 맥락·일·권한은 교체 가능한 AI와 도구 위의 AgentOS에 남습니다. 이 예시는 제품 방향을 설명하며 실제 관찰 실행이나 배포된 통합 기능을 뜻하지 않습니다.">
 </picture>
 
 AgentOS의 판단 계층이 필요한 AI와 도구를 고르고 결과를 확인합니다. 나는 PA와 이야기하고, AgentOS가 대화 아래에서 이 구조를 이어갑니다. **같은 PA, 다른 AI.**
@@ -50,6 +50,11 @@ AgentOS의 판단 계층이 필요한 AI와 도구를 고르고 결과를 확인
 
 *제품 방향을 설명하는 예시이며, 실제 관찰 실행이나 배포된 구매 기능을 뜻하지 않습니다.*
 
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-scenes.ko.narrow.svg">
+  <img src="docs/assets/readme/presence-scenes.ko.svg" alt="세 가지 PA 대화를 설명용으로 재구성한 화면: 귀갓길 식사를 위해 위치를 공유하고, 사진으로 찾은 헤드폰을 선택한 뒤 실행에 필요한 쇼핑 계정을 연결하며, 식당 사진에서 근처 산책 이야기로 이어갑니다. 맥락·연속성·필요한 순간의 권한을 보여주는 가상 화면이며 실제 제품 캡처나 관찰 기록이 아닙니다.">
+</picture>
+
 <!-- readme-section:try-today -->
 
 ## 가볍게 시작하기
@@ -61,11 +66,12 @@ brew install jongtae/agentos/agentos
 agentos start
 ```
 
-1. 브라우저가 [http://127.0.0.1:8787](http://127.0.0.1:8787/)에서 열리면 **바로 시작하기**를 누릅니다.
+1. 브라우저에서 [http://127.0.0.1:8787](http://127.0.0.1:8787/) 설정 화면이 열리면 **바로 시작하기**를 누릅니다.
 2. 내 모델을 연결하고 연결 테스트를 마칩니다. 도구 호출을 지원하는 로컬 Ollama 모델이나 내 API 접근 권한으로 OpenAI·OpenAI 호환 서비스·Anthropic을 사용할 수 있습니다. 설정 화면은 현재 한국어입니다.
-3. **“이번 주에 무엇에 집중하면 좋을지 같이 정리해보자.”** 하고 대화를 시작해보세요.
+3. **설정 → 외부 연결**에서 BotFather로 만든 내 봇의 토큰을 입력해 연결합니다. 표시된 연결 링크를 Telegram에서 열고 **시작**을 누릅니다.
+4. 그 Telegram 대화에서 **“이번 주에 무엇에 집중하면 좋을지 같이 정리해보자.”** 하고 말을 걸어보세요.
 
-Python은 Homebrew가 함께 설치하며, 모델 이용 권한은 별도로 준비합니다. 모델 설정, 파일 작업, Telegram, 최신 소스 실행은 [QUICKSTART](QUICKSTART.md)에 안내되어 있습니다.
+Python은 Homebrew가 함께 설치하며, 모델 이용 권한은 별도로 준비합니다. 대화하는 동안 `agentos start`를 실행한 상태로 둡니다. 모델 설정, 파일 작업, Telegram, 최신 소스 실행은 [QUICKSTART](QUICKSTART.md)에 안내되어 있습니다.
 
 **현재 단계:** Homebrew는 이전 프리뷰인 **v1.1.0**(2026-09-23)을 설치합니다. 이후 `main`의 Presence 구현은 이 배포판에 포함되지 않습니다. 해당 배포판에서는 일정 생성이 불가능하고 조사는 부분 지원입니다. 자세한 범위는 [release manifest](docs/release-manifest.json)를 보세요. [현재 상태](docs/product-status.ko.md)에서 사용할 수 있는 것, 검증한 것, 앞으로의 목표를 구분해 설명합니다.
 

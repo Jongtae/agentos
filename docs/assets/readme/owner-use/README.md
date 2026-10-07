@@ -11,6 +11,8 @@ These GIFs are edited from the owner-supplied `PA Use Case Video.mp4`, selected 
 
 All editions are 960 × 810, 1,140 frames and 57 seconds, with a 50 ms frame delay (20fps) and continuous looping. The retained motion plays at its original speed, including the emoji-selection and reaction sequence. The completed Spam-result screen has a 3.15-second stable hold so its reply can be read. Scene cards and cuts shorten waiting periods; this is an edited reel, not an uncut transaction or a word-for-word transcript. Caption panels summarize or translate the matching excerpts. The phone screen remains the recording.
 
+The public READMEs place each GIF in a closed-by-default native HTML disclosure. Opening it is the reader’s explicit choice to view motion; closing it hides the animation while leaving the four-scene text available. This uses the existing Markdown/HTML renderer and adds no player script or dependency. The GIF files themselves remain continuously looping assets.
+
 ## What the recording supports
 
 1. **Dongtan conversation:** a friend meeting, departure point, a corrected GTX route suggestion and dinner preferences appear in the conversation.

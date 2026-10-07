@@ -31,9 +31,14 @@ Want to run it before reading further? Skip to [Try it](#try-it); the rest of th
 
 These are screen recordings from the owner's own use of Personal AgentOS, edited into four distinct scenes. Korean dialogue remains visible, with English translations below the matching dialogue excerpts. Taps, scrolling and emoji reactions play continuously at 20fps.
 
+<details>
+<summary>Expand to watch the recorded owner-use GIF · collapse to hide motion</summary>
+
 ![Four recorded owner-use scenes: a Dongtan meeting and dinner conversation, an E-Mart cart inquiry, a request for one small can of Spam, and a separate Kyobo book-cart session. Korean dialogue is accompanied by English translations.](docs/assets/readme/owner-use/owner-use.en.gif)
 
 [Open the GIF at full size](docs/assets/readme/owner-use/owner-use.en.gif).
+
+</details>
 
 1. **Meeting a friend in Dongtan:** departure point, GTX and dinner preferences become part of the same conversation. The PA also corrects an earlier route suggestion.
 2. **Checking an E-Mart / SSG cart:** after sign-in, the PA replies that the cart contains 22 items and no Spam.

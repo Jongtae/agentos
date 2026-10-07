@@ -31,9 +31,14 @@ Personal AgentOS 在一个由你安装和掌控的开源环境中探索这一想
 
 这是所有者亲自使用 Personal AgentOS 时录下的画面，剪辑为四个独立场景。保留韩语对话，并在对应的对话节选下方添加中文翻译。点击、滚动和表情反应以20fps连续播放。
 
+<details>
+<summary>展开观看真实使用GIF · 收起即可隐藏动画</summary>
+
 ![所有者真实使用的四个片段：在东滩见朋友的出行与晚餐对话、易买得购物车查询、只添加一小罐午餐肉的请求，以及独立的教保文库购物车会话。韩语对话附有中文翻译。](docs/assets/readme/owner-use/owner-use.zh-CN.gif)
 
 [以原始尺寸查看GIF](docs/assets/readme/owner-use/owner-use.zh-CN.gif).
+
+</details>
 
 1. **在东滩见朋友：** 出发地点、GTX和晚餐偏好在同一段对话中延续，PA也纠正了先前的路线建议。
 2. **查询易买得 / SSG购物车：** 登录后，PA回答购物车里有22件商品，没有午餐肉。

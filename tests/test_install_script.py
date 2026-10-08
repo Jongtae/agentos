@@ -29,8 +29,9 @@ echo "$@" >> "$FAKE_LOG"
 while [ $# -gt 0 ]; do [ "$1" = "-o" ] && { printf 'agentos-archive' > "$2"; exit 0; }; shift; done
 """
 FAKE_UV = """#!/bin/sh
+if [ "$1" = "--version" ]; then echo "uv ${FAKE_UV_VERSION:-0.12.23}"; exit 0; fi
 echo "uv $*" >> "$FAKE_LOG"
-if [ "$1 $2" = "tool dir" ]; then echo "$FAKE_BIN"; fi
+if [ "$2 $3" = "tool dir" ]; then echo "$FAKE_BIN"; fi
 """
 FAKE_AGENTOS = """#!/bin/sh
 echo "agentos $*" >> "$FAKE_LOG"
@@ -85,8 +86,9 @@ class InstallScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         version = pin("AGENTOS_VERSION")
         self.assertTrue(any(f"archive/refs/tags/v{version}.tar.gz" in call for call in calls))
-        install = next(call for call in calls if call.startswith("uv tool install"))
+        install = next(call for call in calls if call.startswith("uv --no-config tool install"))
         self.assertIn("--python 3.13", install)
+        self.assertFalse(any("uv-installer.sh" in call for call in calls), "a current uv is reused")
         self.assertRegex(install, rf"personal-agentos\[mcp-host\] @ \S+agentos-{re.escape(version)}\.tar\.gz$")
         self.assertEqual(calls[-1], "agentos start")
 
@@ -94,24 +96,31 @@ class InstallScriptTests(unittest.TestCase):
         digest = hashlib.sha256(b"agentos-archive").hexdigest()
         result, calls = self.run_script(self.with_archive_checksum(digest), env={"AGENTOS_NO_START": "1"})
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(any(call.startswith("uv tool install") for call in calls))
+        self.assertTrue(any(call.startswith("uv --no-config tool install") for call in calls))
         self.assertNotIn("agentos start", calls)
 
     def test_checksum_mismatch_installs_nothing(self):
-        result, calls = self.run_script(SCRIPT.read_text(encoding="utf-8"))
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("checksum mismatch", result.stderr)
-        self.assertFalse(any(call.startswith("uv tool install") for call in calls))
-        self.assertNotIn("agentos start", calls)
+        for env in ({}, {"NO_FAKE_UV": "1"}):
+            with self.subTest(env=env):
+                result, calls = self.run_script(SCRIPT.read_text(encoding="utf-8"), env=env)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("checksum mismatch for v", result.stderr)
+                # The archive is verified before uv is fetched or used.
+                self.assertFalse(any("uv-installer.sh" in call for call in calls))
+                self.assertFalse(any(call.startswith("uv ") for call in calls))
+                self.assertNotIn("agentos start", calls)
 
     def test_unverified_uv_installer_is_never_run(self):
-        # No uv on PATH: the script must fetch the uv installer, and the
-        # fake curl's bytes do not match the pinned installer checksum.
-        result, calls = self.run_script(SCRIPT.read_text(encoding="utf-8"), env={"NO_FAKE_UV": "1"})
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("uv 0", result.stderr)
-        self.assertTrue(any("uv-installer.sh" in call for call in calls))
-        self.assertFalse(any("archive/refs/tags" in call for call in calls))
+        digest = hashlib.sha256(b"agentos-archive").hexdigest()
+        for env in ({"NO_FAKE_UV": "1"}, {"FAKE_UV_VERSION": "0.1.45"}):
+            with self.subTest(env=env):
+                # No uv, or one too old for `uv tool`: the pinned installer is
+                # fetched, and the fake bytes do not match its checksum.
+                result, calls = self.run_script(self.with_archive_checksum(digest), env=env)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("uv 0", result.stderr)
+                self.assertTrue(any("uv-installer.sh" in call for call in calls))
+                self.assertFalse(any("tool install" in call for call in calls))
 
     def test_windows_shells_are_sent_to_wsl_before_any_download(self):
         for uname in ("MINGW64_NT-10.0", "MSYS_NT-10.0", "CYGWIN_NT-10.0"):

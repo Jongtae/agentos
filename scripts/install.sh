@@ -9,9 +9,10 @@
 # it: the uv release installer (which itself carries the checksums of the uv
 # binaries it downloads) and the published AgentOS release, which is the same
 # GitHub tag archive the Homebrew formula uses, against the SHA-256 recorded
-# in docs/release-manifest.json. A uv already on PATH is reused as is, with
-# the same trust as any other tool the owner installed; only a uv this script
-# downloads is checksum-verified.
+# in docs/release-manifest.json. A current uv already on PATH is reused as
+# is, with the same trust as any other tool the owner installed; only a uv
+# this script downloads is checksum-verified. `--no-config` keeps the owner's
+# uv settings (indexes, offline mode) out of this install.
 # tests/test_install_script.py keeps these pins equal to the newest published
 # release; docs/release.en.md step 9 updates them with each release.
 set -eu
@@ -50,7 +51,24 @@ sha256_of() { $SHA256 "$1" | cut -d' ' -f1; }
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM
 
-if command -v uv >/dev/null 2>&1; then
+# Verify the AgentOS release first, so a bad download changes nothing on this machine.
+archive="$work/agentos-$AGENTOS_VERSION.tar.gz"
+say "Downloading AgentOS $AGENTOS_VERSION..."
+download "https://github.com/Jongtae/agentos/archive/refs/tags/v$AGENTOS_VERSION.tar.gz" "$archive"
+[ "$(sha256_of "$archive")" = "$AGENTOS_ARCHIVE_SHA256" ] \
+  || fail "checksum mismatch for v$AGENTOS_VERSION; nothing was installed."
+
+# Reuse an existing uv only at the pinned minor version or newer; older uv
+# releases lack the `uv tool` commands used below.
+uv_is_current() {
+  ver=$("$1" --version 2>/dev/null | cut -d' ' -f2)
+  major=${ver%%.*}; rest=${ver#*.}; minor=${rest%%.*}
+  want_major=${UV_VERSION%%.*}; want_rest=${UV_VERSION#*.}; want_minor=${want_rest%%.*}
+  case "$major$minor" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$major" -gt "$want_major" ] || { [ "$major" -eq "$want_major" ] && [ "$minor" -ge "$want_minor" ]; }
+}
+
+if command -v uv >/dev/null 2>&1 && uv_is_current "$(command -v uv)"; then
   UV=$(command -v uv)
 else
   say "Installing uv $UV_VERSION (Python package manager by Astral)..."
@@ -62,17 +80,11 @@ else
   [ -x "$UV" ] || fail "uv was installed but not found at $UV."
 fi
 
-archive="$work/agentos-$AGENTOS_VERSION.tar.gz"
-say "Downloading AgentOS $AGENTOS_VERSION..."
-download "https://github.com/Jongtae/agentos/archive/refs/tags/v$AGENTOS_VERSION.tar.gz" "$archive"
-[ "$(sha256_of "$archive")" = "$AGENTOS_ARCHIVE_SHA256" ] \
-  || fail "checksum mismatch for v$AGENTOS_VERSION; nothing was installed."
-
 say "Installing AgentOS $AGENTOS_VERSION..."
-"$UV" tool install --force --quiet --python "$PYTHON_VERSION" "personal-agentos[mcp-host] @ $archive" \
+"$UV" --no-config tool install --force --quiet --python "$PYTHON_VERSION" "personal-agentos[mcp-host] @ $archive" \
   || fail "uv could not install AgentOS."
-"$UV" tool update-shell >/dev/null 2>&1 || true
-bin_dir=$("$UV" tool dir --bin)
+"$UV" --no-config tool update-shell >/dev/null 2>&1 || true
+bin_dir=$("$UV" --no-config tool dir --bin)
 
 say ""
 say "AgentOS $AGENTOS_VERSION is installed. Next time, open a new terminal and run: agentos start"

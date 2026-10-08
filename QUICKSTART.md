@@ -18,7 +18,7 @@ One command installs and starts AgentOS. You do not need Homebrew, Python, Docke
 curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/main/scripts/install.sh | sh
 ```
 
-The [installer](scripts/install.sh) installs [uv](https://docs.astral.sh/uv/) at a pinned version through Astral's official installer, which adds `~/.local/bin` to your shell `PATH`. It then downloads the published release archive and checks its SHA-256 against the [release manifest](docs/release-manifest.json); on a mismatch it installs nothing. Finally it installs AgentOS with a uv-managed Python and starts it. Set `AGENTOS_NO_START=1` to install without starting. Later, open a new terminal and run `agentos start`. Running the same command again after a release updates AgentOS. `uv tool uninstall personal-agentos` removes the program and keeps your data.
+The [installer](scripts/install.sh) first downloads the published release archive and checks its SHA-256 against the [release manifest](docs/release-manifest.json); on a mismatch it installs nothing. If you do not already have a current [uv](https://docs.astral.sh/uv/), it installs a pinned version through Astral's official installer, which adds `~/.local/bin` to your shell `PATH`. It then installs AgentOS with a uv-managed Python, ignoring your own uv settings, and starts it. Set `AGENTOS_NO_START=1` to install without starting. Later, open a new terminal and run `agentos start`. Running the same command again after a release updates AgentOS. `uv tool uninstall personal-agentos` removes the program and keeps your data.
 
 If you use Homebrew on macOS, this installs the same release:
 

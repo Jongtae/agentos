@@ -2,11 +2,11 @@
 
 The public READMEs introduce the desired personal-agent relationship, owner control, the structure that makes continuity possible, a short representative conversation, and a first trial. [The documentation map](../../README.md) remains the documentation authority map.
 
-## Recorded owner use
+## Header and demo
 
-The four public READMEs now also lead with localized [owner-use GIFs](owner-use/README.md), selected from the owner's supplied screen recording on 2026-10-08. They show separate Dongtan, E-Mart/SSG cart-read, small-can request and Kyobo scenes at continuous 20fps. Screen observations and the PA's reported results are distinguished from backend verification and a named release; the recording does not demonstrate an AI switch or completed payment. Short-lived sign-in link text is omitted from the public edit.
+The READMEs open with a fixed-width character banner (`AgentOS` in the FIGlet *ANSI Shadow* font, generated with pyfiglet and kept as plain text inside `<pre>`), status badges, and [`demo/demo.gif`](demo/README.md). The badges link to the `validate` and `full-validate` workflows, the latest release, the supported Python version, platforms and licence; their images come from GitHub Actions and shields.io.
 
-Public front-page derivatives live in `docs/assets/readme/owner-use/`. Full-size GIFs, scene exports, earlier edits and validation receipts are local editing material under the already ignored `output/readme-media/2026-10-08/`; they are not duplicated in Git. The existing overview and reconstructed conversations below retain their illustrative evidence class.
+The demo is one language-neutral GIF edited from real Telegram sessions: a dinner meeting, a grocery cart that stops before payment, and a book-cart discount question. Sign-in links and home-location details are blurred. Its sources, segments, masking and evidence class are in [demo/README.md](demo/README.md) and [demo/manifest.json](demo/manifest.json).
 
 ## Current introduction
 

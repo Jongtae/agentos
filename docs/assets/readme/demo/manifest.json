@@ -1,0 +1,167 @@
+{
+  "selected_by_owner": "2026-10-08",
+  "issue": 1133,
+  "evidence_class": "edited screen recordings of real Telegram sessions; visible screens and PA replies",
+  "application_revision": "not shown in the recordings",
+  "model_identity": "not shown in the recordings",
+  "sources": {
+    "r1": {
+      "recorded": "2026-10-07T21:13+09:00",
+      "duration_s": 735.28,
+      "sha256": "3823c992933b4d6cccd4c1be23e53f0c0c18c58e3bc498f43fd96e0168211b42"
+    },
+    "r2": {
+      "recorded": "2026-10-07T21:49+09:00",
+      "duration_s": 418.12,
+      "sha256": "dfb9049dbc2d03e0a5a03a68545e0fedb22f6898a6d6949b61fde42a56a3e62e"
+    },
+    "r3": {
+      "recorded": "2026-10-07T21:56+09:00",
+      "duration_s": 82.15,
+      "sha256": "6d2296a56f2307538312b13210f4c205fdf06be7cdea1940a6c8f401c54315b9"
+    },
+    "r4": {
+      "recorded": "2026-10-07T22:19+09:00",
+      "duration_s": 67.0,
+      "sha256": "f0f7f507a1a24c578c95460776cfc1971268bc168d438caf7e2bf70c54ab924d"
+    }
+  },
+  "segments": [
+    {
+      "scene": 0,
+      "kind": "title_card",
+      "hold_s": 1.5,
+      "text": "Personal AgentOS · Same PA. Different AI. · Demo · Telegram"
+    },
+    {
+      "scene": 1,
+      "source": "r1",
+      "kind": "hold",
+      "at_s": 250,
+      "hold_s": 3.6
+    },
+    {
+      "scene": 1,
+      "source": "r1",
+      "kind": "motion",
+      "start_s": 356,
+      "end_s": 373,
+      "speed": 4.0
+    },
+    {
+      "scene": 1,
+      "source": "r1",
+      "kind": "hold",
+      "at_s": 422,
+      "hold_s": 3.0
+    },
+    {
+      "scene": 1,
+      "source": "r1",
+      "kind": "motion",
+      "start_s": 440,
+      "end_s": 447,
+      "speed": 2.0
+    },
+    {
+      "scene": 1,
+      "source": "r1",
+      "kind": "motion",
+      "start_s": 474,
+      "end_s": 483,
+      "speed": 3.0
+    },
+    {
+      "scene": 1,
+      "source": "r1",
+      "kind": "motion",
+      "start_s": 640,
+      "end_s": 653,
+      "speed": 4.0
+    },
+    {
+      "scene": 1,
+      "source": "r1",
+      "kind": "hold",
+      "at_s": 653,
+      "hold_s": 3.0
+    },
+    {
+      "scene": 1,
+      "source": "r1",
+      "kind": "hold",
+      "at_s": 715,
+      "hold_s": 3.4
+    },
+    {
+      "scene": 2,
+      "source": "r3",
+      "kind": "hold",
+      "at_s": 79,
+      "hold_s": 3.2
+    },
+    {
+      "scene": 2,
+      "source": "r4",
+      "kind": "hold",
+      "at_s": 1,
+      "hold_s": 2.0
+    },
+    {
+      "scene": 2,
+      "source": "r4",
+      "kind": "hold",
+      "at_s": 45,
+      "hold_s": 1.6
+    },
+    {
+      "scene": 2,
+      "source": "r4",
+      "kind": "hold",
+      "at_s": 64,
+      "hold_s": 3.8
+    },
+    {
+      "scene": 3,
+      "source": "r2",
+      "kind": "hold",
+      "at_s": 86,
+      "hold_s": 2.6
+    },
+    {
+      "scene": 3,
+      "source": "r2",
+      "kind": "hold",
+      "at_s": 112,
+      "hold_s": 1.6
+    },
+    {
+      "scene": 3,
+      "source": "r2",
+      "kind": "hold",
+      "at_s": 182,
+      "hold_s": 3.8
+    }
+  ],
+  "masking": {
+    "method": "Apple Vision OCR text boxes, Gaussian blur, applied to neighbouring frames as well",
+    "patterns": [
+      "sign-in tunnel host",
+      "remote-login path",
+      "one-time code and its continuation lines",
+      "home neighbourhood",
+      "apartment-complex link"
+    ],
+    "post_check": "all 153 distinct output frames re-OCR'd; 0 matches"
+  },
+  "output": {
+    "file": "demo.gif",
+    "width": 480,
+    "height": 1044,
+    "frames": 472,
+    "fps": 10,
+    "loop": true,
+    "sha256": "b316fde7a6ef5ec81aa83565b73e996b7b44f21d03f171586921cd0ddd53adc5",
+    "bytes": 4344647
+  }
+}

@@ -34,10 +34,10 @@ LOCALIZED_READMES = READMES[1:]
 # README.md and must then appear in every public locale in the same order.
 CORE_SECTION_IDS = (
     "hero",
+    "try-today",
     "ownership",
     "presence",
     "conversation",
-    "try-today",
     "more",
     "license",
 )
@@ -108,17 +108,17 @@ STATUS_ROW_EVIDENCE_TOKEN = "Synthetic **pass-with-friction**"
 # This scene explains the intended experience; it cannot silently become
 # a shipped integration claim when the README narrative changes.
 README_DIRECTION_DISCLAIMERS = {
-    "README.md": "A condensed, redacted reconstruction based on owner-pilot conversations. It is not an evidence record of those conversations, and the map and shopping integrations shown are product direction, not shipped features.",
-    "README.ko.md": "소유자 파일럿 대화를 바탕으로 압축·비식별화해 재구성한 그림입니다. 그 대화의 증거 기록은 아니며, 그림 속 지도·쇼핑 연동은 배포된 기능이 아니라 제품 방향입니다.",
-    "README.ja.md": "オーナーのパイロット会話をもとに、要約と匿名化を加えて再構成した図です。その会話の証拠記録ではなく、図中の地図・ショッピング連携は提供済みの機能ではなく製品の方向性です。",
-    "README.zh-CN.md": "这是基于所有者试点对话浓缩并脱敏后的重构图。它不是那些对话的证据记录；图中的地图和购物集成属于产品方向，并非已发布的功能。",
+    "README.md": "An illustrative reconstruction condensed from real conversations. The map and shopping integrations shown are product direction, not shipped features.",
+    "README.ko.md": "실제 대화를 압축해 재구성한 설명용 그림입니다. 그림 속 지도·쇼핑 연동은 배포된 기능이 아니라 제품 방향입니다.",
+    "README.ja.md": "実際の会話を要約して再構成した説明図です。図中の地図・ショッピング連携は提供済みの機能ではなく製品の方向性です。",
+    "README.zh-CN.md": "这是根据真实对话浓缩重构的示意图。图中的地图和购物集成属于产品方向，并非已发布的功能。",
 }
 
 README_RELEASE_BOUNDARIES = {
-    "README.md": "Homebrew installs **v{version}** ({date}), built from the tagged main commit. The meeting illustration and reconstructed conversations are product direction. The owner-use GIF records separate pilot sessions and is not release-specific end-to-end validation.",
-    "README.ko.md": "Homebrew는 태그가 붙은 main 커밋의 **v{version}**({date})을 설치합니다. 미팅 설명 그림과 재구성 대화는 제품 방향 예시입니다. 실제 사용 GIF는 별도 소유자 파일럿 기록이며, 이 배포본의 종단 간 검증은 아닙니다.",
-    "README.ja.md": "Homebrew からは、タグを付けた main コミットの **v{version}**（{date}）が入ります。会議の説明図と再構成した会話は製品の方向性です。実際の利用GIFは別のオーナー・パイロット記録であり、この版の一連の動作を検証したものではありません。",
-    "README.zh-CN.md": "Homebrew 安装的是从已打标签的 main 提交构建的 **v{version}**（{date}）。会议示意图和重构对话属于产品方向。真实使用GIF记录的是独立的所有者试点会话，并非该发行版本的端到端验证。",
+    "README.md": "Homebrew installs **v{version}** ({date}), built from the tagged main commit. The demo is edited from real sessions and is not release-specific end-to-end validation; the illustrations are product direction.",
+    "README.ko.md": "Homebrew는 태그가 붙은 main 커밋의 **v{version}**({date})을 설치합니다. 데모는 실제 사용 세션을 편집한 것으로 이 배포본의 종단 간 검증은 아니며, 설명 그림은 제품 방향 예시입니다.",
+    "README.ja.md": "Homebrew からは、タグを付けた main コミットの **v{version}**（{date}）が入ります。デモは実際の利用セッションを編集したもので、この版の一連の動作を検証したものではありません。説明図は製品の方向性を示す例です。",
+    "README.zh-CN.md": "Homebrew 安装的是从已打标签的 main 提交构建的 **v{version}**（{date}）。演示是根据真实使用会话剪辑的，并非该发行版本的端到端验证；示意图属于产品方向。",
 }
 
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
@@ -667,7 +667,7 @@ def validate_readmes(root: Path = ROOT) -> list[str]:
 
     core_order = tuple(section for section in canonical_sections if section in CORE_SECTION_IDS)
     if not missing_core and core_order != CORE_SECTION_IDS:
-        errors.append("README.md: core section order must follow thesis, ownership, presence, conversation, installation, references, license")
+        errors.append("README.md: core section order must follow thesis, installation, ownership, presence, conversation, references, license")
 
     try:
         release = newest_published_release(root)

@@ -66,7 +66,7 @@ agentos start
 
 On Windows, run `wsl --install` in PowerShell, restart, open Ubuntu and run the first command there. Windows details, what the installer does, running from source and every setting are in [QUICKSTART](QUICKSTART.md). Keep `agentos start` running while you talk.
 
-**Release status:** both installers install **v1.1.1** (2026-10-07), built from the tagged main commit. The demo is edited from real sessions and is not release-specific end-to-end validation; the illustrations are product direction. The [release manifest](docs/release-manifest.json) records what each release covers, and [product status](docs/product-status.en.md) separates shipped behavior, test evidence and direction.
+**Release status:** both installers install **v1.1.1** (2026-10-07), built from the tagged main commit. The demo and the everyday-use image come from real sessions and are not release-specific end-to-end validation; the architecture figure is product direction. The [release manifest](docs/release-manifest.json) records what each release covers, and [product status](docs/product-status.en.md) separates shipped behavior, test evidence and direction.
 
 <!-- readme-section:ownership -->
 
@@ -100,20 +100,20 @@ The figure shows the intended design, not an observed run. Details: [architectur
 
 <!-- readme-section:conversation -->
 
-## Where it's going
+## Everyday use
 
-*An illustrative reconstruction condensed from real conversations. The map and shopping integrations shown are product direction, not shipped features.*
+*Condensed from real conversations with the PA and redrawn: in Telegram the replies arrive as text and links, not cards.*
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation.en.png">
-  <img src="docs/assets/readme/owner-pilot-conversation.en.png" alt="Three reconstructed PA conversations in English: finding dinner after sharing a location, comparing golf belts before an account-login handoff, and continuing from a restaurant photo to a nearby walk. Illustrative, not a verbatim product screenshot.">
+  <img src="docs/assets/readme/owner-pilot-conversation.en.png" alt="Three PA conversations reconstructed from real use, in English: finding dinner after sharing a location, comparing golf belts before signing in for the cart step, and continuing from a restaurant photo to a nearby walk. Condensed, not a verbatim screenshot.">
 </picture>
 
-Dinner on the way home, a belt like the one in a photo, what to do after dinner: each follows the same path. **What you say or show → context you allowed, with source and time → a useful question or tool → the boundary for action → an observed result.** Adding to a cart and paying stay different actions.
+On the way home, the PA asks for your location before suggesting places to eat. For a belt like the one in a photo, it compares options and asks you to sign in before the cart step. From a restaurant photo, it picks up where you are and suggests what to do next. **What you say or show → context you allowed, with source and time → a useful question or tool → the boundary for action → an observed result.** Adding to a cart and paying stay different actions.
+
+**Next:** following what “it” and “the same one” mean across hours, so you keep talking instead of assembling a workflow.
 
 > “We’re almost out of coffee.” · *hours later* · “Anywhere on my way out?” · *later* · “Just get the same one as last time.”
-
-The aim is a PA that follows what “it” and “the same one” mean, so you keep talking instead of assembling a workflow.
 
 <!-- readme-section:more -->
 

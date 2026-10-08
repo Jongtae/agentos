@@ -66,7 +66,7 @@ agentos start
 
 在 Windows 上，请在 PowerShell 中运行 `wsl --install` 并重启，然后打开 Ubuntu 运行第一条命令。Windows 说明、安装脚本做了什么、从源码运行以及所有设置，请见 [QUICKSTART](QUICKSTART.md)。对话期间请保持 `agentos start` 运行。
 
-**发布状态：** 两种安装方式安装的都是从已打标签的 main 提交构建的 **v1.1.1**（2026-10-07）。演示是根据真实使用会话剪辑的，并非该发行版本的端到端验证；示意图属于产品方向。[release manifest](docs/release-manifest.json) 记录每个版本的覆盖范围，[产品状态](docs/product-status.en.md) 区分已提供的功能、测试依据和发展方向。
+**发布状态：** 两种安装方式安装的都是从已打标签的 main 提交构建的 **v1.1.1**（2026-10-07）。演示和日常使用画面来自真实使用会话，并非该发行版本的端到端验证；架构图属于产品方向。[release manifest](docs/release-manifest.json) 记录每个版本的覆盖范围，[产品状态](docs/product-status.en.md) 区分已提供的功能、测试依据和发展方向。
 
 <!-- readme-section:ownership -->
 
@@ -100,20 +100,20 @@ agentos start
 
 <!-- readme-section:conversation -->
 
-## 未来方向
+## 日常使用
 
-*这是根据真实对话浓缩重构的示意图。图中的地图和购物集成属于产品方向，并非已发布的功能。*
+*这是根据与 PA 的真实对话浓缩后重新绘制的画面。在实际的 Telegram 中，回复是文字和链接，而不是卡片。*
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation.zh-CN.png">
-  <img src="docs/assets/readme/owner-pilot-conversation.zh-CN.png" alt="三段 PA 对话的中文版说明性重构图：分享位置后寻找回家路上的餐厅，比较高尔夫腰带并请求登录账户，再从餐厅照片延续到附近散步。不是产品画面的原样截图。">
+  <img src="docs/assets/readme/owner-pilot-conversation.zh-CN.png" alt="根据真实使用重构的三段 PA 对话：分享位置后寻找回家路上的晚餐，比较高尔夫腰带并在加入购物车前请求登录，再从餐厅照片延续到附近散步。浓缩画面，并非原样截图。">
 </picture>
 
-回家路上的晚餐、和照片里相似的腰带、晚饭后做什么，走的都是同一条路径：**你说的或展示的 → 带来源和时间的已授权上下文 → 有用的提问或工具 → 行动边界 → 确认的结果。** 加入购物车和付款是两种不同的行动。
+回家路上，PA 会先询问你的当前位置，再推荐吃饭的地方。对于和照片里相似的腰带，它会先比较，再在加入购物车之前请你登录。收到餐厅照片后，它会从你所在的地方接着推荐接下来做什么。**你说的或展示的 → 带来源和时间的已授权上下文 → 有用的提问或工具 → 行动边界 → 确认的结果。** 加入购物车和付款是两种不同的行动。
+
+**下一步目标：** 即使隔了几个小时，也能理解“那个”和“上次那个”指什么，让你只需继续对话，而不必拼装工作流。
 
 > “咖啡快没了。” · *几小时后* · “出门路上有地方买吗？” · *之后* · “没时间了，买上次那个。”
-
-目标是一个能理解“那个”和“上次那个”指什么的 PA，让你只需继续对话，而不必拼装工作流。
 
 <!-- readme-section:more -->
 

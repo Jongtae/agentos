@@ -83,7 +83,11 @@ def test_validation_uses_the_pinned_resolver_with_read_only_permissions() -> Non
         workflow = (ROOT / relative_path).read_text(encoding="utf-8")
         assert f"astral-sh/setup-uv@{SETUP_UV_REF}" in workflow
         assert f"version: '{UV_VERSION}'" in workflow
-        assert "uv sync --locked --extra mcp-host --extra schema-validation --group dev" in workflow
+        # Required CI syncs only what its focused tests import (#1132); the
+        # nightly suite syncs every extra. Both stay locked to the pinned resolver.
+        assert "uv sync --locked" in workflow and "--group dev" in workflow
+        if relative_path.endswith("full-validate.yml"):
+            assert "uv sync --locked --extra mcp-host --extra schema-validation --group dev" in workflow
         assert "permissions:\n  contents: read" in workflow
         assert "pull_request_target" not in workflow
         assert "contents: write" not in workflow

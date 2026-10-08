@@ -1486,6 +1486,9 @@ class RealWorkerInFlowLogin(_BridgeHarness):
             self.profile._live.goto(origin + '/session-start', 10)
             self.profile._live.hide()
             self.assertTrue(wait_until(lambda: self.store.job(self.job)['status'] == 'queued', 20))
+            # The job is re-queued just before the login record leaves 'resuming'; a
+            # slower macOS runner observed the gap (#1178), so wait for the final state.
+            wait_until(lambda: self.service._browser_login(self.job)['state'] == 'resumed', 10)
             self.assertEqual(self.service._browser_login(self.job)['state'], 'resumed')
             self.assertFalse(self.profile.status()['login_window_open'])
             self.assertFalse(self.profile.status()['in_use'])

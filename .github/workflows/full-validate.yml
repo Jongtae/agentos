@@ -31,3 +31,32 @@ jobs:
       - run: .venv/bin/python -c "import json,pathlib; [json.loads(line) for line in pathlib.Path('docs/issue-branch-ledger.jsonl').read_text(encoding='utf-8').splitlines()]"
       - run: .venv/bin/python scripts/verify_agentpackage_v01.py
       - run: PATH="$PWD/.venv/bin:$PATH" python3 -m pytest -q tests
+
+  # MACOS-CI-01 #1178: the same suite on macOS, where the embedded system
+  # WebKit browser, Keychain-backed sessions and launchd paths actually run.
+  # AGENTOS_REAL_BROWSER_TESTS keeps real windows off an owner's screen during
+  # local runs; a CI runner has no owner screen, so they run here.
+  full-validate-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      AGENTOS_REAL_BROWSER_TESTS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: '0.11.33'
+          enable-cache: true
+      - run: uv sync --locked --extra mcp-host --extra schema-validation --group dev --no-python-downloads
+      - run: PATH="$PWD/.venv/bin:$PATH" python3 -m pytest -q tests

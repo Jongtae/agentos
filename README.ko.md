@@ -30,9 +30,9 @@
 Personal AgentOS는 *아니다*라는 답에서 출발합니다. 내가 설치하고 통제하는 오픈소스 환경에서, 하나의 개인 에이전트(PA)가 내 맥락과 진행 중인 일과 권한을 지키고, 실제 일을 하는 AI는 바꿀 수 있게 합니다.
 
 <p align="center">
-  <img src="docs/assets/readme/demo/demo.gif" width="300" alt="데모: PA와 나눈 한국어 Telegram 대화. 저녁 약속의 경로와 식당을 정리하고, 장바구니에 작은 상품 하나를 담은 뒤 결제 전에 멈추며, 확인하지 못한 할인 단계를 밝힙니다. 개인 정보는 흐리게 처리했습니다.">
+  <img src="docs/assets/readme/demo/demo.ko.gif" width="300" alt="데모: PA와 나눈 한국어 Telegram 대화. 저녁 약속의 경로와 식당을 정리하고, 장바구니에 작은 상품 하나를 담은 뒤 결제 전에 멈추며, 확인하지 못한 할인 단계를 밝힙니다. 개인 정보는 흐리게 처리했습니다.">
 </p>
-<p align="center"><sub>데모 · Telegram 한국어 화면. 대기 시간은 줄이고 개인 정보는 흐리게 처리했습니다.</sub></p>
+<p align="center"><sub>데모 · Telegram 한국어 화면, 한국어 자막. 대기 시간은 줄이고 개인 정보는 흐리게 처리했습니다.</sub></p>
 
 **주요 기능**
 

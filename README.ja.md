@@ -30,9 +30,9 @@
 Personal AgentOS は *いいえ* という答えから始まります。自分でインストールし管理するオープンソース環境で、一つのパーソナルエージェント（PA）が文脈・進行中の仕事・権限を保ち、実際に働く AI は替えられるようにします。
 
 <p align="center">
-  <img src="docs/assets/readme/demo/demo.gif" width="300" alt="デモ：PA との韓国語の Telegram 会話。夕食の約束の経路と店を整理し、カートに小さな商品を一つ入れて支払いの前で止まり、確認できなかった割引の段階を伝えます。個人情報はぼかしています。">
+  <img src="docs/assets/readme/demo/demo.ja.gif" width="300" alt="デモ：PA との韓国語の Telegram 会話。夕食の約束の経路と店を整理し、カートに小さな商品を一つ入れて支払いの前で止まり、確認できなかった割引の段階を伝えます。個人情報はぼかしています。">
 </p>
-<p align="center"><sub>デモ · Telegram（韓国語画面）。待ち時間は短縮し、個人情報はぼかしています。</sub></p>
+<p align="center"><sub>デモ · Telegram（韓国語画面）、日本語字幕付き。待ち時間は短縮し、個人情報はぼかしています。</sub></p>
 
 **主な特長**
 

@@ -18,6 +18,14 @@ def kill_process_group(process, termination_signal):
         os.killpg(process.pid, termination_signal)
     except ProcessLookupError:
         pass
+    except PermissionError:
+        # macOS refuses killpg with EPERM while the exited group leader is an
+        # unreaped zombie (#1178). Reap it, then signal the rest of the group.
+        process.poll()
+        try:
+            os.killpg(process.pid, termination_signal)
+        except (ProcessLookupError, PermissionError):
+            pass
 
 
 def run(args, *, timeout=600, **kwargs):

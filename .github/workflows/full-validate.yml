@@ -37,7 +37,11 @@ jobs:
   # AGENTOS_REAL_BROWSER_TESTS keeps real windows off an owner's screen during
   # local runs; a CI runner has no owner screen, so they run here.
   full-validate-macos:
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
       AGENTOS_REAL_BROWSER_TESTS: '1'

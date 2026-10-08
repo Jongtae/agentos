@@ -85,6 +85,24 @@ Windows에서는 PowerShell에서 `wsl --install`을 실행하고 재시작한 �
 
 로컬 우선(local-first)은 로컬 전용(local-only)이 아닙니다. 로컬 모델과 외부 모델을 선택할 수 있고, 외부 모델을 쓰면 요청에 사용되는 맥락은 그 제공자로 전송됩니다.
 
+### AI를 바꿔도, 대화는 이어집니다
+
+어제 장바구니에 담았던 상품을 묻고, 로그인해 현재 상태를 확인한 다음, AI를 바꿔 상품을 빼 달라고 요청합니다. 모두 같은 쇼핑 대화의 다음 단계입니다.
+
+<!-- ai-switch-snapshot:1 — insert the real cropped image before merging #1189 -->
+
+**1. Claude Code로 바꾸고 이전 일을 묻습니다.** “어제 스팸을 최종 넣었나? 뺐나?” PA는 200g 한 개를 담았다는 이전 대화를 찾고, 현재 장바구니는 로그인 후 확인해야 한다고 답합니다.
+
+<!-- ai-switch-snapshot:2 — insert the real cropped image before merging #1189 -->
+
+**2. 로그인 후 현재 상태를 확인합니다.** PA는 스팸 클래식 200g 한 개가 장바구니에 남아 있다고 답합니다. 일부 단계는 확인하지 못했다는 안내도 함께 표시됩니다.
+
+<!-- ai-switch-snapshot:3 — insert the real cropped image before merging #1189 -->
+
+**3. Codex로 바꾸고 다음 행동을 요청합니다.** “스팸 빼줘.” PA는 스팸 한 개를 제거했고 나머지 22개 상품은 그대로라고 답합니다.
+
+*실제 대화에서 발췌한 내용입니다. 이때의 응답을 보여 주며, 모든 모델이나 사이트에서 같은 결과를 보장한다는 뜻은 아닙니다.*
+
 <!-- readme-section:presence -->
 
 ## 동작 방식

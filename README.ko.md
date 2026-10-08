@@ -12,7 +12,7 @@
 
 **내 컴퓨터에서 돌아가는 나의 개인 에이전트.<br>아래의 AI는 바꿔도, 기억과 진행 중인 일과 권한은 그대로 남습니다.**
 
-[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux | Windows (WSL2)](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20WSL2-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
+[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux | WSL2 limited](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20WSL2%20limited-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
@@ -30,17 +30,17 @@
 Personal AgentOS는 *아니다*라는 답에서 출발합니다. 내가 설치하고 통제하는 오픈소스 환경에서, 하나의 개인 에이전트(PA)가 내 맥락과 진행 중인 일과 권한을 지키고, 실제 일을 하는 AI는 바꿀 수 있게 합니다.
 
 <p align="center">
-  <img src="docs/assets/readme/demo/demo-v2.ko.gif" width="300" alt="데모: PA와 나눈 한국어 Telegram 대화. 저녁 약속의 경로와 식당을 정리하고, 장바구니에 작은 상품 하나를 담은 뒤 결제 전에 멈추며, 확인하지 못한 할인 단계를 밝힙니다. 개인 정보는 흐리게 처리했습니다.">
+  <img src="docs/assets/readme/demo/demo-v2.ko.gif" width="360" alt="데모: PA와 나눈 한국어 Telegram 대화. 저녁 약속의 경로와 식당을 정리하고, 장바구니에 작은 상품 하나를 담은 뒤 결제 전에 멈추며, 확인하지 못한 할인 단계를 밝힙니다. 개인 정보는 흐리게 처리했습니다.">
 </p>
-<p align="center"><sub>데모 · Telegram 한국어 화면, 한국어 자막. 대기 시간은 줄이고 개인 정보는 흐리게 처리했습니다.</sub></p>
+<p align="center"><sub>데모 · Telegram 한국어 화면, 한국어 자막. 대기 시간은 줄이고 개인 정보는 흐리게 처리했습니다. · <a href="docs/assets/readme/demo/demo-v2.ko.gif">전체 크기로 보기</a></sub></p>
 
 **주요 기능**
 
 - **원하는 AI를 연결.** 로컬 Ollama 모델, OpenAI 호환·Anthropic API, Codex나 Claude Code 구독이 실제 일을 합니다.
-- **대화가 바뀌어도 같은 PA.** 기억, 저장한 결과, 진행 중인 일이 다음 대화로 이어지고 재시작 후에도 남습니다.
-- **경계는 내가 정합니다.** 연결한 폴더·계정·도구에만 접근합니다. 결제는 항상 먼저 묻고, 비밀값은 프롬프트·로그·기록에 들어가지 않습니다.
+- **대화가 바뀌어도 같은 PA.** 기억, 저장한 결과와 열린 일의 상태는 다음 대화와 재시작 뒤에도 남습니다. 중단된 실행은 몰래 다시 돌리지 않고 중단으로 보고합니다.
+- **경계는 내가 정합니다.** 내가 연결한 폴더·계정·도구에서 접근이 시작됩니다. 지원되는 결제 흐름은 행동마다 승인을 요구하며, [현재 브라우저 한계](https://github.com/Jongtae/agentos/issues/758)는 공개합니다. [비밀값](SECURITY.md)은 모델 프롬프트·로그·Evidence에 넣지 않습니다.
 - **숨기지 않고 알립니다.** AI가 무언가를 기억하면 그 사실을 알리고 정확히 되돌릴 수 있게 합니다. 맡긴 일마다 내 정보 중 무엇을 썼고 어디로 보냈는지 기록합니다.
-- **늘 쓰는 곳에서 대화.** 휴대폰의 Telegram이나, 내 Mac·Linux·Windows(WSL2) 컴퓨터의 브라우저에서 대화합니다.
+- **늘 쓰는 곳에서 대화.** 휴대폰의 Telegram이나 macOS·Linux의 브라우저에서 대화합니다. Windows는 [현재 제약이 있는 WSL2](QUICKSTART.md#windows-wsl2)에서 동작합니다.
 
 <!-- readme-section:try-today -->
 
@@ -49,8 +49,10 @@ Personal AgentOS는 *아니다*라는 답에서 출발합니다. 내가 설치�
 macOS나 Linux에서는 명령 하나로 설치하고 바로 시작합니다. Homebrew, Python, Docker가 없어도 됩니다.
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/main/scripts/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh | sh
 ```
+
+URL은 설치 스크립트 자체도 특정 커밋에 고정합니다. 실행 전에 [고정된 스크립트 내용을 확인](https://github.com/Jongtae/agentos/blob/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh)할 수 있고, 스크립트는 공개 AgentOS 아카이브와 내려받는 uv 설치 프로그램의 체크섬을 검증합니다.
 
 macOS에서 [Homebrew](https://brew.sh)를 쓴다면:
 

@@ -12,7 +12,7 @@
 
 **自分のコンピューターで動く、自分のパーソナルエージェント。<br>下で働く AI を替えても、記憶と進行中の仕事と権限はそのまま残ります。**
 
-[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux | Windows (WSL2)](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20WSL2-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
+[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux | WSL2 limited](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20WSL2%20limited-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
@@ -30,17 +30,17 @@
 Personal AgentOS は *いいえ* という答えから始まります。自分でインストールし管理するオープンソース環境で、一つのパーソナルエージェント（PA）が文脈・進行中の仕事・権限を保ち、実際に働く AI は替えられるようにします。
 
 <p align="center">
-  <img src="docs/assets/readme/demo/demo-v2.ja.gif" width="300" alt="デモ：PA との韓国語の Telegram 会話。夕食の約束の経路と店を整理し、カートに小さな商品を一つ入れて支払いの前で止まり、確認できなかった割引の段階を伝えます。個人情報はぼかしています。">
+  <img src="docs/assets/readme/demo/demo-v2.ja.gif" width="360" alt="デモ：PA との韓国語の Telegram 会話。夕食の約束の経路と店を整理し、カートに小さな商品を一つ入れて支払いの前で止まり、確認できなかった割引の段階を伝えます。個人情報はぼかしています。">
 </p>
-<p align="center"><sub>デモ · Telegram（韓国語画面）、日本語字幕付き。待ち時間は短縮し、個人情報はぼかしています。</sub></p>
+<p align="center"><sub>デモ · Telegram（韓国語画面）、日本語字幕付き。待ち時間は短縮し、個人情報はぼかしています。 · <a href="docs/assets/readme/demo/demo-v2.ja.gif">フルサイズで表示</a></sub></p>
 
 **主な特長**
 
 - **好きな AI を接続。** ローカルの Ollama モデル、OpenAI 互換・Anthropic API、Codex や Claude Code のサブスクリプションが実際の仕事をします。
-- **会話が変わっても同じ PA。** 記憶、保存した結果、進行中の仕事が次の会話に引き継がれ、再起動後も残ります。
-- **境界は自分で決める。** 接続したフォルダー・アカウント・ツールだけを使います。支払いは必ず先に確認し、秘密情報はプロンプト・ログ・記録に入りません。
+- **会話が変わっても同じ PA。** 記憶、保存した結果、未完の仕事の状態は次の会話や再起動後も残ります。中断された実行は黙って再実行せず、中断として報告します。
+- **境界は自分で決める。** アクセスは自分が接続したフォルダー・アカウント・ツールから始まります。対応している支払いフローは行動ごとの承認を求め、[現在のブラウザー上の制限](https://github.com/Jongtae/agentos/issues/758)も公開しています。[秘密情報](SECURITY.md)はモデルのプロンプト・ログ・Evidenceに入りません。
 - **隠さずに知らせる。** AI が何かを記憶するとそれを知らせ、正確に取り消せるようにします。任せた仕事ごとに、どの情報を使いどこへ送ったかを記録します。
-- **いつもの場所で会話。** スマートフォンの Telegram、または自分の Mac・Linux・Windows（WSL2）のブラウザーで話せます。
+- **いつもの場所で会話。** スマートフォンの Telegram、または macOS・Linux のブラウザーで話せます。Windows は[現在制限のある WSL2](QUICKSTART.md#windows-wsl2)で動作します。
 
 <!-- readme-section:try-today -->
 
@@ -49,8 +49,10 @@ Personal AgentOS は *いいえ* という答えから始まります。自分�
 macOS と Linux では、コマンド一つでインストールしてそのまま起動します。Homebrew、Python、Docker は不要です。
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/main/scripts/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh | sh
 ```
+
+この URL はインストーラー自体も特定のコミットに固定します。実行前に[固定されたスクリプトを確認](https://github.com/Jongtae/agentos/blob/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh)でき、スクリプトは公開済み AgentOS アーカイブと、ダウンロードする uv インストーラーのチェックサムを検証します。
 
 macOS で [Homebrew](https://brew.sh) を使っている場合：
 

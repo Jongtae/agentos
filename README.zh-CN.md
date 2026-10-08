@@ -12,7 +12,7 @@
 
 **在你自己电脑上运行的个人智能体。<br>底层 AI 可以更换，记忆、进行中的工作和权限都会保留。**
 
-[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux | Windows (WSL2)](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20WSL2-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
+[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux | WSL2 limited](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20WSL2%20limited-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
@@ -30,17 +30,17 @@
 Personal AgentOS 的出发点是：*不必*。在一个由你安装和掌控的开源环境里，一个个人智能体（PA）保管你的上下文、进行中的工作和权限，而真正干活的 AI 可以更换。
 
 <p align="center">
-  <img src="docs/assets/readme/demo/demo-v2.zh-CN.gif" width="300" alt="演示：与 PA 的韩语 Telegram 对话。它为晚餐约会整理路线和餐厅，往购物车里加入一件小商品后在付款前停下，并说明哪一步折扣未能确认。个人信息已模糊处理。">
+  <img src="docs/assets/readme/demo/demo-v2.zh-CN.gif" width="360" alt="演示：与 PA 的韩语 Telegram 对话。它为晚餐约会整理路线和餐厅，往购物车里加入一件小商品后在付款前停下，并说明哪一步折扣未能确认。个人信息已模糊处理。">
 </p>
-<p align="center"><sub>演示 · Telegram（韩语界面），附中文字幕。等待时间已缩短，个人信息已模糊处理。</sub></p>
+<p align="center"><sub>演示 · Telegram（韩语界面），附中文字幕。等待时间已缩短，个人信息已模糊处理。 · <a href="docs/assets/readme/demo/demo-v2.zh-CN.gif">查看完整尺寸</a></sub></p>
 
 **主要特点**
 
 - **接入你选择的 AI。** 本地 Ollama 模型、OpenAI 兼容或 Anthropic API，或 Codex、Claude Code 订阅来完成实际工作。
-- **换了对话，还是同一个 PA。** 记忆、保存的结果和进行中的工作会延续到下一次对话，重启后依然保留。
-- **边界由你决定。** 只访问你连接的文件夹、账户和工具。付款前总会先问你；密钥不会进入提示词、日志或记录。
+- **换了对话，还是同一个 PA。** 记忆、已保存的结果和未完工作的状态会跨对话、跨重启保留。中断的执行会如实报告，不会悄悄重放。
+- **边界由你决定。** 访问从你连接的文件夹、账户和工具开始。支持的付款流程会要求逐次批准；[当前浏览器限制](https://github.com/Jongtae/agentos/issues/758)已公开说明。[密钥](SECURITY.md)不会进入模型提示词、日志或 Evidence。
 - **告诉你，而不是瞒着你。** AI 记住某件事时会告诉你，并提供精确的撤销。每项委托工作都会记录用了你的哪些信息、发送到了哪里。
-- **在你常用的地方对话。** 用手机上的 Telegram，或在你自己的 Mac、Linux、Windows（WSL2）电脑的浏览器里对话。
+- **在你常用的地方对话。** 用手机上的 Telegram，或在 macOS、Linux 的浏览器中对话。Windows 可通过[目前仍有限制的 WSL2](QUICKSTART.md#windows-wsl2)运行。
 
 <!-- readme-section:try-today -->
 
@@ -49,8 +49,10 @@ Personal AgentOS 的出发点是：*不必*。在一个由你安装和掌控的�
 在 macOS 或 Linux 上，一条命令即可安装并启动，无需 Homebrew、Python 或 Docker：
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/main/scripts/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh | sh
 ```
+
+该 URL 也把安装脚本本身固定到一个明确提交。运行前可以[检查固定版本的脚本](https://github.com/Jongtae/agentos/blob/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh)；脚本会校验公开的 AgentOS 归档和它下载的 uv 安装程序。
 
 如果你在 macOS 上使用 [Homebrew](https://brew.sh)：
 

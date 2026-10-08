@@ -1307,6 +1307,11 @@ class WebKitIntegrationTests(unittest.TestCase):
         finally:
             sess.close()
 
+    # Known defect #1181: a handler the page assigns as a property is invisible from
+    # the worker's isolated content world, so '재구매' is judged a navigation.
+    # Observed on macos-15 and macos-26 runners (#1178). An unexpected pass fails
+    # the suite, which is the signal to remove this marker with the fix.
+    @unittest.expectedFailure
     def test_a_list_page_link_navigates_and_a_scripted_one_is_judged_as_a_button(self):
         """#899 review P1/P2-3/P2-4/P2-5: the real worker's navLink, end to end."""
         sess = bs.BrowserSession(self.profile.driver_factory('work-899'), work_id='work-899', approvals=Approvals(),

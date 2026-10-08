@@ -15,6 +15,7 @@ import tempfile
 MAX_REQUEST_BYTES = 65_536
 #: #1187: the largest oversized body read and dropped before a refusal.
 DRAIN_LIMIT_BYTES = 1024 * 1024
+DRAIN_SECONDS = 2.0
 MAX_OUTPUT_BYTES = 1_048_576
 MAX_PROMPT_BYTES = 48_000
 
@@ -190,7 +191,11 @@ def make_handler(sidecar: IsolatedEngineSidecar):
                     # #1187: read (and drop) a bounded oversized body before refusing, so
                     # the refusal is not lost to a reset from unread data (macOS).
                     if 0 < length <= DRAIN_LIMIT_BYTES:
-                        self.rfile.read(length)
+                        try:   # bounded in time too: a client that stops sending gets no thread
+                            self.connection.settimeout(DRAIN_SECONDS)
+                            self.rfile.read(length)
+                        except OSError:
+                            self.close_connection = True
                     raise SidecarError("invalid request size")
                 payload = _decode_object(self.rfile.read(length))
                 result = sidecar.execute(payload)

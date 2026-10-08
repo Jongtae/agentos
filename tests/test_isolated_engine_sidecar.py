@@ -393,6 +393,17 @@ class IsolatedEngineSidecarTransportTests(unittest.TestCase):
         status, value = self._raw(json.dumps({"prompt": "z" * 70_000}).encode())
         self.assertEqual((status, set(value)), (400, {"error"}))
 
+    def test_a_truncated_oversized_body_does_not_hold_the_handler(self):
+        """#1187 review: a client that declares an oversized body and stops sending is refused in bounded time."""
+        import socket
+        started = time.monotonic()
+        with socket.create_connection(self.server.server_address, timeout=8) as sock:
+            sock.sendall(b"POST /execute HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n"
+                         b"Content-Length: 100000\r\n\r\n" + b"z" * 10)
+            reply = sock.recv(4096)
+        self.assertIn(b" 400 ", reply.split(b"\r\n", 1)[0])
+        self.assertLess(time.monotonic() - started, 6)
+
     def test_no_malformed_request_ever_started_the_engine(self):
         self.test_unknown_path_and_wrong_content_type_are_refused()
         self.test_duplicate_json_keys_and_non_objects_are_refused()

@@ -85,6 +85,24 @@ Windows では PowerShell で `wsl --install` を実行して再起動し、Ubun
 
 ローカルファースト（local-first）はローカル限定（local-only）ではありません。ローカルモデルと外部モデルを選べ、外部モデルを使う場合はリクエストに使う文脈がその提供元へ送られます。
 
+### AI を替えても、会話は続きます
+
+昨日のカートについて尋ね、ログインして現在の状態を確認した後、AI を替えて商品を削除するよう頼みます。同じ買い物の話が、そのまま次の段階へ進みます。
+
+<!-- ai-switch-snapshot:1 — insert the real cropped image before merging #1189 -->
+
+**1. Claude Code に替えて、前の話を続ける。**「昨日、結局スパムは入れた？ それとも外した？」PA は200g缶を一つ入れたという前の会話を参照し、現在のカートを確かめるにはログインが必要だと答えます。
+
+<!-- ai-switch-snapshot:2 — insert the real cropped image before merging #1189 -->
+
+**2. ログイン後に現在の状態を確認する。** PA はスパム クラシック200gが一つカートに残っていると答えます。一部の段階は確認できなかったという案内も表示されます。
+
+<!-- ai-switch-snapshot:3 — insert the real cropped image before merging #1189 -->
+
+**3. Codex に替えて、次の操作を頼む。**「スパムを外して。」PA は一缶を削除し、ほかの22点はそのままだと答えます。
+
+*実際の会話からの抜粋です。このときの応答を示すもので、すべてのモデルやサイトで同じ結果を保証するものではありません。*
+
 <!-- readme-section:presence -->
 
 ## 仕組み

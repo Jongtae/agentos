@@ -2,7 +2,8 @@
   "selected_by_owner": "2026-10-08",
   "issue": [
     1133,
-    1137
+    1137,
+    1139
   ],
   "evidence_class": "edited screen recordings of real Telegram sessions; visible screens and PA replies",
   "application_revision": "not shown in the recordings",
@@ -64,7 +65,11 @@
           "speaker": "我",
           "text": "明天晚上7点要在东滩站见朋友，怎么去？"
         }
-      }
+      },
+      "crop_window_y": [
+        0,
+        720
+      ]
     },
     {
       "scene": 1,
@@ -89,7 +94,11 @@
           "speaker": "PA",
           "text": "明晚7点的约定已记下。从家出发开车约30–40分钟，也可以坐广域巴士。"
         }
-      }
+      },
+      "crop_window_y": [
+        0,
+        720
+      ]
     },
     {
       "scene": 1,
@@ -115,7 +124,11 @@
           "speaker": "我",
           "text": "我会从公司直接过去，坐GTX好像更好。"
         }
-      }
+      },
+      "crop_window_y": [
+        0,
+        720
+      ]
     },
     {
       "scene": 1,
@@ -140,7 +153,11 @@
           "speaker": "PA",
           "text": "从哪里出发都一样，在城南站换乘GTX-A。要在出发前提醒你吗？"
         }
-      }
+      },
+      "crop_window_y": [
+        30,
+        750
+      ]
     },
     {
       "scene": 1,
@@ -166,7 +183,11 @@
           "speaker": "我",
           "text": "给提醒建议点了个赞"
         }
-      }
+      },
+      "crop_window_y": [
+        0,
+        720
+      ]
     },
     {
       "scene": 1,
@@ -192,7 +213,11 @@
           "speaker": "我",
           "text": "也告诉我附近好吃的。"
         }
-      }
+      },
+      "crop_window_y": [
+        0,
+        720
+      ]
     },
     {
       "scene": 1,
@@ -218,7 +243,11 @@
           "speaker": "我",
           "text": "好久不见的大学朋友，健康餐虽好，还是吃肉这种好吃的吧。"
         }
-      }
+      },
+      "crop_window_y": [
+        0,
+        720
+      ]
     },
     {
       "scene": 1,
@@ -243,7 +272,11 @@
           "speaker": "PA",
           "text": "已记住：10月8日晚7点东滩站的约定，以及出行和日程问题直接给出时间和路线。"
         }
-      }
+      },
+      "crop_window_y": [
+        0,
+        720
+      ]
     },
     {
       "scene": 1,
@@ -268,7 +301,11 @@
           "speaker": "PA",
           "text": "老同学聚会，吃烤肉不错。我挑了东滩站附近的烤肉店。"
         }
-      }
+      },
+      "crop_window_y": [
+        0,
+        720
+      ]
     },
     {
       "scene": 2,
@@ -293,7 +330,11 @@
           "speaker": "PA",
           "text": "购物车里没有午餐肉。22件商品主要是蔬菜、肉、鸡蛋和乳制品。"
         }
-      }
+      },
+      "crop_window_y": [
+        0,
+        720
+      ]
     },
     {
       "scene": 2,
@@ -318,7 +359,11 @@
           "speaker": "我",
           "text": "加一罐午餐肉。买多了老婆不高兴，只要一个小的。"
         }
-      }
+      },
+      "crop_window_y": [
+        0,
+        720
+      ]
     },
     {
       "scene": 2,
@@ -343,7 +388,11 @@
           "speaker": "PA",
           "text": "正在加入一罐 200g 经典午餐肉…"
         }
-      }
+      },
+      "crop_window_y": [
+        0,
+        720
+      ]
     },
     {
       "scene": 2,
@@ -368,7 +417,11 @@
           "speaker": "PA",
           "text": "已加入一小罐200g。加上原来的22件，共23件。请在易买得App里确认后付款。"
         }
-      }
+      },
+      "crop_window_y": [
+        0,
+        720
+      ]
     },
     {
       "scene": 3,
@@ -393,7 +446,11 @@
           "speaker": "PA",
           "text": "购物车里有4本书，打九折后应付68,940韩元。"
         }
-      }
+      },
+      "crop_window_y": [
+        300,
+        1020
+      ]
     },
     {
       "scene": 3,
@@ -418,7 +475,11 @@
           "speaker": "我",
           "text": "用我的积分之类的还能更便宜吗？"
         }
-      }
+      },
+      "crop_window_y": [
+        0,
+        720
+      ]
     },
     {
       "scene": 3,
@@ -443,7 +504,11 @@
           "speaker": "PA",
           "text": "积分和优惠券要到下单的下一步才能查看。有一个步骤没能确认。"
         }
-      }
+      },
+      "crop_window_y": [
+        250,
+        970
+      ]
     }
   ],
   "masking": {
@@ -459,31 +524,31 @@
   },
   "output": {
     "width": 480,
-    "height": 1200,
+    "height": 876,
     "frames": 491,
     "fps": 10,
     "loop": true,
-    "layout": "phone recording 480 x 1044 above a 156 px subtitle strip (scene title, speaker, translated line)",
+    "layout": "phone window 480 x 720 (cropped per segment from 480 x 1044; crop_window_y per segment) above a 156 px subtitle strip",
     "files": {
       "en": {
         "file": "demo.en.gif",
-        "sha256": "7423895ca7d503131f0dd9b2b7be60c25e3c76005aa3326770b9247df247fb2d",
-        "bytes": 4481921
+        "sha256": "db2b7d235ae6383fd1973208f89aeda9939a99c82c499a464115785a8d9dd69a",
+        "bytes": 3670550
       },
       "ko": {
         "file": "demo.ko.gif",
-        "sha256": "3a62ec599dfd09aae507ab2e23931c92b3ada2a2f01632322aa6457c114a0375",
-        "bytes": 4479057
+        "sha256": "5aae23f9326b3a3d42c661f5e38d9d600bce36246c53fb9dc8c6f49adcf9654f",
+        "bytes": 3682946
       },
       "ja": {
         "file": "demo.ja.gif",
-        "sha256": "2b404fd93ae8e112143816dcd599f8d0f1efa81c74a3915bbcb450ec4b6c1df9",
-        "bytes": 4493291
+        "sha256": "c7092de0f4e7b8cda03ff5089e89dd7a00f02b3976a7aac0cf40c449c1587e21",
+        "bytes": 3704257
       },
       "zh-CN": {
         "file": "demo.zh-CN.gif",
-        "sha256": "6476abb5eab8d89be9c2c135b5178c027e6bd18dc741283a77a820cc22ec1eb6",
-        "bytes": 4511662
+        "sha256": "071e67adc0af5e9238c32ef4a7eff0708e7af94b896db3bb874e6f3d4efa9c35",
+        "bytes": 3689888
       }
     }
   }

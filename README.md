@@ -1,127 +1,51 @@
-# Personal AgentOS
+<div align="center">
+
+<pre>
+             P E R S O N A L              
+                                          
+    ___                    __  ____  _____
+   /   | ____ ____  ____  / /_/ __ \/ ___/
+  / /| |/ __ `/ _ \/ __ \/ __/ / / /\__ \ 
+ / ___ / /_/ /  __/ / / / /_/ /_/ /___/ / 
+/_/  |_\__, /\___/_/ /_/\__/\____//____/  
+      /____/                              
+</pre>
+
+**Your personal agent, on your own machine.<br>Change the AI underneath; keep its memory, open work and permissions.**
+
+[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+
+[Quick start](#quick-start) · [What stays yours](#what-stays-yours) · [How it works](#how-it-works) · [Docs](#documentation)
+
+</div>
 
 <!-- readme-parity:v1 -->
 <!-- readme-section:hero -->
 
-## What if Jarvis belonged to another company?
+## Same PA. Different AI.
 
-Imagine Tony Stark had spent years working with Jarvis — sharing context, leaving decisions open, delegating work and learning how to work together.
+If Jarvis belonged to another company, would Tony have to give up Jarvis (what it knows about him, the work they have not finished, the authority he delegated) just to use a better AI?
 
-Now imagine a better AI appears.
+Personal AgentOS is built on the answer *no*. It is an open-source environment you install and control. One personal agent (PA) keeps your context, open work and permissions there, while the AI doing the work can change.
 
-**Should Tony have to lose Jarvis to use it?**
+<p align="center">
+  <img src="docs/assets/readme/demo/demo.gif" width="300" alt="Demo: Korean Telegram conversations with a PA. It plans the route and a restaurant for a dinner meeting, adds one small item to a shopping cart and stops before payment, and says which discount step it could not check. Personal details are blurred.">
+</p>
+<p align="center"><sub>Demo · Telegram, Korean UI. Waiting time is cut and personal details are blurred.</sub></p>
 
-Should he lose what Jarvis remembers about him, the work they have not finished, the authority he has delegated, and the way they have learned to work together — simply because the intelligence provider changes?
+**Highlights**
 
-**The AI can change. Your personal agent should remain yours.**
-
-Personal AgentOS explores that idea in an open-source environment you install and control. The PA's context, unfinished work, authority and evidence stay with you while the AI underneath can change.
-
-The goal is not another chatbot with a longer history. It is one continuing personal agent.
-
-**Same PA. Different AI.**
-
-Want to run it before reading further? Skip to [Try it](#try-it); the rest of this page explains what the project is reaching for.
-
-<!-- readme-section:real-use -->
-
-## Four moments from real use
-
-These are screen recordings from the owner's own use of Personal AgentOS, edited into four distinct scenes. Korean dialogue remains visible, with English translations below the matching dialogue excerpts. Taps, scrolling and emoji reactions play continuously at 20fps.
-
-<details>
-<summary>Expand to watch the recorded owner-use GIF · collapse to hide motion</summary>
-
-![Four recorded owner-use scenes: a Dongtan meeting and dinner conversation, an E-Mart cart inquiry, a request for one small can of Spam, and a separate Kyobo book-cart session. Korean dialogue is accompanied by English translations.](docs/assets/readme/owner-use/owner-use.en.gif)
-
-[Open the GIF at full size](docs/assets/readme/owner-use/owner-use.en.gif).
-
-</details>
-
-1. **Meeting a friend in Dongtan:** departure point, GTX and dinner preferences become part of the same conversation. The PA also corrects an earlier route suggestion.
-2. **Checking an E-Mart / SSG cart:** after sign-in, the PA replies that the cart contains 22 items and no Spam.
-3. **“Just one small can”:** the owner asks for one small can because his wife would dislike buying too much. The PA reports adding one 200g can and a cart count of **22 → 23**.
-4. **A separate Kyobo session:** the recording shows the owner's book cart; the PA lists four books, then discusses points and discounts and says one step was not verified.
-
-The thread is **conversation → the owner's context → account state → a requested action → a reported result**. These are separate moments, not one continuous shopping transaction. Sign-in, waiting time and session persistence remain rough edges.
-
-This owner-pilot recording does not identify the application revision or model. It shows neither an AI switch nor completed payment. [Recording provenance and editing details](docs/assets/readme/owner-use/README.md) distinguish visible screens, the PA's replies and release-specific validation.
-
-<!-- readme-section:ownership -->
-
-## What should remain yours?
-
-The thought experiment becomes a concrete design question: when the intelligence underneath changes, what should remain with the owner? The [strategy whitepaper](docs/whitepapers/whose-agent.ko.md) develops that question across product and industry structure.
-
-AgentOS keeps memory, work and authority in your environment. You choose the AI, the information it can use and the access you give it. Different expertise can serve the same owner; better AI should expand what your agent can do without making you start over.
-
-Two of those controls ship in the current release: when your own AI saves a fact to Memory it tells you afterwards and offers an exact undo, and each piece of work records which of your information it used and where that information went.
-
-Local-first is not local-only: you can use a local or hosted model. With a hosted model, the context used for a request is sent to that provider.
-
-<!-- readme-section:presence -->
-
-## How delegated work can continue
-
-*The following meeting is an illustrative product-direction example. This sequence has not been observed in the current Homebrew build.*
-
-Imagine saying, “Keep track of next week's project meeting. We still need to settle the proposal.” The PA would connect an allowed calendar invitation, proposal and record of earlier decisions to the same meeting to find what remains unresolved. An invitation alone does not mean you accepted the meeting or its follow-up. Before the meeting, it could prepare a brief for the open decision; when you later share notes, it would update the unfinished work. It could prepare a follow-up email as a **draft**, but a draft has not been sent. Without authority to send, it would ask first, and it would report “sent” only after the tool confirmed that result.
-
-<picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.en.narrow.svg">
-  <img src="docs/assets/readme/presence-overview.en.svg" alt="Concept figure: an Assistant answers a question about NVIDIA, a task agent handles an explicit Amazon cart request, and a PA carries an open meeting decision forward. AgentOS links allowed calendar, proposal and note sources; keeps unfinished work; and distinguishes an email draft from a confirmed send through authority and evidence. AI and tools can change. Illustrative product direction, not an observed run or shipped integration.">
-</picture>
-
-**The PA is the personal agent you talk to; AgentOS is the environment you control that carries its context, open work, authority and evidence.** Its judgment layer delegates to AI and tools and checks their results. The aim is for your PA and its work to continue when the AI underneath changes. **Same PA. Different AI.**
-
-That takes more than a long chat history. **One meeting** has time, place and attendees as **metadata**. An **ontology** distinguishes its relationships to other things:
-
-- **The meeting as a calendar event:** When is it, who is involved and what needs preparing?
-- **The same meeting in the project:** Which proposal decision remains open?
-- **The same meeting and a commitment:** Who suggested a follow-up, and who actually accepted it?
-
-These are relationships attached to one sourced meeting, not three different meetings. Its identity, time and invitation come from records; a role's assessment of urgency or responsibility is an interpretation with its own scope and grounds. An invitation is not an accepted commitment. Missing information is not proof that something did not happen; conflicting sources remain visible rather than being silently reconciled. Open decisions continue as work; unconfirmed permission never becomes permission to act; evidence distinguishes a proposal or draft from an action that occurred.
-
-AgentOS aims to connect facts, role-specific interpretations, delegated work, permissions and evidence in a structure the owner controls. This is how a paused task or a different AI could pick up the right next step without making you reconstruct it. The same rule applies beyond meetings; [Architecture and ontology](docs/personal-agentos-architecture.en.md#facts-and-role-interpretations) shows it on an account balance. These are design illustrations, not observed runs. Proactive attention to changing circumstances is a direction beyond the current reactive Presence work, not a claim of always-on monitoring today.
-
-<!-- readme-section:conversation -->
-
-## Ordinary moments, the same PA
-
-*A condensed, redacted reconstruction based on owner-pilot conversations. It is not an evidence record of those conversations, and the map and shopping integrations shown are product direction, not shipped features.*
-
-The illustration below condenses three PA conversations: sharing a location to find dinner on the way home, comparing a golf belt and pausing for account login before a cart action, and continuing from a restaurant photo to a nearby walk. It is an edited illustrative reconstruction, not a verbatim product screenshot or proof of those integrations.
-
-<picture>
-  <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation.en.png">
-  <img src="docs/assets/readme/owner-pilot-conversation.en.png" alt="Three reconstructed PA conversations in English: finding dinner after sharing a location, comparing golf belts before an account-login handoff, and continuing from a restaurant photo to a nearby walk. Illustrative, not a verbatim product screenshot.">
-</picture>
-
-[Open the English image at full size](docs/assets/readme/owner-pilot-conversation.en.png) · [View the original reference image](docs/assets/readme/owner-pilot-conversation-reference.jpg).
-
-The image condenses the conversations. For the choices to make sense, the PA would need relevant information the owner has allowed it to use, and would need to ask again when information is missing or stale.
-
-1. **Dinner on the way home:** “Dinner on my way back?” means a route from the current location toward home. The PA must check whether work/home locations are available and permitted, where the owner is now, the time and whether someone is coming along. In the image it asks for a current location, offers three options using route, distance and opening hours, and the owner picks the second.
-2. **Find this belt:** A visual match alone may be a poor choice. If the owner has shared wardrobe styles and colors, preferences or a budget, the PA should use them; otherwise it asks only for what matters. In the image it compares three belts, then requests an account login for the chosen cart action. Adding to a cart and paying are different actions. The cart step itself is what a task agent does too; the difference is that the PA brings your context and preferences to the choice and stops at your account and authority boundary, not at the click.
-3. **Here at dinner. What next?** The restaurant photo and shared current place are only a start. The companion, occasion, time and weather may change a good suggestion. The PA should check what it does not know before offering a walk, café or bar. After the owner picks a walk, it would verify the route and opening hours.
-
-All three need the same path: **what you say or show → allowed context with a source and time → a useful question or tool → the boundary for action → an observed result**. The image explains that relationship; it does not claim all that context is already collected or those map and shopping integrations are shipped.
-
-Continuity also matters in smaller moments, hours apart:
-
-> “We’re almost out of coffee.”<br>
-> Hours later: “I’m heading out. Is there somewhere on the way I can pick it up?”<br>
-> Later: “No time. Just get the same one as last time.”
-
-The aspiration is simple: the PA follows what “it” and “the same one” mean, brings in relevant context, and asks for missing information or authority when needed. You keep talking; you do not assemble a workflow.
+- **Bring your own AI.** A local Ollama model, an OpenAI-compatible or Anthropic API, or a Codex or Claude Code subscription does the work.
+- **One PA across conversations.** Memory, saved results and the work in progress carry over to the next conversation and survive a restart.
+- **Your boundaries.** It reaches only the folders, accounts and tools you connect. Payments always ask first; secrets never enter a prompt, a log or a record.
+- **Told, not hidden.** When your AI saves something to memory it says so and offers an exact undo. Each task records which of your information it used and where it went.
+- **Where you already talk.** Chat on Telegram from your phone, or in the browser on your own Mac or Linux machine.
 
 <!-- readme-section:try-today -->
 
-## Try it
-
-The published build lets you connect your own model and start a conversation. The meeting scene above is not an end-to-end verified release journey.
+## Quick start
 
 On macOS with [Homebrew](https://brew.sh):
 
@@ -130,28 +54,79 @@ brew install jongtae/agentos/agentos
 agentos start
 ```
 
-1. Browser setup opens at [http://127.0.0.1:8787](http://127.0.0.1:8787/). Choose **바로 시작하기** (Start now).
-2. Connect and test your own model: a tool-capable local Ollama model, or OpenAI, an OpenAI-compatible service or Anthropic with your API access. A Codex or Claude Code subscription can do the work instead of an API key ([QUICKSTART](QUICKSTART.md)). The setup interface is currently Korean.
-3. In **설정 → 외부 연결** (Settings → External connections), connect your own bot using its BotFather token. Open the generated pairing link in Telegram and press **Start**.
-4. In that Telegram chat, say: **“I need to finish a proposal this week. Help me break it into the next few steps.”**
+1. Setup opens at [http://127.0.0.1:8787](http://127.0.0.1:8787/). Choose **바로 시작하기** (Start now); the setup screens are in Korean for now.
+2. Connect your AI: a tool-capable Ollama model, an OpenAI, OpenAI-compatible or Anthropic API key, or a Codex or Claude Code subscription.
+3. Optional: in **설정 → 외부 연결** (Settings → External connections), add your own Telegram bot token and open the pairing link.
+4. Ask: **“I need to finish a proposal this week. Help me break it into the next few steps.”**
 
-Homebrew installs Python for you; model access is separate. Keep `agentos start` running while you talk. [QUICKSTART](QUICKSTART.md) covers model setup, file work, Telegram and running the newest code from source.
+Linux, running from source and every setting are in [QUICKSTART](QUICKSTART.md). Keep `agentos start` running while you talk.
 
-**Where it stands:** Homebrew installs **v1.1.1** (2026-10-07), built from the tagged main commit. The meeting illustration and reconstructed conversations are product direction. The owner-use GIF records separate pilot sessions and is not release-specific end-to-end validation. The [release manifest](docs/release-manifest.json) records source coverage and installed checks; [product status](docs/product-status.en.md) separates available behavior, fixture evidence, owner-pilot evidence and future direction.
+**Release status:** Homebrew installs **v1.1.1** (2026-10-07), built from the tagged main commit. The demo is edited from real sessions and is not release-specific end-to-end validation; the illustrations are product direction. The [release manifest](docs/release-manifest.json) records what each release covers, and [product status](docs/product-status.en.md) separates shipped behavior, test evidence and direction.
+
+<!-- readme-section:ownership -->
+
+## What stays yours
+
+| Can change | Stays with you |
+| --- | --- |
+| The model and its provider | Memory and context about you |
+| The CLI agent or API doing the work | Open work and its next step |
+| Tools and connectors | Permissions and approvals |
+| | The record of what actually ran |
+
+When a better AI appears, you switch the worker, not the agent. [Whose agent?](docs/whitepapers/whose-agent.ko.md) (Korean whitepaper) takes the question further.
+
+Local-first is not local-only: you can use a local or hosted model. With a hosted model, the context used for a request is sent to that provider.
+
+<!-- readme-section:presence -->
+
+## How it works
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.en.narrow.svg">
+  <img src="docs/assets/readme/presence-overview.en.svg" alt="Concept figure: an Assistant answers a question about NVIDIA, a task agent handles an explicit Amazon cart request, and a PA carries an open meeting decision forward. AgentOS links allowed calendar, proposal and note sources; keeps unfinished work; and distinguishes an email draft from a confirmed send through authority and evidence. AI and tools can change. Illustrative product direction, not an observed run or shipped integration.">
+</picture>
+
+- **The PA** is the agent you talk to. **AgentOS** is the environment that keeps its context, open work, authority and evidence.
+- A **judgment layer** chooses the AI and tool for each request, writes the brief, checks the result and hands the work back when it falls short.
+- An **ontology** links one sourced thing, such as a meeting or an account balance, to the work, roles and permissions around it. A draft is never taken for a send, or an invitation for an acceptance.
+
+The figure shows the intended design, not an observed run. Details: [architecture and ontology](docs/personal-agentos-architecture.en.md) · [Presence](docs/presence-experience-contract.en.md).
+
+<!-- readme-section:conversation -->
+
+## Where it's going
+
+*An illustrative reconstruction condensed from real conversations. The map and shopping integrations shown are product direction, not shipped features.*
+
+<picture>
+  <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation.en.png">
+  <img src="docs/assets/readme/owner-pilot-conversation.en.png" alt="Three reconstructed PA conversations in English: finding dinner after sharing a location, comparing golf belts before an account-login handoff, and continuing from a restaurant photo to a nearby walk. Illustrative, not a verbatim product screenshot.">
+</picture>
+
+Dinner on the way home, a belt like the one in a photo, what to do after dinner: each follows the same path. **What you say or show → context you allowed, with source and time → a useful question or tool → the boundary for action → an observed result.** Adding to a cart and paying stay different actions.
+
+> “We’re almost out of coffee.” · *hours later* · “Anywhere on my way out?” · *later* · “Just get the same one as last time.”
+
+The aim is a PA that follows what “it” and “the same one” mean, so you keep talking instead of assembling a workflow.
 
 <!-- readme-section:more -->
 
-## Explore the ideas
+## Documentation
 
-- [Why this project exists](VISION.md) · [Whose agent?](docs/whitepapers/whose-agent.ko.md) (Korean strategy whitepaper) — why the agent's continuity should stay with the owner when AI changes.
-- [Architecture and ontology](docs/personal-agentos-architecture.en.md) · [Presence](docs/presence-experience-contract.en.md) · [Roles and delegation](docs/research/role-ontology-and-mandate-2026-10-05.ko.md) (Korean research proposal) — how personal state, work and control can support one agent across different roles.
-- [Research and references](docs/acknowledgements.en.md) — the work on personal agents, memory, owner models and provenance that informed the design.
-- [Documentation map](docs/README.md) · [Contributing](CONTRIBUTING.md) — find the current contracts, inspect the implementation and help develop it.
+| Document | What's inside |
+| --- | --- |
+| [QUICKSTART](QUICKSTART.md) | Install, connect a model, files, Telegram, run from source |
+| [Product status](docs/product-status.en.md) | What works, what still has friction, and the evidence for each |
+| [Why this exists](VISION.md) | The motivation behind the project |
+| [Architecture and ontology](docs/personal-agentos-architecture.en.md) | Kernel primitives, packages, runtimes and owner control |
+| [Documentation map](docs/README.md) | Every current contract and guide |
+| [Acknowledgements](docs/acknowledgements.en.md) | Research and projects that shaped the design |
+
+**Contributing.** Issues and pull requests are welcome. Start with [CONTRIBUTING](CONTRIBUTING.md); [AGENTS.md](AGENTS.md) describes the development workflow.
 
 <!-- readme-section:license -->
 
-## Open source
+## License
 
-This is a working exploration, open for others to run, question and improve. It does not have to be the final answer to be a useful beginning.
-
-Code: [AGPL-3.0-only](LICENSE). The Personal AgentOS name and logo follow the [trademark notice](TRADEMARKS.md). Third-party work is credited in [acknowledgements](docs/acknowledgements.en.md).
+[AGPL-3.0-only](LICENSE). The Personal AgentOS name and logo follow the [trademark notice](TRADEMARKS.md).

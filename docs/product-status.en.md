@@ -9,12 +9,12 @@ This is the evidence and boundary page behind the [README](../README.md). It sep
 - **Owner pilot:** selected owner-supplied recordings have their own provenance and visible-observation scope. Revision-specific repeatability and release validation remain separate.
 - **Product direction:** the README's continuing conversation and the example below describe the intended experience, not one observed run or shipped shopping integrations.
 
-<!-- readme-section:owner-use-recording -->
-## Selected owner-use recording
+<!-- readme-section:demo-recording -->
+## README demo
 
-The owner supplied `PA Use Case Video.mp4` and selected its GIF derivatives for the public README on 2026-10-08. [The recording provenance](assets/readme/owner-use/README.md) records the preserved continuous-export digests, original-source limitation, cuts and localized files. The visible scenes cover a Dongtan conversation, E-Mart/SSG cart replies, a small-can request and a separate Kyobo account/cart session.
+The README demo is edited from four Telegram screen recordings made on 2026-10-07 and selected for public use on 2026-10-08. It shows a dinner-meeting route and restaurant conversation, one small item added to an E-Mart cart with checkout left to the owner, and a Kyobo book-cart discount question where the PA states the step it could not check. [The demo record](assets/readme/demo/README.md) keeps the source digests, segments and masking.
 
-This is **owner-supplied screen-recording evidence**. The Kyobo cart is visible; the E-Mart counts and Spam update are shown in the PA's replies. No independent backend/tool trace, application revision or model identity accompanies the recording. It does not show an AI switch, completed payment or a repeatability check of the published release. This documentation session ran no live account/provider operation. The historical synthetic audit and reconstructed illustrations below keep their original evidence class.
+This is **edited screen-recording evidence**: the screens show the PA's replies, not an independent backend or tool trace, and the recordings name no application revision or model. It does not show an AI switch, completed payment or a repeatability check of the published release. The historical synthetic audit and reconstructed illustrations below keep their original evidence class.
 
 <!-- readme-section:status -->
 ## What works, what still has friction

@@ -9,7 +9,9 @@
 # it: the uv release installer (which itself carries the checksums of the uv
 # binaries it downloads) and the published AgentOS release, which is the same
 # GitHub tag archive the Homebrew formula uses, against the SHA-256 recorded
-# in docs/release-manifest.json.
+# in docs/release-manifest.json. A uv already on PATH is reused as is, with
+# the same trust as any other tool the owner installed; only a uv this script
+# downloads is checksum-verified.
 # tests/test_install_script.py keeps these pins equal to the newest published
 # release; docs/release.en.md step 9 updates them with each release.
 set -eu
@@ -36,11 +38,14 @@ download() { # url destination
   else fail "curl or wget is required."; fi
 }
 
-sha256_of() {
-  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
-  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
-  else fail "sha256sum or shasum is required."; fi
-}
+if command -v sha256sum >/dev/null 2>&1; then SHA256="sha256sum"
+elif command -v shasum >/dev/null 2>&1; then SHA256="shasum -a 256"
+else fail "sha256sum or shasum is required."; fi
+for pin in "$UV_INSTALLER_SHA256" "$AGENTOS_ARCHIVE_SHA256"; do
+  [ "${#pin}" -eq 64 ] || fail "invalid checksum pin in this installer."
+done
+
+sha256_of() { $SHA256 "$1" | cut -d' ' -f1; }
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT INT TERM

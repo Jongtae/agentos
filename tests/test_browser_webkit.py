@@ -891,6 +891,13 @@ class SessionFixtureHandler(FixtureHandler):
             self.end_headers()
             self.wfile.write(data)
             return
+        if path == '/device':
+            # #1183: what the site sees: the User-Agent header and the layout viewport width.
+            agent = (self.headers.get('User-Agent') or '').replace('<', '')
+            return self._send('<html><head><title>기기</title><meta name="viewport" content="width=device-width">'
+                              f'</head><body><p id="ua">{agent}</p><p id="w">폭 측정 중</p>'
+                              '<script>document.getElementById("w").textContent = "폭 " + window.innerWidth;</script>'
+                              '</body></html>')
         if path == '/whoami':
             present = value in (self.headers.get('Cookie') or '')
             return self._send(f'<html><head><title>계정 상태</title></head><body><p>{"세션 있음" if present else "세션 없음"}</p></body></html>')
@@ -1048,6 +1055,18 @@ class WebKitIntegrationTests(unittest.TestCase):
             self.assertIn(values.get('메모'), ('장보기 목록', None), page['elements'])
             if values.get('메모') is None:
                 self.assertNotIn('장보기', flat(page))
+        finally:
+            sess.close()
+
+    def test_every_page_is_loaded_as_its_mobile_version(self):
+        """#1183: the site sees a phone browser (header) and a phone-width viewport (layout)."""
+        sess = self.session('work-1183')
+        try:
+            page = sess.open({'url': self.origin + '/device', 'effect': 'read'})
+            self.assertIn('iPhone', page['text'])
+            self.assertIn('Mobile/', page['text'])
+            width = int(page['text'].split('폭 ', 1)[1].split()[0])
+            self.assertLessEqual(width, 430, page['text'])
         finally:
             sess.close()
 

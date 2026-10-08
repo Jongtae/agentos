@@ -651,7 +651,10 @@ FRAME_JPEG_QUALITY = 0.6
 REMOTE_KEYS = {'Enter': ('\r', 36), 'Backspace': ('\x7f', 51), 'Tab': ('\t', 48)}
 REMOTE_NAV_ACTIONS = ('back', 'reload')
 
-WIDTH, HEIGHT = 1280, 900
+#: #1183: every page is loaded as its mobile version: phone-sized, with a mobile Safari
+#: user agent (``mobile_user_agent``).  Mobile pages are usually simpler (fewer hover menus,
+#: overlays and desktop-only widgets), so the owner's AI acts on them more reliably.
+WIDTH, HEIGHT = 390, 844
 SETTLE_QUIET_SECONDS = 0.4
 #: #736: after a click, how long a navigation it may start (a script handler, a
 #: timer, a new-window request loaded into this view) is given to begin, and
@@ -692,9 +695,8 @@ def safari_application_name():
     return f'Version/{version} Safari/605.1.15 {EMBEDDED_UA_TOKEN}'
 
 
-#: #955: while a phone drives the login window it is phone-sized and says it is a phone browser,
-#: so a site serves its own mobile sign-in page, which fits the phone (points).
-MOBILE_SIZE = (390.0, 844.0)
+#: #955: the phone-sized window (points), the default since #1183.
+MOBILE_SIZE = (float(WIDTH), float(HEIGHT))
 
 
 def mobile_user_agent():
@@ -896,6 +898,8 @@ class Worker:
         self._install_guard_scripts()
         self.controller.addScriptMessageHandler_contentWorld_name_(self.delegate, self.world, GUARD_HANDLER)
         self.view = WebKit.WKWebView.alloc().initWithFrame_configuration_(Foundation.NSMakeRect(0, 0, WIDTH, HEIGHT), config)
+        # #1183: one user agent for the whole session (a site may drop a sign-in when it changes).
+        self.view.setCustomUserAgent_(mobile_user_agent())
         self.view.setNavigationDelegate_(self.delegate)
         self.view.setUIDelegate_(self.delegate)
         style = (AppKit.NSWindowStyleMaskTitled | AppKit.NSWindowStyleMaskClosable |
@@ -1549,17 +1553,16 @@ class Worker:
         pass the same destination check.  Only while the login window shows.
         """
         AppKit, Foundation, WebKit = self.AppKit, self.Foundation, self.WebKit
-        rect = Foundation.NSMakeRect(0, 0, 520, 720)
+        rect = Foundation.NSMakeRect(0, 0, WIDTH, HEIGHT)
         view = WebKit.WKWebView.alloc().initWithFrame_configuration_(rect, config)
         delegate = _popup_delegate_class().alloc().init()
         delegate.worker = self
         view.setNavigationDelegate_(delegate)
         view.setUIDelegate_(delegate)
-        if self.remote:
-            try:
-                view.setCustomUserAgent_(mobile_user_agent())   # #955: a sign-in popup is phone-shaped too
-            except Exception:
-                pass
+        try:
+            view.setCustomUserAgent_(mobile_user_agent())   # #955, #1183: the same phone browser as the page
+        except Exception:
+            pass
         style = (AppKit.NSWindowStyleMaskTitled | AppKit.NSWindowStyleMaskClosable | AppKit.NSWindowStyleMaskResizable)
         window = AppKit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(rect, style, AppKit.NSBackingStoreBuffered, False)
         window.setContentView_(view)
@@ -1714,30 +1717,22 @@ class Worker:
         self.reply(ident)
 
     def enter_mobile(self):
-        """#955: phone-sized, a phone browser to the site, reloaded so the site serves its mobile page."""
+        """#955: phone-sized for the phone session.  The page is already the mobile one (#1183):
+        the user agent never changes, so no reload; only a window the owner resized is reset."""
         if getattr(self, 'mobile_restore', None) is not None:
             return
         # #956 review: the whole frame (origin and title bar included) is restored as it was.
         self.mobile_restore = self.window.frame()
-        agent = mobile_user_agent()
-        self.view.setCustomUserAgent_(agent)
-        for entry in getattr(self, 'popups', []) or []:
-            try:
-                entry[0].setCustomUserAgent_(agent)
-            except Exception:
-                pass
         self.window.setContentSize_(self.Foundation.NSMakeSize(*MOBILE_SIZE))
         if self.owner_visible:
             self.window.center()
-        self.view.reload()
 
     def leave_mobile(self):
-        """Back to the desktop window after the phone session (no reload: the sign-in is kept)."""
+        """The window as it was before the phone session (the user agent stays mobile, #1183)."""
         restore = getattr(self, 'mobile_restore', None)
         if restore is None:
             return
         self.mobile_restore = None
-        self.view.setCustomUserAgent_(None)
         self.window.setFrame_display_(restore, True)
 
     def op_remote_end(self, ident, command, timeout):

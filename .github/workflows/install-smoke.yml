@@ -2,8 +2,9 @@ name: install-smoke
 
 # INSTALL-XPLAT-01 #1167: run the real one-line installer from a clean HOME
 # (official uv installer, pinned release archive, uv-managed Python) and
-# check that the installed `agentos` serves its setup page. Runs only when
-# the installer or the release pins change, so ordinary PRs pay nothing.
+# check that the installed `agentos` serves its setup page, on Linux, macOS
+# and Windows (WSL2). Runs only when the installer or the release pins
+# change, so ordinary PRs pay nothing.
 on:
   pull_request:
     branches: [main]
@@ -42,3 +43,38 @@ jobs:
           cat "$RUNNER_TEMP/start.log"
           [ "$code" = "200" ]
           "$home/.local/share/uv/tools/personal-agentos/bin/python" -c "import mcp.server.stdio"
+
+  # Windows has no native AgentOS yet (#1168); QUICKSTART sends owners to
+  # WSL2. Run the same installer inside WSL2 Ubuntu on a hosted Windows
+  # runner, then reach the setup page from the Windows side to check the
+  # localhost forwarding QUICKSTART relies on.
+  install-wsl2:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: wsl-bash {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Vampire/setup-wsl v7.0.0 (Apache-2.0), pinned by commit.
+      - uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: 2
+          additional-packages: curl ca-certificates
+
+      - name: Install inside WSL2 and open setup from Windows
+        run: |
+          set -eu
+          cat /proc/version
+          home=$(mktemp -d)
+          env -i HOME="$home" PATH=/usr/bin:/bin:/usr/sbin:/sbin AGENTOS_NO_START=1 sh scripts/install.sh
+          env -i HOME="$home" PATH="$home/.local/bin:/usr/bin:/bin" nohup agentos start --no-browser --port 18787 </dev/null > "$home/start.log" 2>&1 &
+          code=000
+          for _ in $(seq 1 60); do
+            code=$(/mnt/c/Windows/System32/curl.exe -s -o NUL -w '%{http_code}' http://127.0.0.1:18787/ || true)
+            [ "$code" = "200" ] && break; sleep 1
+          done
+          cat "$home/start.log"
+          echo "Windows-side HTTP status: $code"
+          [ "$code" = "200" ]

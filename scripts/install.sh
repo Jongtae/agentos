@@ -71,6 +71,11 @@ uv_is_current() {
 if command -v uv >/dev/null 2>&1 && uv_is_current "$(command -v uv)"; then
   UV=$(command -v uv)
 else
+  # The uv installer uses these but does not check all of them itself; a
+  # minimal system without awk otherwise fails with a misleading checksum error.
+  for tool in awk tar gzip; do
+    command -v "$tool" >/dev/null 2>&1 || fail "$tool is required to install uv; install it with your package manager and run this again."
+  done
   say "Installing uv $UV_VERSION (Python package manager by Astral)..."
   download "https://github.com/astral-sh/uv/releases/download/$UV_VERSION/uv-installer.sh" "$work/uv-install.sh"
   [ "$(sha256_of "$work/uv-install.sh")" = "$UV_INSTALLER_SHA256" ] \

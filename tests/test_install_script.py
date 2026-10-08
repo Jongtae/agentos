@@ -56,7 +56,8 @@ class InstallScriptTests(unittest.TestCase):
             script = folder / "install.sh"
             script.write_text(script_text, encoding="utf-8")
             log = folder / "log"
-            run_env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(folder),
+            system_path = (env or {}).get("PATH_OVERRIDE", "/usr/bin:/bin")
+            run_env = {"PATH": f"{bin_dir}:{system_path}", "HOME": str(folder),
                        "FAKE_LOG": str(log), "FAKE_BIN": str(tool_bin), **(env or {})}
             result = subprocess.run(["sh", str(script)], env=run_env, capture_output=True,
                                     text=True, timeout=30)
@@ -121,6 +122,23 @@ class InstallScriptTests(unittest.TestCase):
                 self.assertIn("uv 0", result.stderr)
                 self.assertTrue(any("uv-installer.sh" in call for call in calls))
                 self.assertFalse(any("tool install" in call for call in calls))
+
+    def test_missing_uv_prerequisite_is_reported_before_download(self):
+        digest = hashlib.sha256(b"agentos-archive").hexdigest()
+        with tempfile.TemporaryDirectory() as folder:
+            # A PATH with the basics but no awk, as in a minimal container.
+            tools = Path(folder)
+            for name in ("sh", "uname", "mktemp", "rm", "cut", "printf", "cat", "tar", "gzip",
+                         "sha256sum", "shasum"):
+                for base in ("/usr/bin", "/bin"):
+                    if Path(base, name).exists():
+                        (tools / name).symlink_to(Path(base, name))
+                        break
+            result, calls = self.run_script(self.with_archive_checksum(digest),
+                                            env={"NO_FAKE_UV": "1", "PATH_OVERRIDE": str(tools)})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("awk is required", result.stderr)
+        self.assertFalse(any("uv-installer.sh" in call for call in calls))
 
     def test_windows_shells_are_sent_to_wsl_before_any_download(self):
         for uname in ("MINGW64_NT-10.0", "MSYS_NT-10.0", "CYGWIN_NT-10.0"):

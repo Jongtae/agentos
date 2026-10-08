@@ -690,6 +690,41 @@ class WorkerGuardLogicTests(unittest.TestCase):
         self.assertEqual(worker.failed, [(5, 'submit_refused')])
         self.assertIsNone(worker.cancelled)
 
+    def test_a_page_set_press_handler_property_is_signalled_to_the_client_world(self):
+        """#1181: the page-world wrapper signals ``el.onclick = f`` (invisible from the client world)."""
+        import re
+        import shutil
+        from personal_agent import browser_worker as bw
+        listed = re.search(r"const PRESS_HANDLERS = \[(.*?)\];", bw.PRELUDE, re.S).group(1)
+        self.assertEqual(tuple(key.strip().strip("'") for key in listed.replace('\n', '').split(',')),
+                         bw.PRESS_HANDLER_KEYS, 'the wrapper covers exactly the handlers scripted() checks')
+        self.assertIn(json.dumps(bw.HANDLER_SIGNAL), bw.client_guard_user_script(False))
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not installed')
+        # A minimal DOM: handler properties are accessors on HTMLElement.prototype, as in WebKit.
+        harness = """
+class Element extends EventTarget {}
+class HTMLElement extends Element {}
+class SVGElement extends Element {}
+class HTMLFormElement extends HTMLElement { submit() {} }
+for (const key of %s) Object.defineProperty(HTMLElement.prototype, key, {configurable: true, enumerable: true,
+  get() { return (this.h || {})[key] || null; }, set(v) { (this.h = this.h || {})[key] = v; }});
+Object.assign(globalThis, {Element, HTMLElement, SVGElement, HTMLFormElement, CustomEvent: Event});
+%s
+const seen = [], el = new HTMLElement(), other = new HTMLElement();
+for (const node of [el, other]) node.addEventListener(%s, () => seen.push(node === el ? 'el' : 'other'));
+el.onclick = function () {};
+other.onclick = null;
+other.onmousedown = 'not a function';
+el.onmousedown = () => {};
+console.log(JSON.stringify({seen, kept: typeof el.onclick}));
+""" % (json.dumps(list(bw.PRESS_HANDLER_KEYS)), bw.PAGE_WRAP_USER_SCRIPT, json.dumps(bw.HANDLER_SIGNAL))
+        result = subprocess.run([node, '-e', harness], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {'seen': ['el', 'el'], 'kept': 'function'},
+                         'only a function assignment signals, and the handler is still set')
+
     def test_the_page_wrapper_is_not_installed_while_the_owner_signs_in(self):
         bw, worker = self.worker()
         added = []
@@ -1307,11 +1342,6 @@ class WebKitIntegrationTests(unittest.TestCase):
         finally:
             sess.close()
 
-    # Known defect #1181: a handler the page assigns as a property is invisible from
-    # the worker's isolated content world, so '재구매' is judged a navigation.
-    # Observed on macos-15 and macos-26 runners (#1178). An unexpected pass fails
-    # the suite, which is the signal to remove this marker with the fix.
-    @unittest.expectedFailure
     def test_a_list_page_link_navigates_and_a_scripted_one_is_judged_as_a_button(self):
         """#899 review P1/P2-3/P2-4/P2-5: the real worker's navLink, end to end."""
         sess = bs.BrowserSession(self.profile.driver_factory('work-899'), work_id='work-899', approvals=Approvals(),

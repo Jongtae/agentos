@@ -85,6 +85,24 @@ agentos start
 
 本地优先（local-first）不等于只在本地（local-only）：你可以选择本地模型或托管模型；使用托管模型时，请求所用的上下文会发送给该提供方。
 
+### 换了 AI，对话继续
+
+先询问昨天购物车里的商品，登录查看当前状态，再换一个 AI，请它移除商品。前后都是同一件购物事项的后续步骤。
+
+<!-- ai-switch-snapshot:1 — insert the real cropped image before merging #1189 -->
+
+**1. 切换到 Claude Code，接着问之前的事。**“昨天最后是把午餐肉加进去了，还是拿出来了？”PA 提到之前加入一罐200g午餐肉的对话，但说明需要登录才能查看当前购物车。
+
+<!-- ai-switch-snapshot:2 — insert the real cropped image before merging #1189 -->
+
+**2. 登录后查看当前状态。** PA 回复说购物车里仍有一罐200g经典午餐肉，同时说明有些步骤未能确认。
+
+<!-- ai-switch-snapshot:3 — insert the real cropped image before merging #1189 -->
+
+**3. 切换到 Codex，继续下一步操作。**“把午餐肉拿出来。”PA 回复说已移除这一罐，其他22件商品保持不变。
+
+*摘自真实对话。这里展示的是这次使用中的回复，不代表所有模型或网站都能得到相同结果。*
+
 <!-- readme-section:presence -->
 
 ## 工作原理

@@ -301,6 +301,9 @@ button.wide{{flex:1}}#done{{width:100%;font-size:19px;padding:16px;background:#3
 <div class="row"><button id="dialog-ok" class="main wide">확인</button><button id="dialog-cancel" class="wide">취소</button></div></div>
 <img id="shot" alt="Mac의 로그인 창">
 <p class="note">화면을 누르면 Mac의 로그인 창에서 같은 자리가 눌려요. 입력할 칸을 먼저 누른 뒤 아래에 글자를 넣고 [입력]을 누르세요.</p>
+<form id="cred" autocomplete="on"><p class="note">위 화면에서 아이디 칸을 누른 뒤, 아래 칸을 눌러 iPhone 암호 자동 채우기(열쇠 아이콘)로 계정을 고르고 [넣기]를 누르세요. 아이디, Tab, 비밀번호 순으로 들어가요.</p>
+<div class="row"><input id="user" name="username" type="text" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="아이디" maxlength="{TEXT_LIMIT}"></div>
+<div class="row"><input id="pass" name="password" type="password" autocomplete="current-password" placeholder="비밀번호" maxlength="{TEXT_LIMIT}"><button id="fill" type="submit" class="main">넣기</button></div></form>
 <div class="row"><input id="text" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="선택한 칸에 넣을 글자" maxlength="{TEXT_LIMIT}"><button id="hide">가리기</button><button id="send" class="main">입력</button></div>
 <div class="row"><button id="enter" class="wide">엔터</button><button id="back" class="wide">←지우기</button><button id="nav-back" class="wide">뒤로</button><button id="reload" class="wide">새로고침</button></div>
 <button id="done">완료</button>
@@ -324,6 +327,14 @@ $('shot').addEventListener('click',e=>{{if(!W||!H)return;const r=e.currentTarget
 const x=Math.max(0,Math.min(W,(e.clientX-r.left)/r.width*W)),y=Math.max(0,Math.min(H,(e.clientY-r.top)/r.height*H));post('{INPUT_PATH}',{{type:'tap',x:x,y:y}}).then(()=>setTimeout(frame,150))}});
 $('send').onclick=async()=>{{const t=$('text').value;if(!t)return;if(await post('{INPUT_PATH}',{{type:'text',text:t}})){{$('text').value=''}}}};
 $('text').addEventListener('keydown',e=>{{if(e.key==='Enter'){{e.preventDefault();$('send').click()}}}});
+// #1170: the phone's own AutoFill fills these two; they go out like typed text (ID, Tab, password) and are
+// cleared at once: the page keeps neither.
+function clearCred(){{$('user').value='';$('pass').value=''}}
+$('cred').addEventListener('submit',async e=>{{e.preventDefault();const u=$('user').value,p=$('pass').value;clearCred();
+if(u&&!(await post('{INPUT_PATH}',{{type:'text',text:u}})))return;
+if(u&&p&&!(await post('{INPUT_PATH}',{{type:'key',key:'Tab'}})))return;
+if(p)await post('{INPUT_PATH}',{{type:'text',text:p}});setTimeout(frame,150)}});
+window.addEventListener('pagehide',clearCred);
 $('hide').onclick=()=>{{const t=$('text');t.type=t.type==='password'?'text':'password';$('hide').textContent=t.type==='password'?'보기':'가리기'}};
 $('enter').onclick=()=>post('{INPUT_PATH}',{{type:'key',key:'Enter'}});
 $('back').onclick=()=>post('{INPUT_PATH}',{{type:'key',key:'Backspace'}});

@@ -107,7 +107,7 @@ agentos start
 <p align="center">
   <img src="docs/assets/readme/ai-switch/ai-switch-conversation.png" alt="三张裁剪后的韩语 Telegram 截图。1：切换到 Claude Code 后，主人问昨天的午餐肉最后放进去了还是拿出来了，PA 接上之前的购物车对话并请求登录。2：登录后，它回答购物车里有 1 罐 CJ 经典午餐肉 200g，并说明有些步骤未能确认。3：切换到 Codex 后，主人让它把午餐肉拿掉，PA 回复已删除，其余 22 件商品仍在。">
 </p>
-<p align="center"><sub>截取自真实对话（Telegram，韩语界面）。登录链接已裁掉。 · <a href="docs/assets/readme/ai-switch/ai-switch-conversation.png">查看大图</a></sub></p>
+<p align="center"><sub>截取自真实对话（Telegram，韩语界面）。登录链接已裁掉，姓名已模糊处理。 · <a href="docs/assets/readme/ai-switch/ai-switch-conversation.png">查看大图</a></sub></p>
 
 ① **切换到 Claude Code。** 问“昨天的午餐肉最后放进去了还是拿出来了？”，PA 接上之前的购物对话。
 

@@ -107,7 +107,7 @@ Windows에서는 PowerShell에서 `wsl --install`을 실행하고 재시작한 �
 <p align="center">
   <img src="docs/assets/readme/ai-switch/ai-switch-conversation.png" alt="한국어 Telegram 화면 세 장을 잘라 붙인 이미지. 1: Claude Code로 바꾼 뒤 어제 스팸을 넣었는지 뺐는지 묻자, PA가 이전 장바구니 대화를 이어받고 로그인을 요청합니다. 2: 로그인 후 CJ 스팸 클래식 200g 1개가 장바구니에 있다고 답하고, 일부 단계는 확인하지 못했다고 알립니다. 3: Codex로 바꾼 뒤 스팸을 빼 달라고 하자, 뺐고 나머지 22개 상품은 그대로라고 답합니다.">
 </p>
-<p align="center"><sub>실제 대화에서 발췌한 화면입니다. 로그인 링크는 잘라냈습니다. · <a href="docs/assets/readme/ai-switch/ai-switch-conversation.png">크게 보기</a></sub></p>
+<p align="center"><sub>실제 대화에서 발췌한 화면입니다. 로그인 링크는 잘라내고 이름은 가렸습니다. · <a href="docs/assets/readme/ai-switch/ai-switch-conversation.png">크게 보기</a></sub></p>
 
 ① **Claude Code로 전환.** “어제 스팸을 넣었나, 뺐나?”라는 질문에 이전 쇼핑 대화를 이어받습니다.
 

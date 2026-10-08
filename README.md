@@ -122,7 +122,7 @@ The aim is a PA that follows what “it” and “the same one” mean, so you k
 | [Documentation map](docs/README.md) | Every current contract and guide |
 | [Acknowledgements](docs/acknowledgements.en.md) | Research and projects that shaped the design |
 
-**Contributing.** Issues and pull requests are welcome. Start with [CONTRIBUTING](CONTRIBUTING.md); [AGENTS.md](AGENTS.md) describes the development workflow.
+**Contributing.** Issues and pull requests are welcome. Start with [CONTRIBUTING](CONTRIBUTING.md); [AGENTS.md](AGENTS.md) describes the development workflow. Tried it? Tell us what worked and what didn't through the [feedback form](https://github.com/Jongtae/agentos/issues/new?template=feedback.yml) or [Discussions](https://github.com/Jongtae/agentos/discussions).
 
 <!-- readme-section:license -->
 

@@ -122,7 +122,7 @@ Linux、ソースからの実行、すべての設定は [QUICKSTART](QUICKSTART
 | [ドキュメントマップ](docs/README.md) | 現在の契約とガイドの一覧 |
 | [謝辞と参考文献](docs/acknowledgements.en.md) | 設計に影響を与えた研究とプロジェクト |
 
-**コントリビュート。** Issue と Pull Request を歓迎します。まず [CONTRIBUTING](CONTRIBUTING.md) を、開発の流れは [AGENTS.md](AGENTS.md) をご覧ください。
+**コントリビュート。** Issue と Pull Request を歓迎します。まず [CONTRIBUTING](CONTRIBUTING.md) を、開発の流れは [AGENTS.md](AGENTS.md) をご覧ください。試したら、[フィードバックフォーム](https://github.com/Jongtae/agentos/issues/new?template=feedback.yml) か [Discussions](https://github.com/Jongtae/agentos/discussions) で、よかった点と困った点を教えてください。
 
 <!-- readme-section:license -->
 

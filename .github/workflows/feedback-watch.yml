@@ -1,0 +1,45 @@
+name: feedback-watch
+
+# Turns public mentions of Personal AgentOS into `feedback` issues (#1143).
+# Development infrastructure for the open-source project, not a product feature.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 0 * * 1,4'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - source: hn
+            feed: 'https://hnrss.org/newest?q=%22Personal+AgentOS%22+OR+Jongtae%2Fagentos&search_attrs=title,url'
+            pattern: ''
+          - source: hn
+            feed: 'https://hnrss.org/newcomments?q=%22Personal+AgentOS%22+OR+Jongtae%2Fagentos'
+            pattern: ''
+          - source: reddit
+            feed: 'https://www.reddit.com/search.rss?q=%22Personal+AgentOS%22+OR+%22Jongtae%2Fagentos%22&sort=new'
+            pattern: ''
+          - source: geeknews
+            feed: 'https://news.hada.io/rss/news'
+            # rss-to-issues applies the pattern as a JavaScript RegExp without flags, so spell out both cases.
+            pattern: '[Pp]ersonal [Aa]gent[Oo][Ss]|[Jj]ongtae/agentos'
+    steps:
+      - uses: git-for-windows/rss-to-issues@99d302b353c4751ca1bda6130fb24934ec12e01e # v0.0.13
+        # Reddit and others can refuse requests from CI runners; a failed feed must not stop the rest.
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          feed: ${{ matrix.feed }}
+          max-age: 96h
+          prefix: '[feedback:${{ matrix.source }}]'
+          labels: 'feedback,source:${{ matrix.source }}'
+          character-limit: 2000
+          content-pattern: ${{ matrix.pattern }}

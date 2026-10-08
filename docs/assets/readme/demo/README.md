@@ -1,6 +1,6 @@
 # README demo
 
-Each public README shows the demo GIF for its language: `demo.en.gif`, `demo.ko.gif`, `demo.ja.gif` and `demo.zh-CN.gif`. All four use the same phone recording (the Korean Telegram interface); a strip under the phone gives the scene title, the speaker and the key line in the README's language, and the opening title card is localized.
+Each public README shows the demo GIF for its language: `demo-v2.en.gif`, `demo-v2.ko.gif`, `demo-v2.ja.gif` and `demo-v2.zh-CN.gif`. All four use the same phone recording (the Korean Telegram interface); a strip under the phone gives the scene title, the speaker and the key line in the README's language, and the opening title card is localized.
 
 | | |
 | --- | --- |
@@ -8,6 +8,8 @@ Each public README shows the demo GIF for its language: `demo.en.gif`, `demo.ko.
 | Scenes | 1. dinner meeting route and restaurant · 2. adding one small item to a grocery cart, stopping before payment · 3. book-cart discount question, with the unchecked step stated |
 | Sources | four iPhone screen recordings of Telegram sessions made on 2026-10-07 (digests in [manifest.json](manifest.json)) |
 | Selected for public use | by the owner on 2026-10-08 (#1133, #1137, #1139) |
+
+When the demo content changes, give the files a new name (for example `demo-v3.<lang>.gif`) and update the READMEs. GitHub, browsers and the GitHub app cache images by URL, so a changed file under the same name can keep showing the previous version.
 
 ## Editing
 

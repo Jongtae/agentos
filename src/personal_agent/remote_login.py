@@ -291,7 +291,7 @@ def page(session, nonce):
 <style nonce="{nonce}">body{{font:16px/1.4 -apple-system,system-ui,sans-serif;margin:0;padding:10px;background:#1c1c1e;color:#f2f2f7}}
 h1{{font-size:16px;margin:0 0 8px;font-weight:600}}.note{{font-size:13px;color:#aeaeb2;margin:6px 0}}
 #shot{{display:block;width:100%;background:#000;border-radius:8px;touch-action:manipulation;-webkit-user-select:none;user-select:none}}
-.row{{display:flex;gap:6px;margin:8px 0}}input{{flex:1;font-size:16px;padding:12px;border-radius:10px;border:1px solid #48484a;background:#2c2c2e;color:#fff}}
+.row{{display:flex;gap:6px;margin:8px 0}}input{{flex:1;min-width:0;font-size:16px;padding:12px;border-radius:10px;border:1px solid #48484a;background:#2c2c2e;color:#fff}}
 button{{font-size:15px;padding:12px 10px;border-radius:10px;border:0;background:#3a3a3c;color:#fff}}button.main{{background:#0a84ff}}
 button.wide{{flex:1}}#done{{width:100%;font-size:19px;padding:16px;background:#30d158;color:#000;font-weight:600;margin-top:10px}}
 #end{{display:none;text-align:center;padding:30px 0;font-size:18px}}.hidden{{display:none}}

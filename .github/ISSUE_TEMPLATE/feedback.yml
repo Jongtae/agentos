@@ -1,0 +1,32 @@
+name: Feedback
+description: Tell us what worked, what confused you, or what you expected Personal AgentOS to do
+labels: ["feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying Personal AgentOS. Short is fine. Please leave out passwords, tokens and other secrets.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of feedback is this?
+      options:
+        - Something did not work
+        - Something was confusing
+        - I expected it to do something it did not
+        - An idea
+        - Something I liked
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, or what would you like?
+      description: The request you made or the step you were on, and what you saw.
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: Your setup (optional)
+      description: For example "macOS 15, Homebrew v1.1.1, Ollama qwen3" or "Linux, source, Claude Code subscription".

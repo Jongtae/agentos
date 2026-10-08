@@ -122,7 +122,7 @@ Linux, 소스 실행, 모든 설정은 [QUICKSTART](QUICKSTART.md)에 있습니�
 | [문서 지도](docs/README.md) | 현재 계약과 가이드 전체 |
 | [참고한 연구와 프로젝트](docs/acknowledgements.en.md) | 설계에 영향을 준 연구와 프로젝트 |
 
-**기여하기.** 이슈와 PR을 환영합니다. [CONTRIBUTING](CONTRIBUTING.md)부터 읽어 주세요. 개발 흐름은 [AGENTS.md](AGENTS.md)에 있습니다.
+**기여하기.** 이슈와 PR을 환영합니다. [CONTRIBUTING](CONTRIBUTING.md)부터 읽어 주세요. 개발 흐름은 [AGENTS.md](AGENTS.md)에 있습니다. 써 보셨다면 [피드백 양식](https://github.com/Jongtae/agentos/issues/new?template=feedback.yml)이나 [Discussions](https://github.com/Jongtae/agentos/discussions)에 좋았던 점과 아쉬운 점을 남겨 주세요.
 
 <!-- readme-section:license -->
 

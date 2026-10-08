@@ -122,7 +122,7 @@ Linux、从源码运行以及所有设置，请见 [QUICKSTART](QUICKSTART.md)�
 | [文档地图](docs/README.md) | 当前全部契约和指南 |
 | [致谢与参考](docs/acknowledgements.en.md) | 影响设计的研究与项目 |
 
-**参与贡献。** 欢迎提交 Issue 和 Pull Request。请先阅读 [CONTRIBUTING](CONTRIBUTING.md)；开发流程见 [AGENTS.md](AGENTS.md)。
+**参与贡献。** 欢迎提交 Issue 和 Pull Request。请先阅读 [CONTRIBUTING](CONTRIBUTING.md)；开发流程见 [AGENTS.md](AGENTS.md)。用过之后，欢迎通过[反馈表单](https://github.com/Jongtae/agentos/issues/new?template=feedback.yml)或 [Discussions](https://github.com/Jongtae/agentos/discussions) 告诉我们哪些好用、哪些不好用。
 
 <!-- readme-section:license -->
 

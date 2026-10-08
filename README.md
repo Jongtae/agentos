@@ -107,7 +107,7 @@ The figure shows the intended design, not an observed run. Details: [architectur
 <p align="center">
   <img src="docs/assets/readme/ai-switch/ai-switch-conversation.png" alt="Three cropped Telegram screenshots in Korean. 1: after switching to Claude Code, the owner asks whether the Spam was added or taken out yesterday; the PA recalls the earlier cart conversation and asks to sign in. 2: after signing in, it reports one CJ Spam Classic 200 g in the cart and says some steps could not be checked. 3: after switching to Codex, the owner says to take the Spam out; the PA reports it removed and 22 items remaining.">
 </p>
-<p align="center"><sub>Excerpts from a real conversation (Telegram, Korean UI). The sign-in link is cropped out. · <a href="docs/assets/readme/ai-switch/ai-switch-conversation.png">Open full size</a></sub></p>
+<p align="center"><sub>Excerpts from a real conversation (Telegram, Korean UI). The sign-in link is cropped out and the name is blurred. · <a href="docs/assets/readme/ai-switch/ai-switch-conversation.png">Open full size</a></sub></p>
 
 ① **Switch to Claude Code.** Asked “Did I end up adding the Spam yesterday, or taking it out?”, the PA picks up the earlier shopping conversation.
 

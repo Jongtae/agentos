@@ -5,19 +5,27 @@ Usage: build.py <source-screenshot-dir> docs/assets/readme/ai-switch
 """
 import hashlib, json, sys
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 SRC = Path(sys.argv[1]); OUT = Path(sys.argv[2])
 # (source file, [crop boxes]) per panel, in conversation order.
 PANELS = [
     ("461b29dc-image.png", [(0, 222, 706, 1220)]),                      # 10:01 switch to Claude Code + question
-    ("183d5629-image.png", [(0, 458, 706, 560), (0, 1020, 706, 1332)]), # 10:02-10:06 sign-in resume + cart answer (sign-in link omitted)
+    ("183d5629-image.png", [(0, 398, 706, 560), (0, 1020, 706, 1332)]), # 10:02-10:06 sign-in needed/resume + cart answer (sign-in link omitted)
     ("d5f26819-image.png", [(0, 390, 706, 1220)]),                      # 10:07 switch to Codex + remove
 ]
+# The owner's Telegram display name in each reply quote, blurred before cropping.
+NAME_BOXES = {
+    "461b29dc-image.png": (48, 592, 176, 620),
+    "183d5629-image.png": (48, 1046, 176, 1074),
+    "d5f26819-image.png": (48, 849, 176, 877),
+}
 M, GAP, SEG_GAP, R, CIRCLE = 24, 36, 18, 28, 60
 panels = []
 for name, boxes in PANELS:
     im = Image.open(SRC / name).convert("RGB")
+    box = NAME_BOXES[name]
+    im.paste(im.crop(box).filter(ImageFilter.GaussianBlur(9)), box[:2])
     parts = [im.crop(b) for b in boxes]
     h = sum(p.height for p in parts) + SEG_GAP * (len(parts) - 1)
     p = Image.new("RGBA", (706, h), (0, 0, 0, 0)); y = 0
@@ -49,7 +57,8 @@ manifest = {
         {"source_sha256": hashlib.sha256((SRC / n).read_bytes()).hexdigest(), "source_size": [706, 1536], "crop_boxes": b}
         for n, b in PANELS
     ],
-    "omitted": "phone status bar, chat header and input bar; in panel 2 the one-time sign-in link and its code (between the two crops)",
+    "name_blur_boxes": NAME_BOXES,
+    "omitted": "phone status bar, chat header and input bar; in panel 2 the one-time sign-in link and its code (between the two crops); the owner's display name in reply quotes is blurred",
 }
 (OUT / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
 print(canvas.size, (OUT / "ai-switch-conversation.png").stat().st_size)

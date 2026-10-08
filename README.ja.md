@@ -107,7 +107,7 @@ Windows では PowerShell で `wsl --install` を実行して再起動し、Ubun
 <p align="center">
   <img src="docs/assets/readme/ai-switch/ai-switch-conversation.png" alt="韓国語の Telegram 画面 3 枚を切り出した画像。1: Claude Code に切り替えたあと、昨日スパムを入れたか抜いたかを尋ねると、PA が前のカートの会話を引き継ぎ、ログインを求めます。2: ログイン後、CJ スパム クラシック 200g が 1 個カートにあると答え、一部の手順は確認できなかったと伝えます。3: Codex に切り替えてスパムを抜くよう頼むと、抜いたこと、残り 22 点はそのままであることを伝えます。">
 </p>
-<p align="center"><sub>実際の会話から抜き出した画面です（Telegram、韓国語 UI）。ログインリンクは切り取っています。 · <a href="docs/assets/readme/ai-switch/ai-switch-conversation.png">原寸で見る</a></sub></p>
+<p align="center"><sub>実際の会話から抜き出した画面です（Telegram、韓国語 UI）。ログインリンクは切り取り、名前はぼかしています。 · <a href="docs/assets/readme/ai-switch/ai-switch-conversation.png">原寸で見る</a></sub></p>
 
 ① **Claude Code に切り替え。** 「昨日スパムは結局入れた？抜いた？」という質問に、前の買い物の会話を引き継ぎます。
 

@@ -304,6 +304,8 @@ def test_claude_bootstrap_points_at_no_completed_program() -> None:
         "next_goal",
         "no work is selected",
         "do not infer one from open issues",
+        # #1191: a direct owner request is authorised by itself; no plan ceremony.
+        "a change the owner asks for directly in the conversation is authorised by that request",
     )
     _assert_any(
         claude,

@@ -30,7 +30,7 @@ If Jarvis belonged to another company, would Tony have to give up Jarvis (what i
 Personal AgentOS is built on the answer *no*. It is an open-source environment you install and control. One personal agent (PA) keeps your context, open work and permissions there, while the AI doing the work can change.
 
 <p align="center">
-  <img src="docs/assets/readme/demo/demo.en.gif" width="300" alt="Demo: Korean Telegram conversations with a PA. It plans the route and a restaurant for a dinner meeting, adds one small item to a shopping cart and stops before payment, and says which discount step it could not check. Personal details are blurred.">
+  <img src="docs/assets/readme/demo/demo-v2.en.gif" width="300" alt="Demo: Korean Telegram conversations with a PA. It plans the route and a restaurant for a dinner meeting, adds one small item to a shopping cart and stops before payment, and says which discount step it could not check. Personal details are blurred.">
 </p>
 <p align="center"><sub>Demo · Telegram (Korean UI) with English subtitles. Waiting time is cut and personal details are blurred.</sub></p>
 

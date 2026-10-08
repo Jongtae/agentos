@@ -531,22 +531,22 @@
     "layout": "phone window 480 x 720 (cropped per segment from 480 x 1044; crop_window_y per segment) above a 156 px subtitle strip",
     "files": {
       "en": {
-        "file": "demo.en.gif",
+        "file": "demo-v2.en.gif",
         "sha256": "db2b7d235ae6383fd1973208f89aeda9939a99c82c499a464115785a8d9dd69a",
         "bytes": 3670550
       },
       "ko": {
-        "file": "demo.ko.gif",
+        "file": "demo-v2.ko.gif",
         "sha256": "5aae23f9326b3a3d42c661f5e38d9d600bce36246c53fb9dc8c6f49adcf9654f",
         "bytes": 3682946
       },
       "ja": {
-        "file": "demo.ja.gif",
+        "file": "demo-v2.ja.gif",
         "sha256": "c7092de0f4e7b8cda03ff5089e89dd7a00f02b3976a7aac0cf40c449c1587e21",
         "bytes": 3704257
       },
       "zh-CN": {
-        "file": "demo.zh-CN.gif",
+        "file": "demo-v2.zh-CN.gif",
         "sha256": "071e67adc0af5e9238c32ef4a7eff0708e7af94b896db3bb874e6f3d4efa9c35",
         "bytes": 3689888
       }

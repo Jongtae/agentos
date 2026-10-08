@@ -1,0 +1,4 @@
+# Shell scripts must keep LF endings, or sh fails on a Windows/WSL checkout
+# (`set: Illegal option -`). Found by the install-smoke WSL2 job (#1167).
+*.sh text eol=lf
+.githooks/* text eol=lf

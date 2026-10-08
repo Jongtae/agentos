@@ -66,6 +66,7 @@ TOOL_LABELS = {
     'calendar_draft_cancel': '일정 초안', 'weather': '날씨 조회', 'ask_location': '위치 확인',
     'delegate_agent': '다른 에이전트에 맡김', 'list_agents': '에이전트 목록 조회',
     'find_files': '파일 찾기', 'read_file': '파일 읽기', 'public_page_read': '공개 페이지 읽기',
+    'drive_search': 'Drive 파일 찾기', 'drive_read': 'Drive 파일 읽기',
     'bounded_public_research': '공개 자료 조사',
     # SEC-BROWSER-01 (#656): steps in the owner-logged-in browser profile.
     'browser_open': '브라우저 페이지 열기', 'browser_read': '브라우저 페이지 읽기', 'browser_find': '브라우저 페이지에서 찾기', 'browser_click': '브라우저에서 누르기', 'browser_type': '브라우저에 입력',

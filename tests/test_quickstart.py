@@ -298,6 +298,18 @@ class QuickstartTests(unittest.TestCase):
         self.assertIn('not configured locally',job['error'])
         self.assertFalse(any(url.endswith('/api/chat') for url, _body, _headers in self.calls))
 
+    def test_drive_request_with_full_drive_connector_runs_in_the_model_loop(self):
+        """#1172: with the full-Drive connector the worker reads Drive with its own tools."""
+        self.model(); self.assertTrue(self.service.test_model()['ok']); self.calls.clear()
+        self.service.drive_oauth=object()
+        self.service.drive_reader_factory=lambda _owner:object()
+        self.service.drive_read_prerequisite=lambda _job:self.fail('the drive.file handoff must not run')
+        self.service.use_decision_engine(capability_need_engine({'구글 드라이브 파일을 요약해줘':INTENT_DRIVE_READ}))
+        job_id=self.store.enqueue('구글 드라이브 파일을 요약해줘','drive-full',channel='telegram:g',chat_id=123)
+        self.assertTrue(self.service.run_one())
+        self.assertNotIn('not configured locally',self.store.job(job_id).get('error') or '')
+        self.assertTrue(any(url.endswith('/api/chat') for url, _body, _headers in self.calls))
+
     def test_selected_drive_content_is_only_in_memory_for_the_model_turn(self):
         key=Fernet.generate_key()
         drive=DriveWebOAuthHandoff(EncryptedDriveSecretStore(self.store,key),'client',

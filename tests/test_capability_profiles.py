@@ -111,7 +111,9 @@ class OneActionSource(_Store):
                                  'calendar_draft_create': False, 'calendar_draft_update': False,
                                  'calendar_draft_cancel': False, 'save_memory': False,
                                  # #826: the connected-folder documents and approved pages.
-                                 'find_files': True, 'list_roots': True, 'read_file': True, 'public_page_read': True})
+                                 'find_files': True, 'list_roots': True, 'read_file': True, 'public_page_read': True,
+                                 # #1172: the owner's Drive reads.
+                                 'drive_search': True, 'drive_read': True})
 
     def test_no_route_keeps_its_own_schema_list(self):
         """The removed three-tool fork and the two list_notes copies stay gone."""
@@ -365,6 +367,8 @@ class SettingsProjection(_Store):
                                              'settings_read', 'settings_change',
                                              # #826: the Work information-use audit, relayed the same way.
                                              'information_use',
+                                             # #1172: the owner's Drive reads, relayed the same way.
+                                             'drive_search', 'drive_read',
                                              # #961: the Work's pinned skills, read in the bridge (only with a binding).
                                              'skill_load', 'skill_resource'],
                                    'unavailable': route_unavailable(BOUNDED_PROFILE),

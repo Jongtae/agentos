@@ -25,9 +25,13 @@ from urllib.parse import parse_qs, unquote, urlencode, urlsplit, urlunsplit
 from .browser_worker import EMBEDDED_UA_TOKEN
 from .quickstart_store import QuickStore
 from .calendar import CalendarConnector
-from .calendar_oauth import CalendarOAuth, EncryptedCalendarSecretStore, calendar_transport
+from .calendar_oauth import (DRIVE_GRANT, DRIVE_SECRET_NAMESPACE, CalendarOAuth, EncryptedCalendarSecretStore,
+                             calendar_transport, drive_transport)
+from .google_drive_read import GoogleDriveReader
+from .browser_jar import KeychainKey, store_account
 from .google_calendar import GoogleCalendar
-from .quickstart_service import AgentService, CALENDAR_CONNECT_PATH, GMAIL_CONNECT_PATH, LOCAL_ADDRESS_HOST, OwnerLocalRequired
+from .quickstart_service import (AgentService, CALENDAR_CONNECT_PATH, DRIVE_CONNECT_PATH, DRIVE_CALLBACK_PATH,
+                                 GMAIL_CONNECT_PATH, LOCAL_ADDRESS_HOST, OwnerLocalRequired)
 from .subscription_engines import SubscriptionEngines
 from .conversation_handoff import ConversationHandoffError, local_refusal_text
 from .plugins import PluginRegistry
@@ -117,6 +121,43 @@ def local_oauth_secret_values(store, path_value, required, label):
     if not all(isinstance(item,str) and item for item in values.values()):
         raise ValueError(f'{label} secret file must contain every required local {label} value.')
     return values
+
+
+#: DRIVE-CONNECT-01 #1172: the publisher's Google OAuth client, shipped with
+#: AgentOS so an owner connects with one button and Google's consent screen.
+#: It must be a "Desktop app" client: Google treats an installed app's client
+#: secret as non-confidential, accepts any loopback port for it, and PKCE plus
+#: the owner-bound signed state bind each authorization.  ``main`` points
+#: ``AGENTOS_GOOGLE_CLIENT_FILE`` here when the owner has not named another
+#: file; ``configured_service`` reads only the environment, so a test or an
+#: embedding caller never picks the bundled client up implicitly.
+BUNDLED_GOOGLE_CLIENT=Path(__file__).with_name('google_oauth_client.json')
+#: Keychain service of the Fernet key that encrypts Google OAuth tokens.
+GOOGLE_OAUTH_KEY_SERVICE='personal-agentos.google-oauth'
+
+
+def google_publisher_client(environ):
+    """``(client_id, client_secret)`` of the configured Desktop OAuth client, or None."""
+    path=environ.get('AGENTOS_GOOGLE_CLIENT_FILE','')
+    if not path:
+        return None
+    try:
+        value=json.loads(Path(path).expanduser().read_text())
+    except (OSError, ValueError):
+        raise ValueError('Google OAuth client file must be a readable Google "Desktop app" client JSON download.') from None
+    installed=value.get('installed') if isinstance(value,dict) else None
+    client_id=installed.get('client_id') if isinstance(installed,dict) else None
+    client_secret=installed.get('client_secret') if isinstance(installed,dict) else None
+    if (not isinstance(client_id,str) or not client_id.endswith('.apps.googleusercontent.com') or len(client_id)>512
+            or not isinstance(client_secret,str) or not client_secret or len(client_secret)>512):
+        raise ValueError('Google OAuth client file must be a Google "Desktop app" client JSON download.')
+    return client_id,client_secret
+
+
+def google_oauth_key(store):
+    """The Keychain-held token key: created on first use, never on disk beside the tokens."""
+    keychain=KeychainKey(store_account(store.root),GOOGLE_OAUTH_KEY_SERVICE)
+    return lambda:keychain.get() or keychain.create()
 
 
 def local_drive_secret_values(store, environ):
@@ -452,10 +493,37 @@ def configured_service(store, environ=None):
                 body=urlencode({**payload,'client_secret':calendar_client_secret}).encode()
                 with urlopen(Request('https://oauth2.googleapis.com/token',body,{'Content-Type':'application/x-www-form-urlencoded'}),timeout=15) as response:
                     return json.loads(response.read())
+    # --- Google Drive read (#1172) ---------------------------------------
+    # One button for the owner: the publisher client above, a Keychain-held
+    # token key, and the loopback callback this listener serves.  Like
+    # Calendar, construction and routes land together and registering the
+    # connector grants nothing until the owner finishes Google's consent.
+    drive_oauth=drive_reader_factory=drive_read_exchange=None
+    google_client=google_publisher_client(environ)
+    if google_client:
+        google_client_id,google_client_secret=google_client
+        google_port=environ.get('AGENTOS_GOOGLE_LOCAL_PORT','8787')
+        if not str(google_port).isdigit() or not 1<=int(google_port)<=65535:
+            raise ValueError('Local Google callback port must be a valid TCP port.')
+        drive_registry=connector_registry or ConnectorRegistry(store,())
+        key_provider=environ.get('AGENTOS_GOOGLE_OAUTH_KEY') or google_oauth_key(store)
+        drive_oauth=CalendarOAuth(EncryptedCalendarSecretStore(store,key_provider,namespace=DRIVE_SECRET_NAMESPACE),
+                                  google_client_id,f'http://{LOCAL_ADDRESS_HOST}:{google_port}{DRIVE_CALLBACK_PATH}',
+                                  registry=drive_registry,allow_localhost=True,grants=(DRIVE_GRANT,))
+        connector_registry=drive_registry
+        def drive_read_exchange(payload):
+            # The client secret is added here only, as for Gmail and Calendar.
+            body=urlencode({**payload,'client_secret':google_client_secret}).encode()
+            with urlopen(Request('https://oauth2.googleapis.com/token',body,{'Content-Type':'application/x-www-form-urlencoded'}),timeout=15) as response:
+                return json.loads(response.read())
+        def drive_reader_factory(owner_id,_oauth=drive_oauth):
+            return GoogleDriveReader(drive_transport(_oauth,owner_id,drive_read_exchange))
     service=AgentService(store,subscription_engines=isolated_engines,
                          isolated_engine_adapter=isolated_engine,drive_web_oauth=drive,
                          connector_registry=connector_registry,gmail=gmail,
-                         calendar_factory=calendar_factory,calendar_oauth=calendar_oauth)
+                         calendar_factory=calendar_factory,calendar_oauth=calendar_oauth,
+                         drive_oauth=drive_oauth,drive_reader_factory=drive_reader_factory)
+    service.drive_read_token_exchange=drive_read_exchange
     service.calendar_token_exchange=calendar_exchange
     service.drive_token_exchange=drive_exchange
     service.drive_read=drive_read
@@ -782,6 +850,25 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 except (AttributeError, ValueError, OSError):
                     return self.reply(400,b'Google Calendar connection could not be completed. Start the connection again from AgentOS.','text/plain; charset=utf-8')
                 return self.reply(200,b'Google Calendar connected. Return to Telegram.','text/plain; charset=utf-8')
+            if path==DRIVE_CONNECT_PATH:
+                # #1172: owner-authenticated and loopback only, like Calendar.
+                if not self.auth():return
+                if self.tunneled():
+                    return self.reply(400,b'Open AgentOS on its local address to connect Google Drive.','text/plain; charset=utf-8')
+                try:return self.redirect(service.begin_drive_connection()['authorization_url'])
+                except (AttributeError, ValueError, KeyError):
+                    return self.reply(400,b'Google Drive connection is unavailable.','text/plain; charset=utf-8')
+            if path==DRIVE_CALLBACK_PATH:
+                # Unauthenticated by necessity (cross-site redirect from
+                # Google); authority is the owner-bound, signed, single-use state.
+                if self.tunneled():
+                    return self.reply(400,b'Google Drive connection could not be completed. Start the connection again from AgentOS.','text/plain; charset=utf-8')
+                try:
+                    callback={key:values[0] for key,values in parse_qs(parts.query).items()}
+                    service.complete_drive_connection(callback)
+                except (AttributeError, ValueError, OSError):
+                    return self.reply(400,b'Google Drive connection could not be completed. Start the connection again from AgentOS.','text/plain; charset=utf-8')
+                return self.reply(200,'Google Drive가 연결되었습니다. 이 창을 닫고 AgentOS로 돌아가세요.'.encode(),'text/plain; charset=utf-8')
             if path=='/google-drive-picker':
                 grant=parse_qs(parts.query).get('grant',[''])[0]
                 if not (getattr(service,'drive_picker_config',None) and service.drive_web_oauth.picker_grant_active(grant)):
@@ -1326,6 +1413,10 @@ def main():
     # The Calendar callback (/oauth/calendar/callback) is served here too, so a
     # second instance on another port never sends its consent to 8787 (#893).
     env['AGENTOS_CALENDAR_LOCAL_PORT']=str(args.port)
+    # #1172: the Google Drive callback is served here as well.
+    env['AGENTOS_GOOGLE_LOCAL_PORT']=str(args.port)
+    if 'AGENTOS_GOOGLE_CLIENT_FILE' not in env and BUNDLED_GOOGLE_CLIENT.is_file():
+        env['AGENTOS_GOOGLE_CLIENT_FILE']=str(BUNDLED_GOOGLE_CLIENT)
     service=configured_service(store,env)
     public_hosts=args.public_tunnel_host
     public_token=args.public_access_token

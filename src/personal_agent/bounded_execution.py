@@ -107,7 +107,11 @@ _OWNER_STATE_RELAYED = ('calendar_query', 'calendar_draft_create', 'calendar_dra
                         # #814: owner settings and their confirm-before-apply drafts, held by the service.
                         'settings_read', 'settings_change',
                         # #826: the information-use audit, read from the Work records the service holds.
-                        'information_use')
+                        'information_use',
+                        # #1172: the owner's Google Drive connection, held by the service.
+                        'drive_search', 'drive_read')
+#: #1172: the owner's Drive connection is held by the service, reached only through its relay.
+_DRIVE = 'owner-drive-connection-served-on-trusted-local-route-only'
 #: #774: the owner's paired Telegram chat is held by the service, reached only through its relay.
 _LOCATION = 'owner-telegram-location-request-served-on-trusted-local-route-only'
 #: #814: the owner settings and their confirmation are held by the service, reached only through its relay.
@@ -218,7 +222,8 @@ CLI_PROFILES = {
             'find_files', 'read_file', 'list_roots', 'calendar_query', 'calendar_draft_create',
             'calendar_draft_update', 'calendar_draft_cancel', 'save_memory', 'list_memory', 'search_memory',
             'list_agents', 'delegate_agent', 'propose_current_state', 'schedule_preparation', 'ask_location',
-            'settings_read', 'settings_change', 'information_use', *_BROWSER_ACTIONS, *_SKILL_ACTIONS)},
+            'settings_read', 'settings_change', 'information_use', 'drive_search', 'drive_read',
+            *_BROWSER_ACTIONS, *_SKILL_ACTIONS)},
                 'runtimes': {'codex': {'pinned_version': '0.153.4', 'live_tested_version': None}},
     },
     'strict-isolated': {
@@ -237,6 +242,7 @@ CLI_PROFILES = {
             'find_files': _STRICT_FILES, 'read_file': _STRICT_FILES, 'list_roots': _STRICT_FILES,
             'calendar_query': _CALENDAR, 'calendar_draft_create': _CALENDAR,
             'calendar_draft_update': _CALENDAR, 'calendar_draft_cancel': _CALENDAR,
+            'drive_search': _DRIVE, 'drive_read': _DRIVE,
             'save_memory': _MEMORY, 'list_memory': _MEMORY, 'search_memory': _MEMORY,
             'list_agents': _SPECIALISTS, 'delegate_agent': _SPECIALISTS,
             **{action: _BROWSER for action in _BROWSER_ACTIONS},

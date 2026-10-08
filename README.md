@@ -12,7 +12,7 @@
 
 **Your personal agent, on your own machine.<br>Change the AI underneath; keep its memory, open work and permissions.**
 
-[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux | Windows (WSL2)](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20WSL2-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
+[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux | WSL2 limited](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20WSL2%20limited-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
@@ -30,17 +30,17 @@ If Jarvis belonged to another company, would Tony have to give up Jarvis (what i
 Personal AgentOS is built on the answer *no*. It is an open-source environment you install and control. One personal agent (PA) keeps your context, open work and permissions there, while the AI doing the work can change.
 
 <p align="center">
-  <img src="docs/assets/readme/demo/demo-v2.en.gif" width="300" alt="Demo: Korean Telegram conversations with a PA. It plans the route and a restaurant for a dinner meeting, adds one small item to a shopping cart and stops before payment, and says which discount step it could not check. Personal details are blurred.">
+  <img src="docs/assets/readme/demo/demo-v2.en.gif" width="360" alt="Demo: Korean Telegram conversations with a PA. It plans the route and a restaurant for a dinner meeting, adds one small item to a shopping cart and stops before payment, and says which discount step it could not check. Personal details are blurred.">
 </p>
-<p align="center"><sub>Demo · Telegram (Korean UI) with English subtitles. Waiting time is cut and personal details are blurred.</sub></p>
+<p align="center"><sub>Demo · Telegram (Korean UI) with English subtitles. Waiting time is cut and personal details are blurred. · <a href="docs/assets/readme/demo/demo-v2.en.gif">Open full size</a></sub></p>
 
 **Highlights**
 
 - **Bring your own AI.** A local Ollama model, an OpenAI-compatible or Anthropic API, or a Codex or Claude Code subscription does the work.
-- **One PA across conversations.** Memory, saved results and the work in progress carry over to the next conversation and survive a restart.
-- **Your boundaries.** It reaches only the folders, accounts and tools you connect. Payments always ask first; secrets never enter a prompt, a log or a record.
+- **One PA across conversations.** Memory, saved results and open-work state persist across conversations and restarts. Interrupted execution is reported rather than silently replayed.
+- **Your boundaries.** Access begins with the folders, accounts and tools you connect. Supported payment flows require per-action approval; [current browser limitations](https://github.com/Jongtae/agentos/issues/758) are documented. [Secrets](SECURITY.md) are excluded from model prompts, logs and Evidence.
 - **Told, not hidden.** When your AI saves something to memory it says so and offers an exact undo. Each task records which of your information it used and where it went.
-- **Where you already talk.** Chat on Telegram from your phone, or in the browser on your own Mac, Linux or Windows (WSL2) computer.
+- **Where you already talk.** Chat on Telegram from your phone, or in the browser on macOS or Linux. Windows works through [WSL2 with current limitations](QUICKSTART.md#windows-wsl2).
 
 <!-- readme-section:try-today -->
 
@@ -49,8 +49,10 @@ Personal AgentOS is built on the answer *no*. It is an open-source environment y
 On macOS or Linux, one command installs and starts AgentOS. You do not need Homebrew, Python or Docker:
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/main/scripts/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh | sh
 ```
+
+The URL pins the installer itself. [Inspect the pinned script](https://github.com/Jongtae/agentos/blob/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh) before running it; the script verifies the published AgentOS archive and the uv installer it downloads.
 
 If you use [Homebrew](https://brew.sh) on macOS:
 

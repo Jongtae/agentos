@@ -12,7 +12,7 @@
 
 **自分のコンピューターで動く、自分のパーソナルエージェント。<br>下で働く AI を替えても、記憶と進行中の仕事と権限はそのまま残ります。**
 
-[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
+[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux | Windows (WSL2)](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20WSL2-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
@@ -40,13 +40,19 @@ Personal AgentOS は *いいえ* という答えから始まります。自分�
 - **会話が変わっても同じ PA。** 記憶、保存した結果、進行中の仕事が次の会話に引き継がれ、再起動後も残ります。
 - **境界は自分で決める。** 接続したフォルダー・アカウント・ツールだけを使います。支払いは必ず先に確認し、秘密情報はプロンプト・ログ・記録に入りません。
 - **隠さずに知らせる。** AI が何かを記憶するとそれを知らせ、正確に取り消せるようにします。任せた仕事ごとに、どの情報を使いどこへ送ったかを記録します。
-- **いつもの場所で会話。** スマートフォンの Telegram、または自分の Mac・Linux のブラウザーで話せます。
+- **いつもの場所で会話。** スマートフォンの Telegram、または自分の Mac・Linux・Windows（WSL2）のブラウザーで話せます。
 
 <!-- readme-section:try-today -->
 
 ## クイックスタート
 
-macOS では [Homebrew](https://brew.sh) でインストールします。
+macOS と Linux では、コマンド一つでインストールしてそのまま起動します。Homebrew、Python、Docker は不要です。
+
+```sh
+curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/main/scripts/install.sh | sh
+```
+
+macOS で [Homebrew](https://brew.sh) を使っている場合：
 
 ```sh
 brew install jongtae/agentos/agentos
@@ -58,9 +64,9 @@ agentos start
 3. 任意：**설정 → 외부 연결**（設定 → 外部接続）で自分の Telegram ボットのトークンを入力し、ペアリングリンクを開きます。
 4. こう話しかけてみてください。**「今週中に提案書を仕上げたい。次にやることをいくつかのステップに分けて。」**
 
-Linux、ソースからの実行、すべての設定は [QUICKSTART](QUICKSTART.md) にあります。会話中は `agentos start` を起動したままにしてください。
+Windows では PowerShell で `wsl --install` を実行して再起動し、Ubuntu を開いて最初のコマンドを実行してください。Windows の手順、インストーラーの動作、ソースからの実行、すべての設定は [QUICKSTART](QUICKSTART.md) にあります。会話中は `agentos start` を起動したままにしてください。
 
-**リリース状況：** Homebrew からは、タグを付けた main コミットの **v1.1.1**（2026-10-07）が入ります。デモは実際の利用セッションを編集したもので、この版の一連の動作を検証したものではありません。説明図は製品の方向性を示す例です。[release manifest](docs/release-manifest.json) は各リリースの範囲を記録し、[製品の状況](docs/product-status.en.md) は提供中の機能・テストの根拠・方向性を区別しています。
+**リリース状況：** どちらのインストール方法でも、タグを付けた main コミットの **v1.1.1**（2026-10-07）が入ります。デモは実際の利用セッションを編集したもので、この版の一連の動作を検証したものではありません。説明図は製品の方向性を示す例です。[release manifest](docs/release-manifest.json) は各リリースの範囲を記録し、[製品の状況](docs/product-status.en.md) は提供中の機能・テストの根拠・方向性を区別しています。
 
 <!-- readme-section:ownership -->
 

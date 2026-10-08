@@ -1,0 +1,44 @@
+name: install-smoke
+
+# INSTALL-XPLAT-01 #1167: run the real one-line installer from a clean HOME
+# (official uv installer, pinned release archive, uv-managed Python) and
+# check that the installed `agentos` serves its setup page. Runs only when
+# the installer or the release pins change, so ordinary PRs pay nothing.
+on:
+  pull_request:
+    branches: [main]
+    paths: [scripts/install.sh, docs/release-manifest.json, .github/workflows/install-smoke.yml]
+  push:
+    branches: [main]
+    paths: [scripts/install.sh, docs/release-manifest.json, .github/workflows/install-smoke.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install from a clean HOME
+        run: |
+          home="$RUNNER_TEMP/home"; mkdir -p "$home"
+          env -i HOME="$home" PATH=/usr/bin:/bin:/usr/sbin:/sbin AGENTOS_NO_START=1 sh scripts/install.sh
+
+      - name: Installed agentos serves setup
+        run: |
+          home="$RUNNER_TEMP/home"
+          env -i HOME="$home" PATH="$home/.local/bin:/usr/bin:/bin" agentos start --no-browser --port 18787 </dev/null > "$RUNNER_TEMP/start.log" 2>&1 &
+          for _ in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18787/ || true)
+            [ "$code" = "200" ] && break; sleep 1
+          done
+          cat "$RUNNER_TEMP/start.log"
+          [ "$code" = "200" ]
+          "$home/.local/share/uv/tools/personal-agentos/bin/python" -c "import mcp.server.stdio"

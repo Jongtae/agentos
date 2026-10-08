@@ -12,7 +12,7 @@
 
 **내 컴퓨터에서 돌아가는 나의 개인 에이전트.<br>아래의 AI는 바꿔도, 기억과 진행 중인 일과 권한은 그대로 남습니다.**
 
-[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
+[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux | Windows (WSL2)](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20WSL2-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
@@ -40,13 +40,19 @@ Personal AgentOS는 *아니다*라는 답에서 출발합니다. 내가 설치�
 - **대화가 바뀌어도 같은 PA.** 기억, 저장한 결과, 진행 중인 일이 다음 대화로 이어지고 재시작 후에도 남습니다.
 - **경계는 내가 정합니다.** 연결한 폴더·계정·도구에만 접근합니다. 결제는 항상 먼저 묻고, 비밀값은 프롬프트·로그·기록에 들어가지 않습니다.
 - **숨기지 않고 알립니다.** AI가 무언가를 기억하면 그 사실을 알리고 정확히 되돌릴 수 있게 합니다. 맡긴 일마다 내 정보 중 무엇을 썼고 어디로 보냈는지 기록합니다.
-- **늘 쓰는 곳에서 대화.** 휴대폰의 Telegram이나, 내 Mac·Linux 컴퓨터의 브라우저에서 대화합니다.
+- **늘 쓰는 곳에서 대화.** 휴대폰의 Telegram이나, 내 Mac·Linux·Windows(WSL2) 컴퓨터의 브라우저에서 대화합니다.
 
 <!-- readme-section:try-today -->
 
 ## 빠른 시작
 
-macOS에서 [Homebrew](https://brew.sh)로 설치합니다.
+macOS나 Linux에서는 명령 하나로 설치하고 바로 시작합니다. Homebrew, Python, Docker가 없어도 됩니다.
+
+```sh
+curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/main/scripts/install.sh | sh
+```
+
+macOS에서 [Homebrew](https://brew.sh)를 쓴다면:
 
 ```sh
 brew install jongtae/agentos/agentos
@@ -58,9 +64,9 @@ agentos start
 3. 선택: **설정 → 외부 연결**에서 내 Telegram 봇 토큰을 넣고 페어링 링크를 엽니다.
 4. 이렇게 말해 보세요. **“이번 주에 제안서를 끝내야 해. 다음 할 일 몇 단계로 나눠 줘.”**
 
-Linux, 소스 실행, 모든 설정은 [QUICKSTART](QUICKSTART.md)에 있습니다. 대화하는 동안 `agentos start`를 켜 두세요.
+Windows에서는 PowerShell에서 `wsl --install`을 실행하고 재시작한 뒤, Ubuntu를 열어 첫 번째 명령을 실행하세요. Windows 안내, 설치 스크립트가 하는 일, 소스 실행, 모든 설정은 [QUICKSTART](QUICKSTART.md)에 있습니다. 대화하는 동안 `agentos start`를 켜 두세요.
 
-**배포 상태:** Homebrew는 태그가 붙은 main 커밋의 **v1.1.1**(2026-10-07)을 설치합니다. 데모는 실제 사용 세션을 편집한 것으로 이 배포본의 종단 간 검증은 아니며, 설명 그림은 제품 방향 예시입니다. [release manifest](docs/release-manifest.json)는 배포본마다 포함 범위를 기록하고, [현재 상태](docs/product-status.ko.md)는 제공 기능과 테스트 근거와 방향을 구분합니다.
+**배포 상태:** 두 설치 방법 모두 태그가 붙은 main 커밋의 **v1.1.1**(2026-10-07)을 설치합니다. 데모는 실제 사용 세션을 편집한 것으로 이 배포본의 종단 간 검증은 아니며, 설명 그림은 제품 방향 예시입니다. [release manifest](docs/release-manifest.json)는 배포본마다 포함 범위를 기록하고, [현재 상태](docs/product-status.ko.md)는 제공 기능과 테스트 근거와 방향을 구분합니다.
 
 <!-- readme-section:ownership -->
 

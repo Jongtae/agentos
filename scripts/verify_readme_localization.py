@@ -115,10 +115,10 @@ README_DIRECTION_DISCLAIMERS = {
 }
 
 README_RELEASE_BOUNDARIES = {
-    "README.md": "Homebrew installs **v{version}** ({date}), built from the tagged main commit. The demo is edited from real sessions and is not release-specific end-to-end validation; the illustrations are product direction.",
-    "README.ko.md": "Homebrew는 태그가 붙은 main 커밋의 **v{version}**({date})을 설치합니다. 데모는 실제 사용 세션을 편집한 것으로 이 배포본의 종단 간 검증은 아니며, 설명 그림은 제품 방향 예시입니다.",
-    "README.ja.md": "Homebrew からは、タグを付けた main コミットの **v{version}**（{date}）が入ります。デモは実際の利用セッションを編集したもので、この版の一連の動作を検証したものではありません。説明図は製品の方向性を示す例です。",
-    "README.zh-CN.md": "Homebrew 安装的是从已打标签的 main 提交构建的 **v{version}**（{date}）。演示是根据真实使用会话剪辑的，并非该发行版本的端到端验证；示意图属于产品方向。",
+    "README.md": "both installers install **v{version}** ({date}), built from the tagged main commit. The demo is edited from real sessions and is not release-specific end-to-end validation; the illustrations are product direction.",
+    "README.ko.md": "두 설치 방법 모두 태그가 붙은 main 커밋의 **v{version}**({date})을 설치합니다. 데모는 실제 사용 세션을 편집한 것으로 이 배포본의 종단 간 검증은 아니며, 설명 그림은 제품 방향 예시입니다.",
+    "README.ja.md": "どちらのインストール方法でも、タグを付けた main コミットの **v{version}**（{date}）が入ります。デモは実際の利用セッションを編集したもので、この版の一連の動作を検証したものではありません。説明図は製品の方向性を示す例です。",
+    "README.zh-CN.md": "两种安装方式安装的都是从已打标签的 main 提交构建的 **v{version}**（{date}）。演示是根据真实使用会话剪辑的，并非该发行版本的端到端验证；示意图属于产品方向。",
 }
 
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
@@ -574,7 +574,7 @@ def validate_body(
 
     installation = section("try-today")
     command_text = text_without_hidden_markup(installation)
-    for token in ("brew install jongtae/agentos/agentos", "http://127.0.0.1:8787/"):
+    for token in ("brew install jongtae/agentos/agentos", "scripts/install.sh | sh", "http://127.0.0.1:8787/"):
         if token not in command_text:
             errors.append(f"{name}: try-today is missing {token!r}")
     boundary = README_RELEASE_BOUNDARIES[name].format(

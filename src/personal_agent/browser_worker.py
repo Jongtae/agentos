@@ -97,6 +97,13 @@ SELECTOR = ('a[href], button, input, select, textarea, summary, [role="button"],
 #: The cancelable event the page-world ``form.submit()`` wrapper dispatches on
 #: the form so the client-world submit guard can refuse it (#698).
 SUBMIT_SIGNAL = 'agentos-guarded-submit'
+#: #1181: set on an element whose press-handler property a page script assigns.  An
+#: attribute, not an event: it is visible from the client world whether or not the
+#: element is connected yet or sits in a shadow tree.
+PRESS_MARK = 'data-agentos-press'
+#: The press handlers ``scripted`` checks (the JS ``PRESS_HANDLERS`` in ``PRELUDE``).
+PRESS_HANDLER_KEYS = ('onclick', 'onmousedown', 'onmouseup', 'onpointerdown', 'onpointerup', 'onauxclick',
+                      'ontouchstart', 'ontouchend', 'onkeydown', 'onkeyup', 'onkeypress', 'onsubmit')
 #: The client-world message handler a cancelled submit is reported through.
 GUARD_HANDLER = 'agentosGuard'
 #: ``autocomplete`` field names of a payment form (with ``password`` inputs).
@@ -205,7 +212,9 @@ const buttonish = (el) => { const tag = el.tagName.toLowerCase();
 // it can only open a page.  A listener added with addEventListener is not visible.
 const PRESS_HANDLERS = ['onclick', 'onmousedown', 'onmouseup', 'onpointerdown', 'onpointerup', 'onauxclick',
   'ontouchstart', 'ontouchend', 'onkeydown', 'onkeyup', 'onkeypress', 'onsubmit'];
-const scripted = (el) => el.getAttributeNames().some((name) => /^on/i.test(name)) ||
+// #1181: a handler property a page script sets lives in the page world and reads as
+// null here; the page-world wrapper (``PAGE_WRAP_USER_SCRIPT``) marks the element instead.
+const scripted = (el) => el.getAttributeNames().some((name) => /^on/i.test(name) || name === %(mark)s) ||
   PRESS_HANDLERS.some((key) => typeof el[key] === 'function');
 const navLink = (el) => el.tagName.toLowerCase() === 'a' && el.hasAttribute('href') &&
   !/^\s*(?:$|#|javascript:)/i.test(el.getAttribute('href') || '') && /^https?:/i.test(el.href || '') &&
@@ -349,6 +358,7 @@ const armSubmitGuard = () => { const s = state(); if (s.submitListening) return;
   window.addEventListener(%(signal)s, cancel, true); };
 const takeCancelled = () => { const s = state(), c = s.cancelled; s.cancelled = null; return c; };
 """ % {'selector': json.dumps(SELECTOR), 'signal': json.dumps(SUBMIT_SIGNAL), 'handler': json.dumps(GUARD_HANDLER),
+       'mark': json.dumps(PRESS_MARK),
        'tokens': json.dumps(list(PAYMENT_TOKENS)), 'secret': json.dumps(sorted(SECRET_TOKENS)),
        'window': SUBMIT_WINDOW_SECONDS * 1000, 'vetted': VETTED_SECONDS * 1000}
 
@@ -575,7 +585,27 @@ PAGE_WRAP_USER_SCRIPT = r"""(() => {
     return apply(original, this, arguments);
   };
   Object.defineProperty(proto, 'submit', {value: submit, writable: true, enumerable: true, configurable: true});
-})();""" % json.dumps(SUBMIT_SIGNAL)
+})();
+(() => {
+  // #1181: a press handler a page assigns as a property (``el.onclick = f``) is only
+  // visible in the page world, so its setter marks the element with an attribute the
+  // client world reads (connected or not, in a shadow tree or not).  This is a best-effort
+  // signal for ordinary pages, not a barrier against a hostile one: such a page can still
+  // hide a handler (``addEventListener``, a saved setter, or removing the mark), which
+  // leaves it where it was before #1181.  Forging a mark only asks for approval more often.
+  const mark = Element.prototype.setAttribute, apply = Reflect.apply;
+  for (const proto of [HTMLElement.prototype, Element.prototype, SVGElement.prototype]) {
+    for (const key of %s) {
+      const desc = Object.getOwnPropertyDescriptor(proto, key);
+      if (!desc || typeof desc.set !== 'function' || !desc.configurable) continue;
+      const set = desc.set;
+      Object.defineProperty(proto, key, {...desc, set: function (value) {
+        apply(set, this, [value]);
+        if (typeof value === 'function') apply(mark, this, [%s, '']);
+      }});
+    }
+  }
+})();""" % (json.dumps(SUBMIT_SIGNAL), json.dumps(list(PRESS_HANDLER_KEYS)), json.dumps(PRESS_MARK))
 
 #: Arguments: nonce, expect, tokens, text.  The held element must be the
 #: focused one and still match the classified descriptor; the text is then

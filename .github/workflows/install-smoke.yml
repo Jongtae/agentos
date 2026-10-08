@@ -8,10 +8,10 @@ name: install-smoke
 on:
   pull_request:
     branches: [main]
-    paths: [scripts/install.sh, docs/release-manifest.json, .github/workflows/install-smoke.yml]
+    paths: [scripts/install.sh, docs/release-manifest.json, .gitattributes, .github/workflows/install-smoke.yml]
   push:
     branches: [main]
-    paths: [scripts/install.sh, docs/release-manifest.json, .github/workflows/install-smoke.yml]
+    paths: [scripts/install.sh, docs/release-manifest.json, .gitattributes, .github/workflows/install-smoke.yml]
   workflow_dispatch:
 
 permissions:

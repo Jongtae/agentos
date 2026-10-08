@@ -50,7 +50,9 @@ def _product_probe():
     from personal_agent.quickstart_service import AgentService
     from personal_agent.quickstart_store import QuickStore
 
-    with tempfile.TemporaryDirectory(prefix="agentos-preflight-") as folder:
+    # #1187: a background thread may still write into the scratch folder while it is
+    # removed (seen on macOS); leftovers in the temp directory are harmless.
+    with tempfile.TemporaryDirectory(prefix="agentos-preflight-", ignore_cleanup_errors=True) as folder:
         root = Path(folder)
         source = QuickStore(root / "source")
         first_claim = not source.claimed() and source.bootstrap.is_file()

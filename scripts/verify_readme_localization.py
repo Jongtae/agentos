@@ -108,17 +108,17 @@ STATUS_ROW_EVIDENCE_TOKEN = "Synthetic **pass-with-friction**"
 # This scene explains the intended experience; it cannot silently become
 # a shipped integration claim when the README narrative changes.
 README_DIRECTION_DISCLAIMERS = {
-    "README.md": "An illustrative reconstruction condensed from real conversations. The map and shopping integrations shown are product direction, not shipped features.",
-    "README.ko.md": "실제 대화를 압축해 재구성한 설명용 그림입니다. 그림 속 지도·쇼핑 연동은 배포된 기능이 아니라 제품 방향입니다.",
-    "README.ja.md": "実際の会話を要約して再構成した説明図です。図中の地図・ショッピング連携は提供済みの機能ではなく製品の方向性です。",
-    "README.zh-CN.md": "这是根据真实对话浓缩重构的示意图。图中的地图和购物集成属于产品方向，并非已发布的功能。",
+    "README.md": "Condensed and translated from real conversations with the PA; not a verbatim screenshot.",
+    "README.ko.md": "PA와 실제로 나눈 대화를 압축해 다시 구성한 화면입니다. 원본 그대로의 캡처는 아닙니다.",
+    "README.ja.md": "PA と実際に交わした会話を要約して再構成した画面です。元の画面そのままではありません。",
+    "README.zh-CN.md": "这是根据与 PA 的真实对话浓缩重构的画面，并非原样截图。",
 }
 
 README_RELEASE_BOUNDARIES = {
-    "README.md": "both installers install **v{version}** ({date}), built from the tagged main commit. The demo is edited from real sessions and is not release-specific end-to-end validation; the illustrations are product direction.",
-    "README.ko.md": "두 설치 방법 모두 태그가 붙은 main 커밋의 **v{version}**({date})을 설치합니다. 데모는 실제 사용 세션을 편집한 것으로 이 배포본의 종단 간 검증은 아니며, 설명 그림은 제품 방향 예시입니다.",
-    "README.ja.md": "どちらのインストール方法でも、タグを付けた main コミットの **v{version}**（{date}）が入ります。デモは実際の利用セッションを編集したもので、この版の一連の動作を検証したものではありません。説明図は製品の方向性を示す例です。",
-    "README.zh-CN.md": "两种安装方式安装的都是从已打标签的 main 提交构建的 **v{version}**（{date}）。演示是根据真实使用会话剪辑的，并非该发行版本的端到端验证；示意图属于产品方向。",
+    "README.md": "both installers install **v{version}** ({date}), built from the tagged main commit. The demo and the everyday-use image come from real sessions and are not release-specific end-to-end validation; the architecture figure is product direction.",
+    "README.ko.md": "두 설치 방법 모두 태그가 붙은 main 커밋의 **v{version}**({date})을 설치합니다. 데모와 일상 사용 화면은 실제 사용 세션을 바탕으로 한 것으로 이 배포본의 종단 간 검증은 아니며, 구조 그림은 제품 방향 예시입니다.",
+    "README.ja.md": "どちらのインストール方法でも、タグを付けた main コミットの **v{version}**（{date}）が入ります。デモと日常利用の画面は実際の利用セッションにもとづくもので、この版の一連の動作を検証したものではありません。構成図は製品の方向性を示す例です。",
+    "README.zh-CN.md": "两种安装方式安装的都是从已打标签的 main 提交构建的 **v{version}**（{date}）。演示和日常使用画面来自真实使用会话，并非该发行版本的端到端验证；架构图属于产品方向。",
 }
 
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")

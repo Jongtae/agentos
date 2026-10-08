@@ -7,7 +7,8 @@
 - **공개 배포본:** 해당 빌드의 설치 smoke와 synthetic 여정 증거는 release manifest에 기록합니다.
 - **현재 main:** 병합된 코드와 모의 환경·fixture 점검이 새 계약을 뒷받침합니다. 전체 경험을 실제 외부 서비스에서 관찰했다는 뜻은 아닙니다.
 - **소유자 파일럿:** 공개용으로 선택한 소유자 녹화에는 별도의 출처와 화면 관찰 범위가 있습니다. 특정 리비전의 반복 재현이나 배포판 검증과는 구분합니다.
-- **제품 방향:** README의 이어지는 대화와 아래 예시는 지향하는 경험을 설명합니다. 하나의 관찰된 실행이나 배포된 구매 통합 기능이 아닙니다.
+- **소유자 파일럿:** README의 데모와 일상 사용 화면은 PA와 실제로 나눈 대화를 압축한 것이며, 배포본별 검증은 아닙니다.
+- **제품 방향:** README의 구조 그림, "다음 목표"의 커피 예시, 아래 예시는 지향하는 경험을 설명합니다. 하나의 관찰된 실행이나 배포된 구매 통합 기능이 아닙니다.
 
 <!-- readme-section:demo-recording -->
 ## README 데모
@@ -59,7 +60,7 @@ README 데모는 2026-10-07에 녹화한 Telegram 화면 녹화 네 개를 편�
 <!-- readme-section:delegation-flow -->
 ## 방금 무슨 일이 있었나
 
-위의 synthetic v1 여정이 지향하는 위임 방식은 다음과 같습니다. 정확히 실행 가능한 범위와 마찰은 근거 표와 release manifest에 기록되어 있으며, README의 대표 대화는 제품 방향을 설명합니다.
+위의 synthetic v1 여정이 지향하는 위임 방식은 다음과 같습니다. 정확히 실행 가능한 범위와 마찰은 근거 표와 release manifest에 기록되어 있으며, README의 일상 사용 화면은 실제 소유자 파일럿 대화를 압축한 것이며 배포본별 검증은 아닙니다.
 
 **일은 맡기고, 통제는 내가.**
 
@@ -95,7 +96,7 @@ README 데모는 2026-10-07에 녹화한 Telegram 화면 녹화 네 개를 편�
 <!-- readme-section:release -->
 ## Homebrew 배포본
 
-**Homebrew 패키지는 태그가 붙은 main 커밋의 최신 공개 배포본 `v1.1.1`(2026-10-07)을 설치합니다.** [release manifest](release-manifest.json)에 포함 소스와 로컬 설치 검증을 기록했습니다. 그 검증은 패키지 설치와 포그라운드 동작에 대한 것이며 실제 Telegram·Google·쇼핑이나 README의 미팅 장면 전체를 입증하지 않습니다. README의 대표 대화는 제품 방향 예시입니다.
+**Homebrew 패키지는 태그가 붙은 main 커밋의 최신 공개 배포본 `v1.1.1`(2026-10-07)을 설치합니다.** [release manifest](release-manifest.json)에 포함 소스와 로컬 설치 검증을 기록했습니다. 그 검증은 패키지 설치와 포그라운드 동작에 대한 것이며 실제 Telegram·Google·쇼핑이나 README의 미팅 장면 전체를 입증하지 않습니다. README의 일상 사용 화면은 실제 소유자 파일럿 대화를 압축한 것이며 배포본별 검증은 아닙니다.
 
 ```sh
 brew install jongtae/agentos/agentos

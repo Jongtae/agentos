@@ -7,7 +7,8 @@ This is the evidence and boundary page behind the [README](../README.md). It sep
 - **Published release:** the release manifest records installed-smoke and synthetic journey evidence for that build.
 - **Current main:** merged code and deterministic/fixture checks support newer contracts; they do not establish the complete experience in live services.
 - **Owner pilot:** selected owner-supplied recordings have their own provenance and visible-observation scope. Revision-specific repeatability and release validation remain separate.
-- **Product direction:** the README's continuing conversation and the example below describe the intended experience, not one observed run or shipped shopping integrations.
+- **Owner pilot:** the README's demo and its everyday-use image are condensed from real conversations with the PA; they are not release-specific validation.
+- **Product direction:** the README's architecture figure, its "next" coffee example and the example below describe the intended experience, not one observed run or shipped shopping integrations.
 
 <!-- readme-section:demo-recording -->
 ## README demo
@@ -59,7 +60,7 @@ These reconstructed, condensed v1 calendar and file scenes explain synthetic jou
 <!-- readme-section:delegation-flow -->
 ## What just happened
 
-In the synthetic v1 journeys above, this is the intended delegation pattern. Exact reachability and friction are recorded in the evidence table and release manifest; the README’s representative conversation remains product direction.
+In the synthetic v1 journeys above, this is the intended delegation pattern. Exact reachability and friction are recorded in the evidence table and release manifest; the README’s everyday-use image is condensed from real owner-pilot conversations, not release-specific validation.
 
 **Delegate the work. Keep the control.**
 
@@ -95,7 +96,7 @@ For installable agents the same rule holds: `downloaded != installed != enabled 
 <!-- readme-section:release -->
 ## The Homebrew release
 
-**The Homebrew package installs the newest published release, `v1.1.1` (2026-10-07), from its tagged main commit.** The [release manifest](release-manifest.json) records source coverage and local installed checks. Those checks establish package installation and foreground operation, not live Telegram, Google, shopping or the complete README meeting scene. The README’s representative conversation remains product direction.
+**The Homebrew package installs the newest published release, `v1.1.1` (2026-10-07), from its tagged main commit.** The [release manifest](release-manifest.json) records source coverage and local installed checks. Those checks establish package installation and foreground operation, not live Telegram, Google, shopping or the complete README meeting scene. The README’s everyday-use image is condensed from real owner-pilot conversations, not release-specific validation.
 
 ```sh
 brew install jongtae/agentos/agentos

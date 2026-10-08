@@ -85,6 +85,24 @@ When a better AI appears, you switch the worker, not the agent. [Whose agent?](d
 
 Local-first is not local-only: you can use a local or hosted model. With a hosted model, the context used for a request is sent to that provider.
 
+### Change the AI. Continue the conversation.
+
+One shopping conversation, with a change of AI in between: ask about yesterday's cart, sign in to check its current state, then ask to remove the item.
+
+<!-- ai-switch-snapshot:1 — insert the real cropped image before merging #1189 -->
+
+**1. Switch to Claude Code and pick up the earlier conversation.** “Did I end up adding the Spam yesterday, or removing it?” The PA refers to the earlier message about one 200g can, but asks for sign-in before checking the current cart.
+
+<!-- ai-switch-snapshot:2 — insert the real cropped image before merging #1189 -->
+
+**2. Check after signing in.** The PA reports that one Spam Classic 200g can is still in the cart. It also says that some steps could not be checked.
+
+<!-- ai-switch-snapshot:3 — insert the real cropped image before merging #1189 -->
+
+**3. Switch to Codex and ask for the next action.** “Remove the Spam.” The PA reports removing the can and leaving the other 22 items unchanged.
+
+*Excerpts from an actual conversation. The replies shown describe this particular use, not a guarantee for every model or website.*
+
 <!-- readme-section:presence -->
 
 ## How it works

@@ -109,7 +109,7 @@ The figure shows the intended design, not an observed run. Details: [architectur
   <img src="docs/assets/readme/owner-pilot-conversation.en.png" alt="Three PA conversations reconstructed from real use, in English: finding dinner after sharing a location, comparing golf belts before signing in for the cart step, and continuing from a restaurant photo to a nearby walk. Condensed, not a verbatim screenshot.">
 </picture>
 
-Dinner on the way home, a belt like the one in a photo, what to do after dinner. In each, the PA asks for what it is missing (your location, a sign-in), uses the context you allowed, and stops at your account before the cart step. **What you say or show → context you allowed, with source and time → a useful question or tool → the boundary for action → an observed result.** Adding to a cart and paying stay different actions.
+On the way home, the PA asks for your location before suggesting places to eat. For a belt like the one in a photo, it compares options and asks you to sign in before the cart step. From a restaurant photo, it picks up where you are and suggests what to do next. **What you say or show → context you allowed, with source and time → a useful question or tool → the boundary for action → an observed result.** Adding to a cart and paying stay different actions.
 
 **Next:** following what “it” and “the same one” mean across hours, so you keep talking instead of assembling a workflow.
 

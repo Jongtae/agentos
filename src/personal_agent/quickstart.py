@@ -155,9 +155,21 @@ def google_publisher_client(environ):
 
 
 def google_oauth_key(store):
-    """The Keychain-held token key: created on first use, never on disk beside the tokens."""
+    """The Keychain-held token key: created on first use, never on disk beside the tokens.
+
+    One provider is shared by the Gmail, Calendar and Drive stores, so it is
+    memoised under a lock: two first uses must not each create a key and
+    leave tokens encrypted under the one the other overwrote.
+    """
     keychain=KeychainKey(store_account(store.root),GOOGLE_OAUTH_KEY_SERVICE)
-    return lambda:keychain.get() or keychain.create()
+    lock=threading.Lock()
+    cached=[]
+    def provider():
+        with lock:
+            if not cached:
+                cached.append(keychain.get() or keychain.create())
+            return cached[0]
+    return provider
 
 
 def local_drive_secret_values(store, environ):
@@ -404,6 +416,28 @@ def configured_service(store, environ=None):
             # developer key. It is not included in status/settings APIs.
             picker_config={'client_id':client_id,'developer_key':picker_key,
                            'app_id':client_id.split('-',1)[0]}
+    # --- Publisher Google client (#1172) ----------------------------------
+    # One Desktop OAuth client shipped with AgentOS serves Gmail, Calendar and
+    # Drive, each still its own connector, consent and exact scope set.  An
+    # owner's explicit per-connector configuration below takes precedence.
+    # Every connector reached through it uses the same publisher secret, so
+    # one `google_exchange` is correct here, unlike the per-connector
+    # exchanges whose names must never cross.
+    google_client=google_publisher_client(environ)
+    google_exchange=google_key_provider=None
+    google_port='8787'
+    if google_client:
+        google_client_id,google_client_secret=google_client
+        google_port=environ.get('AGENTOS_GOOGLE_LOCAL_PORT','8787')
+        if not str(google_port).isdigit() or not 1<=int(google_port)<=65535:
+            raise ValueError('Local Google callback port must be a valid TCP port.')
+        google_key_provider=environ.get('AGENTOS_GOOGLE_OAUTH_KEY') or google_oauth_key(store)
+        def google_exchange(payload):
+            # The publisher secret is added here only; it never reaches a
+            # connector, its state, or any status surface.
+            body=urlencode({**payload,'client_secret':google_client_secret}).encode()
+            with urlopen(Request('https://oauth2.googleapis.com/token',body,{'Content-Type':'application/x-www-form-urlencoded'}),timeout=15) as response:
+                return json.loads(response.read())
     connector_registry=None
     gmail=None
     gmail_exchange=None
@@ -452,6 +486,15 @@ def configured_service(store, environ=None):
                 body=urlencode({**payload,'client_secret':gmail_client_secret}).encode()
                 with urlopen(Request('https://oauth2.googleapis.com/token',body,{'Content-Type':'application/x-www-form-urlencoded'}),timeout=15) as response:
                     return json.loads(response.read())
+            # #1172: renew an expired access token instead of asking to reconnect.
+            gmail.token_exchange=gmail_exchange
+    if gmail is None and google_client:
+        connector_registry=ConnectorRegistry(store,(GMAIL_CONNECTOR,))
+        gmail=GmailConnector(EncryptedGmailSecretStore(store,google_key_provider),google_client_id,
+                             f'http://{LOCAL_ADDRESS_HOST}:{google_port}/oauth/gmail/callback',
+                             registry=connector_registry,allow_localhost=True,
+                             transport=gmail_http_transport(),token_exchange=google_exchange)
+        gmail_exchange=google_exchange
     # --- Google Calendar (J4) -------------------------------------------
     # Construction and routes land together, on purpose. `CalendarConnector`
     # registers both specs on construction, and registering them without a
@@ -477,9 +520,17 @@ def configured_service(store, environ=None):
             # One provider serves reads and writes; the transport picks the
             # grant from the HTTP method, so a read can never spend the write
             # credential and vice versa.
-            def calendar_factory(owner_id,_registry=calendar_registry,_secrets=calendar_secrets):
+            def calendar_exchange(payload):
+                # Same shape as the Gmail exchange: the client secret is added
+                # here and never reaches the connector or any status surface.
+                body=urlencode({**payload,'client_secret':calendar_client_secret}).encode()
+                with urlopen(Request('https://oauth2.googleapis.com/token',body,{'Content-Type':'application/x-www-form-urlencoded'}),timeout=15) as response:
+                    return json.loads(response.read())
+            # #1172: the transport renews an expired grant token itself.
+            def calendar_factory(owner_id,_registry=calendar_registry,_secrets=calendar_secrets,
+                                 _oauth=calendar_oauth,_exchange=calendar_exchange):
                 return CalendarConnector(store,GoogleCalendar(
-                    calendar_transport(_secrets,_registry,owner_id,allow_writes=True)),
+                    calendar_transport(_secrets,_registry,owner_id,allow_writes=True,oauth=_oauth,exchange=_exchange)),
                     registry=_registry)
             # `CalendarOAuth` already registered both definitions above, so
             # the connect route and the parked-Work guidance agree about what
@@ -487,37 +538,34 @@ def configured_service(store, environ=None):
             # Registering again here was dead code: removing it changed
             # nothing observable, which is how the mutation found it.
             connector_registry=calendar_registry
-            def calendar_exchange(payload):
-                # Same shape as the Gmail exchange: the client secret is added
-                # here and never reaches the connector or any status surface.
-                body=urlencode({**payload,'client_secret':calendar_client_secret}).encode()
-                with urlopen(Request('https://oauth2.googleapis.com/token',body,{'Content-Type':'application/x-www-form-urlencoded'}),timeout=15) as response:
-                    return json.loads(response.read())
+    if calendar_oauth is None and google_client:
+        calendar_registry=connector_registry or ConnectorRegistry(store,())
+        calendar_secrets=EncryptedCalendarSecretStore(store,google_key_provider)
+        calendar_oauth=CalendarOAuth(calendar_secrets,google_client_id,
+                                     f'http://{LOCAL_ADDRESS_HOST}:{google_port}/oauth/calendar/callback',
+                                     registry=calendar_registry,allow_localhost=True)
+        calendar_exchange=google_exchange
+        def calendar_factory(owner_id,_registry=calendar_registry,_secrets=calendar_secrets,
+                             _oauth=calendar_oauth,_exchange=google_exchange):
+            return CalendarConnector(store,GoogleCalendar(
+                calendar_transport(_secrets,_registry,owner_id,allow_writes=True,oauth=_oauth,exchange=_exchange)),
+                registry=_registry)
+        connector_registry=calendar_registry
     # --- Google Drive read (#1172) ---------------------------------------
     # One button for the owner: the publisher client above, a Keychain-held
     # token key, and the loopback callback this listener serves.  Like
     # Calendar, construction and routes land together and registering the
     # connector grants nothing until the owner finishes Google's consent.
     drive_oauth=drive_reader_factory=drive_read_exchange=None
-    google_client=google_publisher_client(environ)
     if google_client:
-        google_client_id,google_client_secret=google_client
-        google_port=environ.get('AGENTOS_GOOGLE_LOCAL_PORT','8787')
-        if not str(google_port).isdigit() or not 1<=int(google_port)<=65535:
-            raise ValueError('Local Google callback port must be a valid TCP port.')
         drive_registry=connector_registry or ConnectorRegistry(store,())
-        key_provider=environ.get('AGENTOS_GOOGLE_OAUTH_KEY') or google_oauth_key(store)
-        drive_oauth=CalendarOAuth(EncryptedCalendarSecretStore(store,key_provider,namespace=DRIVE_SECRET_NAMESPACE),
+        drive_oauth=CalendarOAuth(EncryptedCalendarSecretStore(store,google_key_provider,namespace=DRIVE_SECRET_NAMESPACE),
                                   google_client_id,f'http://{LOCAL_ADDRESS_HOST}:{google_port}{DRIVE_CALLBACK_PATH}',
                                   registry=drive_registry,allow_localhost=True,grants=(DRIVE_GRANT,))
         connector_registry=drive_registry
-        def drive_read_exchange(payload):
-            # The client secret is added here only, as for Gmail and Calendar.
-            body=urlencode({**payload,'client_secret':google_client_secret}).encode()
-            with urlopen(Request('https://oauth2.googleapis.com/token',body,{'Content-Type':'application/x-www-form-urlencoded'}),timeout=15) as response:
-                return json.loads(response.read())
-        def drive_reader_factory(owner_id,_oauth=drive_oauth):
-            return GoogleDriveReader(drive_transport(_oauth,owner_id,drive_read_exchange))
+        drive_read_exchange=google_exchange
+        def drive_reader_factory(owner_id,_oauth=drive_oauth,_exchange=google_exchange):
+            return GoogleDriveReader(drive_transport(_oauth,owner_id,_exchange))
     service=AgentService(store,subscription_engines=isolated_engines,
                          isolated_engine_adapter=isolated_engine,drive_web_oauth=drive,
                          connector_registry=connector_registry,gmail=gmail,

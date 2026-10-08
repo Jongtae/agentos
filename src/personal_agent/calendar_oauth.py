@@ -414,6 +414,8 @@ def calendar_transport(
     opener: Callable | None = None,
     now: Callable[[], float] = time.time,
     timeout: float = 20.0,
+    oauth: "CalendarOAuth | None" = None,
+    exchange: Callable[[dict], dict] | None = None,
 ) -> Callable:
     """Return a read-only ``(method, url, body, headers)`` Calendar transport.
 
@@ -434,6 +436,10 @@ def calendar_transport(
     before any credential is resolved, so a refused mutation never even loads
     a token. A caller with no business writing keeps that guarantee by not
     asking for it.
+
+    #1172: given ``oauth`` and ``exchange``, an expired access token for the
+    grant in use is first renewed (``CalendarOAuth.refresh``), as the Drive
+    transport does; without them an expired token requires reconnecting.
     """
     if not getattr(secret_store, "encrypted_secrets", False):
         raise ValueError("Calendar OAuth requires an encrypted owner-local secret store.")
@@ -446,6 +452,8 @@ def calendar_transport(
         opener = _https_json_opener(float(timeout))
     if not callable(opener):
         raise ValueError("The Calendar HTTP opener must be callable.")
+    if (oauth is None) != (exchange is None) or (exchange is not None and not callable(exchange)):
+        raise ValueError("Calendar token renewal needs both the OAuth instance and its exchange.")
 
     def transport(method, url, body, headers):
         reading = method == "GET"
@@ -459,6 +467,11 @@ def calendar_transport(
         # `_authorization_context` checks scope-set equality against the
         # named grant's spec.
         grant = READ_GRANT if reading else WRITE_GRANT
+        if oauth is not None and not oauth.credential_current(owner_id, grant=grant):
+            try:
+                oauth.refresh(owner_id, exchange, grant=grant)
+            except CalendarOAuthError:
+                pass
         access_token, connection_revision = _authorization_context(
             secret_store, registry, owner_id, grant, now
         )

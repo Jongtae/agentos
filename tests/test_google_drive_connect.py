@@ -323,3 +323,150 @@ class CapabilityTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PublisherGoogleConnectorsTest(unittest.TestCase):
+    """The same publisher client offers Gmail and Calendar too (#1172)."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = pathlib.Path(temp.name)
+        path = self.root / 'client.json'
+        path.write_text(json.dumps({'installed': {'client_id': 'n.apps.googleusercontent.com', 'client_secret': 's'}}))
+        self.env = {'AGENTOS_GOOGLE_CLIENT_FILE': str(path), 'AGENTOS_GOOGLE_LOCAL_PORT': '9911',
+                    'AGENTOS_GOOGLE_OAUTH_KEY': Fernet.generate_key().decode()}
+
+    def test_gmail_and_calendar_are_offered_on_the_loopback_listener(self):
+        from personal_agent.calendar import CALENDAR_CONNECTOR_ID, CALENDAR_WRITE_CONNECTOR_ID
+        from personal_agent.gmail import GMAIL_CONNECTOR_ID
+        service = configured_service(QuickStore(str(self.root / 'data')), self.env)
+        self.assertEqual(service.connector_connect_url(GMAIL_CONNECTOR_ID), 'http://127.0.0.1:9911/google-gmail')
+        self.assertEqual(service.connector_connect_url(CALENDAR_CONNECTOR_ID),
+                         'http://127.0.0.1:9911/google-calendar?grant=read')
+        self.assertEqual(service.connector_connect_url(CALENDAR_WRITE_CONNECTOR_ID),
+                         'http://127.0.0.1:9911/google-calendar?grant=write')
+        self.assertEqual(service.gmail.redirect_uri, 'http://127.0.0.1:9911/oauth/gmail/callback')
+        self.assertTrue(callable(service.gmail.token_exchange))
+        self.assertTrue(callable(service.calendar_token_exchange))
+        rows = {row['id'] for row in service.settings_connection_rows()}
+        self.assertTrue({GMAIL_CONNECTOR_ID, CALENDAR_CONNECTOR_ID, DRIVE_CONNECTOR_ID} <= rows)
+
+    def test_owner_connector_configuration_takes_precedence(self):
+        from personal_agent.quickstart import local_gmail_secret_values
+        secret = self.root / 'gmail.json'
+        secret.write_text(json.dumps({'client_id': 'owner-gmail', 'client_secret': 'x',
+                                      'encryption_key': Fernet.generate_key().decode()}))
+        secret.chmod(0o600)
+        env = {**self.env, 'AGENTOS_GMAIL_LOCAL_ONLY': '1', 'AGENTOS_GMAIL_SECRET_FILE': str(secret)}
+        service = configured_service(QuickStore(str(self.root / 'data')), env)
+        self.assertEqual(service.gmail.client_id, 'owner-gmail')
+        self.assertTrue(callable(service.gmail.token_exchange))
+
+    def test_the_shared_keychain_key_is_created_once(self):
+        from unittest import mock
+        from personal_agent import quickstart
+
+        class FakeKeychain:
+            created = 0
+
+            def __init__(self, *_args):
+                self.value = None
+
+            def get(self):
+                return self.value
+
+            def create(self):
+                FakeKeychain.created += 1
+                self.value = Fernet.generate_key()
+                return self.value
+
+        with mock.patch.object(quickstart, 'KeychainKey', FakeKeychain):
+            provider = quickstart.google_oauth_key(QuickStore(str(self.root / 'data')))
+            self.assertEqual(provider(), provider())
+        self.assertEqual(FakeKeychain.created, 1)
+
+
+class GmailRenewalTest(unittest.TestCase):
+    def setUp(self):
+        from personal_agent.connector_contract import ConnectorRegistry as Registry
+        from personal_agent.gmail import GMAIL_CONNECTOR, EncryptedGmailSecretStore, GmailConnector
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        store = EncryptedGmailSecretStore(QuickStore(temp.name), Fernet.generate_key())
+        self.clock = [1_000.0]
+        self.calls = []
+        self.exchanges = []
+
+        def transport(method, endpoint, params, headers):
+            self.calls.append(headers['Authorization'])
+            return {'messages': []}
+
+        self.registry = Registry(store, (GMAIL_CONNECTOR,), clock=lambda: self.clock[0])
+        self.gmail = GmailConnector(store, 'n.apps.googleusercontent.com', 'http://127.0.0.1:8787/oauth/gmail/callback',
+                                    registry=self.registry, transport=transport, now=lambda: self.clock[0],
+                                    allow_localhost=True, token_exchange=self.exchange)
+        offer = self.gmail.begin_oauth(OWNER)
+        state = parse_qs(urlparse(offer['authorization_url']).query)['state'][0]
+        self.gmail.complete_oauth(OWNER, {'state': state, 'code': 'c'}, self.exchange)
+
+    def exchange(self, payload):
+        from personal_agent.gmail import GMAIL_READONLY_SCOPE
+        self.exchanges.append(payload)
+        if payload['grant_type'] == 'refresh_token':
+            return {'access_token': 'renewed', 'expires_in': 3600}
+        return {'access_token': 'first', 'expires_in': 3600, 'refresh_token': 'refresh-1', 'scope': GMAIL_READONLY_SCOPE}
+
+    def test_an_expired_token_is_renewed_before_the_request(self):
+        self.clock[0] += 7200
+        self.assertTrue(self.gmail.credential_renewable(OWNER))
+        self.gmail.search(OWNER, 'from:me')
+        self.assertEqual(self.calls, ['Bearer renewed'])
+        self.assertEqual(self.exchanges[-1]['refresh_token'], 'refresh-1')
+        self.assertEqual(self.gmail.status(OWNER)['state'], 'connected')
+
+    def test_a_widened_renewal_is_refused_and_requires_reauthentication(self):
+        from personal_agent.gmail import GmailReauthenticationRequired
+        self.gmail.token_exchange = lambda payload: {'access_token': 'x', 'expires_in': 3600,
+                                                     'scope': 'https://www.googleapis.com/auth/gmail.modify'}
+        self.clock[0] += 7200
+        with self.assertRaises(GmailReauthenticationRequired):
+            self.gmail.search(OWNER, 'from:me')
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.gmail.status(OWNER)['state'], 'reauth_required')
+
+
+class CalendarRenewalTest(unittest.TestCase):
+    def test_the_calendar_transport_renews_an_expired_grant(self):
+        from personal_agent.calendar_oauth import calendar_transport
+        from personal_agent.google_calendar import CALENDAR_API, CALENDAR_READ_SCOPE
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        store = EncryptedCalendarSecretStore(QuickStore(temp.name), Fernet.generate_key())
+        clock = [1_000.0]
+        registry = ConnectorRegistry(store, (), clock=lambda: clock[0])
+        oauth = CalendarOAuth(store, 'n.apps.googleusercontent.com', 'http://127.0.0.1:8787/oauth/calendar/callback',
+                              registry=registry, now=lambda: clock[0], allow_localhost=True)
+
+        def exchange(payload):
+            if payload['grant_type'] == 'refresh_token':
+                return {'access_token': 'renewed', 'expires_in': 3600, 'scope': CALENDAR_READ_SCOPE}
+            return {'access_token': 'first', 'expires_in': 3600, 'refresh_token': 'r', 'scope': CALENDAR_READ_SCOPE}
+
+        offer = oauth.begin_oauth(OWNER)
+        state = parse_qs(urlparse(offer['authorization_url']).query)['state'][0]
+        oauth.complete_oauth(OWNER, {'state': state, 'code': 'c'}, exchange)
+        clock[0] += 7200
+        seen = []
+        transport = calendar_transport(store, registry, OWNER, now=lambda: clock[0], oauth=oauth, exchange=exchange,
+                                       opener=lambda method, url, body, headers: seen.append(headers['Authorization']) or {})
+        transport('GET', CALENDAR_API + '/calendars/primary/events', None, {})
+        self.assertEqual(seen, ['Bearer renewed'])
+
+    def test_renewal_needs_both_the_oauth_instance_and_its_exchange(self):
+        from personal_agent.calendar_oauth import calendar_transport
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        store = EncryptedCalendarSecretStore(QuickStore(temp.name), Fernet.generate_key())
+        with self.assertRaises(ValueError):
+            calendar_transport(store, ConnectorRegistry(store, ()), OWNER, exchange=lambda payload: {})

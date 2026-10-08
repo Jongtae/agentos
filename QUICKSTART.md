@@ -183,41 +183,57 @@ agentos service uninstall --instance spouse             # data is retained
 - **Google Calendar and Gmail.** An instance's callbacks use its own port, for example `http://localhost:8797/oauth/calendar/callback` and `.../oauth/gmail/callback`. Add those as authorised redirect URIs in your Google OAuth client.
 - **Not yet covered.** The same "not covered" notes as [Background service](#background-service-macos) apply: tests substitute `launchctl`, and a real login service is owner operating validation.
 
-## Google Drive (one button)
+## Google Drive, Gmail and Calendar (one button each)
 
-When the AgentOS you installed ships a Google OAuth client, connecting Drive takes one
-step. From this computer's browser, open **설정 → 외부 연결 → Google Drive → 연결하기**,
-or open `http://127.0.0.1:8787/google-drive-connect`, then approve Google's consent
-screen. You do not create a Google Cloud project, an API key or a secret file. If you asked
-for something over Telegram that needs Drive, the reply carries this same address, and the
-original request continues once after you connect.
+When the AgentOS you installed ships a Google OAuth client, each Google service connects in
+one step. From this computer's browser, open **설정 → 외부 연결**, choose the service and
+press **연결하기**, then approve Google's consent screen:
 
-After that, your AI can search your Drive and read a file. Google Docs, Sheets and Slides
-come back as text; PDF, DOCX, XLSX, TXT and MD are extracted on this computer. The
-connection keeps working after the one-hour Google access token expires, because AgentOS
-renews it with the stored refresh token.
+| Service | Address | Access |
+|---|---|---|
+| Google Drive | `http://127.0.0.1:8787/google-drive-connect` | read the whole Drive (`drive.readonly`) |
+| Gmail | `http://127.0.0.1:8787/google-gmail` | search and read mail (`gmail.readonly`) |
+| Google Calendar | `http://127.0.0.1:8787/google-calendar?grant=read` | read events (`calendar.events.readonly`) |
+| Calendar changes | `http://127.0.0.1:8787/google-calendar?grant=write` | create or change events, each after your approval (`calendar.events`) |
+
+You do not create a Google Cloud project, an API key or a secret file. Each service is a
+separate connection with its own consent, and AgentOS records it only if Google grants
+exactly that scope. If you asked for something over Telegram that needs a connection, the
+reply carries the matching address, and the original request continues once after you
+connect.
+
+After connecting Drive, your AI can search your Drive and read a file. Google Docs, Sheets
+and Slides come back as text; PDF, DOCX, XLSX, TXT and MD are extracted on this computer.
+The connections keep working after the one-hour Google access token expires, because
+AgentOS renews it with the stored refresh token.
 
 What this does and does not do:
 
-- **Read-only, whole Drive.** The only scope requested is `drive.readonly`, and the
-  connection is recorded only if Google grants exactly that. AgentOS cannot create, change,
-  delete, share or move anything in Drive.
+- **Read-only Drive and Gmail.** AgentOS cannot change Drive files or send, delete or label
+  mail. A calendar change is only drafted, and runs after you approve it.
 - **Tokens stay on this computer.** They are stored encrypted in the AgentOS data folder.
   The encryption key is kept in the macOS Keychain, and no AgentOS server sits between you
   and Google. On Linux, set `AGENTOS_GOOGLE_OAUTH_KEY` to a Fernet key you keep outside the
   data folder.
 - **"Google hasn't verified this app."** Until the publisher's app passes Google's
-  verification, Google shows this warning once. Choose *Advanced → continue* to proceed.
+  verification, Google shows this warning on each consent. Choose *Advanced → continue*.
+- **Your own client still wins.** If you configured Gmail or Calendar with your own client
+  (sections below), that configuration is used instead.
 
 **Publisher setup (once, by whoever distributes AgentOS).** In Google Cloud Console:
-enable the Google Drive API; configure the OAuth consent screen as *External*, add the
-`.../auth/drive.readonly` scope and publish it (*In production*, so refresh tokens do not
-expire after 7 days); create an OAuth client of type **Desktop app** and download its JSON.
-Save that file as `src/personal_agent/google_oauth_client.json`, or point
-`AGENTOS_GOOGLE_CLIENT_FILE` at it. A Desktop client's secret is not confidential by
-Google's own definition for installed apps, so it can ship with AgentOS. PKCE and the
-owner-bound signed state protect each authorization. A *Web application* client is
-refused because it cannot use a loopback callback on whatever port AgentOS runs on.
+
+1. Enable the Google Drive API, Gmail API and Google Calendar API.
+2. Configure the OAuth consent screen as *External*. Add the `drive.readonly`,
+   `gmail.readonly`, `calendar.events.readonly` and `calendar.events` scopes, then publish it
+   (*In production*), so refresh tokens do not expire after 7 days.
+3. Create an OAuth client of type **Desktop app** and download its JSON.
+4. Save that file as `src/personal_agent/google_oauth_client.json`, or point
+   `AGENTOS_GOOGLE_CLIENT_FILE` at it.
+
+A Desktop client's secret is not confidential by Google's own definition for installed
+apps, so it can ship with AgentOS. PKCE and the owner-bound signed state protect each
+authorization. A *Web application* client is refused because it cannot use a loopback
+callback on whatever port AgentOS runs on.
 
 ## Google Calendar (source checkout)
 

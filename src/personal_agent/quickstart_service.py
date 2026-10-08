@@ -5708,10 +5708,16 @@ class AgentService:
         has no connector object that can answer.
         """
         owner=self.connector_callback_owner(connector_id)
+        # #1172: an expired access token that the next request renews with a
+        # stored refresh token is not a reconnect.
         if connector_id==GMAIL_CONNECTOR_ID:
-            return self.gmail.credential_current(owner) if self.gmail else None
+            renewable=getattr(self.gmail,'credential_renewable',None)
+            return (self.gmail.credential_current(owner) or bool(callable(renewable) and renewable(owner))
+                    if self.gmail else None)
         if connector_id in (CALENDAR_CONNECTOR_ID,CALENDAR_WRITE_CONNECTOR_ID):
-            return (self.calendar_oauth.credential_current(owner,write=connector_id==CALENDAR_WRITE_CONNECTOR_ID)
+            write=connector_id==CALENDAR_WRITE_CONNECTOR_ID
+            return (self.calendar_oauth.credential_current(owner,write=write)
+                    or bool(callable(self.calendar_token_exchange) and self.calendar_oauth.credential_renewable(owner,write=write))
                     if self.calendar_oauth else None)
         if connector_id==DRIVE_CONNECTOR_ID:
             # An expired access token with a stored refresh token is renewed

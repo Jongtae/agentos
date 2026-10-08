@@ -97,8 +97,10 @@ SELECTOR = ('a[href], button, input, select, textarea, summary, [role="button"],
 #: The cancelable event the page-world ``form.submit()`` wrapper dispatches on
 #: the form so the client-world submit guard can refuse it (#698).
 SUBMIT_SIGNAL = 'agentos-guarded-submit'
-#: #1181: dispatched on an element whose press-handler property a page script sets.
-HANDLER_SIGNAL = 'agentos-press-handler'
+#: #1181: set on an element whose press-handler property a page script assigns.  An
+#: attribute, not an event: it is visible from the client world whether or not the
+#: element is connected yet or sits in a shadow tree.
+PRESS_MARK = 'data-agentos-press'
 #: The press handlers ``scripted`` checks (the JS ``PRESS_HANDLERS`` in ``PRELUDE``).
 PRESS_HANDLER_KEYS = ('onclick', 'onmousedown', 'onmouseup', 'onpointerdown', 'onpointerup', 'onauxclick',
                       'ontouchstart', 'ontouchend', 'onkeydown', 'onkeyup', 'onkeypress', 'onsubmit')
@@ -211,9 +213,9 @@ const buttonish = (el) => { const tag = el.tagName.toLowerCase();
 const PRESS_HANDLERS = ['onclick', 'onmousedown', 'onmouseup', 'onpointerdown', 'onpointerup', 'onauxclick',
   'ontouchstart', 'ontouchend', 'onkeydown', 'onkeyup', 'onkeypress', 'onsubmit'];
 // #1181: a handler property a page script sets lives in the page world and reads as
-// null here; the page-world wrapper (``PAGE_WRAP_USER_SCRIPT``) signals it instead.
-const scripted = (el) => el.getAttributeNames().some((name) => /^on/i.test(name)) ||
-  PRESS_HANDLERS.some((key) => typeof el[key] === 'function') || state().pressed.has(el);
+// null here; the page-world wrapper (``PAGE_WRAP_USER_SCRIPT``) marks the element instead.
+const scripted = (el) => el.getAttributeNames().some((name) => /^on/i.test(name) || name === %(mark)s) ||
+  PRESS_HANDLERS.some((key) => typeof el[key] === 'function');
 const navLink = (el) => el.tagName.toLowerCase() === 'a' && el.hasAttribute('href') &&
   !/^\s*(?:$|#|javascript:)/i.test(el.getAttribute('href') || '') && /^https?:/i.test(el.href || '') &&
   !(el.getAttribute('role') || '').toLowerCase().split(/\s+/).includes('button') && !scripted(el);
@@ -250,7 +252,7 @@ const same = (actual, expect) => !!expect && ['tag', 'type', 'autocomplete', 'na
   'in_form', 'payment_form', 'nav_link', 'pressable', 'href']
   .every((key) => key in expect && actual[key] === expect[key]);
 const state = () => (window.__agentos = window.__agentos || {targets: new Map(), guard: null, listening: false,
-  off: false, allow: null, cancelled: null, held: null, vetted: [], submitListening: false, pressed: new WeakSet()});
+  off: false, allow: null, cancelled: null, held: null, vetted: [], submitListening: false});
 // A form's named controls shadow its own properties (``<input name="action">`` is
 // ``form.action``), so forms are read through the prototype getters (#700).
 const FORM = HTMLFormElement.prototype, own = (proto, key) => Object.getOwnPropertyDescriptor(proto, key);
@@ -353,12 +355,10 @@ const armSubmitGuard = () => { const s = state(); if (s.submitListening) return;
       hold(g, form, submitter, event.type === %(signal)s ? 'signal' : 'event');
     } catch (error) { event.preventDefault(); event.stopImmediatePropagation(); } };   // fail closed
   window.addEventListener('submit', cancel, true);
-  window.addEventListener(%(signal)s, cancel, true);
-  // #1181: capture sees the non-bubbling signal on its way to any element.
-  window.addEventListener(%(pressed)s, (event) => { if (event.target instanceof Element) state().pressed.add(event.target); }, true); };
+  window.addEventListener(%(signal)s, cancel, true); };
 const takeCancelled = () => { const s = state(), c = s.cancelled; s.cancelled = null; return c; };
 """ % {'selector': json.dumps(SELECTOR), 'signal': json.dumps(SUBMIT_SIGNAL), 'handler': json.dumps(GUARD_HANDLER),
-       'pressed': json.dumps(HANDLER_SIGNAL),
+       'mark': json.dumps(PRESS_MARK),
        'tokens': json.dumps(list(PAYMENT_TOKENS)), 'secret': json.dumps(sorted(SECRET_TOKENS)),
        'window': SUBMIT_WINDOW_SECONDS * 1000, 'vetted': VETTED_SECONDS * 1000}
 
@@ -588,10 +588,11 @@ PAGE_WRAP_USER_SCRIPT = r"""(() => {
 })();
 (() => {
   // #1181: a press handler a page assigns as a property (``el.onclick = f``) is only
-  // visible in the page world, so its setter signals the element to the client world.
-  // A page can still hide a handler (``addEventListener``, a saved setter); it can only
-  // fake one, which asks for approval more often, never less.
-  const dispatch = EventTarget.prototype.dispatchEvent, Signal = Event, apply = Reflect.apply;
+  // visible in the page world, so its setter marks the element with an attribute the
+  // client world reads (connected or not, in a shadow tree or not).  A page can still
+  // hide a handler (``addEventListener``, a saved setter); it can only fake or keep a
+  // mark, which asks for approval more often, never less.
+  const mark = Element.prototype.setAttribute, apply = Reflect.apply;
   for (const proto of [HTMLElement.prototype, Element.prototype, SVGElement.prototype]) {
     for (const key of %s) {
       const desc = Object.getOwnPropertyDescriptor(proto, key);
@@ -599,11 +600,11 @@ PAGE_WRAP_USER_SCRIPT = r"""(() => {
       const set = desc.set;
       Object.defineProperty(proto, key, {...desc, set: function (value) {
         apply(set, this, [value]);
-        if (typeof value === 'function') apply(dispatch, this, [new Signal(%s)]);
+        if (typeof value === 'function') apply(mark, this, [%s, '']);
       }});
     }
   }
-})();""" % (json.dumps(SUBMIT_SIGNAL), json.dumps(list(PRESS_HANDLER_KEYS)), json.dumps(HANDLER_SIGNAL))
+})();""" % (json.dumps(SUBMIT_SIGNAL), json.dumps(list(PRESS_HANDLER_KEYS)), json.dumps(PRESS_MARK))
 
 #: Arguments: nonce, expect, tokens, text.  The held element must be the
 #: focused one and still match the classified descriptor; the text is then

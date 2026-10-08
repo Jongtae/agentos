@@ -691,20 +691,20 @@ class WorkerGuardLogicTests(unittest.TestCase):
         self.assertIsNone(worker.cancelled)
 
     def test_a_page_set_press_handler_property_is_signalled_to_the_client_world(self):
-        """#1181: the page-world wrapper signals ``el.onclick = f`` (invisible from the client world)."""
+        """#1181: the page-world wrapper marks ``el.onclick = f`` (invisible from the client world)."""
         import re
         import shutil
         from personal_agent import browser_worker as bw
         listed = re.search(r"const PRESS_HANDLERS = \[(.*?)\];", bw.PRELUDE, re.S).group(1)
         self.assertEqual(tuple(key.strip().strip("'") for key in listed.replace('\n', '').split(',')),
                          bw.PRESS_HANDLER_KEYS, 'the wrapper covers exactly the handlers scripted() checks')
-        self.assertIn(json.dumps(bw.HANDLER_SIGNAL), bw.client_guard_user_script(False))
+        self.assertIn(json.dumps(bw.PRESS_MARK), bw.SNAPSHOT_SCRIPT, 'scripted() reads the mark')
         node = shutil.which('node')
         if not node:
             self.skipTest('node is not installed')
         # A minimal DOM: handler properties are accessors on HTMLElement.prototype, as in WebKit.
         harness = """
-class Element extends EventTarget {}
+class Element extends EventTarget { setAttribute(name, value) { (this.a = this.a || {})[name] = value; } }
 class HTMLElement extends Element {}
 class SVGElement extends Element {}
 class HTMLFormElement extends HTMLElement { submit() {} }
@@ -712,18 +712,16 @@ for (const key of %s) Object.defineProperty(HTMLElement.prototype, key, {configu
   get() { return (this.h || {})[key] || null; }, set(v) { (this.h = this.h || {})[key] = v; }});
 Object.assign(globalThis, {Element, HTMLElement, SVGElement, HTMLFormElement, CustomEvent: Event});
 %s
-const seen = [], el = new HTMLElement(), other = new HTMLElement();
-for (const node of [el, other]) node.addEventListener(%s, () => seen.push(node === el ? 'el' : 'other'));
+const el = new HTMLElement(), other = new HTMLElement();   // never connected: the mark needs no tree
 el.onclick = function () {};
 other.onclick = null;
 other.onmousedown = 'not a function';
-el.onmousedown = () => {};
-console.log(JSON.stringify({seen, kept: typeof el.onclick}));
-""" % (json.dumps(list(bw.PRESS_HANDLER_KEYS)), bw.PAGE_WRAP_USER_SCRIPT, json.dumps(bw.HANDLER_SIGNAL))
+console.log(JSON.stringify({el: el.a || {}, other: other.a || {}, kept: typeof el.onclick}));
+""" % (json.dumps(list(bw.PRESS_HANDLER_KEYS)), bw.PAGE_WRAP_USER_SCRIPT)
         result = subprocess.run([node, '-e', harness], capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout), {'seen': ['el', 'el'], 'kept': 'function'},
-                         'only a function assignment signals, and the handler is still set')
+        self.assertEqual(json.loads(result.stdout), {'el': {bw.PRESS_MARK: ''}, 'other': {}, 'kept': 'function'},
+                         'only a function assignment marks the element, and the handler is still set')
 
     def test_the_page_wrapper_is_not_installed_while_the_owner_signs_in(self):
         bw, worker = self.worker()
@@ -933,7 +931,10 @@ class SessionFixtureHandler(FixtureHandler):
               <a id="empty" href="">정기주문</a>
               <a id="role" href="/list/often" role="button">해외결제</a>
               <a id="noun" href="/list/often">구매</a>
-              <script>document.getElementById('prop').onclick = function () {};</script>
+              <script>document.getElementById('prop').onclick = function () {};
+                // #1181 review: created, given a handler, then connected.
+                const late = document.createElement('a'); late.href = '/list/often'; late.textContent = '추가구매';
+                late.onclick = function () {}; document.body.append(late);</script>
             </body></html>''')
         if path == '/one-click-names':
             # Review of #763 P1/P2: names from aria-labelledby, a child image's alt, a role that
@@ -1350,7 +1351,7 @@ class WebKitIntegrationTests(unittest.TestCase):
             sess.open({'url': self.origin + '/nav-links', 'effect': 'navigate'})
             flagged = {row['name']: row['commit'] for row in sess.last['_elements']}
             self.assertEqual(flagged.get('자주구매'), False, 'a plain http(s) list link opens a page')
-            for name in ('선물구매', '재구매', '정기주문', '해외결제', '구매'):
+            for name in ('선물구매', '재구매', '추가구매', '정기주문', '해외결제', '구매'):
                 self.assertEqual(flagged.get(name), True, name)
         finally:
             sess.close()

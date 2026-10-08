@@ -1,0 +1,61 @@
+{
+  "issue": 1193,
+  "evidence_class": "owner-supplied Telegram screenshots of one real session (2026-10-08, 10:01-10:08 PM); not release-specific end-to-end validation",
+  "output": "ai-switch-conversation.png",
+  "output_sha256": "1b11757ff536c7314907591c09dc93208dd240490ae81a2be19ba4d596a8c59a",
+  "scale": 0.8,
+  "panels": [
+    {
+      "source_sha256": "328c5d1e192f37cabf61852e11b526790b781c7e0d24fa5c14dcc48b06b304a5",
+      "source_size": [
+        706,
+        1536
+      ],
+      "crop_boxes": [
+        [
+          0,
+          222,
+          706,
+          1220
+        ]
+      ]
+    },
+    {
+      "source_sha256": "742e42a9e02fcaf094b50efca42f976432a5bfdcfb60d223d8f021aac90e98f8",
+      "source_size": [
+        706,
+        1536
+      ],
+      "crop_boxes": [
+        [
+          0,
+          458,
+          706,
+          560
+        ],
+        [
+          0,
+          1020,
+          706,
+          1332
+        ]
+      ]
+    },
+    {
+      "source_sha256": "75803b9fea6fdd909a5b376944d14fdc9cb4241fcfb04e5511c5fd47607ec667",
+      "source_size": [
+        706,
+        1536
+      ],
+      "crop_boxes": [
+        [
+          0,
+          390,
+          706,
+          1220
+        ]
+      ]
+    }
+  ],
+  "omitted": "phone status bar, chat header and input bar; in panel 2 the one-time sign-in link and its code (between the two crops)"
+}

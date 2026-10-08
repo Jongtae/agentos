@@ -100,6 +100,21 @@ agentos start
 
 此图是设计方向，并非已观测的运行。详情：[架构与本体](docs/personal-agentos-architecture.en.md) · [Presence](docs/presence-experience-contract.en.md)
 
+<!-- readme-section:ai-switch -->
+
+## 换了 AI，对话照样继续
+
+<p align="center">
+  <img src="docs/assets/readme/ai-switch/ai-switch-conversation.png" alt="三张裁剪后的韩语 Telegram 截图。1：切换到 Claude Code 后，主人问昨天的午餐肉最后放进去了还是拿出来了，PA 接上之前的购物车对话并请求登录。2：登录后，它回答购物车里有 1 罐 CJ 经典午餐肉 200g，并说明有些步骤未能确认。3：切换到 Codex 后，主人让它把午餐肉拿掉，PA 回复已删除，其余 22 件商品仍在。">
+</p>
+<p align="center"><sub>截取自真实对话（Telegram，韩语界面）。登录链接已裁掉。 · <a href="docs/assets/readme/ai-switch/ai-switch-conversation.png">查看大图</a></sub></p>
+
+① **切换到 Claude Code。** 问“昨天的午餐肉最后放进去了还是拿出来了？”，PA 接上之前的购物对话。
+
+② **查看当前购物车。** 重新登录后，回答购物车里有 1 罐 200g 经典午餐肉（SPAM）。
+
+③ **切换到 Codex，请它做下一步。** “把午餐肉拿掉。”在同一段对话里，它告知已删除，其余 22 件商品仍在。
+
 <!-- readme-section:conversation -->
 
 ## 日常使用

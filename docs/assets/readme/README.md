@@ -10,6 +10,10 @@ The demo is edited from real Telegram sessions, with one GIF per README language
 
 `social-preview.png` (1280 × 640) is the repository's social preview image, set in repository Settings → General → Social preview. It repeats the README banner, tagline and platform/licence facts so shared links match the README header.
 
+## AI switch conversation
+
+`ai-switch/ai-switch-conversation.png` is used by all four READMEs in the *A conversation that continues when the AI changes* section. It crops three owner-supplied Telegram screenshots of one real session (2026-10-08, 10:01–10:08 PM, Korean UI): the switch to Claude Code and the question about yesterday's cart, the cart answer after signing in again, and the switch to Codex with the removal. The crops drop the phone status bar, chat header, input bar and, in panel 2, the one-time sign-in link. The switch notices, the owner's requests and the PA's replies stay whole, including the limits the PA stated ("일부 단계는 확인하지 못했어요" and the decision-model fallback note). Source digests, crop boxes and the output digest are in [ai-switch/manifest.json](ai-switch/manifest.json); [ai-switch/build.py](ai-switch/build.py) rebuilds the image from the source screenshots, which are not committed. This is a selected real session, not release-specific end-to-end validation.
+
 ## Current introduction
 
 `presence-overview.{en,ko,ja,zh-CN}.svg` is the illustrated overview used by the four READMEs. Three example cards show answering a question, handling an explicit cart request and carrying a delegated meeting decision toward its next preparation. The Owner/PA/AgentOS architecture follows one sourced meeting through its invitation, proposal, earlier decisions, differing relationships, continuing work, authority check and verified result. It distinguishes invitation from acceptance and draft from send. A separate short coffee conversation in the preserved concept figure illustrates ordinary context over time. Original vector icons and dialogue cards carry the explanation; detailed ontology definitions remain in the linked documents.

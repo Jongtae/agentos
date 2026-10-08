@@ -1,55 +1,104 @@
 name: install-smoke
 
-# INSTALL-XPLAT-01 #1167: run the real one-line installer from a clean HOME
-# (official uv installer, pinned release archive, uv-managed Python) and
-# check that the installed `agentos` serves its setup page, on Linux, macOS
-# and Windows (WSL2). Runs only when the installer or the release pins
-# change, so ordinary PRs pay nothing.
+# INSTALL-XPLAT-01 #1167 / INSTALL-MATRIX-01 #1176: install AgentOS from a
+# clean HOME on the platforms owners use and require the setup page to answer.
+# There is no test team, so this matrix is the platform evidence. It runs when
+# the installer or its pins change, daily (`uv tool install` resolves
+# dependencies fresh, so an upstream release can break an unchanged
+# installer), and on demand. All runners are standard GitHub-hosted runners.
 on:
   pull_request:
     branches: [main]
-    paths: [scripts/install.sh, docs/release-manifest.json, .gitattributes, .github/workflows/install-smoke.yml]
+    paths:
+      - scripts/install.sh
+      - scripts/dev/install_smoke.sh
+      - docs/release-manifest.json
+      - .gitattributes
+      - .github/workflows/install-smoke.yml
   push:
     branches: [main]
-    paths: [scripts/install.sh, docs/release-manifest.json, .gitattributes, .github/workflows/install-smoke.yml]
+    paths:
+      - scripts/install.sh
+      - scripts/dev/install_smoke.sh
+      - docs/release-manifest.json
+      - .gitattributes
+      - .github/workflows/install-smoke.yml
+  schedule:
+    - cron: '41 4 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  # One-line installer directly on macOS and Ubuntu runners.
   install:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [macos-14, macos-15, macos-26, macos-15-intel,
+             ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - run: sh scripts/dev/install_smoke.sh installer
 
-      - name: Install from a clean HOME
-        run: |
-          home="$RUNNER_TEMP/home"; mkdir -p "$home"
-          env -i HOME="$home" PATH=/usr/bin:/bin:/usr/sbin:/sbin AGENTOS_NO_START=1 sh scripts/install.sh
+  # The published Homebrew tap formula.
+  homebrew:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      HOMEBREW_NO_ENV_HINTS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh scripts/dev/install_smoke.sh homebrew
 
-      - name: Installed agentos serves setup
-        run: |
-          home="$RUNNER_TEMP/home"
-          env -i HOME="$home" PATH="$home/.local/bin:/usr/bin:/bin" agentos start --no-browser --port 18787 </dev/null > "$RUNNER_TEMP/start.log" 2>&1 &
-          for _ in $(seq 1 60); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18787/ || true)
-            [ "$code" = "200" ] && break; sleep 1
-          done
-          cat "$RUNNER_TEMP/start.log"
-          [ "$code" = "200" ]
-          "$home/.local/share/uv/tools/personal-agentos/bin/python" -c "import mcp.server.stdio"
+  # Other Linux distributions, each from its stock image plus curl (what a
+  # desktop install already has). Run with `docker run` from the host so
+  # JavaScript actions never execute inside musl images such as Alpine.
+  linux-distro:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: debian:12
+            bootstrap: apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null
+          - image: debian:13
+            bootstrap: apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null
+          - image: fedora:43
+            bootstrap: dnf install -y -q curl tar gzip
+          - image: archlinux:latest
+            bootstrap: pacman -Sy --noconfirm --needed curl tar gzip >/dev/null
+          - image: opensuse/tumbleweed
+            bootstrap: zypper -n -q in curl tar gzip
+          - image: alpine:3.22
+            bootstrap: apk add -q curl
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: ${{ matrix.image }}
+        run: >
+          docker run --rm -v "$PWD:/src:ro" -w /src "${{ matrix.image }}"
+          sh -c '${{ matrix.bootstrap }} && sh scripts/dev/install_smoke.sh installer'
 
   # Windows has no native AgentOS yet (#1168); QUICKSTART sends owners to
-  # WSL2. Run the same installer inside WSL2 Ubuntu on a hosted Windows
-  # runner, then reach the setup page from the Windows side to check the
-  # localhost forwarding QUICKSTART relies on.
+  # WSL2. Install inside WSL2, then reach the setup page with Windows
+  # curl.exe to check the localhost forwarding QUICKSTART relies on.
   install-wsl2:
+    strategy:
+      fail-fast: false
+      matrix:
+        distribution: [Ubuntu-24.04, Ubuntu-22.04, Debian]
     runs-on: windows-latest
+    timeout-minutes: 30
     defaults:
       run:
         shell: wsl-bash {0}
@@ -59,22 +108,10 @@ jobs:
       # Vampire/setup-wsl v7.0.0 (Apache-2.0), pinned by commit.
       - uses: Vampire/setup-wsl@d1da7f2c0322a5ee4f24975344f67fc0f5baf364
         with:
-          distribution: Ubuntu-24.04
+          distribution: ${{ matrix.distribution }}
           wsl-version: 2
           additional-packages: curl ca-certificates
 
-      - name: Install inside WSL2 and open setup from Windows
-        run: |
-          set -eu
+      - run: |
           cat /proc/version
-          home=$(mktemp -d)
-          env -i HOME="$home" PATH=/usr/bin:/bin:/usr/sbin:/sbin AGENTOS_NO_START=1 sh scripts/install.sh
-          env -i HOME="$home" PATH="$home/.local/bin:/usr/bin:/bin" nohup agentos start --no-browser --port 18787 </dev/null > "$home/start.log" 2>&1 &
-          code=000
-          for _ in $(seq 1 60); do
-            code=$(/mnt/c/Windows/System32/curl.exe -s -o NUL -w '%{http_code}' http://127.0.0.1:18787/ || true)
-            [ "$code" = "200" ] && break; sleep 1
-          done
-          cat "$home/start.log"
-          echo "Windows-side HTTP status: $code"
-          [ "$code" = "200" ]
+          SMOKE_HTTP=/mnt/c/Windows/System32/curl.exe SMOKE_NULL=NUL sh scripts/dev/install_smoke.sh installer

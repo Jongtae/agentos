@@ -850,3 +850,33 @@ class MobileUserAgent(unittest.TestCase):
         self.assertIn('Mobile/', agent)
         self.assertTrue(agent.endswith(EMBEDDED_UA_TOKEN), 'AgentOS still refuses its own pages to this browser (#680)')
         self.assertEqual(MOBILE_SIZE, (390.0, 844.0))
+
+
+class PhonePageAutofill(unittest.TestCase):
+    """#1170: the phone page offers iPhone password AutoFill; what it fills goes out as typed text and is cleared."""
+
+    def page(self):
+        class Session:
+            site, code, expires = 'shop.test', 'c0de', 1000.0
+
+            @staticmethod
+            def clock():
+                return 400.0
+        return remote_login.page(Session(), 'n0nce')
+
+    def test_an_id_and_a_password_field_the_phone_can_autofill(self):
+        html = self.page()
+        self.assertIn('name="username" type="text" autocomplete="username"', html)
+        self.assertIn('name="password" type="password" autocomplete="current-password"', html)
+        self.assertIn('<form id="cred" autocomplete="on">', html)
+
+    def test_the_fill_sends_id_tab_password_through_the_input_route_and_keeps_nothing(self):
+        html = self.page()
+        script = html[html.index("$('cred').addEventListener"):html.index("window.addEventListener('pagehide'")]
+        self.assertIn('e.preventDefault()', script, 'the form itself never submits anywhere')
+        self.assertLess(script.index('clearCred()'), script.index("type:'text',text:u"), 'cleared before anything is sent')
+        self.assertLess(script.index("type:'text',text:u"), script.index("key:'Tab'"))
+        self.assertLess(script.index("key:'Tab'"), script.index("type:'text',text:p"))
+        self.assertEqual(script.count(remote_login.INPUT_PATH), 3, 'only the existing input route')
+        self.assertIn("window.addEventListener('pagehide',clearCred)", html)
+        self.assertEqual(remote_login.validate_input({'type': 'key', 'key': 'Tab'}), ('key', {'key': 'Tab'}))

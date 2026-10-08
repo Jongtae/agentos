@@ -589,9 +589,10 @@ PAGE_WRAP_USER_SCRIPT = r"""(() => {
 (() => {
   // #1181: a press handler a page assigns as a property (``el.onclick = f``) is only
   // visible in the page world, so its setter marks the element with an attribute the
-  // client world reads (connected or not, in a shadow tree or not).  A page can still
-  // hide a handler (``addEventListener``, a saved setter); it can only fake or keep a
-  // mark, which asks for approval more often, never less.
+  // client world reads (connected or not, in a shadow tree or not).  This is a best-effort
+  // signal for ordinary pages, not a barrier against a hostile one: such a page can still
+  // hide a handler (``addEventListener``, a saved setter, or removing the mark), which
+  // leaves it where it was before #1181.  Forging a mark only asks for approval more often.
   const mark = Element.prototype.setAttribute, apply = Reflect.apply;
   for (const proto of [HTMLElement.prototype, Element.prototype, SVGElement.prototype]) {
     for (const key of %s) {

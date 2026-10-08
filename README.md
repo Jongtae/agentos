@@ -102,7 +102,7 @@ The figure shows the intended design, not an observed run. Details: [architectur
 
 ## Everyday use
 
-*Condensed and translated from real conversations with the PA; not a verbatim screenshot.*
+*Condensed from real conversations with the PA and redrawn: in Telegram the replies arrive as text and links, not cards.*
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation.en.png">

@@ -108,10 +108,10 @@ STATUS_ROW_EVIDENCE_TOKEN = "Synthetic **pass-with-friction**"
 # This scene explains the intended experience; it cannot silently become
 # a shipped integration claim when the README narrative changes.
 README_DIRECTION_DISCLAIMERS = {
-    "README.md": "Condensed and translated from real conversations with the PA; not a verbatim screenshot.",
-    "README.ko.md": "PA와 실제로 나눈 대화를 압축해 다시 구성한 화면입니다. 원본 그대로의 캡처는 아닙니다.",
-    "README.ja.md": "PA と実際に交わした会話を要約して再構成した画面です。元の画面そのままではありません。",
-    "README.zh-CN.md": "这是根据与 PA 的真实对话浓缩重构的画面，并非原样截图。",
+    "README.md": "Condensed from real conversations with the PA and redrawn: in Telegram the replies arrive as text and links, not cards.",
+    "README.ko.md": "PA와 실제로 나눈 대화를 압축해 다시 그린 화면입니다. 실제 Telegram에서는 카드가 아니라 텍스트와 링크로 답합니다.",
+    "README.ja.md": "PA と実際に交わした会話を要約して描き直した画面です。実際の Telegram では、カードではなくテキストとリンクで返信します。",
+    "README.zh-CN.md": "这是根据与 PA 的真实对话浓缩后重新绘制的画面。在实际的 Telegram 中，回复是文字和链接，而不是卡片。",
 }
 
 README_RELEASE_BOUNDARIES = {

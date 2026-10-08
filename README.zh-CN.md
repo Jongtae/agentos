@@ -102,7 +102,7 @@ agentos start
 
 ## 日常使用
 
-*这是根据与 PA 的真实对话浓缩重构的画面，并非原样截图。*
+*这是根据与 PA 的真实对话浓缩后重新绘制的画面。在实际的 Telegram 中，回复是文字和链接，而不是卡片。*
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation.zh-CN.png">

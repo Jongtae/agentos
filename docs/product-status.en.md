@@ -7,7 +7,7 @@ This is the evidence and boundary page behind the [README](../README.md). It sep
 - **Published release:** the release manifest records installed-smoke and synthetic journey evidence for that build.
 - **Current main:** merged code and deterministic/fixture checks support newer contracts; they do not establish the complete experience in live services.
 - **Owner pilot:** selected owner-supplied recordings have their own provenance and visible-observation scope. Revision-specific repeatability and release validation remain separate.
-- **Owner pilot:** the README's demo and its everyday-use image are condensed from real conversations with the PA; they are not release-specific validation.
+- **Owner pilot:** the README's demo is edited from real sessions; its everyday-use image condenses real conversations and redraws the replies as cards (in Telegram they are text and links). Neither is release-specific validation.
 - **Product direction:** the README's architecture figure, its "next" coffee example and the example below describe the intended experience, not one observed run or shipped shopping integrations.
 
 <!-- readme-section:demo-recording -->

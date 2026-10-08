@@ -102,7 +102,7 @@ Windows では PowerShell で `wsl --install` を実行して再起動し、Ubun
 
 ## 日常での使い方
 
-*PA と実際に交わした会話を要約して再構成した画面です。元の画面そのままではありません。*
+*PA と実際に交わした会話を要約して描き直した画面です。実際の Telegram では、カードではなくテキストとリンクで返信します。*
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation.ja.png">

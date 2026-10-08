@@ -102,7 +102,7 @@ Windows에서는 PowerShell에서 `wsl --install`을 실행하고 재시작한 �
 
 ## 일상에서 쓰는 모습
 
-*PA와 실제로 나눈 대화를 압축해 다시 구성한 화면입니다. 원본 그대로의 캡처는 아닙니다.*
+*PA와 실제로 나눈 대화를 압축해 다시 그린 화면입니다. 실제 Telegram에서는 카드가 아니라 텍스트와 링크로 답합니다.*
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/owner-pilot-conversation.ko.png">

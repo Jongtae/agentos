@@ -1,6 +1,9 @@
 {
   "selected_by_owner": "2026-10-08",
-  "issue": 1133,
+  "issue": [
+    1133,
+    1137
+  ],
   "evidence_class": "edited screen recordings of real Telegram sessions; visible screens and PA replies",
   "application_revision": "not shown in the recordings",
   "model_identity": "not shown in the recordings",
@@ -31,14 +34,62 @@
       "scene": 0,
       "kind": "title_card",
       "hold_s": 1.5,
-      "text": "Personal AgentOS · Same PA. Different AI. · Demo · Telegram"
+      "text": {
+        "en": "P E R S O N A L   A G E N T O S / Same PA. / Different AI. / Demo · Telegram (Korean UI)",
+        "ko": "P E R S O N A L   A G E N T O S / 같은 PA, / 다른 AI. / 데모 · Telegram",
+        "ja": "P E R S O N A L   A G E N T O S / 同じ PA、 / 違う AI。 / デモ · Telegram（韓国語画面）",
+        "zh-CN": "P E R S O N A L   A G E N T O S / 同一个 PA， / 不同的 AI。 / 演示 · Telegram（韩语界面）"
+      }
     },
     {
       "scene": 1,
       "source": "r1",
       "kind": "hold",
       "at_s": 250,
-      "hold_s": 3.6
+      "hold_s": 1.9,
+      "subtitle": {
+        "en": {
+          "speaker": "You",
+          "text": "I'm meeting a friend at Dongtan Station at 7 tomorrow. How do I get there?"
+        },
+        "ko": {
+          "speaker": "나",
+          "text": "내일 친구를 동탄역에서 저녁 7시에 보기로 했어. 어떻게 가면 돼?"
+        },
+        "ja": {
+          "speaker": "自分",
+          "text": "明日、東灘駅で友だちと夜7時に会うことになった。どう行けばいい？"
+        },
+        "zh-CN": {
+          "speaker": "我",
+          "text": "明天晚上7点要在东滩站见朋友，怎么去？"
+        }
+      }
+    },
+    {
+      "scene": 1,
+      "source": "r1",
+      "kind": "hold",
+      "at_s": 250,
+      "hold_s": 2.6,
+      "subtitle": {
+        "en": {
+          "speaker": "PA",
+          "text": "Noted: tomorrow at 7. From home it's about 30–40 min by car, or take the express bus."
+        },
+        "ko": {
+          "speaker": "PA",
+          "text": "내일 저녁 7시 약속 확인했어요. 집 기준으로 자동차 30~40분, 또는 광역버스를 타면 돼요."
+        },
+        "ja": {
+          "speaker": "PA",
+          "text": "明日19時の約束、確認しました。自宅からは車で30〜40分、または広域バスで行けます。"
+        },
+        "zh-CN": {
+          "speaker": "PA",
+          "text": "明晚7点的约定已记下。从家出发开车约30–40分钟，也可以坐广域巴士。"
+        }
+      }
     },
     {
       "scene": 1,
@@ -46,14 +97,50 @@
       "kind": "motion",
       "start_s": 356,
       "end_s": 373,
-      "speed": 4.0
+      "speed": 4.0,
+      "subtitle": {
+        "en": {
+          "speaker": "You",
+          "text": "I'll go straight from the office, actually. GTX seems better."
+        },
+        "ko": {
+          "speaker": "나",
+          "text": "카카오뱅크에서 바로 갈 거긴 한데, GTX가 나을 것 같긴 해."
+        },
+        "ja": {
+          "speaker": "自分",
+          "text": "会社から直接行くけど、GTXのほうがよさそう。"
+        },
+        "zh-CN": {
+          "speaker": "我",
+          "text": "我会从公司直接过去，坐GTX好像更好。"
+        }
+      }
     },
     {
       "scene": 1,
       "source": "r1",
       "kind": "hold",
       "at_s": 422,
-      "hold_s": 3.0
+      "hold_s": 3.2,
+      "subtitle": {
+        "en": {
+          "speaker": "PA",
+          "text": "Either way it's the same route: change to GTX-A at Seongnam. Want a reminder before you leave?"
+        },
+        "ko": {
+          "speaker": "PA",
+          "text": "어디서 출발하든 성남역에서 GTX-A로 환승하는 경로는 같아요. 출발 전에 알림을 보내드릴까요?"
+        },
+        "ja": {
+          "speaker": "PA",
+          "text": "どこから出ても城南駅でGTX-Aに乗り換える経路は同じです。出発前に通知しましょうか？"
+        },
+        "zh-CN": {
+          "speaker": "PA",
+          "text": "从哪里出发都一样，在城南站换乘GTX-A。要在出发前提醒你吗？"
+        }
+      }
     },
     {
       "scene": 1,
@@ -61,7 +148,25 @@
       "kind": "motion",
       "start_s": 440,
       "end_s": 447,
-      "speed": 2.0
+      "speed": 2.0,
+      "subtitle": {
+        "en": {
+          "speaker": "You",
+          "text": "Thumbs-up to the reminder."
+        },
+        "ko": {
+          "speaker": "나",
+          "text": "알림 제안에 '좋아요' 반응"
+        },
+        "ja": {
+          "speaker": "自分",
+          "text": "通知の提案に「いいね」で返事"
+        },
+        "zh-CN": {
+          "speaker": "我",
+          "text": "给提醒建议点了个赞"
+        }
+      }
     },
     {
       "scene": 1,
@@ -69,7 +174,25 @@
       "kind": "motion",
       "start_s": 474,
       "end_s": 483,
-      "speed": 3.0
+      "speed": 3.0,
+      "subtitle": {
+        "en": {
+          "speaker": "You",
+          "text": "Find good places to eat nearby, too."
+        },
+        "ko": {
+          "speaker": "나",
+          "text": "근처 맛집도 알려줘."
+        },
+        "ja": {
+          "speaker": "自分",
+          "text": "近くのおいしい店も教えて。"
+        },
+        "zh-CN": {
+          "speaker": "我",
+          "text": "也告诉我附近好吃的。"
+        }
+      }
     },
     {
       "scene": 1,
@@ -77,70 +200,250 @@
       "kind": "motion",
       "start_s": 640,
       "end_s": 653,
-      "speed": 4.0
+      "speed": 4.0,
+      "subtitle": {
+        "en": {
+          "speaker": "You",
+          "text": "It's an old university friend. Healthy food is fine, but let's have something tasty, like meat."
+        },
+        "ko": {
+          "speaker": "나",
+          "text": "오랜만에 대학 친구 만나는 거니까 건강식도 좋지만 고기 같은 맛있는 걸로."
+        },
+        "ja": {
+          "speaker": "自分",
+          "text": "久しぶりの大学の友だちだから、健康的なのもいいけど肉みたいなおいしいもので。"
+        },
+        "zh-CN": {
+          "speaker": "我",
+          "text": "好久不见的大学朋友，健康餐虽好，还是吃肉这种好吃的吧。"
+        }
+      }
     },
     {
       "scene": 1,
       "source": "r1",
       "kind": "hold",
       "at_s": 653,
-      "hold_s": 3.0
+      "hold_s": 3.2,
+      "subtitle": {
+        "en": {
+          "speaker": "PA",
+          "text": "Remembered: dinner at Dongtan on Oct 8 at 7, and to answer travel questions with a time and route right away."
+        },
+        "ko": {
+          "speaker": "PA",
+          "text": "기억했어요: 10월 8일 저녁 7시 동탄역 약속, 그리고 이동·일정 질문엔 바로 시각과 경로를 정리하기."
+        },
+        "ja": {
+          "speaker": "PA",
+          "text": "覚えました：10月8日19時に東灘駅で約束。移動や予定の質問にはすぐ時刻と経路をまとめる。"
+        },
+        "zh-CN": {
+          "speaker": "PA",
+          "text": "已记住：10月8日晚7点东滩站的约定，以及出行和日程问题直接给出时间和路线。"
+        }
+      }
     },
     {
       "scene": 1,
       "source": "r1",
       "kind": "hold",
       "at_s": 715,
-      "hold_s": 3.4
+      "hold_s": 3.2,
+      "subtitle": {
+        "en": {
+          "speaker": "PA",
+          "text": "For a reunion, here are good grill places right by Dongtan Station."
+        },
+        "ko": {
+          "speaker": "PA",
+          "text": "오랜만의 동기 모임이니 고기로 가는 게 좋겠네요. 동탄역 근처 고깃집을 추려 봤어요."
+        },
+        "ja": {
+          "speaker": "PA",
+          "text": "久しぶりの集まりなら肉がいいですね。東灘駅近くの焼肉店を選びました。"
+        },
+        "zh-CN": {
+          "speaker": "PA",
+          "text": "老同学聚会，吃烤肉不错。我挑了东滩站附近的烤肉店。"
+        }
+      }
     },
     {
       "scene": 2,
       "source": "r3",
       "kind": "hold",
       "at_s": 79,
-      "hold_s": 3.2
+      "hold_s": 3.2,
+      "subtitle": {
+        "en": {
+          "speaker": "PA",
+          "text": "There's no Spam in your cart. Its 22 items are mostly vegetables, meat, eggs and dairy."
+        },
+        "ko": {
+          "speaker": "PA",
+          "text": "장바구니에 스팸은 없어요. 담긴 22개는 대부분 채소, 고기, 계란, 유제품이에요."
+        },
+        "ja": {
+          "speaker": "PA",
+          "text": "カートにスパムはありません。22点は主に野菜、肉、卵、乳製品です。"
+        },
+        "zh-CN": {
+          "speaker": "PA",
+          "text": "购物车里没有午餐肉。22件商品主要是蔬菜、肉、鸡蛋和乳制品。"
+        }
+      }
     },
     {
       "scene": 2,
       "source": "r4",
       "kind": "hold",
       "at_s": 1,
-      "hold_s": 2.0
+      "hold_s": 2.6,
+      "subtitle": {
+        "en": {
+          "speaker": "You",
+          "text": "Add Spam. Just one small one; my wife won't like it if I add a lot."
+        },
+        "ko": {
+          "speaker": "나",
+          "text": "스팸을 넣어 줘. 많이 넣으면 아내가 싫어하니 작은 거 하나만."
+        },
+        "ja": {
+          "speaker": "自分",
+          "text": "スパムを入れて。たくさん入れると妻が嫌がるから、小さいのを一つだけ。"
+        },
+        "zh-CN": {
+          "speaker": "我",
+          "text": "加一罐午餐肉。买多了老婆不高兴，只要一个小的。"
+        }
+      }
     },
     {
       "scene": 2,
       "source": "r4",
       "kind": "hold",
       "at_s": 45,
-      "hold_s": 1.6
+      "hold_s": 1.6,
+      "subtitle": {
+        "en": {
+          "speaker": "PA",
+          "text": "Adding one 200 g can of Spam Classic…"
+        },
+        "ko": {
+          "speaker": "PA",
+          "text": "스팸 클래식 200g 한 개 담는 중…"
+        },
+        "ja": {
+          "speaker": "PA",
+          "text": "スパム クラシック 200g を1缶入れています…"
+        },
+        "zh-CN": {
+          "speaker": "PA",
+          "text": "正在加入一罐 200g 经典午餐肉…"
+        }
+      }
     },
     {
       "scene": 2,
       "source": "r4",
       "kind": "hold",
       "at_s": 64,
-      "hold_s": 3.8
+      "hold_s": 3.8,
+      "subtitle": {
+        "en": {
+          "speaker": "PA",
+          "text": "Added one small 200 g can. With your 22 items there are now 23. Check and pay in the E-Mart app."
+        },
+        "ko": {
+          "speaker": "PA",
+          "text": "작은 캔 200g 1개 담았어요. 기존 22개와 함께 총 23개예요. 이마트몰 앱에서 확인하고 결제하시면 돼요."
+        },
+        "ja": {
+          "speaker": "PA",
+          "text": "小さい200g缶を1つ入れました。既存の22点と合わせて23点です。E-Martアプリで確認して決済してください。"
+        },
+        "zh-CN": {
+          "speaker": "PA",
+          "text": "已加入一小罐200g。加上原来的22件，共23件。请在易买得App里确认后付款。"
+        }
+      }
     },
     {
       "scene": 3,
       "source": "r2",
       "kind": "hold",
       "at_s": 86,
-      "hold_s": 2.6
+      "hold_s": 2.6,
+      "subtitle": {
+        "en": {
+          "speaker": "PA",
+          "text": "Four books in your cart. Total after the 10% discount: ₩68,940."
+        },
+        "ko": {
+          "speaker": "PA",
+          "text": "장바구니에 책 4권, 10% 할인 후 결제 예정 금액은 68,940원이에요."
+        },
+        "ja": {
+          "speaker": "PA",
+          "text": "カートに本が4冊。10%割引後の支払い予定額は68,940ウォンです。"
+        },
+        "zh-CN": {
+          "speaker": "PA",
+          "text": "购物车里有4本书，打九折后应付68,940韩元。"
+        }
+      }
     },
     {
       "scene": 3,
       "source": "r2",
       "kind": "hold",
       "at_s": 112,
-      "hold_s": 1.6
+      "hold_s": 1.8,
+      "subtitle": {
+        "en": {
+          "speaker": "You",
+          "text": "Can my points get me a bigger discount?"
+        },
+        "ko": {
+          "speaker": "나",
+          "text": "내가 가진 포인트 등으로 더 할인되는 게 있어?"
+        },
+        "ja": {
+          "speaker": "自分",
+          "text": "持っているポイントなどで、もっと安くなる？"
+        },
+        "zh-CN": {
+          "speaker": "我",
+          "text": "用我的积分之类的还能更便宜吗？"
+        }
+      }
     },
     {
       "scene": 3,
       "source": "r2",
       "kind": "hold",
       "at_s": 182,
-      "hold_s": 3.8
+      "hold_s": 3.8,
+      "subtitle": {
+        "en": {
+          "speaker": "PA",
+          "text": "Points and coupons only show at the next checkout step. One step I couldn't check."
+        },
+        "ko": {
+          "speaker": "PA",
+          "text": "포인트·쿠폰은 주문 다음 단계에서만 확인돼요. 한 단계는 확인하지 못했어요."
+        },
+        "ja": {
+          "speaker": "PA",
+          "text": "ポイントやクーポンは注文の次の段階でしか確認できません。一つの段階は確認できませんでした。"
+        },
+        "zh-CN": {
+          "speaker": "PA",
+          "text": "积分和优惠券要到下单的下一步才能查看。有一个步骤没能确认。"
+        }
+      }
     }
   ],
   "masking": {
@@ -152,16 +455,36 @@
       "home neighbourhood",
       "apartment-complex link"
     ],
-    "post_check": "all 153 distinct output frames re-OCR'd; 0 matches"
+    "post_check": "all 153 distinct phone frames re-OCR'd after masking; 0 matches (the phone frames are shared by every locale)"
   },
   "output": {
-    "file": "demo.gif",
     "width": 480,
-    "height": 1044,
-    "frames": 472,
+    "height": 1200,
+    "frames": 491,
     "fps": 10,
     "loop": true,
-    "sha256": "b316fde7a6ef5ec81aa83565b73e996b7b44f21d03f171586921cd0ddd53adc5",
-    "bytes": 4344647
+    "layout": "phone recording 480 x 1044 above a 156 px subtitle strip (scene title, speaker, translated line)",
+    "files": {
+      "en": {
+        "file": "demo.en.gif",
+        "sha256": "7423895ca7d503131f0dd9b2b7be60c25e3c76005aa3326770b9247df247fb2d",
+        "bytes": 4481921
+      },
+      "ko": {
+        "file": "demo.ko.gif",
+        "sha256": "3a62ec599dfd09aae507ab2e23931c92b3ada2a2f01632322aa6457c114a0375",
+        "bytes": 4479057
+      },
+      "ja": {
+        "file": "demo.ja.gif",
+        "sha256": "2b404fd93ae8e112143816dcd599f8d0f1efa81c74a3915bbcb450ec4b6c1df9",
+        "bytes": 4493291
+      },
+      "zh-CN": {
+        "file": "demo.zh-CN.gif",
+        "sha256": "6476abb5eab8d89be9c2c135b5178c027e6bd18dc741283a77a820cc22ec1eb6",
+        "bytes": 4511662
+      }
+    }
   }
 }

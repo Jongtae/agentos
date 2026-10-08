@@ -30,9 +30,9 @@
 Personal AgentOS 的出发点是：*不必*。在一个由你安装和掌控的开源环境里，一个个人智能体（PA）保管你的上下文、进行中的工作和权限，而真正干活的 AI 可以更换。
 
 <p align="center">
-  <img src="docs/assets/readme/demo/demo.gif" width="300" alt="演示：与 PA 的韩语 Telegram 对话。它为晚餐约会整理路线和餐厅，往购物车里加入一件小商品后在付款前停下，并说明哪一步折扣未能确认。个人信息已模糊处理。">
+  <img src="docs/assets/readme/demo/demo.zh-CN.gif" width="300" alt="演示：与 PA 的韩语 Telegram 对话。它为晚餐约会整理路线和餐厅，往购物车里加入一件小商品后在付款前停下，并说明哪一步折扣未能确认。个人信息已模糊处理。">
 </p>
-<p align="center"><sub>演示 · Telegram（韩语界面）。等待时间已缩短，个人信息已模糊处理。</sub></p>
+<p align="center"><sub>演示 · Telegram（韩语界面），附中文字幕。等待时间已缩短，个人信息已模糊处理。</sub></p>
 
 **主要特点**
 

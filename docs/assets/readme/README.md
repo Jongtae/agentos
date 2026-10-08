@@ -4,9 +4,9 @@ The public READMEs introduce the desired personal-agent relationship, owner cont
 
 ## Header and demo
 
-The READMEs open with a fixed-width character banner (`AgentOS` in the FIGlet *smslant* font, 36 columns so it fits a phone screen, generated with pyfiglet and kept as plain text inside `<pre>`), status badges, and [`demo/demo.gif`](demo/README.md). The badges link to the `validate` and `full-validate` workflows, the latest release, the supported Python version, platforms and licence; their images come from GitHub Actions and shields.io.
+The READMEs open with a fixed-width character banner (`AgentOS` in the FIGlet *smslant* font, 36 columns so it fits a phone screen, generated with pyfiglet and kept as plain text inside `<pre>`), status badges, and the localized demo GIFs ([`demo/`](demo/README.md)). The badges link to the `validate` and `full-validate` workflows, the latest release, the supported Python version, platforms and licence; their images come from GitHub Actions and shields.io.
 
-The demo is one language-neutral GIF edited from real Telegram sessions: a dinner meeting, a grocery cart that stops before payment, and a book-cart discount question. Sign-in links and home-location details are blurred. Its sources, segments, masking and evidence class are in [demo/README.md](demo/README.md) and [demo/manifest.json](demo/manifest.json).
+The demo is edited from real Telegram sessions, with one GIF per README language (localized title card and subtitles under the phone): a dinner meeting, a grocery cart that stops before payment, and a book-cart discount question. Sign-in links and home-location details are blurred. Its sources, segments, masking and evidence class are in [demo/README.md](demo/README.md) and [demo/manifest.json](demo/manifest.json).
 
 `social-preview.png` (1280 × 640) is the repository's social preview image, set in repository Settings → General → Social preview. It repeats the README banner, tagline and platform/licence facts so shared links match the README header.
 

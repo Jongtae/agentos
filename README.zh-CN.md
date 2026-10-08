@@ -12,7 +12,7 @@
 
 **在你自己电脑上运行的个人智能体。<br>底层 AI 可以更换，记忆、进行中的工作和权限都会保留。**
 
-[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
+[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux | Windows (WSL2)](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20WSL2-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
@@ -40,13 +40,19 @@ Personal AgentOS 的出发点是：*不必*。在一个由你安装和掌控的�
 - **换了对话，还是同一个 PA。** 记忆、保存的结果和进行中的工作会延续到下一次对话，重启后依然保留。
 - **边界由你决定。** 只访问你连接的文件夹、账户和工具。付款前总会先问你；密钥不会进入提示词、日志或记录。
 - **告诉你，而不是瞒着你。** AI 记住某件事时会告诉你，并提供精确的撤销。每项委托工作都会记录用了你的哪些信息、发送到了哪里。
-- **在你常用的地方对话。** 用手机上的 Telegram，或在你自己的 Mac、Linux 电脑的浏览器里对话。
+- **在你常用的地方对话。** 用手机上的 Telegram，或在你自己的 Mac、Linux、Windows（WSL2）电脑的浏览器里对话。
 
 <!-- readme-section:try-today -->
 
 ## 快速开始
 
-在 macOS 上使用 [Homebrew](https://brew.sh) 安装：
+在 macOS 或 Linux 上，一条命令即可安装并启动，无需 Homebrew、Python 或 Docker：
+
+```sh
+curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/main/scripts/install.sh | sh
+```
+
+如果你在 macOS 上使用 [Homebrew](https://brew.sh)：
 
 ```sh
 brew install jongtae/agentos/agentos
@@ -58,9 +64,9 @@ agentos start
 3. 可选：在 **설정 → 외부 연결**（设置 → 外部连接）中填入你自己的 Telegram 机器人令牌，然后打开配对链接。
 4. 试着说：**“这周要完成一份提案，帮我把接下来的事拆成几步。”**
 
-Linux、从源码运行以及所有设置，请见 [QUICKSTART](QUICKSTART.md)。对话期间请保持 `agentos start` 运行。
+在 Windows 上，请在 PowerShell 中运行 `wsl --install` 并重启，然后打开 Ubuntu 运行第一条命令。Windows 说明、安装脚本做了什么、从源码运行以及所有设置，请见 [QUICKSTART](QUICKSTART.md)。对话期间请保持 `agentos start` 运行。
 
-**发布状态：** Homebrew 安装的是从已打标签的 main 提交构建的 **v1.1.1**（2026-10-07）。演示是根据真实使用会话剪辑的，并非该发行版本的端到端验证；示意图属于产品方向。[release manifest](docs/release-manifest.json) 记录每个版本的覆盖范围，[产品状态](docs/product-status.en.md) 区分已提供的功能、测试依据和发展方向。
+**发布状态：** 两种安装方式安装的都是从已打标签的 main 提交构建的 **v1.1.1**（2026-10-07）。演示是根据真实使用会话剪辑的，并非该发行版本的端到端验证；示意图属于产品方向。[release manifest](docs/release-manifest.json) 记录每个版本的覆盖范围，[产品状态](docs/product-status.en.md) 区分已提供的功能、测试依据和发展方向。
 
 <!-- readme-section:ownership -->
 

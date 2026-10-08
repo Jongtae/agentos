@@ -12,7 +12,7 @@
 
 **Your personal agent, on your own machine.<br>Change the AI underneath; keep its memory, open work and permissions.**
 
-[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
+[![CI](https://github.com/Jongtae/agentos/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/validate.yml) [![Full test suite](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml/badge.svg?branch=main)](https://github.com/Jongtae/agentos/actions/workflows/full-validate.yml) [![Latest release](https://img.shields.io/github/v/release/Jongtae/agentos?sort=semver&label=release)](https://github.com/Jongtae/agentos/releases) [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](pyproject.toml) [![macOS | Linux | Windows (WSL2)](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows%20WSL2-555)](QUICKSTART.md) [![License: AGPL 3.0](https://img.shields.io/badge/license-AGPL--3.0--only-blue)](LICENSE)
 
 [English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
@@ -40,13 +40,19 @@ Personal AgentOS is built on the answer *no*. It is an open-source environment y
 - **One PA across conversations.** Memory, saved results and the work in progress carry over to the next conversation and survive a restart.
 - **Your boundaries.** It reaches only the folders, accounts and tools you connect. Payments always ask first; secrets never enter a prompt, a log or a record.
 - **Told, not hidden.** When your AI saves something to memory it says so and offers an exact undo. Each task records which of your information it used and where it went.
-- **Where you already talk.** Chat on Telegram from your phone, or in the browser on your own Mac or Linux machine.
+- **Where you already talk.** Chat on Telegram from your phone, or in the browser on your own Mac, Linux or Windows (WSL2) computer.
 
 <!-- readme-section:try-today -->
 
 ## Quick start
 
-On macOS with [Homebrew](https://brew.sh):
+On macOS or Linux, one command installs and starts AgentOS. You do not need Homebrew, Python or Docker:
+
+```sh
+curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/main/scripts/install.sh | sh
+```
+
+If you use [Homebrew](https://brew.sh) on macOS:
 
 ```sh
 brew install jongtae/agentos/agentos
@@ -58,9 +64,9 @@ agentos start
 3. Optional: in **설정 → 외부 연결** (Settings → External connections), add your own Telegram bot token and open the pairing link.
 4. Ask: **“I need to finish a proposal this week. Help me break it into the next few steps.”**
 
-Linux, running from source and every setting are in [QUICKSTART](QUICKSTART.md). Keep `agentos start` running while you talk.
+On Windows, run `wsl --install` in PowerShell, restart, open Ubuntu and run the first command there. Windows details, what the installer does, running from source and every setting are in [QUICKSTART](QUICKSTART.md). Keep `agentos start` running while you talk.
 
-**Release status:** Homebrew installs **v1.1.1** (2026-10-07), built from the tagged main commit. The demo is edited from real sessions and is not release-specific end-to-end validation; the illustrations are product direction. The [release manifest](docs/release-manifest.json) records what each release covers, and [product status](docs/product-status.en.md) separates shipped behavior, test evidence and direction.
+**Release status:** both installers install **v1.1.1** (2026-10-07), built from the tagged main commit. The demo is edited from real sessions and is not release-specific end-to-end validation; the illustrations are product direction. The [release manifest](docs/release-manifest.json) records what each release covers, and [product status](docs/product-status.en.md) separates shipped behavior, test evidence and direction.
 
 <!-- readme-section:ownership -->
 

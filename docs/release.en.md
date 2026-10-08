@@ -83,7 +83,10 @@ authorized by EPIC-PA1 / #386, which explicitly excludes public deployment.
 
 9. **Record the published release.** Add the computed `sha256`, the tag and
    the version to the `published` list in `docs/release-manifest.json`, and
-   remove the matching `unpublished` entry.
+   remove the matching `unpublished` entry. In the same change, set
+   `AGENTOS_VERSION` and `AGENTOS_ARCHIVE_SHA256` in `scripts/install.sh` to
+   that release; `tests/test_install_script.py` fails until they match, and
+   the `install-smoke` workflow then runs the real installer on Linux and macOS.
 10. **Bump `pyproject.toml` to the next version immediately.** Steps 9 and 10
     must land together. `test_the_in_tree_version_is_not_a_published_version`
     fails the moment a version appears in `published` while `pyproject.toml`

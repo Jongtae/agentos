@@ -10,9 +10,17 @@ The current owner test remains the small file-workspace journey below: configure
 
 [Owner control requirements](docs/owner-control-contract.en.md) describe implemented versus planned boundaries. A local install can use an external model; approve only the data/destinations you intend. No ticket/cart/booking/payment, account creation or new external action is part of the recommended test. Do not publish private documents, credentials or full tool payloads as repository evidence.
 
-## Install on macOS
+## Install on macOS or Linux
 
-Install Homebrew from [brew.sh](https://brew.sh) if needed, then:
+One command installs and starts AgentOS. You do not need Homebrew, Python, Docker or git:
+
+```sh
+curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/main/scripts/install.sh | sh
+```
+
+The [installer](scripts/install.sh) first downloads the published release archive and checks its SHA-256 against the [release manifest](docs/release-manifest.json); on a mismatch it installs nothing. If you do not already have a current [uv](https://docs.astral.sh/uv/), it installs a pinned version through Astral's official installer, which adds `~/.local/bin` to your shell `PATH`. It then installs AgentOS with a uv-managed Python, ignoring your own uv settings, and starts it. Set `AGENTOS_NO_START=1` to install without starting. Later, open a new terminal and run `agentos start`. Running the same command again after a release updates AgentOS. `uv tool uninstall personal-agentos` removes the program and keeps your data.
+
+If you use Homebrew on macOS, this installs the same release:
 
 ```sh
 brew install jongtae/agentos/agentos
@@ -24,6 +32,21 @@ The browser opens at `http://127.0.0.1:8787`. Click **바로 시작하기** (Sta
 For a ChatGPT/Codex subscription, install and log in to the official Codex CLI first (`codex login`), then select **Codex 로그인 완료 · 선택** in AgentOS (**전환** when switching from another subscription engine). AgentOS records only your confirmation; it does not request, read, or store the Codex login. A connected subscription engine receives only the bounded AgentOS tools, not your local files, credentials, or arbitrary shell access. Alternatively, choose a model provider, endpoint and model name, then test the settings and apply the successful configuration. API keys stay in a private local file. Cloud requests send conversation content to your selected provider.
 
 Supported connections: Ollama (an already running local model server), OpenAI-compatible Chat Completions endpoints, and Anthropic Messages. Bring your own model access; no paid model subscription is included.
+
+## Windows (WSL2)
+
+AgentOS does not run natively on Windows yet ([#1168](https://github.com/Jongtae/agentos/issues/1168)). It runs in WSL2, the Linux environment built into Windows 10 and 11:
+
+1. In PowerShell, run `wsl --install`, then restart Windows.
+2. Open **Ubuntu** from the Start menu and create your Linux user name and password.
+3. In Ubuntu, run the install command from [Install on macOS or Linux](#install-on-macos-or-linux).
+4. If no browser window opens, open `http://127.0.0.1:8787` in your Windows browser. WSL2 forwards that local address to Windows.
+
+Things that differ from macOS:
+
+- A Codex or Claude Code subscription must be installed and logged in inside Ubuntu, not in Windows.
+- Windows folders appear under `/mnt/c/`, for example `/mnt/c/Users/your-name/Documents/AgentOS`.
+- Keep the Ubuntu window open while you talk. The background login service and the embedded browser tool are macOS only for now ([#682](https://github.com/Jongtae/agentos/issues/682)).
 
 ## First task
 

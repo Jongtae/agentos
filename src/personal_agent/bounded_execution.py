@@ -868,23 +868,38 @@ def live_progress_reader(engine_id, progress):
 AUTH_HINT = '엔진 로그인이 필요합니다. 설정 › AI 연결에서 로그인을 확인하세요.'
 
 
+#: #808: Codex ``exec --json`` item types that are not actions; every other item is a call.
+CODEX_NON_ACTION_ITEMS = frozenset({'agent_message', 'reasoning', 'todo_list', 'error'})
+#: #808: the most tool-call entries one turn's summary keeps; more makes the report partial.
+CLI_TOOL_CALLS_KEPT = 30
+#: #808: the meta of an execute that never launched the CLI, so it ran nothing.
+NOT_LAUNCHED = {'launched': False}
+
+
 def cli_metadata(engine_id, raw):
     """What the CLI itself reported about the run (#570). Absent fields stay
     absent: a missing model is "not reported", never guessed."""
     meta = {'reported_model': None, 'usage': None, 'tool_calls': [], 'num_turns': None, 'cost_usd': None}
     records = []
     lines = jsonl_lines(raw)
+    # #808: any line this summary could not read may have carried a tool call, so the
+    # report says it is partial instead of letting a missing call read as "no action".
+    partial = len(lines) > 5000
     # Keep the head (init record) and the tail (result record) of a long stream.
     for line in (lines if len(lines) <= 5000 else lines[:1000] + lines[-4000:]):
         # Tool results can be large and carry nothing this summary reads.
         if len(line) > MAX_OUTPUT_BYTES:
+            partial = True
             continue
         try:
             value = json.loads(line)
         except ValueError:
+            partial = True
             continue
         if isinstance(value, dict):
             records.append(value)
+    # #808: one entry per Codex item id (it writes item.started and item.completed for each call).
+    codex_items = {}
     connector_calls = {}
     meta['connector_reads'] = []
     for record in records:
@@ -918,10 +933,27 @@ def cli_metadata(engine_id, raw):
             if isinstance(denial, dict):
                 meta['tool_calls'].append({'type': 'tool_use', 'name': str(denial.get('tool_name') or '')[:80], 'status': 'denied'})
         item = record.get('item')
-        if isinstance(item, dict) and item.get('type') in ('mcp_tool_call', 'command_execution', 'web_search', 'file_change'):
+        # #808: every Codex item but the known non-actions is a call (collab_tool_call, apps, ...).
+        if isinstance(item, dict) and item.get('type') and item.get('type') not in CODEX_NON_ACTION_ITEMS:
             name = item.get('tool') or item.get('name') or item.get('type')
-            meta['tool_calls'].append({'type': item.get('type'), 'name': str(name)[:80], 'status': str(item.get('status') or '')[:20]})
-    meta['tool_calls'] = meta['tool_calls'][:30]
+            entry = {'type': str(item.get('type'))[:40], 'name': str(name)[:80], 'status': str(item.get('status') or '')[:20]}
+            if item.get('server') is not None:
+                entry['server'] = str(item.get('server'))[:80]
+            key = item.get('id')
+            if isinstance(key, str) and key in codex_items:
+                # Review P2: one id reported as two kinds is not one call; do not merge it away.
+                if codex_items[key]['type'] != entry['type']:
+                    partial = True
+                codex_items[key].update(entry)
+            else:
+                meta['tool_calls'].append(entry)
+                if isinstance(key, str):
+                    codex_items[key] = entry
+    if len(meta['tool_calls']) > CLI_TOOL_CALLS_KEPT:
+        partial = True
+    meta['tool_calls'] = meta['tool_calls'][:CLI_TOOL_CALLS_KEPT]
+    if partial:
+        meta['tool_calls_partial'] = True
     meta['connector_reads'] = meta['connector_reads'][:30]
     if not meta['connector_reads']:
         meta.pop('connector_reads')
@@ -1822,6 +1854,16 @@ class BoundedExecutionAdapter:
         return content[:24_000]
 
     def execute(self, engine_id, prompt, tools, *, context=None, model=None, images=None):
+        """Run one CLI turn; a failure before the CLI was launched carries ``NOT_LAUNCHED`` (#808)."""
+        launch = {'started': False}
+        try:
+            return self._execute(engine_id, prompt, tools, launch, context=context, model=model, images=images)
+        except ExecutionError as exc:
+            if not launch['started'] and not exc.meta:
+                exc.meta = dict(NOT_LAUNCHED)
+            raise
+
+    def _execute(self, engine_id, prompt, tools, launch, *, context=None, model=None, images=None):
         instructions = ''
         if context and engine_id == 'claude-code':
             # Claude Code accepts a system-prompt addition; send the shared
@@ -1963,6 +2005,7 @@ class BoundedExecutionAdapter:
                                 tool_timeout=bridge_tool_timeout(offered, timeout), image_paths=image_paths,
                                 ai_connections=ai_connections)
             run_meta = {'argv': display_argv(argv, prompt, instructions), 'requested_model': model or None}
+            launch['started'] = True
             try:
                 if self.runner is subprocess.run:
                     # #718: the facade's live-progress sink (set by the service), if any.
@@ -1991,7 +2034,8 @@ class BoundedExecutionAdapter:
                                      failure_class=failure_class, meta={**run_meta, 'duration_ms': timeout * 1000}) from exc
             except OSError as exc:
                 LOG.warning('engine turn could not start engine=%s error=%s', engine_id, type(exc).__name__)
-                raise ExecutionError('구독 엔진 CLI를 실행하지 못했습니다.', failure_class='start-failed') from exc
+                raise ExecutionError('구독 엔진 CLI를 실행하지 못했습니다.', failure_class='start-failed',
+                                     meta=dict(NOT_LAUNCHED)) from exc
             elapsed = time.monotonic() - started
             if completed.returncode != 0:
                 # Remove the stored credential's literal value before any

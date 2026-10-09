@@ -541,3 +541,65 @@ class OwnClientFromSettingsTest(unittest.TestCase):
         self.store.secret('google_oauth_client', {'installed': {'client_id': 'broken'}})
         service = configured_service(self.store, self.env)
         self.assertIsNone(service.drive_oauth)
+
+
+class CalendarRenewalLockOrderTest(unittest.TestCase):
+    """#1172 review P1: renewal inside a Calendar query must not deadlock against disconnect."""
+
+    def test_query_renewal_and_disconnect_both_finish(self):
+        import threading
+        import time
+        from personal_agent.calendar import CalendarConnector
+        from personal_agent.calendar_oauth import calendar_transport
+        from personal_agent.google_calendar import CALENDAR_READ_SCOPE, GoogleCalendar
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        raw = QuickStore(temp.name)
+        store = EncryptedCalendarSecretStore(raw, Fernet.generate_key())
+        clock = [1_000.0]
+        registry = ConnectorRegistry(store, (), clock=lambda: clock[0])
+        oauth = CalendarOAuth(store, 'n.apps.googleusercontent.com', 'http://127.0.0.1:8787/oauth/calendar/callback',
+                              registry=registry, now=lambda: clock[0], allow_localhost=True)
+
+        def exchange(payload):
+            if payload['grant_type'] == 'refresh_token':
+                return {'access_token': 'renewed', 'expires_in': 3600, 'scope': CALENDAR_READ_SCOPE}
+            return {'access_token': 'first', 'expires_in': 3600, 'refresh_token': 'r', 'scope': CALENDAR_READ_SCOPE}
+
+        offer = oauth.begin_oauth(OWNER)
+        oauth.complete_oauth(OWNER, {'state': parse_qs(urlparse(offer['authorization_url']).query)['state'][0],
+                                     'code': 'c'}, exchange)
+        clock[0] += 7200
+        transport = calendar_transport(store, registry, OWNER, now=lambda: clock[0], oauth=oauth, exchange=exchange,
+                                       opener=lambda method, url, body, headers: {'items': []})
+        calendar = CalendarConnector(raw, GoogleCalendar(transport), registry=registry)
+        inside = threading.Event()
+        original = oauth.credential_current
+
+        def slow(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if threading.current_thread().name == 'query':
+                inside.set()
+                time.sleep(0.3)
+            return result
+
+        oauth.credential_current = slow
+
+        def query():
+            try:
+                calendar.query(OWNER, '2026-10-09T00:00:00+00:00', '2026-10-10T00:00:00+00:00', 'UTC')
+            except Exception:
+                pass
+
+        def disconnect():
+            inside.wait(5)
+            oauth.disconnect(OWNER, lambda credential: None)
+
+        threads = [threading.Thread(target=query, name='query', daemon=True),
+                   threading.Thread(target=disconnect, name='disconnect', daemon=True)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(5)
+        self.assertEqual([thread.is_alive() for thread in threads], [False, False])
+        self.assertEqual(oauth.status(OWNER)['state'], 'disconnected')

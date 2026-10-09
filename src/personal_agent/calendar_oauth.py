@@ -28,7 +28,7 @@ actually complete an authorization - registers the two connector definitions.
 from __future__ import annotations
 
 import base64
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import hashlib
 import hmac
 import json
@@ -469,7 +469,8 @@ def calendar_transport(
         grant = READ_GRANT if reading else WRITE_GRANT
         if oauth is not None and not oauth.credential_current(owner_id, grant=grant):
             try:
-                oauth.refresh(owner_id, exchange, grant=grant)
+                # The caller (``CalendarConnector``) may hold the dispatch lock.
+                oauth.refresh(owner_id, exchange, grant=grant, serialize=False)
             except CalendarOAuthError:
                 pass
         access_token, connection_revision = _authorization_context(
@@ -873,20 +874,34 @@ class CalendarOAuth:
             return self.status(owner_id, grant=grant)
 
     def refresh(
-        self, owner_id: str, exchange: Callable[[dict], dict], *, write: bool = False, grant: str | None = None
+        self,
+        owner_id: str,
+        exchange: Callable[[dict], dict],
+        *,
+        write: bool = False,
+        grant: str | None = None,
+        serialize: bool = True,
     ) -> dict:
         """Replace one grant's access token without changing its authority.
 
         The refresh is grant-scoped and revision-pinned: it never widens the
         scope set, never revives a disconnected grant, and never writes a token
         for a connection that was rotated while the exchange was in flight.
+
+        ``serialize=False`` is for a renewal from inside a request (#1172
+        review P1): ``CalendarConnector`` already holds the dispatch lock
+        there, and taking the module-wide OAuth lock after it would invert the
+        ``OAuth -> dispatch -> authority`` order that connect, disconnect and
+        revocation use, deadlocking against them.  Without it the renewal is
+        still safe: the two revision-pinned guarded sections below refuse to
+        commit over a connection that changed in between.
         """
         if not callable(exchange):
             raise CalendarOAuthError("invalid_callback")
         grant = self._grant(write, grant)
         spec = _spec(grant)
         owner = _owner_key(owner_id)
-        with _OAUTH_LOCK:
+        with _OAUTH_LOCK if serialize else nullcontext():
             token_slot = _secret_slot(TOKEN_SECRET_KEY, grant, owner_id)
             with _lifecycle_guard(self.registry, owner_id, spec.connector_id):
                 try:

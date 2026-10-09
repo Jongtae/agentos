@@ -730,7 +730,7 @@ class D_MissingGmail(LocalHttp, PresenceEval):
                 self.assertEqual(self.searches(), searches, 'no mailbox call before the connection')
                 # The owner connects on this Mac (fixture OAuth token exchange).
                 status, page, _ = self.connect_through_the_browser()
-                self.assertEqual((status, page), (200, '연결되었습니다. 이 창을 닫아도 됩니다. 대화에도 알려 드렸습니다. / Connected. You can close this window.'))
+                self.assertEqual((status, page), (200, 'Gmail 연결이 완료되었습니다. 이 창을 닫아도 됩니다. 대화에도 알려 드렸습니다. / Gmail connected. You can close this window.'))
                 self.assertEqual(self.store.job(job['id'])['status'], 'queued')
                 # The ORIGINAL Work resumes once and answers once in the same conversation.
                 resumed_at = len(self.wire)

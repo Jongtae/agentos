@@ -137,6 +137,11 @@ GOOGLE_OAUTH_KEY_SERVICE='personal-agentos.google-oauth'
 GOOGLE_CLIENT_FORMAT='Google OAuth client must be the JSON download of a Google "Desktop app" client.'
 
 
+def connected_page(name):
+    """The OAuth callback page after a committed connection (#1207)."""
+    return f'{name} 연결이 완료되었습니다. 이 창을 닫아도 됩니다. 대화에도 알려 드렸습니다. / {name} connected. You can close this window.'.encode()
+
+
 def google_client_from_json(value):
     """``(client_id, client_secret)`` from a Desktop client download, or ValueError."""
     if isinstance(value,(str,bytes)):
@@ -916,7 +921,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     return self.reply(400,b'Gmail connection could not be completed. Return to Telegram and request a new link.','text/plain; charset=utf-8')
                 # Says only what happened: the connection.  Whether parked Work
                 # resumed is reported in the conversation that parked it.
-                return self.reply(200,'연결되었습니다. 이 창을 닫아도 됩니다. 대화에도 알려 드렸습니다. / Connected. You can close this window.'.encode(),'text/plain; charset=utf-8')
+                return self.reply(200,connected_page('Gmail'),'text/plain; charset=utf-8')
             if path==CALENDAR_CONNECT_PATH:
                 # Same shape as the Gmail connect route: owner-authenticated,
                 # loopback only. The extra piece is `grant`, because read and
@@ -943,7 +948,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     service.complete_calendar_connection(callback)
                 except (AttributeError, ValueError, OSError):
                     return self.reply(400,b'Google Calendar connection could not be completed. Start the connection again from AgentOS.','text/plain; charset=utf-8')
-                return self.reply(200,'연결되었습니다. 이 창을 닫아도 됩니다. 대화에도 알려 드렸습니다. / Connected. You can close this window.'.encode(),'text/plain; charset=utf-8')
+                return self.reply(200,connected_page('Google Calendar'),'text/plain; charset=utf-8')
             if path==DRIVE_CONNECT_PATH:
                 # #1172: owner-authenticated and loopback only, like Calendar.
                 if not self.auth():return
@@ -962,7 +967,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     service.complete_drive_connection(callback)
                 except (AttributeError, ValueError, OSError):
                     return self.reply(400,b'Google Drive connection could not be completed. Start the connection again from AgentOS.','text/plain; charset=utf-8')
-                return self.reply(200,'연결되었습니다. 이 창을 닫아도 됩니다. 대화에도 알려 드렸습니다. / Connected. You can close this window.'.encode(),'text/plain; charset=utf-8')
+                return self.reply(200,connected_page('Google Drive'),'text/plain; charset=utf-8')
             if path=='/google-drive-picker':
                 grant=parse_qs(parts.query).get('grant',[''])[0]
                 if not (getattr(service,'drive_picker_config',None) and service.drive_web_oauth.picker_grant_active(grant)):

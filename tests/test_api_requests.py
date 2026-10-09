@@ -321,6 +321,22 @@ class SecretStaysOut(Base):
         for path in Path(self.store.root).glob('*.db'):
             self.assertNotIn(self.key.encode(), path.read_bytes())
 
+    def test_an_escaped_echo_of_a_key_is_scrubbed_after_decoding(self):
+        key = 'fk_' + 'a"b\\c' + fake_key()
+        save_slot(self.store, 'fake-holdings', [HOST], key, subject_field='$.account_id', subject_value=ACCOUNT)
+        self.api.key = key
+        original = self.api.__call__
+
+        def escaping(method, url, headers, body, timeout):
+            status, response_headers, raw = original(method, url, headers, body, timeout)
+            data = json.loads(raw)
+            data['debug'] = headers.get('Authorization')
+            return status, response_headers, json.dumps(data, ensure_ascii=True).encode()
+        with mock.patch('personal_agent.api_requests.http_request', escaping):
+            result = self.caps().execute('api_request', READ)
+        self.assertNotIn(key, json.dumps(result, ensure_ascii=False))
+        self.assertEqual(result['data']['debug'], 'Bearer [redacted]')
+
     def test_the_stored_secret_redactor_covers_slot_secrets_and_memory_refuses_them(self):
         self.assertEqual(redact_known_secrets(self.store, f'key={self.key}'), 'key=[redacted]')
         self.assertTrue(memory_value_has_secret(self.store, self.key))
@@ -414,6 +430,41 @@ class NoDuplicateEffect(Base):
         self.assertEqual(unknown.exception.code, 'effect_unknown')
         self.assertEqual(classify_failure(unknown.exception, 'api_request'), ('effect_unknown', 'never', 'unknown'))
         self.assertEqual((len(self.api.calls), self.api.orders), (1, []))
+
+
+class ReviewFixes(Base):
+    """Independent review of #1218."""
+
+    def test_the_ai_can_only_tighten_the_freshness_bound(self):
+        self.api.fault = 'stale'
+        result = self.caps().execute('api_request', {**READ, 'max_age_seconds': str(31 * 86400)})
+        self.assertEqual((result['provenance']['max_age_seconds'], result['provenance']['freshness']), (15 * 60, 'stale'))
+
+    def test_a_sent_change_for_another_subject_returns_no_body(self):
+        caps = self.caps()
+        with self.assertRaises(ToolError):
+            caps.execute('api_request', ORDER)
+        self.approvals.approve_last()
+        result = caps.execute('api_request', ORDER)
+        self.assertEqual(len(self.api.orders), 1)
+        self.assertIsNone(result['data'])
+        self.assertFalse(result['provenance']['subject_verified'])
+
+    def test_the_service_issues_and_spends_an_api_step_approval_once(self):
+        from personal_agent.browser_session import step_binding
+        from personal_agent.quickstart_service import AgentService
+        service = AgentService(self.store)
+        with self.store.db() as db:
+            db.execute("UPDATE jobs SET status='partial' WHERE id=?", (self.job_id,))
+        job = self.store.job(self.job_id)
+        approvals = service.browser_approvals_for(job)
+        binding = step_binding(self.job_id, 'api_request', ORDER['url'], 'fake-holdings|POST|' + ORDER['url'],
+                               argument=ORDER['body'], state='fake-holdings@1|mutate')
+        self.assertFalse(approvals.consume(binding))
+        approvals.request(binding, 'POST order')
+        self.assertTrue(service._decide_browser_step(self.job_id, True)['approved'])
+        self.assertTrue(approvals.consume(binding))
+        self.assertFalse(approvals.consume(binding))
 
 
 class AuditAndReferenceTime(Base):

@@ -380,6 +380,17 @@ def _loopback(host):
         return False
 
 
+def scrub(value, secret):
+    """``value`` with ``secret`` replaced in every string, after JSON decoding (review P1: escaped echoes)."""
+    if isinstance(value, str):
+        return value.replace(secret, '[redacted]')
+    if isinstance(value, list):
+        return [scrub(item, secret) for item in value]
+    if isinstance(value, dict):
+        return {scrub(key, secret): scrub(item, secret) for key, item in value.items()}
+    return value
+
+
 def _transient(exc):
     return isinstance(exc, (TimeoutError, ConnectionError, urllib.error.URLError)) or \
         (isinstance(exc, OSError) and not isinstance(exc, FileNotFoundError))
@@ -450,7 +461,8 @@ class ApiRequests:
             text = str(args['max_age_seconds']).strip()
             if not text.isdigit() or not 0 < int(text) <= MAX_AGE_LIMIT:
                 raise ApiError('max_age_seconds는 1~2678400 사이 정수입니다.', 'api_argument_invalid')
-            max_age = int(text)
+            # The AI may only tighten the slot's freshness bound, never widen it (review P1).
+            max_age = min(int(text), max_age)
         idempotency = self._approve(slot, method, url, body, effect, named, path) if effect in APPROVED_EFFECTS else None
         secret = self.store.secret(SECRET_PREFIX + slot['name'])
         if not secret:
@@ -498,20 +510,27 @@ class ApiRequests:
             data = json.loads(text) if text.strip() else None
         except ValueError:
             raise ApiError('응답이 JSON이 아니어서 쓰지 않았습니다.', 'api_not_json') from None
-        # A read for another subject is withheld; a sent change already happened, so its
-        # response is kept and only marked unverified (refusing it would hide the effect).
-        subject = slot['subject'] if effect not in APPROVED_EFFECTS else None
+        # An escaped echo (``\"`` or ``\u`` in the JSON text) decodes back to the key: scrub the decoded values too.
+        data = scrub(data, secret)
+        # A read for another subject is withheld.  A sent change already happened, so it is not
+        # reported as a failure; its response body is withheld instead when it is not the
+        # slot's subject (review P1: another account's data must not reach the AI either way).
+        subject = slot['subject']
+        subject_verified = False
         if subject is not None:
             found = [value for value in select(data, subject['field']) if value is not MISSING]
-            if len(found) != 1 or str(found[0]) != subject['value']:
+            subject_verified = len(found) == 1 and str(found[0]) == subject['value']
+            if not subject_verified and effect not in APPROVED_EFFECTS:
                 raise ApiError(f"응답이 슬롯 '{slot['name']}'에 묶인 대상의 것인지 확인되지 않아 쓰지 않았습니다.",
                                'api_subject_mismatch')
+            if not subject_verified:
+                data = None
         record = provenance(data, status=status, headers=response_headers, retrieved_at=retrieved,
                             as_of_field=args.get('as_of_field') or None, max_age_seconds=max_age,
                             checks=checks, required_fields=required)
         record.update({'source': {'slot': slot['name'], 'host': named, 'path': path, 'method': method},
                        'status': status, 'effect': effect, 'attempts': attempts,
-                       'subject_verified': subject is not None})
+                       'subject_verified': subject_verified})
         return {'data': data, 'provenance': record, 'sources': [f'{parts.scheme}://{named}{path}'],
                 # Typed Evidence qualifiers (``agent_runtime.EVIDENCE_QUALIFIER_FLAGS``).
                 'stale': record['freshness'] == 'stale', 'as_of_unknown': record['freshness'] == 'unknown',

@@ -860,7 +860,8 @@ class QuickStore:
         arguments and the page state it was refused on) are keyed digests the
         service computes; no page text or typed value reaches this row.
         """
-        if not isinstance(action,str) or not action.startswith('browser_'):raise ValueError('승인 대상을 확인하세요.')
+        # #1216: an authenticated API call above read is approved through the same one-time step approval.
+        if not isinstance(action,str) or not (action.startswith('browser_') or action=='api_request'):raise ValueError('승인 대상을 확인하세요.')
         if any(not isinstance(value,str) or len(value)!=64 for value in (page_digest,target_digest,step_digest)):raise ValueError('승인 내용을 확인하세요.')
         if isinstance(ttl,bool) or not isinstance(ttl,(int,float)) or not 1<=ttl<=900:raise ValueError('승인 유효 시간을 확인하세요.')
         created=time.time() if now is None else float(now);token=secrets.token_urlsafe(32)

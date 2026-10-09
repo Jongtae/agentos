@@ -478,6 +478,16 @@ class ConversationConfirmation(_Case):
         edited = [body for method, body in self.telegram if method == 'editMessageText'][-1]
         self.assertEqual(edited['text'], '이미 적용했어요.', 'the message shows what became of it')
 
+    def test_a_timed_out_tap_does_not_apply_when_the_setting_moved_since(self):
+        draft = self.settings.propose('owner', 'http', 'current_context', 'timezone', 'Asia/Seoul')
+        self.service.set_current_context({'timezone': 'Europe/Paris'})   # another control moved it after the message
+        self.clock[0] += self.settings.TTL_SECONDS + 1
+        rows = self.settings.pending_or_renewable('owner', 'http')
+        self.assertEqual([row['id'] for row in rows], [draft['draft_id']])
+        result = self.settings.settle_pending('owner', 'http', rows, True)
+        self.assertIn('설정이 바뀌었', result['response'])
+        self.assertEqual(self.context()['timezone'], 'Europe/Paris', 'the approval covered the value the owner saw, not this one')
+
     def test_a_cancel_after_the_draft_timed_out_changes_nothing_and_says_so(self):
         self.change_turn()
         work = self.receive('현재 맥락 켜 줘')

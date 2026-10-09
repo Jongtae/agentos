@@ -813,6 +813,11 @@ class SettingsOrchestrator:
     def _renew(self, owner, channel, row):
         """A fresh draft of exactly this timed-out change; the old one is closed so it cannot be carried twice."""
         draft = self.propose(owner, channel, row["category"], row["setting"], row["after"], row.get("reason"), row.get("work_id"))
+        if draft["before"] != row["before"]:
+            # The owner approved the change from the value they saw; the setting moved since, so the approval no longer covers it.
+            self._settle(draft["draft_id"], "canceled", None)
+            self._settle(row["id"], "failed", "failed", "stale")
+            raise SettingsError(STALE_MESSAGE)
         self._settle(row["id"], "renewed", None)
         return self._drafts()[draft["draft_id"]]
 

@@ -7753,7 +7753,7 @@ class AgentService:
         sender=callback.get('from',{}).get('id') if isinstance(callback.get('from'),dict) else None
         callback_id=callback.get('id')
         parts=str(callback.get('data') or '').split(':')
-        rows,job,notification=[],None,None
+        rows,job,notification,renew_failure=[],None,None,None
         with self.lock:
             cfg=self.store.config('telegram',{})
             authorized=self._callback_authorized(cfg,generation,sender,message.get('chat',{}) if isinstance(message.get('chat'),dict) else {})
@@ -7768,7 +7768,7 @@ class AgentService:
                 if exact and not rows and parts[2]=='confirm':
                     # The tap approves the exact effects the message showed; a timeout alone is not a dead end.
                     try:rows=self.settings_orchestrator.renew_expired(self.settings_owner(job),job['channel'],job['id'],notification.get('fingerprint'))
-                    except ValueError:rows=[]
+                    except ValueError as exc:rows,renew_failure=[],str(exc)
                 if rows:self.store.update_notification(notification['id'],'settings_'+parts[2]+'ing')
                 elif exact and parts[2]=='cancel':
                     # Nothing left to cancel (timed out or already settled): the owner's answer is still "no change".
@@ -7792,7 +7792,7 @@ class AgentService:
             this_message=(notification and notification['kind']=='settings_change_proposed' and notification['chat_id']==sender
                           and notification['message_id']==message.get('message_id'))
             if this_message:
-                done={'settings_confirmed':'이미 적용했어요.','settings_canceled':'바꾸지 않았어요.'}.get(notification['state'])
+                done=renew_failure or {'settings_confirmed':'이미 적용했어요.','settings_canceled':'바꾸지 않았어요.'}.get(notification['state'])
                 try:
                     if done:self.telegram.edit_message_text(sender,notification['message_id'],done,{'inline_keyboard':[]})
                     else:self.telegram.edit_message_reply_markup(sender,notification['message_id'],{'inline_keyboard':[]})

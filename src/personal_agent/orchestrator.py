@@ -90,6 +90,9 @@ EVENT_TOOL = 'orchestrator'
 PLANNED, FALLBACK, EVALUATED = 'planned', 'fallback', 'evaluated'
 #: Why the default Main AI ran the raw request.
 FALLBACK_UNAVAILABLE = 'judgment_unavailable'
+#: #1227: the Judgment AI is being checked for a newly chosen Main AI (#685) - a
+#: state the switch reply already told the owner, not an outage.
+FALLBACK_QUALIFYING = 'judgment_qualifying'
 FALLBACK_MALFORMED = 'plan_malformed'
 FALLBACK_UNCONFIDENT = 'plan_unconfident'
 FALLBACK_INVALID = 'plan_invalid'
@@ -105,6 +108,7 @@ STOP_REACHED, STOP_LIMIT, STOP_BUDGET, STOP_EFFECT, STOP_UNJUDGED, STOP_OWNER, S
 #: presentation belongs to the UX child; the text is kept with the Evidence).
 FALLBACK_TEXT = {
     FALLBACK_UNAVAILABLE: '판단 AI를 사용할 수 없어 요청별 AI 선택 없이 기본 AI가 요청을 그대로 처리했습니다.',
+    FALLBACK_QUALIFYING: '새 기본 AI에 맞춰 판단 AI를 확인하는 중이라 요청별 AI 선택 없이 기본 AI가 요청을 그대로 처리했습니다.',
     FALLBACK_MALFORMED: '판단 AI의 작업 계획을 읽을 수 없어 기본 AI가 요청을 그대로 처리했습니다.',
     FALLBACK_UNCONFIDENT: '판단 AI가 작업 계획을 확신하지 못해 기본 AI가 요청을 그대로 처리했습니다.',
     FALLBACK_BUDGET: '남은 작업 시간이 부족해 판단 AI에 묻지 않고 기본 AI가 요청을 그대로 처리했습니다.',
@@ -552,7 +556,7 @@ class Orchestration:
     """
 
     def __init__(self, judgments, catalogue, *, request, conversation='', continues='', sections=None, budget=None,
-                 record=None, state=None, work_id=None, policy=None):
+                 record=None, state=None, work_id=None, policy=None, qualifying=None):
         self.judgments, self.catalogue = judgments, catalogue
         self.request, self.conversation = str(request or ''), str(conversation or '')
         #: #980: the owner message and reply of the Work this one follows up, when the
@@ -561,6 +565,8 @@ class Orchestration:
         self.sections = dict(sections or {})
         self.budget, self.record = budget, record or (lambda status, detail: None)
         self.state, self.work_id = state, work_id
+        #: #1227: whether the Judgment AI check for the current Main AI is still running.
+        self.qualifying = qualifying or (lambda: False)
         self.policy = policy or DecisionPolicy()
         self.attempts = []
         self.history = []  # (attempt, evaluation, answer excerpt, factual summary)
@@ -774,6 +780,12 @@ class Orchestration:
         except Exception:
             return {}
 
+    def _qualifying(self):
+        try:
+            return bool(self.qualifying())
+        except Exception:
+            return False
+
     # -- the loop -------------------------------------------------------------
     def first(self):
         """The first attempt: the validated plan, or the default Main AI with the raw request."""
@@ -787,6 +799,8 @@ class Orchestration:
             self._planned(attempt)
             return attempt
         failure = failure or FALLBACK_INVALID
+        if failure == FALLBACK_UNAVAILABLE and self._qualifying():
+            failure = FALLBACK_QUALIFYING
         attempt = Attempt(1, self.catalogue.default, fallback=failure)
         if getattr(self, 'account_change', False) or getattr(self, 'owner_situation', False):
             # #948 review: an invalid plan that still said account_change (or, #1008,

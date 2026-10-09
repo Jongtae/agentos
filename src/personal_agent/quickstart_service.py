@@ -4422,7 +4422,7 @@ class AgentService:
         return Orchestration(self.decision_judge,catalogue,request=request,conversation=conversation,
                              continues=self.continued_exchange(job),
                              sections={**sections,'history':len(earlier)},budget=budget,record=event,state=state,
-                             work_id=job['id'])
+                             work_id=job['id'],qualifying=self.decision_routes.qualifying)
 
     def cli_shortfall(self, job_id, since, request, evaluation):
         """``(outcome, report)`` of an attempt the one outcome judgment found short or could not judge (#710 review, #820).

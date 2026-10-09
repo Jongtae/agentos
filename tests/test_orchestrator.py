@@ -414,6 +414,21 @@ class Fallback(Harness):
         _job, row = self.run_work('셋')
         self.assertNotIn(NOTICE_ONCE, row['response'], 'said once, not on every turn')
 
+    def test_a_running_judgment_check_is_a_state_not_an_unavailable_notice(self):
+        # #1227: right after a Main AI switch the Judgment AI is being checked (#685).
+        self.script([plan('codex', 'Look it up.')], goals=[True])
+        _job, row = self.run_work('하나')
+        self.service.use_decision_engine(UnavailableDecisionEngine())
+        self.engine.turns.clear()
+        with mock.patch.object(self.service.decision_routes, 'qualifying', return_value=True):
+            job, row = self.run_work('둘')
+        self.assert_default_raw_run(job, 'judgment_qualifying')
+        self.assertNotIn(NOTICE_ONCE, row['response'])
+        # The working state is kept: a real outage afterwards is still told once.
+        self.engine.turns.clear()
+        _job, row = self.run_work('셋')
+        self.assertTrue(row['response'].endswith(NOTICE_ONCE))
+
 
 class PrivateReadsWithSearch(Harness):
     """EGRESS-OPEN-01 (#826): private reads and the CLI's own web search run in the same attempt."""

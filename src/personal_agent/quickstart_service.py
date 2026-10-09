@@ -4723,7 +4723,8 @@ class AgentService:
     #: Records that are AgentOS's own bookkeeping, not tool attempts.
     #: #710: ``orchestrator`` events record the plan and its evaluation, never a tool attempt.
     LOCAL_NON_TOOL_EVENTS=frozenset({'model','local_authority','conversation_continuity',ORCHESTRATION_EVENT,om.EVENT_TOOL,
-                                     om.REVIEW_EVENT_TOOL,MEMORY_UNDO_TOOL,STEER_EVENT,REACTION_EVENT})
+                                     om.REVIEW_EVENT_TOOL,MEMORY_UNDO_TOOL,STEER_EVENT,REACTION_EVENT,
+                                     'response_timing'})  # #1237: #1232's stage timings are not tool calls
 
     def attempted_only_reads(self, job_id):
         """True only when every tool this Work attempted is a declared read.

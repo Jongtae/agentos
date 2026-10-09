@@ -194,15 +194,14 @@ keeps what was read and why, not the connection itself.
 example because your AI has no Google connection), add one Google OAuth client of your own.
 One client covers all three services:
 
-1. In Google Cloud Console, create a project and enable the Google Drive API, Gmail API and
-   Google Calendar API.
-2. Configure the OAuth consent screen as *External*. Add the `drive.readonly`,
-   `gmail.readonly`, `calendar.events.readonly` and `calendar.events` scopes, then publish it
-   (*In production*). In *Testing*, Google expires the connection every 7 days.
-3. Create an OAuth client of type **Desktop app** and download its JSON.
-4. In AgentOS, open **설정 → 외부 연결 → 자체 Google client → client 넣기**, paste the JSON
-   and save. Alternatively, point `AGENTOS_GOOGLE_CLIENT_FILE` at the file; an environment
-   file wins over the saved one.
+The same steps, with direct links, are in **설정 → 외부 연결 → 자체 Google client → client 만드는 방법**:
+
+1. [Create a project](https://console.cloud.google.com/projectcreate) in Google Cloud.
+2. [Enable the Drive, Gmail and Calendar APIs](https://console.cloud.google.com/flows/enableapi?apiid=drive.googleapis.com,gmail.googleapis.com,calendar-json.googleapis.com) in that project.
+3. [Get started with Google Auth Platform](https://console.cloud.google.com/auth/overview): enter an app name and your email, and choose *External* as the audience.
+4. On [Audience](https://console.cloud.google.com/auth/audience), press *Publish app* to move it to production. In *Testing*, Google expires the connection every 7 days.
+5. [Create a client](https://console.cloud.google.com/auth/clients/create) of type **Desktop app** and download its JSON right away; Google shows the secret only at creation.
+6. In AgentOS, open **설정 → 외부 연결 → 자체 Google client → client 넣기**, choose the downloaded file (or paste its contents) and save. Alternatively, point `AGENTOS_GOOGLE_CLIENT_FILE` at the file; an environment file wins over the saved one.
 
 Then press **연결** on each service in the same section and approve Google's consent screen:
 

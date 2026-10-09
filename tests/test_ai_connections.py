@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from personal_agent.bounded_execution import CONNECTOR_PERMISSION_TOOL, BoundedExecutionAdapter
+from personal_agent.bounded_execution import CONNECTOR_PERMISSION_TOOL, BoundedExecutionAdapter, cli_metadata
 from personal_agent.quickstart_store import QuickStore
 
 INIT = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}}
@@ -58,9 +58,9 @@ class ServiceDecisionTests(unittest.TestCase):
         self.service = AgentService(self.store)
         self.job = {'id': self.store.enqueue('drive', 'k1')}
 
-    def events(self):
+    def events(self, tool='connector_permission'):
         with self.store.db() as db:
-            return [dict(row) for row in db.execute("SELECT tool,status,detail FROM tool_events WHERE tool='connector_permission'")]
+            return [dict(row) for row in db.execute('SELECT tool,status,detail FROM tool_events WHERE tool=?', (tool,))]
 
     def test_off_refuses_everything(self):
         decision = self.service.connector_permission(self.job, {'tool_name': READ, 'input': {}})
@@ -74,20 +74,28 @@ class ServiceDecisionTests(unittest.TestCase):
         self.assertEqual(denied['behavior'], 'deny')
         self.assertIn('실행하지 않았습니다', denied['message'])
         rows = self.events()
-        self.assertEqual([row['status'] for row in rows], ['succeeded', 'failed'])
+        self.assertEqual([row['status'] for row in rows], ['allowed', 'denied'], 'a permission is not a read')
         self.assertNotIn('secret-id', json.dumps(rows))
         self.assertEqual(json.loads(rows[0]['detail'])['evidence'], {'service': 'Google Drive', 'operation': 'list_recent_files',
                                                                       'decision': 'allow'})
 
-    def test_a_write_word_anywhere_refuses_the_operation(self):
+    def test_only_reviewed_read_operations_run(self):
         self.service.set_ai_connections({'enabled': True})
-        for operation in ('get_and_delete', 'read_and_archive', 'find_and_replace', 'readonly_share', 'getaway',
-                          'list-and-send', 'downloadAndTrash', 'update_file', 'create_file'):
-            decision = self.service.connector_permission(self.job, {'tool_name': 'mcp__claude_ai_X__' + operation, 'input': {}})
-            self.assertEqual(decision['behavior'], 'deny', operation)
+        drive = 'mcp__claude_ai_Google_Drive__'
+        # Read-sounding names are not reviewed reads: a name never grants authority.
+        for tool in (drive + 'get_or_place_order', drive + 'query_database', drive + 'update_file', drive + 'create_file',
+                     drive + 'get_and_delete', drive + 'search_files_and_share', 'mcp__claude_ai_Gmail__search_threads',
+                     'mcp__claude_ai_X__search_files'):
+            self.assertEqual(self.service.connector_permission(self.job, {'tool_name': tool, 'input': {}})['behavior'], 'deny', tool)
         for operation in ('search_files', 'read_file_content', 'get_file_metadata', 'list_recent_files', 'download_file_content'):
-            decision = self.service.connector_permission(self.job, {'tool_name': 'mcp__claude_ai_X__' + operation, 'input': {}})
+            decision = self.service.connector_permission(self.job, {'tool_name': drive + operation, 'input': {}})
             self.assertEqual(decision['behavior'], 'allow', operation)
+
+    def test_an_unreadable_review_list_refuses_everything(self):
+        from unittest import mock
+        self.service.set_ai_connections({'enabled': True})
+        with mock.patch.object(type(self.service), 'reviewed_connector_reads', staticmethod(lambda: {})):
+            self.assertEqual(self.service.connector_permission(self.job, {'tool_name': READ, 'input': {}})['behavior'], 'deny')
 
     def test_a_named_instance_is_treated_as_a_family_instance(self):
         from unittest import mock
@@ -106,14 +114,19 @@ class ServiceDecisionTests(unittest.TestCase):
         for tool in ('mcp__agentos__connector_permission', 'Bash', 'mcp__other__read_file', 'mcp__claude_ai_'):
             self.assertEqual(self.service.connector_permission(self.job, {'tool_name': tool, 'input': {}})['behavior'], 'deny', tool)
 
-    def test_the_audit_shows_the_service_and_operation(self):
+    def test_the_audit_shows_only_reads_the_stream_saw_complete(self):
         from personal_agent.information_use import work_information_use
         self.service.set_ai_connections({'enabled': True})
         self.service.connector_permission(self.job, {'tool_name': READ, 'input': {}})
-        audit = work_information_use(self.store, self.job['id'])
-        flat = json.dumps(audit, ensure_ascii=False)
+        self.assertNotIn('AI에 연결된 서비스', json.dumps(work_information_use(self.store, self.job['id']), ensure_ascii=False),
+                         'an allowed call that never ran is not a read')
+        self.service.record_turn_provenance(self.job['id'], connector_reads=[
+            {'tool': READ, 'status': 'succeeded'}, {'tool': 'mcp__claude_ai_Google_Drive__read_file_content', 'status': 'failed'}])
+        self.assertEqual([row['status'] for row in self.events('connector_read')], ['succeeded', 'failed'])
+        flat = json.dumps(work_information_use(self.store, self.job['id']), ensure_ascii=False)
         self.assertIn('AI에 연결된 서비스', flat)
         self.assertIn('Google Drive · list_recent_files', flat)
+        self.assertNotIn('read_file_content', flat)
 
     def test_a_family_instance_can_never_turn_it_on(self):
         from unittest import mock
@@ -132,6 +145,26 @@ class ServiceDecisionTests(unittest.TestCase):
         self.assertFalse(self.service.ai_connections_enabled(), 'a draft changes nothing')
         orchestrator.confirm('local-owner', 'web', draft['draft_id'], draft['digest'])
         self.assertTrue(self.service.ai_connections_enabled())
+
+
+class StreamReadTests(unittest.TestCase):
+    def test_connector_reads_come_from_matched_tool_results(self):
+        stream = '\n'.join(json.dumps(record) for record in (
+            {'type': 'assistant', 'message': {'content': [
+                {'type': 'tool_use', 'id': 't1', 'name': READ, 'input': {'q': 'private'}},
+                {'type': 'tool_use', 'id': 't2', 'name': 'mcp__claude_ai_Google_Drive__read_file_content', 'input': {}},
+                {'type': 'tool_use', 'id': 't3', 'name': 'mcp__claude_ai_Google_Drive__search_files', 'input': {}},
+                {'type': 'tool_use', 'id': 't4', 'name': 'mcp__agentos__file_read', 'input': {}}]}},
+            {'type': 'user', 'message': {'content': [
+                {'type': 'tool_result', 'tool_use_id': 't1', 'content': 'file names'},
+                {'type': 'tool_result', 'tool_use_id': 't2', 'is_error': True, 'content': 'denied'},
+                {'type': 'tool_result', 'tool_use_id': 't4', 'content': 'x'}]}},
+            {'type': 'result', 'subtype': 'success', 'result': 'ok'}))
+        meta = cli_metadata('claude-code', stream)
+        self.assertEqual(meta['connector_reads'], [{'tool': READ, 'status': 'succeeded'},
+                                                   {'tool': 'mcp__claude_ai_Google_Drive__read_file_content', 'status': 'failed'}])
+        self.assertNotIn('private', json.dumps(meta['connector_reads']))
+        self.assertNotIn('connector_reads', cli_metadata('claude-code', json.dumps({'type': 'result', 'result': 'ok'})))
 
 
 class BridgeWireTests(unittest.TestCase):

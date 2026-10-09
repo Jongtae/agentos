@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "about": "AI-GOOGLE-01 #1197: authority data. Connector operations reviewed as read-only; only these run when the owner's AI connections are on. Anything not listed is refused. Extend only after reviewing the operation's actual effect.",
+  "reviewed": "2026-10-09",
+  "source": "claude.ai connector tool list observed with Claude Code 2.1.280 on the owner's Mac",
+  "operations": {
+    "Google Drive": ["search_files", "list_recent_files", "read_file_content", "get_file_metadata", "download_file_content"]
+  }
+}

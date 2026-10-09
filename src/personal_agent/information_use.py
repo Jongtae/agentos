@@ -42,8 +42,8 @@ READ_CATEGORIES = {
     'calendar_query': 'calendar', 'calendar_draft_create': 'calendar', 'calendar_draft_update': 'calendar',
     'calendar_draft_cancel': 'calendar',
     'find_files': 'files', 'read_file': 'files', 'list_roots': 'files',
-    # #1197: a read through the owner's AI-side connection (claude.ai connector), as AgentOS allowed it.
-    'connector_permission': 'ai_connection',
+    # #1197: a read through the owner's AI-side connection (claude.ai connector) the turn's stream showed completing.
+    'connector_read': 'ai_connection',
     # #1172: the owner's connected Google Drive.
     'drive_search': 'drive', 'drive_read': 'drive',
     # #1216: a response read with the owner's API credential (the slot, never its value).
@@ -215,7 +215,7 @@ def _event_items(action, evidence):
         query = f"?{_text(source.get('query'), 80)}" if source.get('query') else ''
         return [f"{_text(source.get('slot'), 40)} → {_text(source.get('host'), 80)}{_text(source.get('path'), 80)}{query} "
                 f"(기준 {basis}{', ' + flags if flags else ''})"]
-    if action == 'connector_permission':
+    if action == 'connector_read':
         return [f"{_text(evidence.get('service'), 60)} · {_text(evidence.get('operation'), 60)}"]
     if action == 'list_roots':
         roots = [f'폴더: {_text(name, 60)}' for name in evidence.get('roots') or ()]

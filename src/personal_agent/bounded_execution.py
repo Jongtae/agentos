@@ -840,6 +840,8 @@ def cli_metadata(engine_id, raw):
             continue
         if isinstance(value, dict):
             records.append(value)
+    connector_calls = {}
+    meta['connector_reads'] = []
     for record in records:
         models = record.get('modelUsage')
         if isinstance(models, dict) and models:
@@ -857,6 +859,16 @@ def cli_metadata(engine_id, raw):
             for part in message['content']:
                 if isinstance(part, dict) and part.get('type') == 'tool_use':
                     meta['tool_calls'].append({'type': 'tool_use', 'name': str(part.get('name') or '')[:80], 'status': 'requested'})
+                    # #1197: an AI-connector call, matched to its result below (names only, never content).
+                    if str(part.get('name') or '').startswith('mcp__claude_ai_') and isinstance(part.get('id'), str):
+                        connector_calls[part['id']] = str(part['name'])[:120]
+        reply = record.get('message') if record.get('type') == 'user' else None
+        if isinstance(reply, dict) and isinstance(reply.get('content'), list):
+            for part in reply['content']:
+                if (isinstance(part, dict) and part.get('type') == 'tool_result'
+                        and part.get('tool_use_id') in connector_calls):
+                    meta['connector_reads'].append({'tool': connector_calls.pop(part['tool_use_id']),
+                                                    'status': 'failed' if part.get('is_error') else 'succeeded'})
         for denial in record.get('permission_denials') or []:
             if isinstance(denial, dict):
                 meta['tool_calls'].append({'type': 'tool_use', 'name': str(denial.get('tool_name') or '')[:80], 'status': 'denied'})
@@ -865,6 +877,9 @@ def cli_metadata(engine_id, raw):
             name = item.get('tool') or item.get('name') or item.get('type')
             meta['tool_calls'].append({'type': item.get('type'), 'name': str(name)[:80], 'status': str(item.get('status') or '')[:20]})
     meta['tool_calls'] = meta['tool_calls'][:30]
+    meta['connector_reads'] = meta['connector_reads'][:30]
+    if not meta['connector_reads']:
+        meta.pop('connector_reads')
     meta['native_searches'] = native_searches(engine_id, records)
     # #795: how the stream ended, content-free, so a run with no final answer is
     # diagnosable: the last event types and any error text the CLI itself reported.

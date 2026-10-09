@@ -2196,6 +2196,20 @@ class AgentService:
         Redacted before persistence, bounded, local only; shown in developer
         mode. Never allowed to break the turn itself.
         """
+        # #1236 review: a connector read the CLI's own stream shows completing is the read that happened.
+        reads=fields.pop('connector_reads',None)
+        if isinstance(reads,list) and reads:
+            try:
+                with self.store.db() as db:
+                    for read in reads[:30]:
+                        if not isinstance(read,dict) or read.get('status') not in ('succeeded','failed'):continue
+                        server,_sep,operation=str(read.get('tool') or '')[len('mcp__claude_ai_'):].rpartition('__')
+                        detail={'scope':'ai-connection','host_action':'connector_read',
+                                'evidence':{'service':server.replace('_',' ').strip()[:60],'operation':operation[:60]}}
+                        db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                                   (job_id,'connector_read',read['status'],json.dumps(detail,ensure_ascii=False),time.time()))
+            except Exception:
+                LOG.warning('connector reads not recorded job=%s',job_id)
         try:
             current=self.store.turn_provenance(job_id) or {}
             for key in ('prompt_envelope','instructions'):
@@ -6846,15 +6860,16 @@ class AgentService:
     # -- the phone's one-time link to the login window (#939) -------------------------------
     # -- the owner's AI connections (AI-GOOGLE-01 #1197) ---------------------------
     AI_CONNECTIONS_KEY='ai_connections'
-    #: Connector tools whose operation starts with one of these only read; every
-    #: other connector operation (create, update, share, trash, send ...) is refused.
-    AI_CONNECTION_READ_VERBS=frozenset({'search','list','get','read','download','fetch','find','query'})
-    #: Review on #1197: any of these words anywhere in an operation name refuses it,
-    #: so ``get_and_delete`` or ``read_and_archive`` is never taken for a read.
-    AI_CONNECTION_WRITE_WORDS=frozenset({'create','update','delete','remove','trash','move','share','send','insert',
-                                         'replace','archive','copy','upload','batch','write','edit','modify','set',
-                                         'add','rename','post','put','patch','publish','reply','forward','draft',
-                                         'label','mark','permission','permissions','empty','restore','untrash'})
+    #: Review on #1236: authority comes from a reviewed list of read-only connector
+    #: operations (``connector_read_operations.json``), never from a tool's name.
+    @staticmethod
+    def reviewed_connector_reads():
+        try:
+            data=json.loads((Path(__file__).with_name('connector_read_operations.json')).read_text())
+            return {str(service):frozenset(map(str,operations)) for service,operations in (data.get('operations') or {}).items()
+                    if isinstance(operations,list)}
+        except (OSError,ValueError,AttributeError):
+            return {}
     AI_CONNECTIONS_FAMILY_TEXT='이 Mac의 AI 로그인과 그 연결은 소유자의 것이라 가족 비서에서는 쓸 수 없어요.'
 
     def ai_connections_status(self):
@@ -6897,18 +6912,18 @@ class AgentService:
             return {'behavior':'deny','message':'AgentOS가 이 도구 사용을 허용하지 않았습니다. 실행하지 않았습니다.'}
         server,_sep,operation=tool[len('mcp__claude_ai_'):].rpartition('__')
         service_name=server.replace('_',' ').strip()[:60] or '연결된 서비스'
-        words=[word for word in re.split(r'[^a-z0-9]+',operation.lower()) if word]
-        allow=bool(words) and words[0] in self.AI_CONNECTION_READ_VERBS and not any(
-            word in self.AI_CONNECTION_WRITE_WORDS for word in words)
+        allow=operation in self.reviewed_connector_reads().get(service_name,frozenset())
         detail={'scope':'ai-connection','host_action':'connector_permission',
                 'evidence':{'service':service_name,'operation':operation[:60],'decision':'allow' if allow else 'deny'}}
+        # A permission is not a read: the read is recorded only when the turn's own
+        # stream shows the connector call succeeded (``record_turn_provenance``).
         with self.store.db() as db:
             db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
-                       (job['id'],'connector_permission','succeeded' if allow else 'failed',json.dumps(detail,ensure_ascii=False),time.time()))
+                       (job['id'],'connector_permission','allowed' if allow else 'denied',json.dumps(detail,ensure_ascii=False),time.time()))
         if allow:
             return {'behavior':'allow','updatedInput':arguments.get('input') if isinstance(arguments.get('input'),dict) else {}}
-        return {'behavior':'deny','message':(f'{service_name}에서 바꾸는 작업({operation})은 아직 승인 흐름이 없어 AgentOS가 막았습니다. '
-                                             '실행하지 않았습니다. 소유자에게 직접 하도록 안내하세요.')}
+        return {'behavior':'deny','message':(f'{service_name}의 {operation}은(는) AgentOS가 읽기 전용으로 검토한 동작이 아니라 막았습니다. '
+                                             '실행하지 않았습니다. 필요하면 소유자에게 직접 하도록 안내하세요.')}
 
     # -- phone input (PHONE-INPUT-01 #1213) ------------------------------------
     def phone_input_kinds(self):

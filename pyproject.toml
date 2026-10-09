@@ -41,7 +41,7 @@ where = ["src"]
 include = ["personal_agent*"]
 
 [tool.setuptools.package-data]
-personal_agent = ["web/*.html", "web/*.css", "web/*.js", "bundled_skills/*/SKILL.md", "bundled_skills/*/references/*.md", "skill_references.json"]
+personal_agent = ["web/*.html", "web/*.css", "web/*.js", "bundled_skills/*/SKILL.md", "bundled_skills/*/references/*.md", "skill_references.json", "connector_read_operations.json"]
 
 [tool.uv]
 required-version = ">=0.11.33,<0.13"

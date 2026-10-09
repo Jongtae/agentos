@@ -82,10 +82,13 @@ def next_action(row):
         return row.get("connect_hint") or "이 설치에서는 여기서 연결을 시작할 수 없습니다."
     if state == "connected":
         return "추가로 할 일이 없습니다. 권한을 새로 받으려면 설정 > 외부 연결에서 다시 연결하세요."
+    # #1207: name the loopback start address when this install offers one.
+    url = row.get("connect_url")
+    where = f"이 컴퓨터(Mac)의 브라우저에서 {url} 을 열거나 설정 > 외부 연결에서" if url else "설정 > 외부 연결에서"
     if state == "reauth_required":
-        return "설정 > 외부 연결에서 다시 연결하세요."
+        return f"{where} 다시 연결하세요."
     if state == "disconnected":
-        return "설정 > 외부 연결에서 연결하세요."
+        return f"{where} 연결하세요."
     return "설정 > 외부 연결에서 상태를 확인하세요."
 
 

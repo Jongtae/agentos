@@ -37,6 +37,10 @@ class LaunchTests(unittest.TestCase):
         env = adapter.environment('claude-code', '/runtime/claude', root, ai_connections=True)
         self.assertEqual(env['HOME'], str(Path.home()))
         self.assertNotIn('CLAUDE_CODE_OAUTH_TOKEN', env)
+        from unittest import mock
+        with mock.patch.dict('os.environ', {'USER': 'owner', 'LOGNAME': 'owner'}):
+            env = adapter.environment('claude-code', '/runtime/claude', root, ai_connections=True)
+        self.assertEqual((env['USER'], env['LOGNAME']), ('owner', 'owner'), 'the Keychain login is found by account name')
         self.assertIn('--no-session-persistence', argv, 'no turn transcript is left under ~/.claude')
 
     def test_off_keeps_todays_isolation(self):
@@ -47,6 +51,7 @@ class LaunchTests(unittest.TestCase):
         env = adapter.environment('claude-code', '/runtime/claude', root)
         self.assertEqual(env['HOME'], str(root))
         self.assertEqual(env['CLAUDE_CODE_OAUTH_TOKEN'], 'long-lived-token')
+        self.assertNotIn('USER', env, 'off keeps the minimal environment')
 
 
 class ServiceDecisionTests(unittest.TestCase):

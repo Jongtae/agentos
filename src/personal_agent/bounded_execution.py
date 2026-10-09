@@ -1358,6 +1358,11 @@ class BoundedExecutionAdapter:
             # load only under it, not under the long-lived token (observed,
             # 2.1.280).  User settings stay out (--setting-sources project).
             env['HOME'] = str(Path.home())
+            # #1247: that login is in the macOS Keychain under the account
+            # name; without USER the CLI reports "Not logged in" (observed).
+            for name in ('USER', 'LOGNAME'):
+                if os.environ.get(name):
+                    env[name] = os.environ[name]
             return env
         if engine_id == 'claude-code':
             token = self.credentials('claude-code')

@@ -2,6 +2,7 @@
 import concurrent.futures
 import hmac
 import json
+from collections import namedtuple
 import logging
 import re
 import secrets
@@ -441,6 +442,10 @@ BROWSER_SIGNINS_LINE=('Browser sign-ins (stored sessions browser_open uses; no p
                       'page is not the owner\'s data; call browser_sign_in): ')
 
 
+#: #1213: one OAuth connection as connector-agnostic surfaces see it.
+ConnectionHandler=namedtuple('ConnectionHandler','label redirect_uri begin complete')
+
+
 class AgentService:
     #: #953: a Telegram login prompt is followed by the phone link at once.  The test suite turns this
     #: off (tests/conftest.py) so no test ever starts a real tunnel; a test that wants it injects a fake.
@@ -623,6 +628,13 @@ class AgentService:
         self._remote_login=None
         self._remote_login_started=False
         self.remote_login_popen=None   # a test injects a fake ngrok here
+        # #1213: the one phone input session (own Google client, Google consent from the phone).
+        #: ``{connector_id: ConnectionHandler}`` registered by the wiring layer for
+        #: every OAuth connection this install offers; the phone surface reads only this.
+        self.connection_handlers={}
+        self._phone_input=None
+        self._phone_input_started=False
+        self.phone_input_popen=None   # a test injects a fake ngrok here
         #: #940 hook: ``(site) -> owner-facing refusal text or None``.  A login window (explicit, in-flow or
         #: from the phone) never opens for a site this refuses: the family-share follow-up (#935) sets it to
         #: refuse the sites this instance *received*, so a family member never re-drives the owner's session.
@@ -6803,6 +6815,105 @@ class AgentService:
         return str(reason) if reason else None
 
     # -- the phone's one-time link to the login window (#939) -------------------------------
+    # -- phone input (PHONE-INPUT-01 #1213) ------------------------------------
+    def register_connection(self, connector_id, label, redirect_uri, begin, complete):
+        """Offer one OAuth connection to connector-agnostic surfaces (the phone link, #1213).
+
+        ``begin()`` returns ``{'authorization_url': ...}``; ``complete(params)``
+        takes the callback's ``{state, code | error}``.  Registering grants
+        nothing: both still run the connector's own signed, owner-bound flow.
+        """
+        self.connection_handlers[connector_id]=ConnectionHandler(label,redirect_uri,begin,complete)
+
+    def phone_input_kinds(self):
+        """``{kind: owner word}`` this install can open a phone link for, now."""
+        from . import phone_input
+        kinds={}
+        if callable(self.google_client_installer) and self.google_client_source!='environment':
+            kinds[phone_input.GOOGLE_CLIENT]='자체 Google client'
+        for connector_id,handler in self.connection_handlers.items():
+            kinds[connector_id]=handler.label+' 연결'
+        return kinds
+
+    def phone_input_session(self):
+        session=self._phone_input
+        return session if session is not None and session.alive() else None
+
+    def phone_input_started(self):
+        """Whether a phone input link was ever started in this process: the tunnel gate stays closed from then on."""
+        return self._phone_input_started
+
+    def start_phone_input(self, kind):
+        """Open the one phone input session for ``kind`` and send its link to the paired Telegram chat.
+
+        Returns the conversation's answer.  Raises ``ValueError`` (owner-facing)
+        when the kind is not offered, Telegram is not paired, one is already
+        open, ngrok is missing or the link could not open or be delivered.
+        """
+        from . import phone_input
+        from .subscription_engines import find_cli
+        kinds=self.phone_input_kinds()
+        if kind not in kinds:raise ValueError('이 설치에서 휴대폰 링크로 할 수 있는 일이 아닙니다.')
+        cfg=self.store.config('telegram',{})
+        if not (cfg.get('enabled') and isinstance(cfg.get('user_id'),int)):raise ValueError(phone_input.NOT_PAIRED_TEXT)
+        popen=self.phone_input_popen or subprocess.Popen
+        with self.lock:
+            if self.phone_input_session() is not None:raise ValueError(phone_input.BUSY_TEXT)
+            if popen is subprocess.Popen and not find_cli('ngrok'):raise ValueError(phone_input.NO_NGROK_TEXT)
+            port=self.local_server_port
+            if not isinstance(port,int):raise ValueError(phone_input.NO_PORT_TEXT)
+            session=phone_input.PhoneInput(kind,kinds[kind],popen=popen)
+            self._phone_input=session
+            self._phone_input_started=True
+        try:
+            session.start(port)
+        except phone_input.PhoneInputError as exc:
+            session.finish('failed')
+            raise ValueError(str(exc)) from None
+        minutes=max(1,int(session.expires-session.clock())//60)
+        text=phone_input.LINK_TEXT.format(label=session.label,minutes=minutes,link=session.link)
+        try:self.telegram.call('sendMessage',{'chat_id':cfg['user_id'],'text':text,'link_preview_options':{'is_disabled':True}})
+        except Exception as exc:
+            # A link nobody received must not keep a public tunnel open.
+            LOG.warning('phone input: link not sent (%s)',type(exc).__name__)
+            session.finish('failed')
+            raise ValueError(phone_input.TUNNEL_FAILED_TEXT) from None
+        return phone_input.SENT_TEXT.format(minutes=minutes)
+
+    def phone_input_client(self, session, body):
+        """The phone page saves the owner's own Google client; the conversation is told (#1211)."""
+        from . import phone_input
+        if session.kind!=phone_input.GOOGLE_CLIENT:raise ValueError('이 링크로는 client를 넣을 수 없습니다.')
+        before=self.settings_snapshot()
+        self.save_google_client({'client_json':body.get('client_json')})
+        notice=self.settings_web_change_notice('자체 Google client','저장했습니다',before)
+        if notice:self._conversation_notice(notice.replace('설정 화면에서','휴대폰 링크에서',1))
+        session.finish_later('done')
+        return {'ok':True}
+
+    def phone_input_start(self, session):
+        """The phone page asks for Google's consent address of its connector."""
+        connector=self.connection_handlers.get(session.kind)
+        if connector is None:raise ValueError('이 링크로는 연결을 시작할 수 없습니다.')
+        try:offer=connector.begin()
+        except ValueError as exc:
+            raise ValueError('이미 연결돼 있거나 지금은 연결을 시작할 수 없습니다.') from exc
+        return {'ok':True,'authorization_url':offer['authorization_url']}
+
+    def phone_input_finish(self, session, body):
+        """The phone page hands back the loopback callback address; the connection completes as on the Mac."""
+        from . import phone_input
+        connector=self.connection_handlers.get(session.kind)
+        if connector is None:raise ValueError('이 링크로는 연결을 마칠 수 없습니다.')
+        params=phone_input.callback_params(body.get('url'),connector.redirect_uri)
+        if params is None:
+            raise ValueError('승인 후 "연결할 수 없음" 탭의 주소 전체(http://127.0.0.1:...)를 붙여 넣어 주세요.')
+        try:connector.complete(params)
+        except ValueError:
+            raise ValueError('연결하지 못했어요. [Google에서 승인]부터 다시 해 주세요.') from None
+        session.finish_later('done')
+        return {'ok':True}
+
     def remote_login_session(self):
         """The current remote login session while it is alive, else None."""
         session=self._remote_login

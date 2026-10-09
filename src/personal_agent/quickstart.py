@@ -42,6 +42,7 @@ from .connector_contract import ConnectorRegistry
 from . import family_setup
 from . import family_share
 from . import remote_login
+from . import phone_input
 from .service_control import service_action
 from .connector_http import contained_opener
 from .gmail import (GMAIL_CONNECTOR, EncryptedGmailSecretStore, GmailConnector,
@@ -229,6 +230,26 @@ def build_google_connectors(store, client, port, key_provider, registry, *, gmai
     return built
 
 
+def register_google_connections(service):
+    """Register every Google OAuth connection this service holds for connector-agnostic surfaces (#1213).
+
+    The wiring layer is where connectors are named; the service's phone link
+    and other generic surfaces only read ``service.connection_handlers``.
+    """
+    names=service.CONNECTION_NAMES
+    if service.gmail is not None:
+        service.register_connection(GMAIL_CONNECTOR.connector_id,names.get(GMAIL_CONNECTOR.connector_id,'Gmail'),
+                                    service.gmail.redirect_uri,service.begin_gmail_connection,service.complete_gmail_connection)
+    if service.calendar_oauth is not None:
+        for connector_id,grant in (('google-calendar','read'),('google-calendar-write','write')):
+            service.register_connection(connector_id,names.get(connector_id,connector_id),service.calendar_oauth.redirect_uri,
+                                        lambda grant=grant:service.begin_calendar_connection(grant),
+                                        service.complete_calendar_connection)
+    if service.drive_oauth is not None:
+        service.register_connection('google-drive',names.get('google-drive','Google Drive'),service.drive_oauth.redirect_uri,
+                                    service.begin_drive_connection,service.complete_drive_connection)
+
+
 def install_google_connectors(service, built):
     """Attach :func:`build_google_connectors` output to a service (startup or Settings)."""
     service.connector_registry=built['registry']
@@ -246,6 +267,7 @@ def install_google_connectors(service, built):
     service.drive_read_token_exchange=built['exchange']
     service.google_client_source=built['source']
     service.google_client_id=built['client_id']
+    register_google_connections(service)
 
 
 def google_oauth_key(store):
@@ -625,6 +647,7 @@ def configured_service(store, environ=None):
             store,client,port,key_provider,service.connector_registry,
             gmail=service.gmail is None,calendar=service.calendar_oauth is None))
     service.google_client_installer=install_google_client
+    register_google_connections(service)
     own=google_own_client(environ,store)
     if own:
         install_google_client(own)
@@ -789,7 +812,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             # #949: a family member signs in to their own accounts from their phone too; the remote-login
             # paths pass here and ``remote_login_gate`` (exact code, bound client) decides them.
             if (self.tunneled() and family_setup.setup_recorded(store) and path not in family_setup.PUBLIC_PATHS
-                    and path not in remote_login.PUBLIC_PATHS):
+                    and path not in remote_login.PUBLIC_PATHS and path not in phone_input.PUBLIC_PATHS):
                 self.reply(404,{'error':'찾을 수 없습니다.'})
                 return True
             return False
@@ -843,7 +866,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             after the session ended, so a tunnel left up reaches nothing.
             """
             if (self.tunneled() and not self.public_host() and service.remote_login_started()
-                    and path not in remote_login.PUBLIC_PATHS):
+                    and path not in remote_login.PUBLIC_PATHS and path not in phone_input.PUBLIC_PATHS):
                 self.reply(404,{'error':'찾을 수 없습니다.'})
                 return True
             return False
@@ -892,6 +915,61 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 return self.reply(200,{'ok':bool(session.finish_later('done'))})
             return self.reply(405,{'error':'지원하지 않는 요청입니다.'})
 
+        def phone_input_gate(self,path):
+            """#1213: once a phone input link was started in this process, a tunneled request (other than one
+            on a configured public tunnel host) reaches only the phone-input and remote-login routes.
+
+            True when the request was answered here (refused).  The gate stays closed after the
+            session ended, so a tunnel left up reaches nothing.
+            """
+            if (self.tunneled() and not self.public_host() and service.phone_input_started()
+                    and path not in phone_input.PUBLIC_PATHS and path not in remote_login.PUBLIC_PATHS):
+                self.reply(404,{'error':'찾을 수 없습니다.'})
+                return True
+            return False
+
+        def phone_input_cookie(self):
+            cookie=SimpleCookie()
+            try:cookie.load(self.headers.get('Cookie',''))
+            except Exception:return ''
+            return cookie[phone_input.COOKIE_NAME].value if phone_input.COOKIE_NAME in cookie else ''
+
+        def phone_input_route(self,method,parts):
+            """The phone input page and its APIs (#1213): exact code or 404, then the bound client only."""
+            path=parts.path
+            session=service.phone_input_session()
+            if session is None or not session.code_ok(parse_qs(parts.query).get('code',[''])[0]):
+                return self.reply(404,{'error':'링크가 만료되었거나 올바르지 않습니다.'})
+            cookie=self.phone_input_cookie()
+            if path==phone_input.PAGE_PATH and method=='GET':
+                issued=session.open_page(cookie)
+                if issued is False:return self.reply(404,{'error':'링크가 만료되었거나 올바르지 않습니다.'})
+                nonce=secrets.token_urlsafe(16)
+                return self.reply(200,phone_input.page(session,nonce).encode(),'text/html; charset=utf-8',
+                                  cookie=phone_input.cookie_header(issued) if issued else None,csp=phone_input.page_csp(nonce))
+            if method!='POST' or path==phone_input.PAGE_PATH:return self.reply(405,{'error':'지원하지 않는 요청입니다.'})
+            if not session.client_ok(cookie):return self.reply(404,{'error':'링크가 만료되었거나 올바르지 않습니다.'})
+            if self.headers.get('Content-Type','').split(';')[0].strip().lower()!='application/json':
+                return self.reply(415,{'error':'JSON 요청이 필요합니다.'})
+            try:
+                length=int(self.headers.get('Content-Length','0'))
+                if not 0<length<=32768:raise ValueError
+                body=json.loads(self.rfile.read(length))
+                if not isinstance(body,dict):raise ValueError
+            except (TypeError,ValueError):
+                return self.reply(400,{'error':'요청이 올바르지 않습니다.'})
+            try:
+                if path==phone_input.CLIENT_PATH:return self.reply(200,service.phone_input_client(session,body))
+                if path==phone_input.START_PATH:return self.reply(200,service.phone_input_start(session))
+                if path==phone_input.FINISH_PATH:return self.reply(200,service.phone_input_finish(session,body))
+            except ValueError as exc:
+                return self.reply(400,{'ok':False,'error':str(exc)})
+            except Exception as exc:
+                # #1213 review P2: a token exchange or delivery failure still answers the phone; nothing it carried is logged.
+                logging.getLogger('personal_agent.phone_input').warning('phone input request failed (%s)',type(exc).__name__)
+                return self.reply(502,{'ok':False,'error':'지금은 처리하지 못했어요. 잠시 후 다시 해 주세요.'})
+            return self.reply(405,{'error':'지원하지 않는 요청입니다.'})
+
         def cookie(self,token,max_age=86400):
             secure='; Secure' if os.environ.get('AGENTOS_SECURE_COOKIE')=='1' or public_hosts else ''
             return f'agentos_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}{secure}'
@@ -908,9 +986,10 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if not self.valid_host():return
             parts=urlsplit(self.path)
             path=parts.path
-            if self.family_gate(path) or self.remote_login_gate(path):return
+            if self.family_gate(path) or self.remote_login_gate(path) or self.phone_input_gate(path):return
             if path in family_setup.PUBLIC_PATHS:return self.family_route('GET',parts)
             if path in remote_login.PUBLIC_PATHS:return self.remote_login_route('GET',parts)
+            if path in phone_input.PUBLIC_PATHS:return self.phone_input_route('GET',parts)
             if path=='/' and self.public_host() and public_access_token:
                 token=parse_qs(parts.query).get('access',[''])[0]
                 nonlocal pairing_available
@@ -1103,7 +1182,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
         def do_DELETE(self):
             if not self.valid_host():return
             path=urlsplit(self.path).path
-            if self.remote_login_gate(path) or not self.auth():return
+            if self.remote_login_gate(path) or self.phone_input_gate(path) or not self.auth():return
             parts=path.split('/')
             if len(parts)==5 and parts[:3]==['','api','personal-space'] and parts[3] in ('memories','results'):
                 return self.reply(200,store.delete_personal_space_item(parts[3],parts[4]))
@@ -1113,9 +1192,10 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             self.settings_change=None
             if not self.valid_host():return
             parts=urlsplit(self.path)
-            if self.family_gate(parts.path) or self.remote_login_gate(parts.path):return
+            if self.family_gate(parts.path) or self.remote_login_gate(parts.path) or self.phone_input_gate(parts.path):return
             if parts.path in family_setup.PUBLIC_PATHS or parts.path in ('/api/family/telegram-token',family_share.SHARE_PATH):return self.family_route('POST',parts)
             if parts.path in remote_login.PUBLIC_PATHS:return self.remote_login_route('POST',parts)
+            if parts.path in phone_input.PUBLIC_PATHS:return self.phone_input_route('POST',parts)
             if parts.path==ISOLATED_MCP_PATH:
                 # This is an internal engine callback, not a browser API.  A
                 # session cookie never authorizes it and public tunnel hosts

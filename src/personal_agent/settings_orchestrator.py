@@ -94,7 +94,8 @@ def next_action(row):
 
 #: #814: owner-visible names of the categories and settings the conversation may read/change.
 CATEGORY_LABELS = {"connections": "외부 연결", "current_context": "현재 맥락", "judgment_ai": "판단 AI", "main_ai": "기본 AI",
-                   "owner_model": "알아 두기", "family": "가족 비서", "skills": "스킬"}
+                   "owner_model": "알아 두기", "family": "가족 비서", "skills": "스킬",
+                   "phone_link": "휴대폰 링크"}
 SETTINGS = {"current_context": ("enabled", "timezone"), "judgment_ai": ("mode", "model"), "main_ai": ("route", "model"),
             # #805 owner-model upkeep: its pause switch and rolling 24-hour call cap.
             "owner_model": ("enabled", "daily_calls"),
@@ -102,17 +103,19 @@ SETTINGS = {"current_context": ("enabled", "timezone"), "judgment_ai": ("mode", 
             # #934: the owner shares (and stops sharing) one signed-in site with one of them.
             "family": ("add", "share_site", "unshare_site"),
             # #961: optional skill know-how: the switch, adding one pinned GitHub skill, removing one.
-            "skills": ("enabled", "add", "remove")}
+            "skills": ("enabled", "add", "remove"),
+            # #1213: a one-time phone link for an input only a page can take (own Google client, Google consent).
+            "phone_link": ("send",)}
 SETTING_LABELS = {"enabled": "사용", "timezone": "시간대", "mode": "방식", "model": "모델", "route": "경로",
                   "daily_calls": "하루 판단 횟수", "add": "새로 만들기", "share_site": "로그인 공유", "unshare_site": "공유 그만",
-                  "remove": "빼기"}
+                  "remove": "빼기", "send": "보내기"}
 #: #934: the value of a share is "<family assistant>|<site>"; a stop may name the site alone.
 FAMILY_SHARE_SETTINGS = frozenset({("family", "share_site"), ("family", "unshare_site")})
 FAMILY_SHARE_NOTE = "비밀번호는 넘기지 않고 지금 로그인된 세션만 전달해요. 내 세션이 갱신되면 따라가고, 결제는 계정 주인만 할 수 있어요."
 VALUE_LABELS = {"on": "켜짐", "off": "꺼짐", "follow_main": "기본 AI 따라가기", "explicit": "따로 지정"}
 JUDGMENT_MODE_LABELS = {"off": "사용 안 함"}
 UNKNOWN_SETTING_MESSAGE = ("대화로 바꿀 수 있는 설정이 아닙니다. 현재 맥락(enabled, timezone), 판단 AI(mode, model), "
-                           "기본 AI(route, model), 알아 두기(enabled, daily_calls), 가족 비서(add, share_site, unshare_site), 스킬(enabled, add, remove)만 바꿀 수 있습니다. API 키, 토큰, 로그인, 엔드포인트는 설정 화면에서 직접 입력하세요.")
+                           "기본 AI(route, model), 알아 두기(enabled, daily_calls), 가족 비서(add, share_site, unshare_site), 스킬(enabled, add, remove), 휴대폰 링크(send)만 바꿀 수 있습니다. API 키, 토큰, 로그인, 엔드포인트는 설정 화면에서 직접 입력하세요.")
 CREDENTIAL_VALUE_MESSAGE = ("자격 증명처럼 보이는 값은 대화로 설정하지 않습니다. API 키, 토큰, 로그인은 설정 화면에서 직접 입력하세요. "
                             "아무것도 바꾸지 않았습니다.")
 UNAVAILABLE_MESSAGE = "이 설정의 현재 상태를 확인하지 못해 바꾸지 않았습니다. 설정 화면에서 확인하세요."
@@ -122,7 +125,9 @@ MAX_REASON_CHARS = 300
 #: With a follow-up channel they are applied off the caller's thread, one at a time.
 SLOW_SETTINGS = frozenset({("judgment_ai", "model"), ("main_ai", "route"), ("main_ai", "model"),
                            # #961: adding a skill downloads and inspects one pinned GitHub folder.
-                           ("skills", "add")})
+                           ("skills", "add"),
+                           # #1213: opening a phone link starts an ngrok tunnel (up to ~30 seconds).
+                           ("phone_link", "send")})
 #: #961: what adding a skill does, shown with the draft.
 SKILL_ADD_NOTE = ("확인하면 고정된 커밋에서 그 폴더만 받아 라이선스와 내용을 확인한 뒤 추가해요(브랜치 이름은 이 초안을 만들 때 "
                   "GitHub에 물어 커밋으로 고정했어요). 스크립트·훅은 실행하지 않고, 라이선스를 확인할 수 없거나 실행 파일이 "
@@ -291,6 +296,13 @@ class SettingsOrchestrator:
                 "unshare_site": self._row("unshare_site", "", shared, None,
                                           format="사이트 주소, 또는 비서 이름|사이트 주소(예: example.com)",
                                           shared=[{"instance": row["instance"], "site": row["site"]} for row in shares])}
+
+    def _phone_link(self):
+        """#1213: what a one-time phone link can be opened for on this install now (``send``'s options)."""
+        kinds = self.service.phone_input_kinds()
+        return {"send": self._row("send", "", "", self._options(tuple(kinds), kinds),
+                                  note="확인하면 연결된 Telegram으로 약 10분 동안 열리는 일회용 링크를 보냅니다. "
+                                       "자체 Google client를 넣거나 Google 서비스를 휴대폰에서 연결할 때 씁니다.")}
 
     def _skills(self):
         """#961: the switch, and the installed skills for ``add`` / ``remove`` (names and pinned sources only)."""
@@ -510,6 +522,8 @@ class SettingsOrchestrator:
 
         elif (category, setting) == ("skills", "remove"):
             summary = f"스킬 '{after}'를 뺍니다"
+        elif (category, setting) == ("phone_link", "send"):
+            summary = f"휴대폰으로 '{self._describe(category, setting, after, row)}' 링크를 보냅니다(약 10분 동안 열려요)"
         elif (category, setting) in FAMILY_SHARE_SETTINGS:
             from . import family_share
             instance, _sep, site = after.partition("|")
@@ -557,6 +571,9 @@ class SettingsOrchestrator:
             notify = self.__dict__.get("_family_notify", {}).pop(row["id"], None)
             self.service.start_family_setup(after, notify=notify)
             return "requested"
+        elif category == "phone_link":
+            # #1213: the link goes to the paired Telegram chat; its text is the answer.
+            self.__dict__.setdefault("_apply_text", {})[row["id"]] = self.service.start_phone_input(after)
         elif category == "skills":
             # #961: the service's own setters; adding returns the installed identity as the answer.
             receipt = self.service.apply_skill_setting(setting, after)

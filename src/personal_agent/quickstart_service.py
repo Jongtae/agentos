@@ -411,13 +411,13 @@ MEMORY_SAVED_UNDONE='되돌렸어요'
 MEMORY_UNDO_BUTTON='되돌리기'
 MEMORY_SAVED_STATUS={'retracted':'되돌렸어요','outdated':'그 사이 바뀌어 그대로 두었어요'}
 MEMORY_SAVED_OUTDATED_TEXT='그 사이 바뀐 것이 있어 그대로 두었어요. 내 기록에서 볼 수 있어요.'
-MEMORY_SAVED_EXPIRED_TEXT='시간이 지나 여기서는 되돌릴 수 없어요. 내 기록에서 지울 수 있어요.'
+MEMORY_SAVED_EXPIRED_TEXT='여기서는 더 되돌릴 수 없어요. 내 기록에서 지울 수 있어요.'
 #: The undo stays valid for a week (#918 option B, as for forget), then the button no longer acts.
 MEMORY_SAVED_TTL_SECONDS=7*86400
 #: Undo events on the Work (information-use audit, Evidence); not a Work step.
 MEMORY_UNDO_TOOL='memory_undo'
 MEMORY_CANDIDATES_OUTDATED_TEXT='그 사이 바뀐 것이 있어 일부는 그대로 두었어요. 내 기록에서 볼 수 있어요.'
-MEMORY_CANDIDATES_EXPIRED_TEXT='시간이 지나 여기서는 닫았어요. 남은 것은 내 기록에서 정할 수 있어요.'
+MEMORY_CANDIDATES_EXPIRED_TEXT='여기서는 닫았어요. 남은 것은 내 기록에서 정할 수 있어요.'
 #: #836: a value written like a memory key (``word_word.word``) is shown as words.
 MEMORY_KEY_SHAPED=re.compile(r'[a-z][a-z0-9]*(?:[._][a-z0-9]+)+')
 BROWSER_LOGIN_RESULT_TEXT={'resumed':'로그인 창을 닫고 요청을 한 번 이어서 처리합니다.',
@@ -744,7 +744,7 @@ class AgentService:
         the drafts pending and the message is handled as a normal turn.  The
         caller has already required ``owner_typed`` (#814 review P1).
         """
-        rows=self.settings_orchestrator.pending_for_conversation(self.settings_owner(job),job['channel'])
+        rows=self.settings_orchestrator.pending_or_renewable(self.settings_owner(job),job['channel'])
         if not rows or not isinstance(prompt,str):return None
         pending='\n'.join(row['effect']+(f" ({row['note']})" if row.get('note') else '') for row in rows)
         if self.decision_judge.settings_draft_confirmed(pending,prompt).outcome==JUDGMENT_YES:return 'confirm'
@@ -757,7 +757,7 @@ class AgentService:
         if not job:raise ValueError('작업을 찾지 못했습니다.')
         action=(body or {}).get('action') if isinstance(body,dict) else None
         if action not in ('confirm','cancel'):raise ValueError('적용 또는 취소만 할 수 있습니다.')
-        rows=self.settings_orchestrator.pending_for_work(job['id'])
+        rows=self.settings_orchestrator.pending_or_renewable(self.settings_owner(job),job['channel'],job['id'])
         if not rows:raise ValueError('확인을 기다리는 설정 변경이 없습니다.')
         result=self.settings_orchestrator.settle_pending(self.settings_owner(job),job['channel'],rows,action=='confirm',
                                                          notify=lambda text,job=job:self.settings_followup(job,text))
@@ -8111,7 +8111,6 @@ class AgentService:
                            and notification['message_id']==message.get('message_id'))
                     if exact and time.time()-float(binding['sent'])>MEMORY_SAVED_TTL_SECONDS:
                         self.expire_memory_saved(notification,binding)
-                        alert=(MEMORY_SAVED_EXPIRED_TEXT,True)
                     elif exact:
                         decided=self.undo_memory_saved(notification['job_id'],binding,targets)
                         finished=not self.memory_saved_open(binding)
@@ -8124,7 +8123,6 @@ class AgentService:
                                                             self.memory_saved_text(binding,footer),
                                                             self.legacy_memory_saved_markup(notification['id'],binding))
                         except ProviderError:pass
-                        if outdated:alert=(MEMORY_SAVED_OUTDATED_TEXT,True)
                         changed=True
             elif authorized and isinstance(data,str) and data.startswith('p7q:'):
                 # #719: stop one watch from its own notification.  Exact: this
@@ -9033,7 +9031,7 @@ class AgentService:
                     if settings_answer:
                         # #855: the owner's typed yes/no to the pending draft, the same path as the buttons.
                         result=self.settings_orchestrator.settle_pending(
-                            owner,job['channel'],self.settings_orchestrator.pending_for_conversation(owner,job['channel']),
+                            owner,job['channel'],self.settings_orchestrator.pending_or_renewable(owner,job['channel']),
                             settings_answer=='confirm',notify=lambda text,job=job:self.settings_followup(job,text))
                         LOG.info('settings drafts %s by owner reply work=%s',settings_answer,job['id'])
                     else:

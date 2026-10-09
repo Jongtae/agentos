@@ -318,7 +318,7 @@ class TelegramConfirmTests(TelegramHarness):
         self.assertEqual(self.store.memories(), [])
         self.assertEqual(self.notification(job['id'])[0]['state'], 'expired')
         self.assertEqual(self.edits()[-1]['reply_markup'], {'inline_keyboard': []})
-        self.assertIn('시간이 지나', self.edits()[-1]['text'])
+        self.assertIn('여기서는 닫았어요', self.edits()[-1]['text'])
 
     def test_the_sweep_closes_an_expired_prompt_without_a_tap(self):
         job, _prompt, row = self.offered()

@@ -765,6 +765,14 @@ class SettingsOrchestrator:
         lines, states = [], []
         for row in rows:
             try:
+                if row.get("state") != "awaiting-confirmation" or float(row.get("expires_at") or 0) < self.now():
+                    # Only time ran out: the owner's answer carries the exact change forward (or declines it).
+                    if not apply:
+                        states.append("canceled")
+                        lines.append("설정 변경을 취소했습니다. 아무것도 바꾸지 않았습니다.")
+                        self._settle(row["id"], "canceled", "canceled")
+                        continue
+                    row = self._renew(owner, channel, row)
                 result = (self.confirm(owner, channel, row["id"], row.get("digest", ""), notify) if apply
                           else self.cancel(owner, channel, row["id"]))
                 states.append(result.get("state"))
@@ -779,28 +787,46 @@ class SettingsOrchestrator:
         """This Work's drafts still awaiting the owner, oldest first (#814)."""
         return [row for row in self.pending_drafts() if row.get("work_id") == work_id]
 
-    def renew_expired(self, owner, channel, work_id, fingerprint):
-        """Fresh drafts of the same changes an owner's tap offered after their time ran out.
+    #: How long after its time ran out a draft can still be carried forward by the owner's own yes / 적용.
+    RENEW_GRACE_SECONDS = 60 * 60
 
-        The tapped message showed the exact effects; the tap approves those exact
-        values.  Only drafts that are exactly the offered set (ids and digests) and
-        merely timed out are renewed; each new draft still passes the stale-state
-        check when confirmed.  A superseded or settled draft is never revived.
-        """
+    def _timed_out(self, owner, channel, work_id=None):
         now = self.now()
-        old = sorted((row for row in self._drafts().values() if isinstance(row, dict) and row.get("work_id") == work_id
-                      and row.get("owner") == owner and row.get("channel") == channel
-                      and (row.get("state") == "expired" or (row.get("state") == "awaiting-confirmation"
-                                                              and float(row.get("expires_at") or 0) < now))),
-                     key=lambda row: (row.get("created_at") or 0, row["id"]))
+        return sorted((row for row in self._drafts().values() if isinstance(row, dict)
+                       and row.get("owner") == owner and row.get("channel") == channel
+                       and (work_id is None or row.get("work_id") == work_id)
+                       and (row.get("state") == "expired" or row.get("state") == "awaiting-confirmation")
+                       and float(row.get("expires_at") or 0) < now
+                       and now - float(row.get("expires_at") or 0) <= self.RENEW_GRACE_SECONDS),
+                      key=lambda row: (row.get("created_at") or 0, row["id"]))
+
+    def pending_or_renewable(self, owner, channel, work_id=None):
+        """Drafts awaiting the owner plus those whose time only just ran out, oldest first.
+
+        An owner's yes / 적용 carries the second kind forward (``settle_pending``);
+        nothing here applies anything by itself.
+        """
+        rows = [row for row in self.pending_drafts() if row.get("owner") == owner and row.get("channel") == channel
+                and (work_id is None or row.get("work_id") == work_id)]
+        return sorted([*rows, *self._timed_out(owner, channel, work_id)], key=lambda row: (row.get("created_at") or 0, row["id"]))
+
+    def _renew(self, owner, channel, row):
+        """A fresh draft of exactly this timed-out change; the old one is closed so it cannot be carried twice."""
+        draft = self.propose(owner, channel, row["category"], row["setting"], row["after"], row.get("reason"), row.get("work_id"))
+        self._settle(row["id"], "renewed", None)
+        return self._drafts()[draft["draft_id"]]
+
+    def renew_expired(self, owner, channel, work_id, fingerprint):
+        """Fresh drafts of the changes a tapped message offered, when they are exactly the offered set and only timed out.
+
+        The message showed the exact effects and the tap approves those values; each new
+        draft still passes the stale-state check when confirmed.  A superseded, settled
+        or canceled draft is never revived.
+        """
+        old = self._timed_out(owner, channel, work_id)
         for start in range(len(old)):
-            if old[start:] and self.drafts_digest(old[start:]) == fingerprint:
-                rows = []
-                for row in old[start:]:
-                    draft = self.propose(owner, channel, row["category"], row["setting"], row["after"],
-                                         row.get("reason"), work_id)
-                    rows.append(self._drafts()[draft["draft_id"]])
-                return rows
+            if self.drafts_digest(old[start:]) == fingerprint:
+                return [self._renew(owner, channel, row) for row in old[start:]]
         return []
 
     @staticmethod

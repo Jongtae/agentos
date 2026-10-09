@@ -317,7 +317,7 @@ class SaveAndTell(TelegramHarness):
         self.assertEqual([m['content'] for m in self.store.memories()], ['여의도 본사'], 'nothing retracted')
         self.assertIn('그 사이 바뀌어 그대로 두었어요', self.edits()[-1]['text'])
         self.assertIn(MEMORY_SAVED_OUTDATED_TEXT, self.edits()[-1]['text'])
-        self.assertEqual(self.answers()[-1], MEMORY_SAVED_OUTDATED_TEXT)
+        self.assertNotEqual(self.answers()[-1], MEMORY_SAVED_OUTDATED_TEXT, 'the message says it; no popup layer')
         self.assertEqual(self.notification(job['id'], MEMORY_SAVED_KIND)[0]['state'], 'memory_undone')
 
     def test_a_deleted_memory_refuses_the_undo(self):

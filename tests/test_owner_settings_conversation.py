@@ -919,12 +919,26 @@ class TypedConfirmation(ReviewRemediation):
         self.assertEqual(self.applies, [])
         self.assertEqual(self.store.config('settings_change_drafts')[draft['id']]['state'], 'awaiting-confirmation')
         self.assertEqual(self.settings.pending_for_work(work), [dict(self.settings.pending_for_work(work)[0])])
-        # An expired draft is no longer answered by a yes.
+        # A draft whose time only ran out is still answered by the owner's yes: it carries the shown change forward.
         self.clock[0] += self.settings.TTL_SECONDS + 1
         confirmed, _ = self.judge(JUDGMENT_YES)
-        self.owner_turn('응')
-        confirmed.assert_not_called()
-        self.assertEqual(self.applies, [])
+        job = self.owner_turn('응')
+        confirmed.assert_called()
+        self.assertEqual(self.applies, [{'enabled': True}])
+        self.assertNotIn('만료', job['response'])
+        # Well past the grace window nothing is carried forward.
+        self.assertEqual(self.settings.pending_or_renewable('local-owner', 'web-1'), [])
+
+    def test_the_web_button_after_the_time_ran_out_applies_the_shown_change(self):
+        work, draft = self.web_draft()
+        self.clock[0] += self.settings.TTL_SECONDS + 1
+        result = self.service.work_settings_draft(work, {'action': 'confirm'})
+        self.assertEqual(self.applies, [{'enabled': True}])
+        self.assertNotIn('만료', result['response'])
+        self.assertEqual(self.store.config('settings_change_drafts')[draft['id']]['state'], 'renewed')
+        with self.assertRaises(ValueError):
+            self.service.work_settings_draft(work, {'action': 'confirm'})
+        self.assertEqual(self.applies, [{'enabled': True}], 'carried forward exactly once')
 
     def test_no_owner_facing_string_names_a_settings_command(self):
         from personal_agent.agent_runtime import SETTINGS_CHANGE_DESCRIPTION

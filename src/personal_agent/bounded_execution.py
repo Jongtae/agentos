@@ -170,6 +170,9 @@ STRICT_ISOLATED_LIMITATION = ('the CLI gets no shell, file or image tool and its
 #: engine runtime root must not be under one for strict isolation.
 BASELINE_READABLE_ROOTS = ('/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp')
 
+#: #1197: the bridge tool Claude Code asks before any connector tool runs.
+CONNECTOR_PERMISSION_TOOL = 'mcp__agentos__connector_permission'
+
 #: Name of the Codex permissions profile AgentOS defines on the command line.
 CODEX_STRICT_PERMISSIONS = 'agentos-strict-isolated'
 #: Codex permissions profile (official `[permissions.<name>]` config): the
@@ -1284,9 +1287,16 @@ class BoundedExecutionAdapter:
         # CLAUDE_CODE_OAUTH_TOKEN; HOME stays the empty per-turn directory.
         self.credentials = credentials or (lambda engine_id: '')
 
-    def environment(self, engine_id, binary, run_dir):
+    def environment(self, engine_id, binary, run_dir, ai_connections=False):
         env = {'HOME': str(run_dir), 'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}
         env['PYTHONPATH'] = str(Path(__file__).resolve().parents[1])
+        if engine_id == 'claude-code' and ai_connections:
+            # #1197 (owner opt-in, owner instance only): the Mac's regular
+            # Claude Code login, whose claude.ai connectors (Google Drive)
+            # load only under it, not under the long-lived token (observed,
+            # 2.1.280).  User settings stay out (--setting-sources project).
+            env['HOME'] = str(Path.home())
+            return env
         if engine_id == 'claude-code':
             token = self.credentials('claude-code')
             if isinstance(token, str) and token:
@@ -1357,7 +1367,8 @@ class BoundedExecutionAdapter:
         return {'state': 'unknown', 'detail': 'unparsed status'}
 
     def command(self, engine_id, binary, prompt, mcp_config, instructions='', profile=BOUNDED_PROFILE,
-                disabled_features=(), model=None, native_search=False, tool_timeout=None, image_paths=()):
+                disabled_features=(), model=None, native_search=False, tool_timeout=None, image_paths=(),
+                ai_connections=False):
         """The argv of one Work turn.
 
         ``native_search`` (#678) lets the trusted-local turn use the CLI's own
@@ -1422,7 +1433,13 @@ class BoundedExecutionAdapter:
             # #961: no Claude Code skill or slash command of its own ("Disable all skills");
             # AgentOS serves the Work's pinned skills through the bridge.
             argv = [binary, '-p', prompt, '--output-format', 'stream-json', '--verbose',
-                    '--strict-mcp-config', '--mcp-config', str(mcp_config), '--disable-slash-commands', *model_args]
+                    *(() if ai_connections else ('--strict-mcp-config',)), '--mcp-config', str(mcp_config),
+                    '--disable-slash-commands', *model_args]
+            if ai_connections:
+                # #1197: the owner's AI connectors load beside the bridge; none is
+                # pre-approved, so every connector call asks AgentOS
+                # (CONNECTOR_PERMISSION_TOOL) and only reads are allowed.
+                argv += ['--setting-sources', 'project', '--permission-prompt-tool', CONNECTOR_PERMISSION_TOOL]
             if instructions:
                 # #569: AgentOS instructions travel as a system-prompt addition,
                 # the conversation and request as the prompt.
@@ -1794,6 +1811,10 @@ class BoundedExecutionAdapter:
             native_search = bool(getattr(tools, 'native_search', False)) and profile == BOUNDED_PROFILE
             # #701: only the trusted-local route is ever given the service's browser relay.
             relay = getattr(tools, 'browser_relay', None) if profile == BOUNDED_PROFILE else None
+            # #1197: the owner's AI connections, only for Claude Code on the trusted-local
+            # route and only with the service relay that decides each connector call.
+            ai_connections = (bool(getattr(tools, 'ai_connections', False)) and engine_id == 'claude-code'
+                              and profile == BOUNDED_PROFILE and relay is not None)
             search_off = str(getattr(tools, 'native_search_reason', '') or '') if not native_search else ''
             # Both supported CLIs receive this per-turn bridge configuration.
             # The engine gets no store handle; the bridge alone owns validated
@@ -1814,10 +1835,12 @@ class BoundedExecutionAdapter:
                          *([f'--browser-relay={relay}'] if relay else []),
                          # #774: the relay serves owner-state tools even when no browser is served.
                          *(['--relay-no-browser'] if relay and not getattr(tools, 'relay_browser', True) else []),
+                         # #1197: the bridge answers Claude Code's permission prompts for connector tools.
+                         *(['--ai-connections'] if ai_connections else []),
                          # #961: the exact skill revisions this Work may load (trusted-local only).
                          *[f'--skill={ref}' for ref in (skill_refs(tools.capabilities) if profile == BOUNDED_PROFILE else ())]],
             }}}, ensure_ascii=False), encoding='utf-8')
-            env = self.environment(engine_id, binary, run_dir)
+            env = self.environment(engine_id, binary, run_dir, ai_connections=ai_connections)
             disabled = ()
             if profile == STRICT_PROFILE:
                 # #616: never launch an unqualified CLI under the strict
@@ -1860,7 +1883,8 @@ class BoundedExecutionAdapter:
                        if (relay is not None and getattr(tools, 'relay_browser', True)) or action not in _BROWSER_ACTIONS]
             argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile, disabled_features=disabled,
                                 model=model or None, native_search=native_search,
-                                tool_timeout=bridge_tool_timeout(offered, timeout), image_paths=image_paths)
+                                tool_timeout=bridge_tool_timeout(offered, timeout), image_paths=image_paths,
+                                ai_connections=ai_connections)
             run_meta = {'argv': display_argv(argv, prompt, instructions), 'requested_model': model or None}
             try:
                 if self.runner is subprocess.run:

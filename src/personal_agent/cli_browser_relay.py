@@ -153,6 +153,18 @@ class BrowserRelay:
         if not isinstance(request, dict) or not hmac.compare_digest(str(request.get('key') or ''), self._key):
             return {'error': {'kind': 'tool', 'message': RELAY_UNAVAILABLE_TEXT, 'code': 'relay_refused'}}
         name, arguments = request.get('name'), request.get('arguments')
+        if name == 'connector_permission':
+            # #1197: the turn's connector permission decision, made by the service.
+            decide = getattr(self.tools, 'connector_permission', None)
+            if not callable(decide) or not isinstance(arguments, dict):
+                return {'error': {'kind': 'invalid_arguments', 'message': ''}}
+            with self._lock:
+                if self._closed:
+                    return {'error': {'kind': 'tool', 'message': RELAY_UNAVAILABLE_TEXT, 'code': 'stopped'}}
+                try:
+                    return {'ok': decide(arguments)}
+                except Exception as exc:
+                    return {'error': _error_payload(exc)}
         tools = getattr(self.tools.capabilities, 'tools', {}) or {}
         # Only this Work's browser and owner-state tools (#774): every other tool stays in the bridge.
         if not isinstance(name, str) or (tools.get(name) or {}).get('host_action') not in HOST_RELAYED_ACTIONS:

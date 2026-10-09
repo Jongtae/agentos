@@ -95,7 +95,7 @@ def next_action(row):
 #: #814: owner-visible names of the categories and settings the conversation may read/change.
 CATEGORY_LABELS = {"connections": "외부 연결", "current_context": "현재 맥락", "judgment_ai": "판단 AI", "main_ai": "기본 AI",
                    "owner_model": "알아 두기", "family": "가족 비서", "skills": "스킬",
-                   "phone_link": "휴대폰 링크"}
+                   "phone_link": "휴대폰 링크", "ai_connections": "AI의 연결 서비스"}
 SETTINGS = {"current_context": ("enabled", "timezone"), "judgment_ai": ("mode", "model"), "main_ai": ("route", "model"),
             # #805 owner-model upkeep: its pause switch and rolling 24-hour call cap.
             "owner_model": ("enabled", "daily_calls"),
@@ -105,7 +105,9 @@ SETTINGS = {"current_context": ("enabled", "timezone"), "judgment_ai": ("mode", 
             # #961: optional skill know-how: the switch, adding one pinned GitHub skill, removing one.
             "skills": ("enabled", "add", "remove"),
             # #1213: a one-time phone link for an input only a page can take (own Google client, Google consent).
-            "phone_link": ("send",)}
+            "phone_link": ("send",),
+            # #1197: Works may use the owner's AI-side connections (claude.ai connectors), read-only.
+            "ai_connections": ("enabled",)}
 SETTING_LABELS = {"enabled": "사용", "timezone": "시간대", "mode": "방식", "model": "모델", "route": "경로",
                   "daily_calls": "하루 판단 횟수", "add": "새로 만들기", "share_site": "로그인 공유", "unshare_site": "공유 그만",
                   "remove": "빼기", "send": "보내기"}
@@ -115,7 +117,7 @@ FAMILY_SHARE_NOTE = "비밀번호는 넘기지 않고 지금 로그인된 세션
 VALUE_LABELS = {"on": "켜짐", "off": "꺼짐", "follow_main": "기본 AI 따라가기", "explicit": "따로 지정"}
 JUDGMENT_MODE_LABELS = {"off": "사용 안 함"}
 UNKNOWN_SETTING_MESSAGE = ("대화로 바꿀 수 있는 설정이 아닙니다. 현재 맥락(enabled, timezone), 판단 AI(mode, model), "
-                           "기본 AI(route, model), 알아 두기(enabled, daily_calls), 가족 비서(add, share_site, unshare_site), 스킬(enabled, add, remove), 휴대폰 링크(send)만 바꿀 수 있습니다. API 키, 토큰, 로그인, 엔드포인트는 설정 화면에서 직접 입력하세요.")
+                           "기본 AI(route, model), 알아 두기(enabled, daily_calls), 가족 비서(add, share_site, unshare_site), 스킬(enabled, add, remove), 휴대폰 링크(send), AI의 연결 서비스(enabled)만 바꿀 수 있습니다. API 키, 토큰, 로그인, 엔드포인트는 설정 화면에서 직접 입력하세요.")
 CREDENTIAL_VALUE_MESSAGE = ("자격 증명처럼 보이는 값은 대화로 설정하지 않습니다. API 키, 토큰, 로그인은 설정 화면에서 직접 입력하세요. "
                             "아무것도 바꾸지 않았습니다.")
 UNAVAILABLE_MESSAGE = "이 설정의 현재 상태를 확인하지 못해 바꾸지 않았습니다. 설정 화면에서 확인하세요."
@@ -296,6 +298,15 @@ class SettingsOrchestrator:
                 "unshare_site": self._row("unshare_site", "", shared, None,
                                           format="사이트 주소, 또는 비서 이름|사이트 주소(예: example.com)",
                                           shared=[{"instance": row["instance"], "site": row["site"]} for row in shares])}
+
+    def _ai_connections(self):
+        """#1197: whether Works may use the owner's AI-side connections; unavailable on a family instance."""
+        status = self.service.ai_connections_status()
+        if not status["available"]:
+            return {"unavailable": status["note"]}
+        enabled = "on" if status["enabled"] else "off"
+        return {"enabled": self._row("enabled", enabled, VALUE_LABELS[enabled], self._options(("on", "off")),
+                                     note=status["note"])}
 
     def _phone_link(self):
         """#1213: what a one-time phone link can be opened for on this install now (``send``'s options)."""
@@ -571,6 +582,8 @@ class SettingsOrchestrator:
             notify = self.__dict__.get("_family_notify", {}).pop(row["id"], None)
             self.service.start_family_setup(after, notify=notify)
             return "requested"
+        elif category == "ai_connections":
+            self.service.set_ai_connections({"enabled": after == "on"})
         elif category == "phone_link":
             # #1213: the link goes to the paired Telegram chat; its text is the answer.
             self.__dict__.setdefault("_apply_text", {})[row["id"]] = self.service.start_phone_input(after)

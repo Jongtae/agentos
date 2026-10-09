@@ -2963,7 +2963,7 @@ class AgentService:
                     'subscription_engines':self.subscription_engine_status(),
                     'subscription_execution':self.subscription_execution_profile(),
                     'telegram':{'enabled':tg.get('enabled',False),'mode':tg.get('mode','owner-token'),'username':tg.get('username',''),'paired':bool(tg.get('user_id')),'user_id':tg.get('user_id')},
-                    'file_roots':[{**root,'blocked':folder_grants.blocked(root.get('path',''),self.store)} for root in self.store.config('file_roots',[])], 'file_workspace':FileWorkspace(self.store).projection(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'connectors':self.google_connection_rows(),'google_client':self.google_client_status(),'current_context':self.current_state.status(),'browser':self.browser_status()}
+                    'file_roots':[{**root,'blocked':folder_grants.blocked(root.get('path',''),self.store)} for root in self.store.config('file_roots',[])], 'file_workspace':FileWorkspace(self.store).projection(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'connectors':self.google_connection_rows(),'google_client':self.google_client_status(),'ai_connections':self.ai_connections_status(),'current_context':self.current_state.status(),'browser':self.browser_status()}
 
     def home(self):
         """Return the minimal, credential-free read model for the owner home."""
@@ -6844,6 +6844,57 @@ class AgentService:
         return str(reason) if reason else None
 
     # -- the phone's one-time link to the login window (#939) -------------------------------
+    # -- the owner's AI connections (AI-GOOGLE-01 #1197) ---------------------------
+    AI_CONNECTIONS_KEY='ai_connections'
+    #: Connector tools whose operation starts with one of these only read; every
+    #: other connector operation (create, update, share, trash, send ...) is refused.
+    AI_CONNECTION_READ_VERBS=('search','list','get','read','download','fetch','find','query')
+    AI_CONNECTIONS_FAMILY_TEXT='이 Mac의 AI 로그인과 그 연결은 소유자의 것이라 가족 비서에서는 쓸 수 없어요.'
+
+    def ai_connections_status(self):
+        """Whether Works may use the owner's AI-side connections (claude.ai connectors), and whether this instance may."""
+        from . import family_setup
+        family=family_setup.setup_recorded(self.store)
+        enabled=bool((self.store.config(self.AI_CONNECTIONS_KEY,{}) or {}).get('enabled')) and not family
+        return {'enabled':enabled,'available':not family,
+                'note':(self.AI_CONNECTIONS_FAMILY_TEXT if family else
+                        '기본 AI가 Claude Code일 때 그 AI에 연결된 서비스(예: claude.ai의 Google Drive)를 읽기 전용으로 씁니다.')}
+
+    def ai_connections_enabled(self):
+        return self.ai_connections_status()['enabled']
+
+    def set_ai_connections(self, body):
+        """Switch the owner's AI connections on or off; never on a family instance."""
+        enabled=(body or {}).get('enabled') if isinstance(body,dict) else None
+        if not isinstance(enabled,bool):raise ValueError('켜기 또는 끄기를 선택하세요.')
+        if enabled and not self.ai_connections_status()['available']:raise ValueError(self.AI_CONNECTIONS_FAMILY_TEXT)
+        self.store.put(self.AI_CONNECTIONS_KEY,{'enabled':enabled,'changed_at':time.time()})
+        return self.ai_connections_status()
+
+    def connector_permission(self, job, arguments):
+        """Claude Code's permission prompt for one AI connector call (#1197): allow reads, refuse the rest.
+
+        Only tools of the owner's claude.ai connectors are ever decided here;
+        anything else (including a model calling this tool itself) is refused.
+        The decision and the operation name are recorded for the Work's
+        information-use audit; the call's input is never recorded.
+        """
+        tool=arguments.get('tool_name') if isinstance(arguments,dict) else None
+        if not self.ai_connections_enabled() or not isinstance(tool,str) or not tool.startswith('mcp__claude_ai_') or len(tool)>200:
+            return {'behavior':'deny','message':'AgentOS가 이 도구 사용을 허용하지 않았습니다. 실행하지 않았습니다.'}
+        server,_sep,operation=tool[len('mcp__claude_ai_'):].rpartition('__')
+        service_name=server.replace('_',' ').strip()[:60] or '연결된 서비스'
+        allow=bool(operation) and operation.lower().startswith(self.AI_CONNECTION_READ_VERBS)
+        detail={'scope':'ai-connection','host_action':'connector_permission',
+                'evidence':{'service':service_name,'operation':operation[:60],'decision':'allow' if allow else 'deny'}}
+        with self.store.db() as db:
+            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                       (job['id'],'connector_permission','succeeded' if allow else 'failed',json.dumps(detail,ensure_ascii=False),time.time()))
+        if allow:
+            return {'behavior':'allow','updatedInput':arguments.get('input') if isinstance(arguments.get('input'),dict) else {}}
+        return {'behavior':'deny','message':(f'{service_name}에서 바꾸는 작업({operation})은 아직 승인 흐름이 없어 AgentOS가 막았습니다. '
+                                             '실행하지 않았습니다. 소유자에게 직접 하도록 안내하세요.')}
+
     # -- phone input (PHONE-INPUT-01 #1213) ------------------------------------
     def phone_input_kinds(self):
         """``{kind: owner word}`` this install can open a phone link for, now."""
@@ -9508,6 +9559,9 @@ class AgentService:
                                             # #774: the relay serves the owner-state tools too; browser tools
                                             # are listed only while the browser profile is available.
                                             served.relay_browser=capabilities.browser is not None
+                                            # #1197: the owner's AI connections for this turn (owner instance, owner opt-in).
+                                            served.ai_connections=self.ai_connections_enabled()
+                                            served.connector_permission=lambda arguments,job=job:self.connector_permission(job,arguments)
                                         except OSError:
                                             LOG.warning('cli browser relay could not start job=%s',job['id'])
                                     try:

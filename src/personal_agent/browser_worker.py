@@ -859,6 +859,8 @@ class Worker:
         self.blocked = 0           # main-frame navigations refused so far
         self.refused_submits = 0   # form navigations refused with no page form to hold (#700 review)
         self.step_refused = 0      # ``refused_submits`` when the current step began
+        self.posted_submits = 0    # #899: non-GET form submissions the page started so far
+        self.step_posted = 0       # ``posted_submits`` when the current step began
         self.reported_refused = 0  # ``refused_submits`` last reported (step answer or snapshot, #758)
         self.hosts = set()         # hosts of committed main-frame navigations in this worker's life
         self.popups = []           # #914: (view, window, delegate) of sign-in popups while the owner signs in
@@ -1118,13 +1120,19 @@ class Worker:
         self.AppHelper.callLater(POLL_SECONDS, poll)
 
     def settle(self, ident, finish):
-        """Wait until no navigation is loading for a short quiet period, then ``finish``."""
+        """Wait until no navigation is loading or being decided for a short quiet period, then ``finish``.
+
+        #899 review P1: a pending policy decision (a form submission being
+        checked) counts as not quiet, as it does for a click (``click_settled``),
+        so a typing step never answers ``posted: False`` while its submit is
+        still being decided.
+        """
         quiet_since = [None]
 
         def poll():
             if ident not in self.pending:
                 return
-            if self.view.isLoading():
+            if self.view.isLoading() or self.deciding > 0:
                 quiet_since[0] = None
             elif quiet_since[0] is None:
                 quiet_since[0] = time.monotonic()
@@ -1247,7 +1255,10 @@ class Worker:
             if blocked_before is not None and self.blocked > blocked_before:
                 return self.fail(ident, 'blocked_destination')
             dialogs = (step or {}).get('dialogs') or []
-            self.reply(ident, **({'navigated': True} if navigated else {}), **({'dialogs': dialogs} if dialogs else {}))
+            # #899: whether the page started a non-GET form submission during this step; a decision
+            # still pending when the step answers counts as one (review P1: unknown is not "none").
+            self.reply(ident, **({'navigated': True} if navigated else {}), **({'dialogs': dialogs} if dialogs else {}),
+                       posted=self.posted_submits > self.step_posted or self.deciding > 0)
         step, self.dialog_step = getattr(self, 'dialog_step', None), None
         self.end_step(answer)
 
@@ -1430,6 +1441,7 @@ class Worker:
             return self.fail(ident, 'target_changed')   # never press an element nobody classified
         nonce = uuid.uuid4().hex
         self.step_refused = self.refused_submits
+        self.step_posted = self.posted_submits
         # #936: a page's own alert/confirm/prompt during this step is answered by its rule.
         self.dialog_step = {'approved': command.get('dialog_approved') is True,
                             'confirm_ok': command.get('confirm_ok') is True, 'dialogs': []}
@@ -1512,6 +1524,7 @@ class Worker:
             return self.fail(ident, 'submit_changed')
         self.held = None   # released at most once
         self.step_refused = self.refused_submits
+        self.step_posted = self.posted_submits
         # #937 review P2: the owner approved exactly this submit, so its own confirmation may be answered.
         self.dialog_step = {'approved': True, 'confirm_ok': True, 'dialogs': []}
         self.deadline(ident, timeout, on_timeout=self.end_step)
@@ -2043,6 +2056,8 @@ def _delegate_class():
             if (main_frame or source_main) and not worker.guard_off and kind in (
                     WebKit.WKNavigationTypeFormSubmitted, WebKit.WKNavigationTypeFormResubmitted):
                 method = str(request.HTTPMethod() or 'GET') if request is not None else 'GET'
+                if method.upper() != 'GET':
+                    worker.posted_submits += 1   # #899: counted when started, whatever the guard decides
                 if kind == WebKit.WKNavigationTypeFormResubmitted and method.upper() != 'GET':
                     worker.refused_submits += 1
                     return handler(WebKit.WKNavigationActionPolicyCancel)

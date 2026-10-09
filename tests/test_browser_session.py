@@ -1800,3 +1800,25 @@ class FormlessLoginDetection(unittest.TestCase):
     def test_the_form_rule_is_unchanged(self):
         self.assertTrue(bs.login_form_present([self.field('email', 1), self.field('password', 1), self.field('text')]))
         self.assertFalse(bs.login_form_present([self.field('email', 1), self.field('password', 2)]))
+
+
+class ObservedStepTests(unittest.TestCase):
+    """#899: a click or typing step reports what AgentOS observed of it, when the driver reported it."""
+
+    def test_the_driver_report_becomes_observed_step(self):
+        for posted in (False, True):
+            with self.subTest(posted=posted):
+                class Reporting(FakeDriver):
+                    def click(inner, index, timeout, approved=False, confirm_ok=False):
+                        FakeDriver.click(inner, index, timeout, approved, confirm_ok)
+                        return {'navigated': False, 'posted': posted}
+                browser, driver = session(Reporting())
+                browser.open({'url': ORIGIN + '/product', 'effect': 'read'})
+                result = browser.click({'target': '내 계정', 'effect': 'navigate'})
+                self.assertEqual(result['observed_step'], {'posted': posted, 'approved': False})
+
+    def test_no_report_means_no_observation(self):
+        browser, driver = session()
+        browser.open({'url': ORIGIN + '/product', 'effect': 'read'})
+        self.assertNotIn('observed_step', browser.click({'target': '내 계정', 'effect': 'navigate'}))
+

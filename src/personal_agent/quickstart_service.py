@@ -4537,7 +4537,7 @@ class AgentService:
             except (TypeError,ValueError):data={}
             data=data if isinstance(data,dict) else {}
             action=data.get('host_action') or row['tool']
-            if action not in repeatable and not page_load_only(action,data):effect=True
+            if action not in repeatable and not page_load_only(action,data,row['status']):effect=True
             if row['tool'] not in called:called.append(row['tool'])
             if row['status']=='succeeded':
                 evidence=data.get('evidence') if isinstance(data.get('evidence'),dict) else {}

@@ -1075,12 +1075,19 @@ class CatalogueData(Harness):
 INVALID_OUTPUT = '엔진이 요구된 구조화된 응답을 반환하지 않았습니다.'
 
 
-def bridge_step(record, tool, declared=None, *, status='succeeded', host='page.example.test'):
-    """One browser call as the MCP bridge records it: its running event, then its result (#787)."""
+def bridge_step(record, tool, declared=None, *, status='succeeded', host='page.example.test', observed=None):
+    """One browser call as the MCP bridge records it: its running event, then its result (#787).
+
+    ``observed``: #899's ``observed_step`` of a click or typing result; ``status=None`` leaves the call running.
+    """
     extra = {'declared_effect': declared} if declared else {}
     record(tool, 'running', json.dumps({'scope': 'subscription-mcp-bridge', 'host_action': tool,
                                         'step': {'action': tool, 'host': host}, **extra}))
-    result = ({'evidence': {'state': 'page', 'url': f'https://{host}/', 'title': 'Page'}} if status == 'succeeded'
+    if status is None:
+        return
+    evidence = {'state': 'page', 'url': f'https://{host}/', 'title': 'Page',
+                **({'observed_step': observed} if observed is not None else {})}
+    result = ({'evidence': evidence} if status == 'succeeded'
               else {'code': 'tool_failed', 'retry': 'permanent', 'effect': 'none', 'error': '실행하지 못했습니다.'})
     record(tool, status, json.dumps({'scope': 'subscription-mcp-bridge', 'host_action': tool, **result, **extra}))
 
@@ -1125,6 +1132,43 @@ class ReadIsNotAnEffect(Harness):
                 self.assertEqual(len(self.asked_plans), 1, 'no re-plan after a possible state change')
                 self.assertEqual(len(self.transport.bodies), bodies, 'no other worker ran')
                 self.assertEqual(row['status'], 'failed')
+
+    def observed_attempt(self, *calls):
+        """``calls``: (tool, declared, status, observed) recorded in the first attempt."""
+        def run(tools):
+            if len(self.engine.turns) == 1:
+                for tool, declared, status, observed in calls:
+                    bridge_step(tools.capabilities.record, tool, declared, status=status, observed=observed)
+        self.engine.before = run
+        self.engine.fail = [ExecutionError(INVALID_OUTPUT, failure_class='invalid-output', meta=NO_TOOL_CALLS)]
+        self.script([plan('codex', 'Look it up.'), plan('openai', 'Answer directly.')])
+        self.observed_runs = getattr(self, 'observed_runs', 0) + 1
+        return self.run_work('알려줘', key=f'observed-{self.observed_runs}')
+
+    def test_a_typed_search_and_navigating_clicks_with_nothing_posted_are_redelegated(self):
+        """#899: declared read/navigate, no non-GET form submission, no spent approval."""
+        quiet = {'posted': False, 'approved': False}
+        job, row = self.observed_attempt(('browser_open', 'read', 'succeeded', None),
+                                         ('browser_type', 'read', 'succeeded', quiet),
+                                         ('browser_click', 'navigate', 'succeeded', quiet))
+        first = self.events(job, 'evaluated')[0][1]
+        self.assertEqual((first['outcome'], first['next'], first['stop']), ('worker_failed', 'redelegate', None))
+        self.assertEqual(row['response'], 'api answer')
+
+    def test_an_input_step_that_posted_spent_an_approval_failed_or_never_finished_stays_an_effect(self):
+        quiet = {'posted': False, 'approved': False}
+        for call in (('browser_click', 'navigate', 'succeeded', {'posted': True, 'approved': False}),
+                     ('browser_click', 'navigate', 'succeeded', {'posted': False, 'approved': True}),
+                     ('browser_click', 'mutate', 'succeeded', quiet),
+                     ('browser_click', None, 'succeeded', quiet),
+                     ('browser_type', 'read', 'failed', None),
+                     ('browser_click', 'navigate', None, None)):
+            with self.subTest(call=call):
+                self.engine.turns.clear()
+                self.asked_plans.clear()
+                job, _row = self.observed_attempt(('browser_open', 'read', 'succeeded', None), call)
+                last = self.events(job, 'evaluated')[-1][1]
+                self.assertEqual((last['outcome'], last['next'], last['stop']), ('worker_failed', 'stop', 'effect'))
 
     def test_a_failed_final_attempt_reports_what_was_tried_what_failed_and_the_next_step(self):
         from personal_agent.conversation_projection import TERMINAL_FAILED_HEADER

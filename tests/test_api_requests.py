@@ -467,6 +467,33 @@ class ReviewFixes(Base):
         self.assertFalse(approvals.consume(binding))
 
 
+class GitHubReviewFixes(Base):
+    """Codex review comments on #1218."""
+
+    def test_a_request_body_is_recorded_by_length_only(self):
+        self.work({'tool_calls': [tool_call('c1', 'api_request', **ORDER)]}, {'content': '승인이 필요합니다.'})
+        running = [json.loads(row['detail']) for row in self.events() if row['tool'] == 'api_request' and row['status'] == 'running']
+        self.assertEqual(running[0]['arguments']['body'], f"[가림: {len(ORDER['body'])}자]")
+        self.assertNotIn('"side"', json.dumps(self.events(), ensure_ascii=False))
+
+    def test_an_accepted_change_with_an_unreadable_body_is_an_unknown_effect(self):
+        caps = self.caps()
+        with self.assertRaises(ToolError):
+            caps.execute('api_request', ORDER)
+        self.approvals.approve_last()
+        caps.api().transport = lambda *a: (201, {}, b'<html>ok</html>')
+        with self.assertRaises(ToolError) as unreadable:
+            caps.execute('api_request', ORDER)
+        self.assertEqual(unreadable.exception.code, 'api_not_json')
+        self.assertEqual(classify_failure(unreadable.exception, 'api_request')[1:], ('never', 'unknown'))
+
+    def test_the_audit_names_the_query_that_was_asked_for(self):
+        self.work({'tool_calls': [tool_call('c1', 'api_request', **{**READ, 'url': URL + '?view=summary'})]}, summary_from_tool)
+        self.assertEqual(self.evidence()['source']['query'], 'view=summary')
+        audit = json.dumps(information_use.work_information_use(self.store, self.job_id), ensure_ascii=False)
+        self.assertIn(f'{HOST}{HOLDINGS_PATH}?view=summary', audit)
+
+
 class AuditAndReferenceTime(Base):
     """Acceptance 5."""
 
@@ -498,7 +525,10 @@ class ReadIsNotOrder(Base):
                 caps.execute('api_request', {**ORDER, 'effect': effect})
             self.assertEqual((refused.exception.code, refused.exception.requires), ('approval_required', 'api-step-approval'))
         self.assertEqual((self.api.calls, self.api.orders), ([], []))
-        self.assertIn(f'POST {HOST}{ORDERS_PATH} (fake-holdings, mutate)', self.approvals.requested[0][1])
+        label = self.approvals.requested[0][1]
+        self.assertTrue(label.startswith(f'POST {ORDERS_PATH} '), label)
+        self.assertIn('"quantity": 1', label)
+        self.assertIn(f'→ {HOST} (fake-holdings, mutate)', label)
 
     def test_a_non_get_declared_read_is_still_an_order(self):
         self.assertEqual(effective_effect('POST', 'read'), 'mutate')

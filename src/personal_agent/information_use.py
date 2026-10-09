@@ -210,7 +210,8 @@ def _event_items(action, evidence):
         source = evidence.get('source') if isinstance(evidence.get('source'), dict) else {}
         basis = _text(evidence.get('as_of') or '기준 시각 모름', 40)
         flags = ', '.join(_text(value, 20) for value in (evidence.get('freshness'), evidence.get('completeness')) if value)
-        return [f"{_text(source.get('slot'), 40)} → {_text(source.get('host'), 80)}{_text(source.get('path'), 80)} "
+        query = f"?{_text(source.get('query'), 80)}" if source.get('query') else ''
+        return [f"{_text(source.get('slot'), 40)} → {_text(source.get('host'), 80)}{_text(source.get('path'), 80)}{query} "
                 f"(기준 {basis}{', ' + flags if flags else ''})"]
     if action == 'list_roots':
         roots = [f'폴더: {_text(name, 60)}' for name in evidence.get('roots') or ()]

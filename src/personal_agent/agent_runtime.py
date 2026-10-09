@@ -48,7 +48,9 @@ EFFECT={'type':'string','enum':['read','navigate','mutate','payment']}
 #: The argument recorded as a length placeholder, per host action: typed
 #: browser text (#656) and a proposed current-state value (#627), which the
 #: owner may have phrased around a secret before the host redacts it.
-REDACTED_ARGUMENTS={'browser_type':'text','propose_current_state':'value'}
+REDACTED_ARGUMENTS={'browser_type':'text','propose_current_state':'value',
+                    # #1216 review: an API request body (an order, an identity form) is recorded by length only.
+                    'api_request':'body'}
 #: #659: the argument recorded with only stored secrets, credential shapes and
 #: saved private values removed (``Capabilities.judgment_text``): a
 #: preparation goal is owner text the owner reads back, not a secret.

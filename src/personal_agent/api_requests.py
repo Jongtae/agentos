@@ -66,6 +66,7 @@ MAX_PATH_CHARS = 200
 
 APPROVAL_TEXT = ('이 API 호출은 상태를 바꾸는 요청이라 소유자 승인이 필요합니다. '
                  '소유자가 이 단계를 승인하면 이 요청을 한 번만 이어서 처리합니다.')
+SENT_UNREADABLE_TEXT = '변경 요청은 접수됐지만 응답을 읽지 못해 실제 결과는 확인되지 않았습니다. 상대 서비스에서 확인해 주세요.'
 UNKNOWN_EFFECT_TEXT = ('상태를 바꾸는 API 요청이 응답 없이 끝나 실제로 반영됐는지 알 수 없습니다. '
                        '다시 보내지 않았습니다. 상대 서비스에서 결과를 먼저 확인해 주세요.')
 
@@ -434,7 +435,10 @@ class ApiRequests:
         if approvals is not None and approvals.consume(binding):
             return binding_digest(binding)[:32]
         if approvals is not None:
-            approvals.request(binding, f"{method} {named}{path} ({slot['name']}, {effect})")
+            # The owner approves what is sent: the query and the body come first, so a bounded label keeps them.
+            query = urlsplit(url).query
+            sent = ' '.join(part for part in (f'?{query}' if query else '', ' '.join(str(body or '').split())) if part)
+            approvals.request(binding, f"{method} {path} {sent} → {named} ({slot['name']}, {effect})".replace('  ', ' '))
         raise ApiError(APPROVAL_TEXT, 'approval_required', requires='api-step-approval')
 
     def call(self, args):
@@ -503,13 +507,15 @@ class ApiRequests:
             raise ApiError(f'API가 오류로 답했습니다(HTTP {status}).', 'api_error',
                            effect='unknown' if effect in APPROVED_EFFECTS and status >= 500 else None)
         if len(raw) > MAX_RESPONSE_BYTES:
-            raise ApiError('응답이 너무 커서 읽지 않았습니다.', 'api_response_too_large')
+            raise ApiError('응답이 너무 커서 읽지 않았습니다.' + (' ' + SENT_UNREADABLE_TEXT if effect in APPROVED_EFFECTS else ''),
+                           'api_response_too_large', effect='unknown' if effect in APPROVED_EFFECTS else None)
         # The key never comes back to the AI, even if the service echoes it.
         text = raw.decode('utf-8', 'replace').replace(secret, '[redacted]')
         try:
             data = json.loads(text) if text.strip() else None
         except ValueError:
-            raise ApiError('응답이 JSON이 아니어서 쓰지 않았습니다.', 'api_not_json') from None
+            raise ApiError('응답이 JSON이 아니어서 쓰지 않았습니다.' + (' ' + SENT_UNREADABLE_TEXT if effect in APPROVED_EFFECTS else ''),
+                           'api_not_json', effect='unknown' if effect in APPROVED_EFFECTS else None) from None
         # An escaped echo (``\"`` or ``\u`` in the JSON text) decodes back to the key: scrub the decoded values too.
         data = scrub(data, secret)
         # A read for another subject is withheld.  A sent change already happened, so it is not
@@ -528,7 +534,9 @@ class ApiRequests:
         record = provenance(data, status=status, headers=response_headers, retrieved_at=retrieved,
                             as_of_field=args.get('as_of_field') or None, max_age_seconds=max_age,
                             checks=checks, required_fields=required)
-        record.update({'source': {'slot': slot['name'], 'host': named, 'path': path, 'method': method},
+        record.update({'source': {'slot': slot['name'], 'host': named, 'path': path, 'method': method,
+                                  # The owner can tell which resource was asked for (the key is never in a URL).
+                                  **({'query': parts.query[:200]} if parts.query else {})},
                        'status': status, 'effect': effect, 'attempts': attempts,
                        'subject_verified': subject_verified})
         return {'data': data, 'provenance': record, 'sources': [f'{parts.scheme}://{named}{path}'],

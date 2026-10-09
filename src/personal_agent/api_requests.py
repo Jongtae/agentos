@@ -63,6 +63,8 @@ MAX_RESPONSE_BYTES = 1_000_000
 MAX_BODY_BYTES = 64 * 1024
 MAX_CHECKS = 8
 MAX_PATH_CHARS = 200
+#: The owner's short description of a slot's API (endpoints, fields), shown to the AI: content, not code.
+MAX_NOTE_CHARS = 400
 
 APPROVAL_TEXT = ('이 API 호출은 상태를 바꾸는 요청이라 소유자 승인이 필요합니다. '
                  '소유자가 이 단계를 승인하면 이 요청을 한 번만 이어서 처리합니다.')
@@ -113,7 +115,8 @@ def slots(store):
         if subject is not None and not (isinstance(subject.get('field'), str) and isinstance(subject.get('value'), str)):
             subject = None
         max_age = slot.get('max_age_seconds')
-        out[name] = {'name': name, 'hosts': hosts, 'header': header,
+        note = ' '.join(str(slot.get('note') or '').split())[:MAX_NOTE_CHARS]
+        out[name] = {'note': note, 'name': name, 'hosts': hosts, 'header': header,
                      'scheme': slot.get('scheme') if isinstance(slot.get('scheme'), str) else '',
                      'subject': subject, 'revision': int(slot.get('revision') or 1),
                      'max_age_seconds': max_age if isinstance(max_age, int) and 0 < max_age <= MAX_AGE_LIMIT else DEFAULT_MAX_AGE}
@@ -121,7 +124,7 @@ def slots(store):
 
 
 def save_slot(store, name, hosts, secret, *, header='Authorization', scheme='Bearer', subject_field=None,
-              subject_value=None, max_age_seconds=None):
+              subject_value=None, max_age_seconds=None, note=''):
     """Register or replace one slot; returns its owner-readable summary (no secret)."""
     if not isinstance(name, str) or not NAME.match(name) or len(name) > 40:
         raise ApiError('슬롯 이름은 소문자·숫자·하이픈 40자 이하입니다.', 'api_slot_invalid')
@@ -142,7 +145,10 @@ def save_slot(store, name, hosts, secret, *, header='Authorization', scheme='Bea
     if name not in rows and len(rows) >= MAX_SLOTS:
         raise ApiError(f'슬롯은 {MAX_SLOTS}개까지입니다.', 'api_slot_invalid')
     previous = rows.get(name) if isinstance(rows.get(name), dict) else {}
-    row = {'hosts': _normal_hosts(hosts), 'header': header, 'scheme': scheme or '', 'subject': subject,
+    note = ' '.join(str(note or '').split())
+    if len(note) > MAX_NOTE_CHARS or (note and secret.strip() in note):
+        raise ApiError(f'API 설명은 {MAX_NOTE_CHARS}자 이하이고 비밀값을 담지 않아야 합니다.', 'api_slot_invalid')
+    row = {'note': note, 'hosts': _normal_hosts(hosts), 'header': header, 'scheme': scheme or '', 'subject': subject,
            'revision': int(previous.get('revision') or 0) + 1, 'saved_at': time.time()}
     if max_age_seconds is not None:
         row['max_age_seconds'] = max_age_seconds
@@ -170,7 +176,7 @@ def secret_names(store):
 
 def describe(slot):
     """What the owner and the AI may see of a slot: never the value."""
-    return {'slot': slot['name'], 'hosts': list(slot['hosts']), 'subject_bound': slot['subject'] is not None,
+    return {'slot': slot['name'], 'hosts': list(slot['hosts']), 'note': slot['note'], 'subject_bound': slot['subject'] is not None,
             'max_age_seconds': slot['max_age_seconds']}
 
 
@@ -183,7 +189,8 @@ def context_line(store):
     listed = slots(store)
     if not listed:
         return None
-    return CONTEXT_LINE + '; '.join(f"{name} ({', '.join(slot['hosts'])})" for name, slot in sorted(listed.items()))
+    return CONTEXT_LINE + '; '.join(f"{name} ({', '.join(slot['hosts'])}{': ' + slot['note'] if slot['note'] else ''})"
+                                    for name, slot in sorted(listed.items()))
 
 
 def effective_effect(method, declared):
@@ -504,7 +511,8 @@ class ApiRequests:
             raise ApiError(f"API가 인증을 거절했습니다(HTTP {status}). 슬롯 '{slot['name']}'의 키나 권한을 확인해 주세요.",
                            'api_unauthorized', requires=f"api-slot:{slot['name']}")
         if status >= 400:
-            raise ApiError(f'API가 오류로 답했습니다(HTTP {status}).', 'api_error',
+            raise ApiError(f'API가 오류로 답했습니다(HTTP {status}, {method} {path}).'
+                           + (' 이 경로가 없습니다. 슬롯 설명의 경로를 확인하세요.' if status == 404 else ''), 'api_error',
                            effect='unknown' if effect in APPROVED_EFFECTS and status >= 500 else None)
         if len(raw) > MAX_RESPONSE_BYTES:
             raise ApiError('응답이 너무 커서 읽지 않았습니다.' + (' ' + SENT_UNREADABLE_TEXT if effect in APPROVED_EFFECTS else ''),

@@ -220,6 +220,45 @@ def register_pending(owner_store, record, port):
     owner_store.put(PENDING_KEY, rows)
 
 
+def record_tunnel(owner_store, instance, pid):
+    """Remember the tunnel process of a pending setup, so a restart can end it (#929)."""
+    rows = [dict(row, tunnel_pid=int(pid)) if isinstance(row, dict) and row.get('instance') == instance else row
+            for row in owner_store.config(PENDING_KEY, []) or []]
+    owner_store.put(PENDING_KEY, rows)
+
+
+def _tunnel_command(pid, run=subprocess.run):
+    """The command line of ``pid``, or '' when it is gone or unreadable."""
+    try:
+        result = run(['ps', '-o', 'command=', '-p', str(int(pid))], capture_output=True, text=True, timeout=5)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return ''
+    return result.stdout.strip() if result.returncode == 0 else ''
+
+
+def stop_stale_tunnel(row, *, run=subprocess.run, kill=None):
+    """End the tunnel a setup left behind when its watcher died with the process (#929).
+
+    Only a process whose command line is still this setup's own ``ngrok http
+    127.0.0.1:<port>`` is signalled, so a reused pid is never touched.
+    Returns True when a tunnel was signalled.
+    """
+    import os
+    import signal
+    pid, port = row.get('tunnel_pid'), row.get('port')
+    if not isinstance(pid, int) or pid <= 1 or not isinstance(port, int):
+        return False
+    words = _tunnel_command(pid, run).split()
+    if not (words and Path(words[0]).name == 'ngrok' and words[1:3] == ['http', f'127.0.0.1:{port}']):
+        return False
+    try:
+        (kill or os.kill)(pid, signal.SIGTERM)
+    except OSError:
+        return False
+    LOG.info('family setup: stopped the tunnel a restart left behind (instance=%s)', row.get('instance'))
+    return True
+
+
 def clear_pending(owner_store, instance):
     rows = [row for row in owner_store.config(PENDING_KEY, []) if isinstance(row, dict) and row.get('instance') != instance]
     owner_store.put(PENDING_KEY, rows)
@@ -544,10 +583,14 @@ def pick_instance_name(home=None):
     return next_instance_name(set(installed) | folders)
 
 
-def reconcile_pending(owner_store, now=None):
-    """At start: a setup whose watcher died with the process is closed (#913 review P3-2)."""
+def reconcile_pending(owner_store, now=None, *, run=subprocess.run, kill=None):
+    """At start: a setup whose watcher died with the process is closed (#913 review P3-2).
+
+    #929: its tunnel process, which outlives the owner server, is ended too.
+    """
     for row in list(owner_store.config(PENDING_KEY, []) or []):
         if isinstance(row, dict) and row.get('instance'):
+            stop_stale_tunnel(row, run=run, kill=kill)
             clear_pending(owner_store, row['instance'])
 
 
@@ -610,6 +653,8 @@ def prepare_family_setup(owner_store, name, display_name, *, service_action, env
         except (OSError, RuntimeError) as exc:
             raise SetupError('가족에게 보낼 임시 링크를 열지 못했습니다. ' + str(exc)) from None
         handle['process'] = process
+        if isinstance(getattr(process, 'pid', None), int):
+            record_tunnel(owner_store, name, process.pid)
         handle['link'] = f"{public}/family-setup?code={quote(record['code'])}"
         return handle
     except BaseException:

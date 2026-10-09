@@ -6,6 +6,7 @@ No live Telegram, ngrok or launchd operation is observed here.
 """
 import io
 import json
+import subprocess
 import tempfile
 import threading
 import time
@@ -359,6 +360,8 @@ class OwnerCommand(unittest.TestCase):
             self.sent.append(json.loads(request.data))
             body = {'ok': True, 'result': {}}
         elif '/api/family/status' in url:
+            # #929: while the setup waits, its row names the tunnel a restart would end.
+            self.pending_seen = self.owner.config(family_setup.PENDING_KEY)
             body = {'state': next(self.states)}
         else:
             raise AssertionError(url)
@@ -370,6 +373,7 @@ class OwnerCommand(unittest.TestCase):
         class Process:
             stdout = iter([json.dumps({'msg': 'started tunnel', 'url': 'https://abc123.ngrok-free.app'}) + '\n'])
             terminated = False
+            pid = 4242
 
             def terminate(inner):
                 inner.terminated = True
@@ -397,6 +401,7 @@ class OwnerCommand(unittest.TestCase):
         self.assertIn('아내 비서', link)
         self.assertEqual(self.sent[0]['chat_id'], 111, 'the link also reaches the owner on Telegram to forward')
         self.assertTrue(self.process.terminated)
+        self.assertEqual([row.get('tunnel_pid') for row in self.pending_seen], [4242])
         self.assertEqual(self.owner.config(family_setup.PENDING_KEY), [])
         family = QuickStore(self.root / 'home/.local/share/agentos-instances/spouse')
         self.assertIsNone(family_setup.read_setup(family), 'the setup is closed afterwards')
@@ -487,6 +492,37 @@ class OwnerCommand(unittest.TestCase):
         family_setup.reconcile_pending(self.owner)
         self.assertEqual(self.owner.config(family_setup.PENDING_KEY), [])
         self.assertEqual(self.owner.secret(family_setup.handoff_secret_key('spouse')), '')
+
+    def test_a_restart_ends_the_tunnel_its_setup_left_and_nothing_else(self):
+        """#929: the recorded tunnel is signalled only while it is still this setup's ngrok."""
+        import signal
+        record = {'instance': 'spouse', 'username': 'x_bot', 'expires': time.time() + 60, 'handoff': 'h'}
+        cases = (('/opt/homebrew/bin/ngrok http 127.0.0.1:8797 --host-header=rewrite --inspect=false', True),
+                 ('/opt/homebrew/bin/ngrok http 127.0.0.1:9999 --host-header=rewrite', False),  # another setup's port
+                 ('/usr/bin/python3 -m something', False),                                     # pid reused
+                 ('', False))                                                                  # already gone
+        for command, stopped in cases:
+            with self.subTest(command=command):
+                family_setup.register_pending(self.owner, record, 8797)
+                family_setup.record_tunnel(self.owner, 'spouse', 4242)
+                [row] = self.owner.config(family_setup.PENDING_KEY)
+                self.assertEqual(row['tunnel_pid'], 4242)
+                killed, asked = [], []
+
+                def run(argv, **_kwargs):
+                    asked.append(argv)
+                    return subprocess.CompletedProcess(argv, 0 if command else 1, command + '\n', '')
+                family_setup.reconcile_pending(self.owner, run=run, kill=lambda pid, sig: killed.append((pid, sig)))
+                self.assertEqual(asked, [['ps', '-o', 'command=', '-p', '4242']])
+                self.assertEqual(killed, [(4242, signal.SIGTERM)] if stopped else [])
+                self.assertEqual(self.owner.config(family_setup.PENDING_KEY), [])
+
+    def test_a_row_without_a_tunnel_runs_nothing(self):
+        record = {'instance': 'spouse', 'username': 'x_bot', 'expires': time.time() + 60, 'handoff': 'h'}
+        family_setup.register_pending(self.owner, record, 8797)
+        family_setup.reconcile_pending(self.owner, run=lambda *a, **k: self.fail('ps was run'),
+                                       kill=lambda *a: self.fail('a process was signalled'))
+        self.assertEqual(self.owner.config(family_setup.PENDING_KEY), [])
 
     def test_an_invalid_name_is_refused(self):
         self.assertEqual(self.invoke('add', 'Not/Valid'), 2)

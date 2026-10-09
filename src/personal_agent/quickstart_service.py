@@ -2698,9 +2698,9 @@ class AgentService:
         (``tool_calls``): Codex ``exec --json`` items and Claude Code
         ``stream-json`` ``tool_use`` blocks and ``permission_denials``.  Not
         host actions: an AgentOS bridge call (Claude Code ``mcp__agentos__*``;
-        a Codex ``mcp_tool_call`` naming a trusted-local bridge action, since
-        the summary drops the server and ``agentos`` is the only one a Work
-        turn configures), which AgentOS records as its own tool event and
+        a Codex ``mcp_tool_call`` naming a trusted-local bridge action on the
+        server ``agentos`` (#808: another server, such as ``codex_apps``, is a
+        host action whatever its tool is named), which AgentOS records as its own tool event and
         ``orchestration_step`` already evaluates, and the CLI's own web search
         (Codex ``web_search``, Claude Code ``WebSearch``), a public read
         recorded as a ``cli-native`` ``web_search``.  A Claude Code tool call
@@ -2709,8 +2709,10 @@ class AgentService:
         name.  None when there is no parsed list (the CLI was killed, timed out
         or never reported one), when the stream did not end with the CLI's own
         end-of-turn record (``CLI_TURN_END_RECORDS``: empty, malformed or cut
-        off output), or when the list reached ``CLI_TOOL_CALLS_KEPT``: absent
-        evidence is not evidence of no action.
+        off output), when the summary is partial (#808: a dropped line, a
+        capped list) or the list reached ``CLI_TOOL_CALLS_KEPT``: absent
+        evidence is not evidence of no action.  ``()`` for an execute that
+        never launched the CLI (``launched: False``).
         """
         from collections import Counter
         from .bounded_execution import CLAUDE_NATIVE_SEARCH_TOOL

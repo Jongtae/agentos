@@ -2133,6 +2133,16 @@ class CliHostActions(unittest.TestCase):
         self.assertNotIn('tool_calls_partial', meta)
         self.assertEqual(AgentService.cli_host_actions(meta), ())
 
+    def test_one_id_reported_as_two_kinds_is_unobservable(self):
+        """#808 review P2: a started command and a completed bridge call under one id are not merged into a bridge call."""
+        from personal_agent.bounded_execution import cli_metadata
+        started = json.dumps({'type': 'item.started', 'item': {'id': 'i1', 'type': 'command_execution', 'status': 'in_progress'}})
+        done = json.dumps({'type': 'item.completed', 'item': {'id': 'i1', 'type': 'mcp_tool_call', 'server': 'agentos',
+                                                              'tool': 'save_note', 'status': 'completed'}})
+        meta = cli_metadata('codex', '\n'.join([started, done, json.dumps({'type': 'turn.completed'})]))
+        self.assertTrue(meta['tool_calls_partial'])
+        self.assertIsNone(AgentService.cli_host_actions(meta))
+
     def test_a_not_launched_report_is_no_host_action(self):
         from personal_agent.bounded_execution import NOT_LAUNCHED
         self.assertEqual(AgentService.cli_host_actions(dict(NOT_LAUNCHED)), ())

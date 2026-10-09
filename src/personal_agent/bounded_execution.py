@@ -941,6 +941,9 @@ def cli_metadata(engine_id, raw):
                 entry['server'] = str(item.get('server'))[:80]
             key = item.get('id')
             if isinstance(key, str) and key in codex_items:
+                # Review P2: one id reported as two kinds is not one call; do not merge it away.
+                if codex_items[key]['type'] != entry['type']:
+                    partial = True
                 codex_items[key].update(entry)
             else:
                 meta['tool_calls'].append(entry)

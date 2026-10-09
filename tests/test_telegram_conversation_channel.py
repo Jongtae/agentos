@@ -64,6 +64,10 @@ class RecordingChannel:
         result=self._record('delete_message', chat_id=chat_id, message_id=message_id)
         return result if isinstance(result,bool) else True
 
+    def edit_message_reply_markup(self, chat_id, message_id, reply_markup=None):
+        return self._record('edit_message_reply_markup', chat_id=chat_id, message_id=message_id,
+                            reply_markup=reply_markup)
+
     def answer_callback_query(self, callback_query_id, text=None, show_alert=False):
         return self._record('answer_callback_query', callback_query_id=callback_query_id, text=text,
                             show_alert=show_alert)
@@ -213,9 +217,11 @@ class TelegramPolicyRoutingTests(unittest.TestCase):
         self.pair()
         self.service.ingest_callback({'id': 'cb-1', 'from': {'id': 42}, 'data': 'unhandled',
                                       'message': {'message_id': 5, 'chat': {'id': 42, 'type': 'private'}}}, 'g')
-        self.assertEqual(self.channel.names, ['answer_callback_query'])
+        self.assertEqual(self.channel.names, ['answer_callback_query', 'edit_message_reply_markup'])
         self.assertEqual(self.channel.calls[0][1],
-                         {'callback_query_id': 'cb-1', 'text': '처리할 수 있는 요청이 아닙니다.', 'show_alert': False})
+                         {'callback_query_id': 'cb-1', 'text': '', 'show_alert': False})
+        self.assertEqual(self.channel.calls[1][1]['reply_markup'], {'inline_keyboard': []},
+                         'a tap that cannot act removes its dead buttons')
 
     def test_connect_verifies_the_candidate_token_through_the_seam_before_storing_it(self):
         self.channel = RecordingChannel(results={'get_me': {'username': 'owner_bot'},

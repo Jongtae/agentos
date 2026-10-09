@@ -226,7 +226,7 @@ class TelegramConfirmTests(TelegramHarness):
         self.tap(f"p7m:{row['id']}:1:reject", row['message_id'])
         self.assertEqual(len(self.store.memories()), 1)
         self.assertEqual(len(self.edits()), 1)
-        self.assertEqual(self.answers()[-1], '처리할 수 있는 요청이 아닙니다.')
+        self.assertFalse(self.answers()[-1], 'a tap that changes nothing shows no system toast')
 
     def test_reject_leaves_memory_untouched(self):
         _job, _prompt, row = self.offered()
@@ -318,7 +318,7 @@ class TelegramConfirmTests(TelegramHarness):
         self.assertEqual(self.store.memories(), [])
         self.assertEqual(self.notification(job['id'])[0]['state'], 'expired')
         self.assertEqual(self.edits()[-1]['reply_markup'], {'inline_keyboard': []})
-        self.assertIn('시간이 지나', self.edits()[-1]['text'])
+        self.assertIn('여기서는 닫았어요', self.edits()[-1]['text'])
 
     def test_the_sweep_closes_an_expired_prompt_without_a_tap(self):
         job, _prompt, row = self.offered()

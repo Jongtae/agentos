@@ -457,8 +457,48 @@ class ConversationConfirmation(_Case):
         self.tap(f"p7s:{notification['id']}:confirm", notification['message_id'])
         self.assertEqual(self.applies, [{'enabled': True}], 'applied exactly once')
         self.assertTrue(self.context()['enabled'])
+        edits = [body for method, body in self.telegram if method == 'editMessageText']
+        self.assertIn('바꿨습니다', edits[0]['text'])
+        self.assertEqual(edits[-1]['text'], '이미 적용했어요.', 'a repeated tap shows the settled state, not an error')
+
+    def test_a_tap_after_the_draft_timed_out_still_applies_the_exact_shown_change(self):
+        self.change_turn()
+        work = self.receive('현재 맥락 켜 줘')
+        self.service.deliver_one()
+        self.service.deliver_notification()
+        notification = self.notification(work)
+        self.clock[0] += self.settings.TTL_SECONDS + 1
+        self.tap(f"p7s:{notification['id']}:confirm", notification['message_id'])
+        self.assertEqual(self.applies, [{'enabled': True}], 'the tap approved the exact effect the message showed')
+        self.assertTrue(self.context()['enabled'])
+        answers = [body['text'] for method, body in self.telegram if method == 'answerCallbackQuery']
+        self.assertNotIn('처리할 수 있는 요청이 아닙니다.', answers)
+        self.tap(f"p7s:{notification['id']}:confirm", notification['message_id'])
+        self.assertEqual(self.applies, [{'enabled': True}], 'still exactly once')
         edited = [body for method, body in self.telegram if method == 'editMessageText'][-1]
-        self.assertIn('바꿨습니다', edited['text'])
+        self.assertEqual(edited['text'], '이미 적용했어요.', 'the message shows what became of it')
+
+    def test_a_timed_out_tap_does_not_apply_when_the_setting_moved_since(self):
+        draft = self.settings.propose('owner', 'http', 'current_context', 'timezone', 'Asia/Seoul')
+        self.service.set_current_context({'timezone': 'Europe/Paris'})   # another control moved it after the message
+        self.clock[0] += self.settings.TTL_SECONDS + 1
+        rows = self.settings.pending_or_renewable('owner', 'http')
+        self.assertEqual([row['id'] for row in rows], [draft['draft_id']])
+        result = self.settings.settle_pending('owner', 'http', rows, True)
+        self.assertIn('설정이 바뀌었', result['response'])
+        self.assertEqual(self.context()['timezone'], 'Europe/Paris', 'the approval covered the value the owner saw, not this one')
+
+    def test_a_cancel_after_the_draft_timed_out_changes_nothing_and_says_so(self):
+        self.change_turn()
+        work = self.receive('현재 맥락 켜 줘')
+        self.service.deliver_one()
+        self.service.deliver_notification()
+        notification = self.notification(work)
+        self.clock[0] += self.settings.TTL_SECONDS + 1
+        self.tap(f"p7s:{notification['id']}:cancel", notification['message_id'])
+        self.assertEqual(self.applies, [])
+        answers = [body['text'] for method, body in self.telegram if method == 'answerCallbackQuery']
+        self.assertEqual(answers[-1], '바꾸지 않았습니다.')
 
     def test_a_stale_digest_or_a_cancel_applies_nothing(self):
         self.change_turn()
@@ -889,12 +929,26 @@ class TypedConfirmation(ReviewRemediation):
         self.assertEqual(self.applies, [])
         self.assertEqual(self.store.config('settings_change_drafts')[draft['id']]['state'], 'awaiting-confirmation')
         self.assertEqual(self.settings.pending_for_work(work), [dict(self.settings.pending_for_work(work)[0])])
-        # An expired draft is no longer answered by a yes.
+        # A draft whose time only ran out is still answered by the owner's yes: it carries the shown change forward.
         self.clock[0] += self.settings.TTL_SECONDS + 1
         confirmed, _ = self.judge(JUDGMENT_YES)
-        self.owner_turn('응')
-        confirmed.assert_not_called()
-        self.assertEqual(self.applies, [])
+        job = self.owner_turn('응')
+        confirmed.assert_called()
+        self.assertEqual(self.applies, [{'enabled': True}])
+        self.assertNotIn('만료', job['response'])
+        # Well past the grace window nothing is carried forward.
+        self.assertEqual(self.settings.pending_or_renewable('local-owner', 'web-1'), [])
+
+    def test_the_web_button_after_the_time_ran_out_applies_the_shown_change(self):
+        work, draft = self.web_draft()
+        self.clock[0] += self.settings.TTL_SECONDS + 1
+        result = self.service.work_settings_draft(work, {'action': 'confirm'})
+        self.assertEqual(self.applies, [{'enabled': True}])
+        self.assertNotIn('만료', result['response'])
+        self.assertEqual(self.store.config('settings_change_drafts')[draft['id']]['state'], 'renewed')
+        with self.assertRaises(ValueError):
+            self.service.work_settings_draft(work, {'action': 'confirm'})
+        self.assertEqual(self.applies, [{'enabled': True}], 'carried forward exactly once')
 
     def test_no_owner_facing_string_names_a_settings_command(self):
         from personal_agent.agent_runtime import SETTINGS_CHANGE_DESCRIPTION

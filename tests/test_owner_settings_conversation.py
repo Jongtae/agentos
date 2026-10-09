@@ -460,6 +460,33 @@ class ConversationConfirmation(_Case):
         edited = [body for method, body in self.telegram if method == 'editMessageText'][-1]
         self.assertIn('바꿨습니다', edited['text'])
 
+    def test_a_tap_after_the_draft_timed_out_still_applies_the_exact_shown_change(self):
+        self.change_turn()
+        work = self.receive('현재 맥락 켜 줘')
+        self.service.deliver_one()
+        self.service.deliver_notification()
+        notification = self.notification(work)
+        self.clock[0] += self.settings.TTL_SECONDS + 1
+        self.tap(f"p7s:{notification['id']}:confirm", notification['message_id'])
+        self.assertEqual(self.applies, [{'enabled': True}], 'the tap approved the exact effect the message showed')
+        self.assertTrue(self.context()['enabled'])
+        answers = [body['text'] for method, body in self.telegram if method == 'answerCallbackQuery']
+        self.assertNotIn('처리할 수 있는 요청이 아닙니다.', answers)
+        self.tap(f"p7s:{notification['id']}:confirm", notification['message_id'])
+        self.assertEqual(self.applies, [{'enabled': True}], 'still exactly once')
+
+    def test_a_cancel_after_the_draft_timed_out_changes_nothing_and_says_so(self):
+        self.change_turn()
+        work = self.receive('현재 맥락 켜 줘')
+        self.service.deliver_one()
+        self.service.deliver_notification()
+        notification = self.notification(work)
+        self.clock[0] += self.settings.TTL_SECONDS + 1
+        self.tap(f"p7s:{notification['id']}:cancel", notification['message_id'])
+        self.assertEqual(self.applies, [])
+        answers = [body['text'] for method, body in self.telegram if method == 'answerCallbackQuery']
+        self.assertEqual(answers[-1], '바꾸지 않았습니다.')
+
     def test_a_stale_digest_or_a_cancel_applies_nothing(self):
         self.change_turn()
         work = self.receive('현재 맥락 켜 줘')

@@ -7765,8 +7765,23 @@ class AgentService:
                        and notification['message_id']==message.get('message_id') and job
                        and job['channel']==f"telegram:{generation}" and job['chat_id']==sender)
                 rows=self.offered_settings_drafts(notification) if exact else []
+                if exact and not rows and parts[2]=='confirm':
+                    # The tap approves the exact effects the message showed; a timeout alone is not a dead end.
+                    try:rows=self.settings_orchestrator.renew_expired(self.settings_owner(job),job['channel'],job['id'],notification.get('fingerprint'))
+                    except ValueError:rows=[]
                 if rows:self.store.update_notification(notification['id'],'settings_'+parts[2]+'ing')
+                elif exact and parts[2]=='cancel':
+                    # Nothing left to cancel (timed out or already settled): the owner's answer is still "no change".
+                    self.store.update_notification(notification['id'],'settings_canceled')
+                    rows=[{'_nothing_left':True}]
         if not authorized:return
+        if rows and rows[0].get('_nothing_left'):
+            if isinstance(callback_id,str):
+                try:self.telegram.answer_callback_query(callback_id,'바꾸지 않았습니다.',show_alert=False)
+                except ProviderError:pass
+            try:self.telegram.edit_message_text(sender,notification['message_id'],'바꾸지 않았습니다.',{'inline_keyboard':[]})
+            except ProviderError:pass
+            return
         # #814 review P2-3: the tap is answered first; a slow setter then runs off this poll thread.
         if isinstance(callback_id,str):
             text=('적용을 시작했습니다.' if rows and parts[2]=='confirm' else '처리했습니다.' if rows else '처리할 수 있는 요청이 아닙니다.')

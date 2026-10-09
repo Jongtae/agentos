@@ -779,6 +779,30 @@ class SettingsOrchestrator:
         """This Work's drafts still awaiting the owner, oldest first (#814)."""
         return [row for row in self.pending_drafts() if row.get("work_id") == work_id]
 
+    def renew_expired(self, owner, channel, work_id, fingerprint):
+        """Fresh drafts of the same changes an owner's tap offered after their time ran out.
+
+        The tapped message showed the exact effects; the tap approves those exact
+        values.  Only drafts that are exactly the offered set (ids and digests) and
+        merely timed out are renewed; each new draft still passes the stale-state
+        check when confirmed.  A superseded or settled draft is never revived.
+        """
+        now = self.now()
+        old = sorted((row for row in self._drafts().values() if isinstance(row, dict) and row.get("work_id") == work_id
+                      and row.get("owner") == owner and row.get("channel") == channel
+                      and (row.get("state") == "expired" or (row.get("state") == "awaiting-confirmation"
+                                                              and float(row.get("expires_at") or 0) < now))),
+                     key=lambda row: (row.get("created_at") or 0, row["id"]))
+        for start in range(len(old)):
+            if old[start:] and self.drafts_digest(old[start:]) == fingerprint:
+                rows = []
+                for row in old[start:]:
+                    draft = self.propose(owner, channel, row["category"], row["setting"], row["after"],
+                                         row.get("reason"), work_id)
+                    rows.append(self._drafts()[draft["draft_id"]])
+                return rows
+        return []
+
     @staticmethod
     def drafts_digest(rows):
         """The fingerprint of exactly these drafts (ids and digests) a confirmation message offers (#814)."""

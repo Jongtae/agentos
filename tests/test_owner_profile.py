@@ -69,8 +69,10 @@ class ProfileJudgmentAndGuidance(unittest.TestCase):
         [save_memory] = [tool['function'] for tool in DEFINITIONS if tool['function']['name'] == 'save_memory']
         self.assertIn(PROFILE_KEY_GUIDANCE, save_memory['description'])
         self.assertIn('profile.allergy.peanut', save_memory['description'])
-        self.assertEqual(sorted(save_memory['parameters']['properties']), ['content', 'memory_key'],
-                         'no new argument: the model already chooses memory_key')
+        # #794 phase 3 adds only the optional correction flag (a wrong value vs an outdated one); no key argument.
+        self.assertEqual(sorted(save_memory['parameters']['properties']), ['content', 'correction', 'memory_key'],
+                         'no new key argument: the model already chooses memory_key')
+        self.assertEqual(save_memory['parameters']['required'], ['memory_key', 'content'])
         self.assertIn('"profile." memory_key', API_TOOL_GUIDANCE)
         self.assertIn('owner profile section', API_TOOL_GUIDANCE)
 

@@ -290,7 +290,7 @@ class CurrentContext:
 
     def _observation(self, db, scope, epoch, obs_id, now):
         row = db.execute('SELECT * FROM context_observations WHERE id=? AND owner_key=? AND generation=? '
-                         "AND context_epoch=? AND expires_at>? AND state!='invalidated'",
+                         "AND context_epoch=? AND expires_at>? AND state NOT IN ('invalidated','forgotten')",
                          (obs_id, *scope, epoch, now)).fetchone()
         if row is None or row['source_kind'] == 'text_edit':
             return None

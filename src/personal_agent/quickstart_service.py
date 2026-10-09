@@ -284,7 +284,7 @@ BROWSER_LEGACY_KEY='browser_legacy_profile_removed_at'
 RETRY_REFUSED_RAN_CURRENT='retry-refused-ran-current'
 #: Tools whose call may have changed state outside this conversation; an earlier
 #: Work that called one is never replayed (``safe_retry``).
-RETRY_EFFECT_TOOLS=frozenset({'save_note','save_memory','delegate_agent',
+RETRY_EFFECT_TOOLS=frozenset({'save_note','save_memory','forget_record','delegate_agent',
                               'calendar_draft_create','calendar_draft_update','calendar_draft_cancel',
                               # #656: a browser step in the owner's session may have added to a cart or submitted a form.
                               # #787: a browser_open declared read/navigate only loaded a page (``effect_calls``).
@@ -10125,6 +10125,17 @@ class AgentService:
                 db.execute("UPDATE jobs SET delivery='pending' WHERE id=? AND status='interrupted' AND delivery='none'",(work_id,))
         return running
 
+    def purge_forgotten(self):
+        """Purge forgotten owner state whose undo window ended (#794); a failure is logged and retried next tick."""
+        from .owner_forget import OwnerForget
+        try:
+            purged=OwnerForget(self.store).purge_due()
+        except Exception as exc:
+            LOG.warning('forgotten owner state purge failed (%s)',type(exc).__name__)
+            return 0
+        if purged:LOG.info('purged forgotten owner state receipts=%s',purged)
+        return purged
+
     def start(self):
         # #913 review P3-2: a family setup whose watcher died with the last process is closed.
         try:
@@ -10133,6 +10144,8 @@ class AgentService:
         except Exception as exc:
             LOG.warning('family setup reconcile failed (%s)',type(exc).__name__)
         self.recover_interrupted_work()
+        # #794 phase 3: a purge a restart left overdue runs before any Work reads owner state.
+        self.purge_forgotten()
         # #1130: a working-copy run is not covered by the release's mcp-host check; say so at start.
         # Each Work turn checks again, so this is a log line, not a gate.
         bridge_problem=bridge_sdk_problem()
@@ -10170,6 +10183,8 @@ class AgentService:
                 now=time.monotonic()
                 if now>=next_document_resume_prune:
                     self.prune_expired_document_resumes()
+                    # #794 phase 3: forgotten owner state whose 7-day undo ended is purged (overdue after a restart too).
+                    self.purge_forgotten()
                     next_document_resume_prune=now+30
                 if now>=next_shared_sites_retry:
                     # #934: a push or revocation a family instance did not confirm is retried; one config read otherwise.

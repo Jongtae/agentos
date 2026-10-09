@@ -39,6 +39,7 @@ MEMORY_UNDO_ACTION = 'memory_undo'
 #: Owner-private reads, by host action, and the category their items belong to.
 READ_CATEGORIES = {
     'list_memory': 'memory', 'search_memory': 'memory', 'save_memory': 'memory', MEMORY_UNDO_ACTION: 'memory',
+    'forget_record': 'memory',
     'calendar_query': 'calendar', 'calendar_draft_create': 'calendar', 'calendar_draft_update': 'calendar',
     'calendar_draft_cancel': 'calendar',
     'find_files': 'files', 'read_file': 'files', 'list_roots': 'files',
@@ -187,7 +188,14 @@ def _event_items(action, evidence):
         key = _text(evidence.get('memory_key'), 80)
         # #918 slice (a): the owner's worker saved it at once (undo offered); a third party's stays a proposal.
         state = ('바로 저장' if evidence.get('auto_saved') else '저장') if evidence.get('saved') else '제안'
+        if evidence.get('saved') and evidence.get('correction'):
+            state += ' · 잘못된 이전 값 정정'
         return [f'{key} ({state})' if key else state]
+    if action == 'forget_record':
+        # #794: the receipt only; the forgotten value is never repeated in the audit.
+        names = {'forget': '잊음 (7일 안 되돌리기 가능)', 'delete': '완전 삭제', 'undo': '잊음 되돌림', 'list': '되돌릴 수 있는 항목 확인'}
+        kind = {'memory': '기억', 'claim': '현재 상태', 'observation': '관찰'}.get(evidence.get('kind'), '')
+        return [' '.join(part for part in (kind, names.get(evidence.get('action'), '기억 정리')) if part)]
     if action == MEMORY_UNDO_ACTION:
         key = _text(evidence.get('memory_key'), 80)
         state = '되돌림 · 이전 값 복원' if evidence.get('restored_id') else '되돌림'

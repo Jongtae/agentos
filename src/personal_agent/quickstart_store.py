@@ -454,11 +454,12 @@ class QuickStore:
         return {key:value[key] for key in ('id','memory_key','content','created','supersedes','state','content_digest','candidate_id') if key in value}
 
     def _save_memory(self, db, memory_key, content, owner_key, work_key=None, candidate_id=None,
-                     preserve_correction_token=None):
+                     preserve_correction_token=None, corrected=False):
         memory_id=str(uuid.uuid4());digest=self.memory_digest(memory_key,content)
         previous=db.execute("SELECT id FROM memories WHERE owner_key=? AND memory_key=? AND state='current' ORDER BY created DESC LIMIT 1",(owner_key,memory_key)).fetchone()
         if previous:
-            db.execute("UPDATE memories SET state='superseded' WHERE id=? AND owner_key=?",(previous['id'],owner_key))
+            # #794 phase 3: a value that was wrong is ``corrected``; one that became outdated is ``superseded``.
+            db.execute("UPDATE memories SET state=? WHERE id=? AND owner_key=?",('corrected' if corrected else 'superseded',previous['id'],owner_key))
             if preserve_correction_token is None:
                 db.execute("""UPDATE memory_approvals SET state='revoked',memory_key=''
                               WHERE owner_key=? AND action='correct-memory'
@@ -486,7 +487,7 @@ class QuickStore:
     #: The notice's state while it waits for the Work's reply to be delivered.
     NOTICE_HELD='held'
 
-    def save_memory(self, memory_key, content, owner_id='local-owner', work_id=None, notice=False):
+    def save_memory(self, memory_key, content, owner_id='local-owner', work_id=None, notice=False, corrected=False):
         """Write one current Memory row; with ``notice``, hold its owner notice durably in the same transaction (#918).
 
         A direct save by the owner's own AI must never end without the owner
@@ -499,7 +500,7 @@ class QuickStore:
         work_key=self._work_binding(work_id) if work_id is not None else None
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
-            row=self._save_memory(db,memory_key,content,owner_key,work_key)
+            row=self._save_memory(db,memory_key,content,owner_key,work_key,corrected=corrected is True)
             if notice and isinstance(work_id,str):
                 job=db.execute('SELECT channel,chat_id FROM jobs WHERE id=?',(work_id,)).fetchone()
                 channel=str(job['channel'] or '') if job else ''
@@ -958,7 +959,7 @@ class QuickStore:
             db.execute("UPDATE memories SET state='retracted' WHERE id=? AND owner_key=?",(memory_id,owner_key))
             restored=None
             if row['supersedes']:
-                previous=db.execute("SELECT * FROM memories WHERE id=? AND owner_key=? AND state='superseded'",(row['supersedes'],owner_key)).fetchone()
+                previous=db.execute("SELECT * FROM memories WHERE id=? AND owner_key=? AND state IN ('superseded','corrected')",(row['supersedes'],owner_key)).fetchone()
                 if previous:
                     db.execute("UPDATE memories SET state='current' WHERE id=? AND owner_key=?",(previous['id'],owner_key))
                     restored=self._memory_row(db.execute('SELECT * FROM memories WHERE id=?',(previous['id'],)).fetchone())
@@ -1117,7 +1118,7 @@ class QuickStore:
                 # early and orphan the remaining ancestors while reporting an
                 # untruthful deleted_memory_count.
                 db.execute('BEGIN IMMEDIATE')
-                superseded=db.execute("SELECT owner_key,supersedes FROM memories WHERE id=? AND state='superseded'",(item_id,)).fetchone()
+                superseded=db.execute("SELECT owner_key,supersedes FROM memories WHERE id=? AND state IN ('superseded','corrected')",(item_id,)).fetchone()
                 if superseded:
                     owner_key=superseded['owner_key']
                     deleted_approvals=db.execute('DELETE FROM memory_approvals WHERE owner_key=? AND (subject_id=? OR result_id=?)',

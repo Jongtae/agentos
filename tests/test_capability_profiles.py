@@ -113,6 +113,8 @@ class OneActionSource(_Store):
                                  'search_memory': True,
                                  'calendar_draft_create': False, 'calendar_draft_update': False,
                                  'calendar_draft_cancel': False, 'save_memory': False,
+                                 # #794 phase 3: the owner's exact forget/delete/undo.
+                                 'forget_record': False,
                                  # #826: the connected-folder documents and approved pages.
                                  'find_files': True, 'list_roots': True, 'read_file': True, 'public_page_read': True,
                                  # #1172: the owner's Drive reads.
@@ -369,6 +371,8 @@ class SettingsProjection(_Store):
                                              # #774: relayed to the service on this route.
                                              'calendar_query', 'calendar_draft_create', 'calendar_draft_update', 'calendar_draft_cancel', 'list_memory', 'search_memory', 'save_memory', 'schedule_preparation',
                                              'ask_location',
+                                             # #794 phase 3: relayed the same way.
+                                             'forget_record',
                                              # #814: owner settings, relayed the same way.
                                              'settings_read', 'settings_change',
                                              # #826: the Work information-use audit, relayed the same way.

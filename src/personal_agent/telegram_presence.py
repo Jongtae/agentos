@@ -259,6 +259,7 @@ FALLBACK_STEP_LINES = {
     'save_note': (None, '메모 저장 중'),
     'list_memory': (None, '기억 확인 중'),
     'save_memory': (None, '기억 저장 중'),
+    'forget_record': (None, '기억 정리 중'),
     'list_agents': (None, '에이전트 목록 확인 중'),
     'delegate_agent': (None, '전문 에이전트에게 맡기는 중'),
     'propose_current_state': (None, '현재 상황 기록 중'),

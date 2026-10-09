@@ -23,8 +23,10 @@ HOST_ACTIONS={'web_search','public_page_read','bounded_public_research','weather
               # #1172: read-only search and read of the owner's connected Google Drive.
               'drive_search','drive_read',
               # #1216: an authenticated API call by secret-slot reference (non-read needs approval).
-              'api_request'}
-WRITE_ACTIONS={'save_note','save_memory','delegate_agent','calendar_draft_create','calendar_draft_update','calendar_draft_cancel','browser_click','browser_type','propose_current_state','schedule_preparation','ask_location','settings_change','api_request'}
+              'api_request',
+              # #794 phase 3: the owner's exact forget, complete deletion and undo.
+              'forget_record'}
+WRITE_ACTIONS={'save_note','save_memory','delegate_agent','calendar_draft_create','calendar_draft_update','calendar_draft_cancel','browser_click','browser_type','propose_current_state','schedule_preparation','ask_location','settings_change','api_request','forget_record'}
 #: #627: declared host actions ``Capabilities.offered_tools`` offers only while
 #: the owner has current context on.  Off, every route's surface is exactly the
 #: pre-#627 one; the declarations (CLI profiles, Settings, the Claude

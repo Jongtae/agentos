@@ -329,7 +329,7 @@ class ContextObservations:
             identity = self._active_identity(db)
             rows = [] if identity is None else db.execute(
                 'SELECT * FROM context_observations WHERE owner_key=? AND generation=? AND context_epoch=? '
-                "AND expires_at>? AND state!='invalidated' ORDER BY observed_at DESC",
+                "AND expires_at>? AND state NOT IN ('invalidated','forgotten') ORDER BY observed_at DESC",
                 (*identity, settings['epoch'], now)).fetchall()
         entries = [self._entry(row, now) for row in rows]
         if not settings['enabled']:

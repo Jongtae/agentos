@@ -253,7 +253,7 @@ class ExposedToolWireBoundary(unittest.TestCase):
         # #814: and the owner settings tools.
         # #826: and the connected-folder documents, approved pages and the information-use audit.
         self.assertEqual(names, ["bounded_public_research", "calendar_draft_cancel", "calendar_draft_create",
-                                 "calendar_draft_update", "calendar_query", "drive_read", "drive_search", "find_files", "information_use",
+                                 "calendar_draft_update", "calendar_query", "drive_read", "drive_search", "find_files", "forget_record", "information_use",
                                  "list_memory", "list_notes", "list_roots", "public_page_read", "read_file", "save_memory",
                                  "save_note", "schedule_preparation", "search_memory", "settings_change", "settings_read", "weather",
                                  "web_search"])
@@ -281,7 +281,7 @@ class ExposedToolWireBoundary(unittest.TestCase):
         self.assertIn("--native-search", self.server["args"])
         self.assertEqual([tool["name"] for tool in replies[2]["result"]["tools"]],
                          ["calendar_draft_cancel", "calendar_draft_create", "calendar_draft_update", "calendar_query",
-                          "drive_read", "drive_search", "find_files", "information_use", "list_memory", "list_notes", "list_roots", "public_page_read",
+                          "drive_read", "drive_search", "find_files", "forget_record", "information_use", "list_memory", "list_notes", "list_roots", "public_page_read",
                           "read_file", "save_memory", "save_note", "schedule_preparation", "search_memory", "settings_change",
                           "settings_read", "weather"])
         self.assertFalse(_refused(replies[3]))

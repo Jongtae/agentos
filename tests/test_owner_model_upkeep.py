@@ -255,6 +255,19 @@ class Apply(Upkeep):
         for raw in ('sk-proj', 'LEAKYSECRET0918VALUE', 'profile.api'):
             self.assertNotIn(raw, text)
 
+    def test_a_value_the_owner_forgot_is_not_re_derived_from_a_source_work(self):
+        """#794 phase 3: upkeep reprocessing a Work never brings back a forgotten value."""
+        from personal_agent.owner_forget import OwnerForget
+        row = self.store.save_memory('profile.place.work', '판교', MEMORY_OWNER, work_id='w0')
+        OwnerForget(self.store).forget(MEMORY_OWNER, 'memory:' + row['id'])
+        job = self.finished('나는 판교에서 일해')
+        self.answers = [[proposal('profile.place.work', '판교'), proposal('profile.place.home', '합정')]]
+        self.service.run_owner_model_upkeep()
+        self.assertEqual([r['content'] for r in self.store.memories(MEMORY_OWNER)], ['합정'])
+        [(_status, detail)] = self.evidence(job)
+        self.assertEqual([item['reason'] for item in detail['dropped']], [om.FORGOTTEN_VALUE])
+        self.assertNotIn('판교', json.dumps(detail['dropped'], ensure_ascii=False))
+
     def test_a_stated_value_the_owner_did_not_say_is_saved_too(self):
         """#918: the value-coverage gate is off this path; the owner's notice with undo is the correction."""
         job = self.finished('나는 판교에서 일해')

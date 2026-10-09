@@ -38,7 +38,7 @@ BOUNDED_NAMES = ['ask_location', 'bounded_public_research', 'browser_click', 'br
                  'calendar_draft_cancel', 'calendar_draft_create', 'calendar_draft_update', 'calendar_query',
                  # #1172: the owner's Drive reads, relayed to the service.
                  'drive_read', 'drive_search', 'find_files',
-                 'information_use', 'list_memory', 'list_notes', 'list_roots', 'propose_current_state', 'public_page_read',
+                 'forget_record', 'information_use', 'list_memory', 'list_notes', 'list_roots', 'propose_current_state', 'public_page_read',
                  'read_file', 'save_memory', 'save_note', 'schedule_preparation',
                  'search_memory', 'settings_change', 'settings_read', 'weather', 'web_search',
                  # #1216: authenticated API calls by slot, relayed to the service.

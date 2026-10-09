@@ -54,6 +54,8 @@ import hashlib
 import json
 import time
 
+from .owner_forget import OwnerForget
+
 #: The source Work's tool-event name of every upkeep run (#794 shows it).
 EVENT_TOOL = 'owner_model'
 #: The DecisionContext purpose of the proposal judgment.
@@ -289,6 +291,10 @@ SCHEMA = {'type': 'object', 'additionalProperties': False,
 def shape(data):
     """Types only; each proposal's meaning is ``validate``'s (an absent situation is no note)."""
     return isinstance(data.get('proposals'), list) and isinstance(data.get('situation', ''), str)
+
+
+#: #794 phase 3: an upkeep proposal whose exact value the owner forgot (``owner_forget``).
+FORGOTTEN_VALUE = 'forgotten-value'
 
 
 def normalized(text):
@@ -642,6 +648,10 @@ class Upkeep:
                 # #918 review P1: a stored secret or a credential-shaped value never enters Memory; only a key digest is kept.
                 dropped.append({'key_digest': key_digest(key), 'reason': SECRET_SHAPED_VALUE})
                 continue
+            if OwnerForget(self.store).is_forgotten(MEMORY_OWNER, key, content):
+                # #794 phase 3: upkeep reprocesses a source Work; a value the owner forgot is not re-derived from it.
+                dropped.append({'key_digest': key_digest(key), 'reason': FORGOTTEN_VALUE})
+                continue
             row = {'memory_key': key, 'category': item['category'], 'kind': item['kind'],
                    'content_chars': len(content), 'supersedes_key': item['supersedes_key'] or None}
             # #918 slice (a), owner decision 2026-09-30: the owner's own Judgment AI saves at once as
@@ -718,6 +728,8 @@ class Upkeep:
                 dropped.append({'note': 'lesson', 'key_digest': key_digest(key), 'reason': STOPPED_PAUSED})
             elif memory_value_has_secret(self.store, key, content):
                 dropped.append({'note': 'lesson', 'key_digest': key_digest(key), 'reason': SECRET_SHAPED_VALUE})
+            elif OwnerForget(self.store).is_forgotten(MEMORY_OWNER, key, content):
+                dropped.append({'note': 'lesson', 'key_digest': key_digest(key), 'reason': FORGOTTEN_VALUE})
             else:
                 try:
                     memory = self.store.save_memory(key, content, MEMORY_OWNER, work_id=job['id'], notice=True)

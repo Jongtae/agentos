@@ -104,6 +104,8 @@ _PREPARATIONS = 'owner-preparations-not-bound-to-cli-route'
 #: #774: relayed to the service on the trusted-local route only.
 _OWNER_STATE_RELAYED = ('calendar_query', 'calendar_draft_create', 'calendar_draft_update', 'calendar_draft_cancel',
                         'list_memory', 'search_memory', 'save_memory', 'schedule_preparation', 'ask_location',
+                        # #794 phase 3: exact forget/delete/undo of owner state, held by the service.
+                        'forget_record',
                         # #814: owner settings and their confirm-before-apply drafts, held by the service.
                         'settings_read', 'settings_change',
                         # #826: the information-use audit, read from the Work records the service holds.
@@ -227,7 +229,7 @@ CLI_PROFILES = {
         'unavailable': {action: _ISOLATED for action in (
             'bounded_public_research', 'save_note', 'weather', 'web_search', 'public_page_read',
             'find_files', 'read_file', 'list_roots', 'calendar_query', 'calendar_draft_create',
-            'calendar_draft_update', 'calendar_draft_cancel', 'save_memory', 'list_memory', 'search_memory',
+            'calendar_draft_update', 'calendar_draft_cancel', 'save_memory', 'list_memory', 'search_memory', 'forget_record',
             'list_agents', 'delegate_agent', 'propose_current_state', 'schedule_preparation', 'ask_location',
             'settings_read', 'settings_change', 'information_use', 'drive_search', 'drive_read', 'api_request',
             *_BROWSER_ACTIONS, *_SKILL_ACTIONS)},
@@ -251,7 +253,7 @@ CLI_PROFILES = {
             'calendar_draft_update': _CALENDAR, 'calendar_draft_cancel': _CALENDAR,
             'drive_search': _DRIVE, 'drive_read': _DRIVE,
             'api_request': _API,
-            'save_memory': _MEMORY, 'list_memory': _MEMORY, 'search_memory': _MEMORY,
+            'save_memory': _MEMORY, 'list_memory': _MEMORY, 'search_memory': _MEMORY, 'forget_record': _MEMORY,
             'list_agents': _SPECIALISTS, 'delegate_agent': _SPECIALISTS,
             **{action: _BROWSER for action in _BROWSER_ACTIONS},
             'schedule_preparation': _PREPARATIONS,

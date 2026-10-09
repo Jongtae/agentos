@@ -33,7 +33,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       answer_note, owner_cause, report_statement, terminal_text, tried_statement, turn_qualifier,
                                       verified_portion)
 from .subscription_engines import SubscriptionEngines
-from .bounded_execution import BRIDGE_UNAVAILABLE, TOOL_INCOMPLETE, TOOL_INCOMPLETE_TEXT, bridge_sdk_problem, incomplete_bridge_calls
+from .bounded_execution import BRIDGE_UNAVAILABLE, CLI_TOOL_CALLS_KEPT, TOOL_INCOMPLETE, TOOL_INCOMPLETE_TEXT, bridge_sdk_problem, incomplete_bridge_calls
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, StrictIsolatedAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, profile_actions, profile_status, route_unavailable
 from .orchestrator import model_refused, remember_model_refusal
 from .orchestrator import (EVENT_TOOL as ORCHESTRATION_EVENT, NOT_JUDGED, NOT_REACHED, REACHED, UNJUDGED, WORKER_FAILED,
@@ -296,10 +296,6 @@ RETRY_EFFECT_TOOLS=frozenset({'save_note','save_memory','delegate_agent',
                               # #1216: an API call; one AgentOS classified read changed nothing (``effect_calls``).
                               'api_request'})
 EFFECT_RETRY_REFUSAL='이전 요청이 상태를 바꾸는 작업을 시도해 자동으로 다시 실행하지 않았습니다.'
-#: #795: ``bounded_execution.cli_metadata`` keeps at most this many of the tool
-#: calls a CLI reported; a list that long may have dropped some, so it cannot
-#: show that the CLI ran no host action (``cli_host_actions``).
-CLI_TOOL_CALLS_KEPT=30
 #: #795 review: the record each CLI writes last when its turn ended (Codex
 #: ``exec --json`` ``turn.completed``/``turn.failed``, Claude Code
 #: ``stream-json`` ``result``), as ``cli_metadata``'s ``stream_tail`` names it.
@@ -2719,15 +2715,19 @@ class AgentService:
         from collections import Counter
         from .bounded_execution import CLAUDE_NATIVE_SEARCH_TOOL
         bridge=set(profile_actions(BOUNDED_PROFILE))
+        # #808: an execute that never launched the CLI ran nothing.
+        if isinstance(meta,dict) and meta.get('launched') is False:return ()
         calls=meta.get('tool_calls') if isinstance(meta,dict) else None
-        if not isinstance(calls,list) or len(calls)>=CLI_TOOL_CALLS_KEPT:return None
+        # #808: a summary that dropped a line or reached its cap may have lost a call.
+        if not isinstance(calls,list) or meta.get('tool_calls_partial') or len(calls)>=CLI_TOOL_CALLS_KEPT:return None
         tail=meta.get('stream_tail')
         if not isinstance(tail,list) or not tail or tail[-1] not in CLI_TURN_END_RECORDS:return None
         host,denied=[],Counter()
         for call in calls:
             if not isinstance(call,dict):return None
             kind,name=call.get('type'),str(call.get('name') or '')
-            if (kind=='mcp_tool_call' and name in bridge) or (kind=='tool_use' and name.startswith('mcp__agentos__')):continue
+            # #808: a Codex MCP call is the bridge's only when its server is ``agentos``.
+            if (kind=='mcp_tool_call' and name in bridge and call.get('server')=='agentos') or (kind=='tool_use' and name.startswith('mcp__agentos__')):continue
             if kind=='web_search' or (kind=='tool_use' and name==CLAUDE_NATIVE_SEARCH_TOOL):continue
             if kind=='tool_use' and call.get('status')=='denied':
                 denied[name]+=1

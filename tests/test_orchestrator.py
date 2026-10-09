@@ -1979,7 +1979,7 @@ class UnmediatedEngine(Harness):
         self.assertEqual(row['response'], 'cli answer')
 
     def test_a_trusted_local_attempt_whose_cli_reported_no_host_action_is_redelegated(self):
-        calls = [{'type': 'mcp_tool_call', 'name': 'web_search', 'status': 'completed'},
+        calls = [{'type': 'mcp_tool_call', 'name': 'web_search', 'status': 'completed', 'server': 'agentos'},
                  {'type': 'web_search', 'name': 'web_search', 'status': 'completed'},
                  {'type': 'tool_use', 'name': 'mcp__agentos__list_notes', 'status': 'requested'},
                  {'type': 'tool_use', 'name': 'WebSearch', 'status': 'requested'},
@@ -1996,6 +1996,14 @@ class UnmediatedEngine(Harness):
         self.store.put('subscription_isolation', {'profile': STRICT_PROFILE,
                                                   'qualified': {'codex': {'platform': sys.platform}}})
         self.assertIs(self.service.subscription_facade('codex')[0], StrictIsolatedAgentOSMcpTools)
+
+    def test_a_failure_before_the_cli_launched_is_redelegated(self):
+        """#808: a missing binary, an oversized prompt or a start error ran nothing."""
+        from personal_agent.bounded_execution import NOT_LAUNCHED
+        job, row = self.failing_attempt(dict(NOT_LAUNCHED))
+        first = self.events(job, 'evaluated')[0][1]
+        self.assertEqual((first['outcome'], first['next'], first['stop']), ('worker_failed', 'redelegate', None))
+        self.assertEqual(row['response'], 'api answer')
 
     def test_a_strict_profile_attempt_with_only_reads_is_redelegated(self):
         self.strict()
@@ -2047,7 +2055,7 @@ class CliHostActions(unittest.TestCase):
     def test_bridge_calls_own_search_and_denied_calls_are_not_host_actions(self):
         host = AgentService.cli_host_actions
         self.assertEqual(host(reported([])), ())
-        self.assertEqual(host(reported([{'type': 'mcp_tool_call', 'name': 'save_note', 'status': 'completed'},
+        self.assertEqual(host(reported([{'type': 'mcp_tool_call', 'name': 'save_note', 'status': 'completed', 'server': 'agentos'},
                                               {'type': 'tool_use', 'name': 'mcp__agentos__save_note', 'status': 'requested'},
                                               {'type': 'web_search', 'name': 'web_search', 'status': 'completed'},
                                               {'type': 'tool_use', 'name': 'WebSearch', 'status': 'requested'}])), ())
@@ -2086,6 +2094,48 @@ class CliHostActions(unittest.TestCase):
         self.assertEqual(AgentService.cli_host_actions(cli_metadata('claude-code', claude + '\n' + result)), ('Bash',))
         self.assertIsNone(AgentService.cli_host_actions(cli_metadata('claude-code', claude)), 'no result record')
 
+
+    def test_codex_items_beyond_the_four_known_kinds_are_calls(self):
+        """#808: a sub-agent spawn and an apps connector call named like a bridge action are host actions."""
+        from personal_agent.bounded_execution import cli_metadata
+        ended = json.dumps({'type': 'turn.completed'})
+        collab = json.dumps({'type': 'item.completed', 'item': {'id': 'i1', 'type': 'collab_tool_call', 'tool': 'spawn_agent',
+                                                                'status': 'completed'}})
+        apps = json.dumps({'type': 'item.completed', 'item': {'id': 'i2', 'type': 'mcp_tool_call', 'server': 'codex_apps',
+                                                              'tool': 'save_note', 'status': 'completed'}})
+        bridge = json.dumps({'type': 'item.completed', 'item': {'id': 'i3', 'type': 'mcp_tool_call', 'server': 'agentos',
+                                                                'tool': 'save_note', 'status': 'completed'}})
+        talk = json.dumps({'type': 'item.completed', 'item': {'id': 'i4', 'type': 'agent_message', 'text': 'hi'}})
+        meta = cli_metadata('codex', '\n'.join([collab, apps, bridge, talk, ended]))
+        self.assertEqual(AgentService.cli_host_actions(meta), ('spawn_agent', 'save_note'))
+        self.assertEqual(meta['tool_calls'][1]['server'], 'codex_apps')
+
+    def test_a_dropped_line_makes_the_report_unobservable(self):
+        from personal_agent.bounded_execution import MAX_OUTPUT_BYTES, cli_metadata
+        ended = json.dumps({'type': 'turn.completed'})
+        for dropped in ('{"type": "item.completed", "item": ' + 'x' * MAX_OUTPUT_BYTES + '}', '{not json'):
+            with self.subTest(size=len(dropped)):
+                meta = cli_metadata('codex', dropped + '\n' + ended)
+                self.assertTrue(meta['tool_calls_partial'])
+                self.assertIsNone(AgentService.cli_host_actions(meta))
+
+    def test_started_and_completed_events_count_once(self):
+        """#808: fifteen bridge calls stay observable although Codex writes two events for each."""
+        from personal_agent.bounded_execution import cli_metadata
+        lines = []
+        for index in range(15):
+            item = {'id': f'c{index}', 'type': 'mcp_tool_call', 'server': 'agentos', 'tool': 'web_search'}
+            lines += [json.dumps({'type': 'item.started', 'item': {**item, 'status': 'in_progress'}}),
+                      json.dumps({'type': 'item.completed', 'item': {**item, 'status': 'completed'}})]
+        meta = cli_metadata('codex', '\n'.join(lines + [json.dumps({'type': 'turn.completed'})]))
+        self.assertEqual(len(meta['tool_calls']), 15)
+        self.assertEqual({call['status'] for call in meta['tool_calls']}, {'completed'})
+        self.assertNotIn('tool_calls_partial', meta)
+        self.assertEqual(AgentService.cli_host_actions(meta), ())
+
+    def test_a_not_launched_report_is_no_host_action(self):
+        from personal_agent.bounded_execution import NOT_LAUNCHED
+        self.assertEqual(AgentService.cli_host_actions(dict(NOT_LAUNCHED)), ())
 
 
 class CatalogueMatchesOffered(Harness):

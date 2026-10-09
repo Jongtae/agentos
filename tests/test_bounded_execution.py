@@ -850,3 +850,35 @@ class ServiceLoggingTests(unittest.TestCase):
                 for handler in logger.handlers: handler.close()
         finally:
             logger.handlers, logger.propagate, logger.level = saved
+
+
+class NotLaunchedTests(unittest.TestCase):
+    """#808: a failure before the CLI started carries ``NOT_LAUNCHED``; a launched one keeps its own meta."""
+
+    def test_pre_launch_failures_say_nothing_ran(self):
+        from personal_agent.bounded_execution import NOT_LAUNCHED
+        with tempfile.TemporaryDirectory() as folder:
+            missing = BoundedExecutionAdapter(finder=lambda _: None, runtime_root=Path(folder) / 'turns')
+            missing.bridge_check = lambda: None
+
+            def refused(*_a, **_k):
+                raise OSError('exec format error')
+            broken = BoundedExecutionAdapter(finder=lambda _: '/runtime/codex', runner=refused,
+                                             runtime_root=Path(folder) / 'turns', codex_home=Path(folder))
+            broken.bridge_check = lambda: None
+            for adapter, prompt in ((missing, 'hello'), (broken, 'x' * 60_000), (broken, 'hello')):
+                with self.subTest(prompt=len(prompt)), self.assertRaises(ExecutionError) as caught:
+                    adapter.execute('codex', prompt, AgentOSMcpTools(_Capabilities()))
+                self.assertEqual(caught.exception.meta, NOT_LAUNCHED)
+
+    def test_a_launched_failure_keeps_its_argv(self):
+        class Failed:
+            returncode, stdout, stderr = 1, '', 'boom'
+        with tempfile.TemporaryDirectory() as folder:
+            adapter = BoundedExecutionAdapter(finder=lambda _: '/runtime/codex', runner=lambda *a, **k: Failed(),
+                                              runtime_root=Path(folder) / 'turns', codex_home=Path(folder))
+            adapter.bridge_check = lambda: None
+            with self.assertRaises(ExecutionError) as caught:
+                adapter.execute('codex', 'hello', AgentOSMcpTools(_Capabilities()))
+        self.assertIn('argv', caught.exception.meta)
+        self.assertNotIn('launched', caught.exception.meta)

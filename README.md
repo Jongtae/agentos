@@ -56,7 +56,7 @@ These are not features of one particular AI model. They are the criteria by whic
 - **Execution:** It doesn't only answer questions; it can act in real services and on computers.
 - **Owner Control:** I retain control over my data, permissions and the outcomes of execution.
 
-These are design goals, not a claim that every scenario already works. The [product status](docs/product-status.en.md), real demo above and [known browser limitations](https://github.com/Jongtae/agentos/issues/758) show what has been observed and what still needs work.
+These are guiding principles, not a claim that every scenario already works. The [product status](docs/product-status.en.md), real demo above and [known browser limitations](https://github.com/Jongtae/agentos/issues/758) show what has been observed and what still needs work.
 
 <!-- readme-section:try-today -->
 

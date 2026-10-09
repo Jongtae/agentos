@@ -320,6 +320,8 @@ class ServiceProvenance(unittest.TestCase):
         # #961: skills are off by default, so the skill tools are not offered.
         from personal_agent.agent_runtime import SKILL_ACTIONS
         hidden |= SKILL_ACTIONS
+        # #1216: no API slot is registered, so api_request is not offered.
+        hidden |= {'api_request'}
         self.assertEqual(record['exposed_tools'], [tool['name'] for tool in profile_mcp_tools('trusted-local')
                                                    if tool['name'] not in hidden])
         if service.browser_profile.available():

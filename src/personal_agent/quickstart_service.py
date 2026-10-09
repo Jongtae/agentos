@@ -33,7 +33,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
                                       answer_note, owner_cause, report_statement, terminal_text, tried_statement, turn_qualifier,
                                       verified_portion)
 from .subscription_engines import SubscriptionEngines
-from .bounded_execution import TOOL_INCOMPLETE, TOOL_INCOMPLETE_TEXT, incomplete_bridge_calls
+from .bounded_execution import BRIDGE_UNAVAILABLE, TOOL_INCOMPLETE, TOOL_INCOMPLETE_TEXT, bridge_sdk_problem, incomplete_bridge_calls
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, StrictIsolatedAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, profile_actions, profile_status, route_unavailable
 from .orchestrator import model_refused, remember_model_refusal
 from .orchestrator import (EVENT_TOOL as ORCHESTRATION_EVENT, NOT_JUDGED, NOT_REACHED, REACHED, UNJUDGED, WORKER_FAILED,
@@ -9639,6 +9639,9 @@ class AgentService:
                                     self._remember_engine_login(subscription['id'],'signed-out','run')
                                 record('subscription_engine','failed',json.dumps({'engine':subscription['id'],'error':str(exc),**diagnostics},ensure_ascii=False))
                                 # #710: a failed worker may be re-delegated within the Work's bounds.
+                                # #1130: not to another CLI when the shared AgentOS bridge failed; it would run without tools too.
+                                if diagnostics.get('failure_class')==BRIDGE_UNAVAILABLE and orchestration is not None:
+                                    orchestration.drop_bridge_workers()
                                 following=self.orchestration_step(orchestration,attempt,job['id'],attempt_start,failed=str(exc),
                                                                   unmediated=unmediated_turn,engine_meta=getattr(exc,'meta',None))
                                 if following is not None:
@@ -10129,6 +10132,10 @@ class AgentService:
         except Exception as exc:
             LOG.warning('family setup reconcile failed (%s)',type(exc).__name__)
         self.recover_interrupted_work()
+        # #1130: a working-copy run is not covered by the release's mcp-host check; say so at start.
+        # Each Work turn checks again, so this is a log line, not a gate.
+        bridge_problem=bridge_sdk_problem()
+        if bridge_problem:LOG.warning('AgentOS MCP bridge unavailable: %s; CLI Work turns will be refused until fixed',bridge_problem)
         # #685: a Judgment AI qualification cut off by the restart is requeued once or fails as interrupted.
         self.decision_routes.recover_qualification()
         # #814 review: a settings draft a restart cut off mid-apply is settled unknown (never re-applied).

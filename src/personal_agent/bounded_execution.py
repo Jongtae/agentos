@@ -525,6 +525,51 @@ class ExecutionError(ValueError):
                 ('exit_code', self.exit_code), ('reason', self.reason)) if value not in ('', None)}
 
 
+#: #1130: the ``mcp`` SDK release the stdio bridge is written against; equal to
+#: the ``mcp-host`` extra pin in pyproject.toml (a test keeps them together).
+MCP_SDK_VERSION = '2.3.0'
+#: #1130: a Work turn whose AgentOS bridge cannot run.  Every CLI worker shares
+#: the same bridge, so this is a host failure, never a worker shortfall.
+BRIDGE_UNAVAILABLE = 'bridge-unavailable'
+BRIDGE_UNAVAILABLE_TEXT = ('AgentOS 도구 연결(MCP 브리지)을 시작할 수 없어 AI가 AgentOS 도구 없이 일하게 되므로 '
+                           '작업을 멈췄어요. 다른 AI로 바꿔도 같은 연결을 쓰기 때문에 다시 맡기지 않았습니다.')
+BRIDGE_DEPENDENCY_HINT = (' AgentOS를 실행하는 Python 환경의 mcp-host 의존성을 맞춘 뒤(작업본은 pip install -e ".[mcp-host]", '
+                          '설치본은 재설치) 다시 요청하세요.')
+
+
+def bridge_sdk_problem():
+    """Why the per-turn bridge cannot import its SDK in this interpreter, or ``None`` (#1130).
+
+    The bridge runs as ``sys.executable -m personal_agent.mcp_bridge``, so the
+    installed distribution metadata of this interpreter decides.  Metadata is
+    read from disk on each call (nothing is imported or cached), so a repaired
+    environment is seen by the next turn without a restart.
+    """
+    from importlib import metadata
+    try:
+        installed = metadata.version('mcp')
+    except metadata.PackageNotFoundError:
+        return 'mcp SDK is not installed (mcp-host extra missing)'
+    if installed != MCP_SDK_VERSION:
+        return f'mcp SDK {installed} is installed; the bridge needs {MCP_SDK_VERSION}'
+    return None
+
+
+def claude_bridge_status(raw):
+    """The ``agentos`` MCP server status Claude Code reported in its init record, or ``None`` (#1130)."""
+    for line in jsonl_lines(raw or '')[:20]:
+        try:
+            record = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(record, dict) and record.get('type') == 'system' and record.get('subtype') == 'init':
+            for server in record.get('mcp_servers') or ():
+                if isinstance(server, dict) and server.get('name') == 'agentos':
+                    return str(server.get('status') or '') or None
+            return None
+    return None
+
+
 # Shared with the service for provenance redaction (#570).
 SECRET_PATTERN = _SECRET
 
@@ -1294,6 +1339,8 @@ class BoundedExecutionAdapter:
         from .subscription_engines import find_cli as which
         self.finder = finder or which
         self.runner = runner
+        # #1130: whether the per-turn bridge can start here (replaceable in tests).
+        self.bridge_check = bridge_sdk_problem
         configured_root = runtime_root or os.environ.get('AGENTOS_ENGINE_RUNS')
         self.runtime_root = Path(configured_root).expanduser() if configured_root else Path.home()/'.local/share/agentos/engine-runs'
         self.codex_home = Path(codex_home).expanduser() if codex_home else None
@@ -1785,6 +1832,13 @@ class BoundedExecutionAdapter:
         binary = self.finder(binaries[engine_id])
         if not binary:
             raise ExecutionError('연결한 구독 엔진 CLI를 격리된 런타임에서 찾지 못했습니다.')
+        # #1130: a bridge that cannot start leaves the CLI without AgentOS tools while
+        # the turn still exits 0; refuse before launch instead of letting it look like a worker shortfall.
+        problem = self.bridge_check()
+        if problem:
+            LOG.warning('engine turn refused engine=%s class=%s reason=%s', engine_id, BRIDGE_UNAVAILABLE, problem)
+            raise ExecutionError(BRIDGE_UNAVAILABLE_TEXT + BRIDGE_DEPENDENCY_HINT,
+                                 failure_class=BRIDGE_UNAVAILABLE, reason=problem)
         # Only declarative tool metadata is written here.  Tool calls must be
         # served by the AgentOS MCP bridge, never by engine-provided commands.
         self.runtime_root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -1970,6 +2024,14 @@ class BoundedExecutionAdapter:
                                      meta={**run_meta, **cli_metadata(engine_id, stdout),
                                            'duration_ms': int(elapsed * 1000),
                                            **({'unsupported_model': refused} if refused else {})})
+            # #1130: the CLI's own record of whether the AgentOS bridge started.
+            bridge_status = claude_bridge_status(completed.stdout) if engine_id == 'claude-code' else None
+            if bridge_status is not None and bridge_status != 'connected':
+                LOG.warning('engine turn had no bridge engine=%s status=%s', engine_id, bridge_status)
+                raise ExecutionError(BRIDGE_UNAVAILABLE_TEXT, failure_class=BRIDGE_UNAVAILABLE, exit_code=0,
+                                     reason=f'agentos MCP server status: {bridge_status}',
+                                     meta={**run_meta, **cli_metadata(engine_id, completed.stdout),
+                                           'duration_ms': int(elapsed * 1000)})
             try:
                 content = self._content(engine_id, completed.stdout)
             except ExecutionError as exc:

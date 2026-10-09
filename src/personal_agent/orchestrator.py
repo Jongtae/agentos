@@ -749,6 +749,17 @@ class Orchestration:
             if not worker['models']:
                 worker.update(available=False, reason='default_model_refused')
 
+    def drop_bridge_workers(self):
+        """The shared AgentOS bridge cannot start: no CLI worker is offered again in this Work (#1130).
+
+        Every subscription CLI reaches AgentOS tools through the same per-turn
+        bridge, so another CLI would run without tools too.  API routes run the
+        tools in process and stay available.
+        """
+        for worker in self.catalogue.workers:
+            if worker['kind'] == KIND_SUBSCRIPTION:
+                worker.update(available=False, reason='bridge_unavailable')
+
     @staticmethod
     def signature(worker, model):
         """Worker and effective model of an attempt (#729)."""

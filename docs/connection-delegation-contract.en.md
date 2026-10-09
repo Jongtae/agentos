@@ -81,9 +81,14 @@ What each effect class needs, under the pilot posture:
 
 Classifying an effect:
 
-- **Deterministic guards apply where they can see the effect.** Examples are the card and one-time-code field guard (#698) and a GET-only transport (#1172, #1218).
+- **Deterministic guards apply where they can see the effect.** Examples:
+  - the card and one-time-code field guard (#698);
+  - #1172's Drive transport, which refuses every method except GET;
+  - #1218's API transport, which treats only GET and HEAD as reads and floors every other method to at least mutate.
+
+  An HTTP method is not proof of no side effect: a GET that changes server state is a known #1218 follow-up.
 - **A label can only add a requirement, never remove one.** This holds for the model's effect label and for an MCP server's `readOnlyHint`/`destructiveHint` annotations. Annotations are untrusted hints.
-- **The owner can mark a connection as money-capable.** A brokerage is the obvious example. On a money-capable connection, a tool call counts as read only when an AgentOS-owned read-only transport makes it so, or when the owner reviewed that tool as read. Every other call there is payment-class.
+- **The owner can mark a connection as money-capable.** A brokerage is the obvious example. On a money-capable connection, a tool call counts as read only when an AgentOS-owned transport limits it to a read method (GET or HEAD), or when the owner reviewed that tool as read. Every other call there is payment-class.
 - **Semantic effect judgment stays with the model; deterministic code enforces only these invariants.** There are no keyword rules (Decision Layer).
 
 Decision points must be proven before they are relied on. A compatibility test shows that the CLI actually stops at the decision point for an AI-side connector's write tool, and that AgentOS's refusal holds. Until that observation exists, the column "AI-side, no decision point" applies.
@@ -154,11 +159,15 @@ Every external read that feeds an answer keeps:
 - its source;
 - the time the source says the data is as of;
 - the raw values apart from values AgentOS or the model computed;
-- one of `fresh`, `stale`, `partial`, `conflict` or `unknown`.
+- two independent states:
+  - **freshness**: `fresh`, `stale` or `unknown`;
+  - **completeness**: `complete`, `partial` or `inconsistent`.
 
-These are generic Evidence semantics, introduced for API reads by #1218. They are never domain-specific types in core code.
+  A response can be fresh and partial, or stale and complete.
 
-A report never upgrades a state. `stale` stays stale, and `partial` is not reported as complete. Requested, observed, failed and unknown stay distinct (Secretary Agency Contract §Evidence-based completion). For money-related reads, the answer names the account and the as-of time it used.
+These are generic Evidence semantics, introduced for API reads by #1218 with exactly these values. They are never domain-specific types in core code.
+
+A report never upgrades a state. `stale` stays stale, `partial` is not reported as complete, and `inconsistent` values are not reconciled silently. Requested, observed, failed and unknown stay distinct (Secretary Agency Contract §Evidence-based completion). For money-related reads, the answer names the account and the as-of time it used.
 
 ## 9. Cost
 
@@ -189,7 +198,7 @@ These are observation windows, not completion criteria. No site, provider or cat
 | --- | --- |
 | "스크린골프장 약속 가는 길" | Uses the owner's saved map service. Honours "큰길 우선" when a hand can; otherwise says it could not. Gives leave-by time from the owner's start point (map-directions method). |
 | Cart add on the owner's shop | Hand per §3. Exact item, variant and quantity read back. Payment never started (shopping-cart method; pilot posture). |
-| "현재 자산 요약해줘" | Read-only. Hand per §3: an AI-side or registry MCP if the brokerage has one, otherwise #1218 or the browser. Account and as-of time named. Stale, partial and conflict shown (§8). No order tool offered without the §4 money rules. |
+| "현재 자산 요약해줘" | Read-only. Hand per §3: an AI-side or registry MCP if the brokerage has one, otherwise #1218 or the browser. Account and as-of time named. Stale, partial and inconsistent shown (§8). No order tool offered without the §4 money rules. |
 | Second opinion | An independent review is delegated to a different AI with context but no conclusion (§5). Disagreements are shown to the owner; the owner decides. |
 
 ## 12. Current state and gaps

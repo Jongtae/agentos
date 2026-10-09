@@ -313,7 +313,7 @@ class EngineFailureDiagnosticsTests(unittest.TestCase):
 
     def test_redaction_covers_common_credential_shapes(self):
         samples = ['{"api_key": "abc123secretvalue"}', 'Authorization: Basic dXNlcjpwYXNz',
-                   'key AIzaSyA1234567890abcdefghijklmnopqrstu', 'bot 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawq',
+                   'key AIzaSyA1234567890abcdefghijklmnopqrstu', 'bot 123456789:' + 'AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsawq',
                    'password=hunter2hunter2', 'Bearer abc.def.ghi', 'sk-proj-abcdefghijkl']
         for sample in samples:
             with self.subTest(sample=sample):

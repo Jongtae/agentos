@@ -4,7 +4,7 @@ about: Something in AgentOS does not work as described
 labels: bug
 ---
 
-<!-- Security problem? Do not file it here. Follow SECURITY.md and report it privately. -->
+<!-- Security problem? Do not file it here. Follow .github/SECURITY.md and report it privately. -->
 
 ## What happened
 

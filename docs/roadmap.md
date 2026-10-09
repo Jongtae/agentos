@@ -94,7 +94,7 @@ Few reference agents is acceptable, weak supported functions are not. Useful all
 
 FILE-WORKSPACE-01 / #314/#315/#316 completed through PR #320 and PR #324: owner-approved read-only references, managed results, original/derived/draft/final provenance, separate rebuildable indexes and durable Work/approval/evidence/recovery/auth, and restart/reuse. Evidence is deterministic-model/temp-local-file integration, not a universal personal-folder or external-provider claim.
 
-DOGFOOD-01 / #351 completed through PRs #354–#356: documented Mac/browser/direct-provider/file/result/restart steps and simulated-provider real HTTP/temp-file acceptance. Actual live provider and real owner browser quality remain separate observations. The old no-successor closeout is historical; #357 now prepares only USE-01 without executing it. [Current owner instructions](../QUICKSTART.md) remain usable while platform work is planned.
+DOGFOOD-01 / #351 completed through PRs #354–#356: documented Mac/browser/direct-provider/file/result/restart steps and simulated-provider real HTTP/temp-file acceptance. Actual live provider and real owner browser quality remain separate observations. The old no-successor closeout is historical; #357 now prepares only USE-01 without executing it. [Current owner instructions](QUICKSTART.md) remain usable while platform work is planned.
 
 D-AP-01 / #334 completed in PR #350 supplies normative contracts and schema/fixture verification, not installation, Runtime/Registry/Marketplace, credentials or Ruflo operation. Tests/static cases must not be described as live capability or benchmark success.
 

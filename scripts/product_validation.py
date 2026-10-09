@@ -47,9 +47,9 @@ class ProductValidator:
         return False
 
     def documentation(self):
-        task = self.text("TASKS.md")
+        task = self.text("docs/TASKS.md")
         roadmap = self.text("docs/roadmap.md")
-        quickstart = self.text("QUICKSTART.md")
+        quickstart = self.text("docs/QUICKSTART.md")
         stale = []
         for phrase in ("| M3 | Persistent runtime and official server install | Planned |", "| M4 | Role and tool extension contract | Planned |", "| M5 | v1 release acceptance | Planned |", "PDF/Office extraction is not implemented"):
             if phrase in task or phrase in quickstart:

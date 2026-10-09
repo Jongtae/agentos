@@ -70,8 +70,8 @@ class GovUsePreservationTests(unittest.TestCase):
         self.assertEqual(blob_sha(content), ROADMAP_SHA)
 
     def test_current_alignment_documents_have_existing_local_link_targets(self):
-        paths = ["README.md", "README.ko.md", "README.ja.md", "README.zh-CN.md",
-                 "VISION.md", "AGENTS.md", "QUICKSTART.md", "TASKS.md",
+        paths = ["README.md", "docs/i18n/README.ko.md", "docs/i18n/README.ja.md", "docs/i18n/README.zh-CN.md",
+                 "docs/VISION.md", "AGENTS.md", "docs/QUICKSTART.md", "docs/TASKS.md",
                  "docs/roadmap.md", "docs/personal-agentos-architecture.en.md",
                  "docs/agent-distribution-platform-foundation.en.md",
                  "docs/owner-control-contract.en.md", "docs/default-agent-usefulness.en.md",

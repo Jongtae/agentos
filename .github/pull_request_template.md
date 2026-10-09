@@ -64,7 +64,7 @@ Install, staged health check, enable/disable, update, rollback, quarantine, unin
 Complete when any public README or README visual changes; otherwise write `N/A`.
 
 - canonical `README.md` changed:
-- `README.ko.md`, `README.ja.md`, `README.zh-CN.md` updated for semantic/structural parity:
+- `docs/i18n/README.ko.md`, `docs/i18n/README.ja.md`, `docs/i18n/README.zh-CN.md` updated for semantic/structural parity:
 - illustrative product direction vs current supported slice remains explicit:
 - embedded-text visuals are language-neutral or localized:
 - `python3 scripts/verify_readme_localization.py`:

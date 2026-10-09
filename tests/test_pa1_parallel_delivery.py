@@ -132,7 +132,7 @@ class Pa1ParallelDeliveryTests(unittest.TestCase):
         # unconditionally made TASKS.md fail the moment the program
         # legitimately closed out -- the same cast-not-rule mistake this test
         # already carries two scars from.
-        tasks = (ROOT / "TASKS.md").read_text(encoding="utf-8")
+        tasks = (ROOT / "docs/TASKS.md").read_text(encoding="utf-8")
         self.assertNotIn("selects USE-01 as goal-ready", tasks)
         self.assertIn("#358 did not select a successor; EPIC-PA1 is separately prepared by #385", tasks)
         if status == CLOSED_OUT:

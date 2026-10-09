@@ -30,7 +30,7 @@ The owner can entrust approved material to a durable AI environment, ask for out
 
 This is not a coding harness, swarm framework, host kernel, hypervisor or replacement for macOS/Linux. Repository issues, branches, CI, delivery heartbeat and Goal mode build the product; they are not an end-user capability or proof of live operation.
 
-Canonical references: [architecture](../../personal-agentos-architecture.en.md), [owner-control contract](../../owner-control-contract.en.md), [default-agent usefulness](../../default-agent-usefulness.en.md), [v0.1 contracts](../../core-primitives-agentpackage-v0.1.en.md) and [platform foundation](../../agent-distribution-platform-foundation.en.md). Current implementation status is in [TASKS](../../../TASKS.md), [roadmap](../../roadmap.md) and named evidence, not implied by this product vision.
+Canonical references: [architecture](../../personal-agentos-architecture.en.md), [owner-control contract](../../owner-control-contract.en.md), [default-agent usefulness](../../default-agent-usefulness.en.md), [v0.1 contracts](../../core-primitives-agentpackage-v0.1.en.md) and [platform foundation](../../agent-distribution-platform-foundation.en.md). Current implementation status is in [TASKS](../../TASKS.md), [roadmap](../../roadmap.md) and named evidence, not implied by this product vision.
 
 ## Product principle: utility and control are both required
 

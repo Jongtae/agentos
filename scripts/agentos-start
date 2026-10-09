@@ -1,5 +1,5 @@
 #!/bin/sh
 set -eu
-AGENTOS_SOURCE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+AGENTOS_SOURCE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$AGENTOS_SOURCE_DIR"
 exec python3 -m personal_agent.quickstart start "$@"

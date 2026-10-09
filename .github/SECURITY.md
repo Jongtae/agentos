@@ -27,11 +27,11 @@ Personal AgentOS runs on the owner's own machine and keeps their state there. Th
 
 ## Current posture (pilot)
 
-The project is in a single-owner pilot: one owner, on their own machine, with their own accounts. By the owner's decision, some protections are deliberately deferred to a later hardening program rather than missing by accident. [`AGENTS.md`](AGENTS.md) (*Secretary agency re-plan*) records these decisions. In particular:
+The project is in a single-owner pilot: one owner, on their own machine, with their own accounts. By the owner's decision, some protections are deliberately deferred to a later hardening program rather than missing by accident. [`AGENTS.md`](../AGENTS.md) (*Secretary agency re-plan*) records these decisions. In particular:
 
 - the assistant may use the owner's private material and web search in the same task. Each task instead records which owner information it used and where that information went;
 - a check on private values leaving to new destinations, and further isolation, are deferred ([#828](https://github.com/Jongtae/agentos/issues/828)).
 
 Reports about these deferred areas are still welcome, and they inform the hardening program. They are not treated as regressions of an enforced guarantee.
 
-The canonical boundaries are in the [Owner Control Contract](docs/owner-control-contract.en.md), the [Secretary Agency Contract](docs/secretary-agency-contract.en.md) and [Personal AgentOS Architecture](docs/personal-agentos-architecture.en.md).
+The canonical boundaries are in the [Owner Control Contract](../docs/owner-control-contract.en.md), the [Secretary Agency Contract](../docs/secretary-agency-contract.en.md) and [Personal AgentOS Architecture](../docs/personal-agentos-architecture.en.md).

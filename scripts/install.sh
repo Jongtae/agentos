@@ -29,7 +29,7 @@ fail() { printf 'AgentOS install: %s\n' "$*" >&2; exit 1; }
 case "$(uname -s)" in
   Darwin|Linux) ;;
   MINGW*|MSYS*|CYGWIN*)
-    fail "Windows runs AgentOS inside WSL2. In PowerShell run 'wsl --install', restart, open Ubuntu and run this command there. See QUICKSTART.md (Windows)." ;;
+    fail "Windows runs AgentOS inside WSL2. In PowerShell run 'wsl --install', restart, open Ubuntu and run this command there. See docs/QUICKSTART.md (Windows)." ;;
   *) fail "unsupported system $(uname -s); AgentOS supports macOS, Linux and Windows through WSL2." ;;
 esac
 

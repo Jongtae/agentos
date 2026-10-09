@@ -20,6 +20,7 @@ Personal AgentOS keeps current contracts, delivery selection, research, evidence
 - Product architecture and owner control: [Personal AgentOS Architecture](personal-agentos-architecture.en.md), [Owner Control Contract](owner-control-contract.en.md), [Agent Distribution Platform Foundation](agent-distribution-platform-foundation.en.md).
 - Owner-facing experience: [Presence Experience Contract](presence-experience-contract.en.md), [Secretary Agency Contract](secretary-agency-contract.en.md).
 - AI judgment and execution: [Decision Layer](decision-layer.en.md), [Assistant Execution Contract](assistant-execution-contract.en.md).
+- Connections, control levels, delegation and the owner's way: [Connection and Delegation Contract](connection-delegation-contract.en.md).
 - Repository delivery: [Development Constitution](development-constitution.en.md), [Development Governance](development-governance.en.md), [Goal Execution Contract](goal-execution-contract.en.md), [Incremental Delivery](incremental-delivery.en.md).
 
 Core current contracts now lead with a current-rule/precedence section. Superseded amendment chains and dated diagnostic evidence that can be separated safely are preserved under [archive/history/contract-amendments/](archive/history/contract-amendments/) rather than requiring readers to replay them inline. Mixed amendments stay canonical when they still contain live rules. This organization does not alter product semantics.

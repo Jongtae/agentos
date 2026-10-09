@@ -7787,7 +7787,20 @@ class AgentService:
             text=('적용을 시작했습니다.' if rows and parts[2]=='confirm' else '처리했습니다.' if rows else '')
             try:self.telegram.answer_callback_query(callback_id,text,show_alert=False)
             except ProviderError:pass
-        if not rows:return
+        if not rows:
+            # Nothing to act on: the message shows what became of it instead of leaving dead buttons.
+            this_message=(notification and notification['kind']=='settings_change_proposed' and notification['chat_id']==sender
+                          and notification['message_id']==message.get('message_id'))
+            if this_message:
+                done={'settings_confirmed':'이미 적용했어요.','settings_canceled':'바꾸지 않았어요.'}.get(notification['state'])
+                try:
+                    if done:self.telegram.edit_message_text(sender,notification['message_id'],done,{'inline_keyboard':[]})
+                    else:self.telegram.edit_message_reply_markup(sender,notification['message_id'],{'inline_keyboard':[]})
+                except ProviderError:pass
+            elif message.get('message_id'):
+                try:self.telegram.edit_message_reply_markup(sender,message['message_id'],{'inline_keyboard':[]})
+                except ProviderError:pass
+            return
         lines=[]
         owner,channel=self.settings_owner(job),job['channel']
         for row in rows:
@@ -8168,6 +8181,10 @@ class AgentService:
             if authorized and isinstance(callback_id,str):
                 text,show=alert or ('처리했습니다.' if changed else '',False)
                 try:self.telegram.answer_callback_query(callback_id,text,show_alert=show)
+                except ProviderError:pass
+            if authorized and not changed and not alert and message.get('message_id'):
+                # A tap that can no longer act removes its dead buttons rather than leaving them to be pressed again.
+                try:self.telegram.edit_message_reply_markup(sender,message['message_id'],{'inline_keyboard':[]})
                 except ProviderError:pass
 
     def set_current_context(self, body):

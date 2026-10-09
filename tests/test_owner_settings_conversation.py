@@ -457,8 +457,9 @@ class ConversationConfirmation(_Case):
         self.tap(f"p7s:{notification['id']}:confirm", notification['message_id'])
         self.assertEqual(self.applies, [{'enabled': True}], 'applied exactly once')
         self.assertTrue(self.context()['enabled'])
-        edited = [body for method, body in self.telegram if method == 'editMessageText'][-1]
-        self.assertIn('바꿨습니다', edited['text'])
+        edits = [body for method, body in self.telegram if method == 'editMessageText']
+        self.assertIn('바꿨습니다', edits[0]['text'])
+        self.assertEqual(edits[-1]['text'], '이미 적용했어요.', 'a repeated tap shows the settled state, not an error')
 
     def test_a_tap_after_the_draft_timed_out_still_applies_the_exact_shown_change(self):
         self.change_turn()
@@ -474,6 +475,8 @@ class ConversationConfirmation(_Case):
         self.assertNotIn('처리할 수 있는 요청이 아닙니다.', answers)
         self.tap(f"p7s:{notification['id']}:confirm", notification['message_id'])
         self.assertEqual(self.applies, [{'enabled': True}], 'still exactly once')
+        edited = [body for method, body in self.telegram if method == 'editMessageText'][-1]
+        self.assertEqual(edited['text'], '이미 적용했어요.', 'the message shows what became of it')
 
     def test_a_cancel_after_the_draft_timed_out_changes_nothing_and_says_so(self):
         self.change_turn()

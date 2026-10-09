@@ -5753,6 +5753,32 @@ class AgentService:
              if self.google_client_id and holder is not None and getattr(holder,'client_id',None)==self.google_client_id}
         return [{**row,'source':'own-client'} if row.get('connector_id') in own else row for row in rows]
 
+    CONNECTION_NAMES={'google-gmail-read':'Google Gmail','google-calendar':'Google Calendar',
+                      'google-calendar-write':'Google Calendar 일정 만들기','google-drive-read':'Google Drive',
+                      DRIVE_CONNECTOR_ID:'Google Drive'}
+
+    def notify_connection_completed(self, connector_id):
+        """Tell the owner's conversation that a connection completed (#1207).
+
+        Only for a connection no Work was parked for; a parked Work's resume
+        reports itself.  One assistant transcript row (on the paired Telegram
+        channel when paired, else the web conversation) and, when paired, the
+        same text to Telegram, best effort, like ``settings_followup``.  It
+        reports only what ``complete_oauth`` already committed.
+        """
+        name=self.CONNECTION_NAMES.get(connector_id,connector_id)
+        text=f'{name} 연결이 완료되었습니다. 이제 대화에서 바로 요청하시면 됩니다.'
+        cfg=self.store.config('telegram',{})
+        paired=bool(cfg.get('enabled') and cfg.get('user_id') is not None and cfg.get('generation'))
+        channel=f"telegram:{cfg.get('generation')}" if paired else 'web'
+        with self.store.db() as db:
+            db.execute('INSERT INTO messages(role,content,channel,created) VALUES (?,?,?,?)',
+                       ('assistant',text,channel,time.time()))
+        if paired:
+            try:self.telegram.send_message(int(cfg['user_id']),text)
+            except (ProviderError,TypeError,ValueError):LOG.warning('connection notice not delivered connector=%s',connector_id)
+        return text
+
     def settings_connection_rows(self):
         """Owner-visible connections for the conversation Settings read model."""
         tg=self.store.config('telegram',{})
@@ -5761,13 +5787,13 @@ class AgentService:
             rows.append({'id':'telegram','service':'Telegram','state':'connected' if tg.get('user_id') else 'pending'})
         else:
             rows.append({'id':'telegram','service':'Telegram','state':'disconnected'})
-        names={'google-gmail-read':'Google Gmail','google-calendar':'Google Calendar',
-               'google-calendar-write':'Google Calendar 일정 만들기','google-drive-read':'Google Drive',
-               DRIVE_CONNECTOR_ID:'Google Drive'}
         for row in self.google_connection_rows():
             ident=row.get('connector_id')
-            rows.append({'id':ident,'service':names.get(ident,row.get('label') or ident),'state':row.get('state'),
-                         'connectable':bool(row.get('connect_path')),'connect_hint':row.get('connect_hint','')})
+            # #1207: the absolute loopback start address, so the conversation
+            # can hand the owner the link; naming it grants nothing.
+            rows.append({'id':ident,'service':self.CONNECTION_NAMES.get(ident,row.get('label') or ident),'state':row.get('state'),
+                         'connectable':bool(row.get('connect_path')),'connect_hint':row.get('connect_hint',''),
+                         'connect_url':self.connector_connect_url(ident) if row.get('connect_path') else ''})
         # #1204: the owner's own Google client as setup state, never as a
         # connection: saving a client grants nothing.  The steps for making
         # one stay on the Settings page; this only says where to go.
@@ -6886,6 +6912,7 @@ class AgentService:
         result=self.drive_oauth.complete_oauth(owner,callback,self.drive_read_token_exchange)
         self._remember_connector_owner(owner)
         if not parked:
+            self.notify_connection_completed(DRIVE_CONNECTOR_ID)
             return result
         try:
             resumed=self.resume_connector_work(DRIVE_CONNECTOR_ID,owner,tuple(result.get('granted_scopes') or ()))
@@ -6948,6 +6975,7 @@ class AgentService:
         connector_id=result.get('connector_id') or connector_id
         granted=tuple(result.get('granted_scopes') or ())
         if not parked:
+            self.notify_connection_completed(connector_id)
             return result
         try:
             resumed=self.resume_connector_work(connector_id,owner,granted)
@@ -6997,6 +7025,7 @@ class AgentService:
         granted=tuple(status.get('granted_scopes') or ())
         result={'connected':True,'connector_id':GMAIL_CONNECTOR_ID,'work_id':None,'scheduled':False}
         if not parked:
+            self.notify_connection_completed(GMAIL_CONNECTOR_ID)
             return result
         try:
             resumed=self.resume_connector_work(GMAIL_CONNECTOR_ID,owner,granted)

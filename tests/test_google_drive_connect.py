@@ -673,3 +673,63 @@ class OwnClientGuideTest(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         rows = AgentService(QuickStore(temp.name)).settings_connection_rows()
         self.assertNotIn('google-own-client', {row['id'] for row in rows})
+
+
+class ConnectionNoticeTest(unittest.TestCase):
+    """#1207: a completed connection is told to the conversation; the chat can hand out the start link."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.store = QuickStore(str(pathlib.Path(temp.name) / 'data'))
+        env = {'AGENTOS_GOOGLE_LOCAL_PORT': '9911', 'AGENTOS_GOOGLE_OAUTH_KEY': Fernet.generate_key().decode()}
+        self.service = configured_service(self.store, env)
+        self.service.save_google_client({'client_json': OwnClientFromSettingsTest.CLIENT})
+        self.sent = []
+
+        class Telegram:
+            def send_message(inner, chat_id, text):
+                self.sent.append((chat_id, text))
+
+        self.service.telegram = Telegram()
+
+    def complete_drive(self):
+        offer = self.service.begin_drive_connection()
+        state = parse_qs(urlparse(offer['authorization_url']).query)['state'][0]
+        self.service.drive_read_token_exchange = lambda payload: {
+            'access_token': 'a', 'expires_in': 3600, 'refresh_token': 'r', 'scope': DRIVE_READONLY_SCOPE}
+        return self.service.complete_drive_connection({'state': state, 'code': 'c'})
+
+    def assistant_rows(self):
+        with self.store.db() as db:
+            return [dict(row) for row in db.execute("SELECT content, channel FROM messages WHERE role='assistant'")]
+
+    def test_a_completed_connection_is_told_to_the_web_conversation(self):
+        self.complete_drive()
+        rows = self.assistant_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertIn('Google Drive 연결이 완료되었습니다', rows[0]['content'])
+        self.assertEqual(rows[0]['channel'], 'web')
+        self.assertEqual(self.sent, [])
+
+    def test_a_paired_owner_also_gets_it_on_telegram(self):
+        self.store.put('telegram', {'enabled': True, 'user_id': 4242, 'generation': 'g1'})
+        self.complete_drive()
+        self.assertEqual(self.assistant_rows()[0]['channel'], 'telegram:g1')
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.sent[0][0], 4242)
+        self.assertIn('Google Drive', self.sent[0][1])
+
+    def test_a_failed_connection_tells_nothing(self):
+        offer = self.service.begin_drive_connection()
+        state = parse_qs(urlparse(offer['authorization_url']).query)['state'][0]
+        self.service.drive_read_token_exchange = lambda payload: {'access_token': 'a', 'expires_in': 3600,
+                                                                  'scope': 'https://www.googleapis.com/auth/drive'}
+        with self.assertRaises(ValueError):
+            self.service.complete_drive_connection({'state': state, 'code': 'c'})
+        self.assertEqual(self.assistant_rows(), [])
+
+    def test_the_settings_read_hands_out_the_start_link(self):
+        response = self.service.conversation_settings_request({'operation': 'read', 'category': 'connections'})['response']
+        self.assertIn(f'http://127.0.0.1:9911{DRIVE_CONNECT_PATH}', response)
+        self.assertIn('http://127.0.0.1:9911/google-gmail', response)

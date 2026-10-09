@@ -5778,32 +5778,53 @@ class AgentService:
                 snapshot[f"connection.{row['id']}"]=(str(row.get('service') or row['id']),str(row.get('state_label') or row.get('state')))
         return snapshot
 
-    def notify_settings_web_change(self, label, before):
-        """Tell the conversation what a Settings-web change did (#1211), like ``settings_followup``.
+    def settings_web_change_notice(self, label, verb, before):
+        """What a Settings-web change did, for the conversation, or None (#1211).
 
-        The lines are the before/after difference of ``settings_snapshot``; a
-        change the read model does not show (a saved key, a folder) is named
-        by ``label`` alone, never with its value.
+        The lines are the before/after difference of ``settings_snapshot``.
+        With no ``verb`` the read model shows the setting, so nothing changed
+        means no notice.  With a ``verb`` (a key, a folder, a policy the read
+        model cannot show) the notice states that action, never the value.
         """
         after=self.settings_snapshot()
         lines=[f'- {after[key][0]}: {before[key][1]} → {after[key][1]}' for key in after
                if key in before and before[key][1]!=after[key][1]]
         lines+=[f'- {after[key][0]}: {after[key][1]}' for key in after if key not in before]
-        text=f'설정 화면에서 {label}을(를) 바꿨습니다.'+('\n'+'\n'.join(lines[:8]) if lines else '')
-        self._conversation_notice(text)
+        if not lines and not verb:
+            return None
+        head=f'설정 화면에서 {label}을(를) {verb or "바꿨습니다"}.'
+        return head+('\n'+'\n'.join(lines[:8]) if lines else '')
+
+    def notify_settings_web_change(self, label, before, verb=None):
+        """Record and deliver one Settings-web change notice; the text, or None when nothing changed."""
+        text=self.settings_web_change_notice(label,verb,before)
+        if text:
+            self._conversation_notice(text)
         return text
 
-    def _conversation_notice(self, text):
-        """One assistant row in the owner's conversation, and Telegram when paired (best effort)."""
+    def _notice_channel(self):
         cfg=self.store.config('telegram',{})
         paired=bool(cfg.get('enabled') and cfg.get('user_id') is not None and cfg.get('generation'))
-        channel=f"telegram:{cfg.get('generation')}" if paired else 'web'
+        return cfg,paired,(f"telegram:{cfg.get('generation')}" if paired else 'web')
+
+    def record_conversation_notice(self, text):
+        """The durable half: one assistant row in the owner's conversation."""
+        _cfg,_paired,channel=self._notice_channel()
         with self.store.db() as db:
             db.execute('INSERT INTO messages(role,content,channel,created) VALUES (?,?,?,?)',
                        ('assistant',text,channel,time.time()))
+
+    def deliver_conversation_notice(self, text):
+        """The best-effort half: the same text to the paired Telegram chat."""
+        cfg,paired,_channel=self._notice_channel()
         if paired:
             try:self.telegram.send_message(int(cfg['user_id']),text)
             except (ProviderError,TypeError,ValueError):LOG.warning('conversation notice not delivered')
+
+    def _conversation_notice(self, text):
+        """One assistant row in the owner's conversation, and Telegram when paired (best effort)."""
+        self.record_conversation_notice(text)
+        self.deliver_conversation_notice(text)
 
     def notify_connection_completed(self, connector_id, resuming=False):
         """Tell the owner's conversation that a connection completed (#1207).

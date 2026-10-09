@@ -773,10 +773,15 @@ class SettingsWebNoticeTest(unittest.TestCase):
         self.assertNotIn('GOCSPX', text)
         self.assertEqual(self.assistant_rows(), [text])
 
-    def test_a_change_the_read_model_does_not_show_is_named_only(self):
+    def test_a_change_the_read_model_does_not_show_states_the_action_only(self):
         before = self.service.settings_snapshot()
-        text = self.service.notify_settings_web_change('웹 검색 키', before)
-        self.assertEqual(text, '설정 화면에서 웹 검색 키을(를) 바꿨습니다.')
+        text = self.service.notify_settings_web_change('웹 검색 키', before, verb='저장했습니다')
+        self.assertEqual(text, '설정 화면에서 웹 검색 키을(를) 저장했습니다.')
+
+    def test_nothing_changed_means_no_notice(self):
+        before = self.service.settings_snapshot()
+        self.assertIsNone(self.service.notify_settings_web_change('현재 맥락', before))
+        self.assertEqual(self.assistant_rows(), [])
 
     def test_the_conversation_links_to_the_own_client_input(self):
         response = self.service.conversation_settings_request({'operation': 'read', 'category': 'connections'})['response']
@@ -829,14 +834,13 @@ class SettingsWebNoticeOverHttpTest(unittest.TestCase):
                 request('/api/google/client', {'client_json': 'not json'})
             self.assertEqual(notices(), [])
             request('/api/google/client', {'client_json': OwnClientFromSettingsTest.CLIENT})
-            # The notice is recorded right after the response is written.
-            import time
-            for _ in range(50):
-                if notices():
-                    break
-                time.sleep(0.05)
+            # Recorded before the success is exposed: no wait needed.
             self.assertEqual(len(notices()), 1)
-            self.assertIn('설정 화면에서 자체 Google client', notices()[0])
+            self.assertIn('설정 화면에서 자체 Google client을(를) 저장했습니다.', notices()[0])
+            # Re-submitting the current value of a setting the read model shows says nothing.
+            current = service.current_state.status()
+            request('/api/current-context', {'enabled': bool(current.get('enabled'))})
+            self.assertEqual(len(notices()), 1)
         finally:
             server.shutdown()
             thread.join()

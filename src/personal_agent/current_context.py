@@ -92,8 +92,10 @@ def redact_known_secrets(store, text):
     bridge resolves profile anchors without the service).
     """
     from .bounded_execution import SECRET_PATTERN
+    from .api_requests import secret_names
     text = str(text or '')
-    for name in KNOWN_SECRET_NAMES:
+    # #1216: every registered API slot's secret too.
+    for name in (*KNOWN_SECRET_NAMES, *secret_names(store)):
         try:
             value = store.secret(name)
         except Exception:

@@ -40,7 +40,9 @@ BOUNDED_NAMES = ['ask_location', 'bounded_public_research', 'browser_click', 'br
                  'drive_read', 'drive_search', 'find_files',
                  'information_use', 'list_memory', 'list_notes', 'list_roots', 'propose_current_state', 'public_page_read',
                  'read_file', 'save_memory', 'save_note', 'schedule_preparation',
-                 'search_memory', 'settings_change', 'settings_read', 'weather', 'web_search']
+                 'search_memory', 'settings_change', 'settings_read', 'weather', 'web_search',
+                 # #1216: authenticated API calls by slot, relayed to the service.
+                 'api_request']
 # #961: the skill tools join only when the Work has a skill binding (skills on, one installed).
 SKILL_NAMES = ['skill_load', 'skill_resource']
 #: The ungated fixture below lists every declared profile action.
@@ -411,7 +413,9 @@ class SubscriptionServiceTests(unittest.TestCase):
             self.assertEqual(adapter.call[2], [name for name in BOUNDED_NAMES if name not in
                                                ('propose_current_state', 'web_search', 'bounded_public_research',
                                                 # #774: a non-Telegram Work could never be answered.
-                                                'ask_location')])
+                                                'ask_location',
+                                                # #1216: no API slot is registered.
+                                                'api_request')])
             self.assertEqual(store.job(job)['response'], 'engine answer')
 
     def test_summary_regression_sends_approved_notes_to_subscription_engine(self):

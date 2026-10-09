@@ -462,7 +462,9 @@ class GoalSummaryTests(unittest.TestCase):
     def test_a_truncated_result_is_not_an_unresolved_obligation(self):
         """#752: ``truncated`` is an Evidence qualifier, not incompleteness; the goal judgment decides."""
         from personal_agent.agent_runtime import INCOMPLETE_QUALIFIERS
-        self.assertEqual(INCOMPLETE_QUALIFIERS, ('partial',))
+        # #1216: response-truth flags (inconsistent, stale, undated) count as incomplete; truncated still does not.
+        self.assertEqual(INCOMPLETE_QUALIFIERS, ('partial', 'inconsistent', 'stale', 'as-of-unknown'))
+        self.assertNotIn('truncated', INCOMPLETE_QUALIFIERS)
         rows = [('weather', 'failed', json.dumps({'host_action': 'weather', 'code': 'transient_failure'})),
                 ('weather', 'succeeded', json.dumps({'host_action': 'weather', 'evidence': {}})),
                 ('web_search', 'succeeded', json.dumps({'host_action': 'web_search', 'evidence': {'qualifiers': ['truncated']}}))]

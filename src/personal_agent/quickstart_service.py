@@ -293,7 +293,9 @@ RETRY_EFFECT_TOOLS=frozenset({'save_note','save_memory','delegate_agent',
                               # #774: a Telegram prompt already reached the owner.
                               'ask_location',
                               # #814: a settings draft and its confirmation message.
-                              'settings_change'})
+                              'settings_change',
+                              # #1216: an API call; one AgentOS classified read changed nothing (``effect_calls``).
+                              'api_request'})
 EFFECT_RETRY_REFUSAL='이전 요청이 상태를 바꾸는 작업을 시도해 자동으로 다시 실행하지 않았습니다.'
 #: #795: ``bounded_execution.cli_metadata`` keeps at most this many of the tool
 #: calls a CLI reported; a list that long may have dropped some, so it cannot
@@ -849,6 +851,11 @@ class AgentService:
         sessions=self.browser_sessions_text()
         if sessions:
             text=f'{text}\n{sessions}' if text else sessions
+        # #1216: which API slots the AI may call by name (names and hosts only, never a value).
+        from .api_requests import context_line
+        slots=context_line(self.store)
+        if slots:
+            text=f'{text}\n{slots}' if text else slots
         return text
 
     def browser_sessions_text(self):
@@ -2636,6 +2643,18 @@ class AgentService:
             return False,EFFECT_RETRY_REFUSAL
         return True,None
 
+    def _with_disclosures(self, work_id, response):
+        """``response`` followed by the Work's response-truth disclosures (``agent_runtime.work_disclosures``)."""
+        from .agent_runtime import work_disclosures
+        try:
+            with self.store.db() as db:
+                rows=[(row['tool'],row['status'],row['detail']) for row in
+                      db.execute('SELECT tool,status,detail FROM tool_events WHERE job_id=? ORDER BY id',(work_id,))]
+        except Exception:
+            return response
+        lines=[line for line in work_disclosures(rows) if line not in str(response or '')]
+        return '\n\n'.join(part for part in (str(response or '').strip(),'\n'.join(lines)) if part) if lines else response
+
     @staticmethod
     def effect_calls(event):
         """The ``RETRY_EFFECT_TOOLS`` names one recorded tool event may have changed state with.
@@ -2648,7 +2667,7 @@ class AgentService:
         from .agent_runtime import page_load_only
         trace=event.get('trace') if isinstance(event.get('trace'),dict) else {}
         names={name for name in (event.get('tool'),trace.get('host_action')) if isinstance(name,str) and name in RETRY_EFFECT_TOOLS}
-        if names=={'browser_open'} and page_load_only(trace.get('host_action') or event.get('tool'),trace):return set()
+        if names and names<={'browser_open','api_request'} and page_load_only(trace.get('host_action') or event.get('tool'),trace):return set()
         return names
 
     @staticmethod
@@ -9753,6 +9772,9 @@ class AgentService:
                 # turns, so it is scrubbed before it is persisted anywhere.
                 scrub=(lambda text:self.scrub_work_text(job['id'],text) if text else text) if prep.preparation_of(job.get('request_key')) else (lambda text:text)
                 response=scrub(response)
+                # #1216: stale, inconsistent, partial or undated response data is said in AgentOS's own words,
+                # on every route and whatever the outcome; a line the answer already carries is not repeated.
+                response=self._with_disclosures(job['id'],response)
                 self.record_work_sources(job['id'],work_sources)
                 with self.store.db() as db:
                     db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('assistant',response,job['channel'],time.time(),job.get('workspace_id'),job['id']))

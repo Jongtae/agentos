@@ -78,6 +78,9 @@ class OneActionSource(_Store):
     def test_every_profile_tool_is_the_native_definition_on_the_mcp_wire(self):
         # #627: with current context on, every declared action is on the wire.
         self.enable_context()
+        # #1216: with an API slot registered, api_request is listed too.
+        from personal_agent.api_requests import save_slot
+        save_slot(self.store, 'fixture-api', ['api.example.test'], 'fixture-value-0000')
         for profile, facade in FACADES.items():
             # #701: with a browser profile registered, trusted-local lists its browser tools too.
             # #774: with the service's preparation scheduler wired, schedule_preparation is listed too,
@@ -266,9 +269,12 @@ class EffectiveAvailability(_Store):
         self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps()).definitions()],
                          sorted(set(profile_actions(BOUNDED_PROFILE)) - CONTEXT_GATED_ACTIONS - BROWSER_ACTIONS
                                 - {'schedule_preparation', 'ask_location', 'settings_read', 'settings_change', 'information_use'}
-                                - SKILL_ACTIONS))
+                                # #1216: no registered API slot hides api_request.
+                                - SKILL_ACTIONS - {'api_request'}))
         self.enable_context()
         self.assertIn('propose_current_state', [d['function']['name'] for d in self.caps().definitions()])
+        from personal_agent.api_requests import save_slot
+        save_slot(self.store, 'fixture-api', ['api.example.test'], 'fixture-value-0000')
         self.assertEqual([t['name'] for t in AgentOSMcpTools(self.caps(browser=lambda: None,
                                                                        preparations=lambda *a: None,
                                                                        location_request=lambda *a: None,
@@ -369,6 +375,8 @@ class SettingsProjection(_Store):
                                              'information_use',
                                              # #1172: the owner's Drive reads, relayed the same way.
                                              'drive_search', 'drive_read',
+                                             # #1216: authenticated API calls by slot, relayed the same way.
+                                             'api_request',
                                              # #961: the Work's pinned skills, read in the bridge (only with a binding).
                                              'skill_load', 'skill_resource'],
                                    'unavailable': route_unavailable(BOUNDED_PROFILE),

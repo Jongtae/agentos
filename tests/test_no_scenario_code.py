@@ -54,7 +54,9 @@ SCANNED_MODULES = ('agent_runtime.py', 'conversation_handoff.py', 'current_conte
                    'preparations.py', 'local_tools.py', 'quickstart_service.py', 'orchestrator.py', 'owner_model.py',
                    # SKILL-SUPPLY-02 (#961): the skill-supply glue stays free of site/category branches;
                    # skill content is data in packages, not scanned (#960 section 8).
-                   'skills.py')
+                   'skills.py',
+                   # API-READ-01 (#1216): the authenticated API call and its response provenance.
+                   'api_requests.py')
 
 #: Modules whose job is to name providers.  Not scanned.
 ALLOWED_MODULES = {

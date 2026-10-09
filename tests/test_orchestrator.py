@@ -450,7 +450,8 @@ class PrivateReadsWithSearch(Harness):
         argv = adapter.command('claude-code', '/runtime/claude', 'p', config, native_search=True)
         allowed = argv[-1].split(',')
         self.assertIn('WebSearch', allowed)
-        for name in ('list_notes', 'list_memory', 'find_files', 'read_file'):
+        # #798: the calendar read too, so a native-search turn can reach the connection hand-off.
+        for name in ('list_notes', 'list_memory', 'find_files', 'read_file', 'calendar_query'):
             self.assertIn('mcp__agentos__' + name, allowed)
         self.assertNotIn('mcp__agentos__web_search', allowed)
         self.assertEqual(turn_actions(BOUNDED_PROFILE, native_search=True),

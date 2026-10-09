@@ -1380,7 +1380,7 @@ class QuickStore:
 
     def task_events(self, job_id):
         with self.db() as db:
-            rows=[dict(r) for r in db.execute("SELECT id,job_id,tool,status,detail,created FROM tool_events WHERE job_id=? AND tool!='model' ORDER BY id",(job_id,))]
+            rows=[dict(r) for r in db.execute("SELECT id,job_id,tool,status,detail,created FROM tool_events WHERE job_id=? AND tool NOT IN ('model','response_timing') ORDER BY id",(job_id,))]
         events=[]
         for row in rows:
             try:trace=json.loads(row.pop('detail'))

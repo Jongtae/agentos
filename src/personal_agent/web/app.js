@@ -1410,5 +1410,6 @@ for(const dialog of document.querySelectorAll('.preference-dialog'))dialog.addEv
 function bootFailed(error){$('welcome').hidden=false;$('management').hidden=true;$('auth-title').textContent=t('AgentOS를 확인하고 있습니다…');$('auth-help').textContent='';setError('auth-error',error);clearTimeout(bootRetryTimer);if(error?.offline)bootRetryTimer=setTimeout(()=>{status().catch(bootFailed);},5000);}
 status().catch(bootFailed);
 window.addEventListener('beforeunload',event=>{const dirty=($('ai-chooser').open&&chooserDraftDirty())||decisionDraftDirty()||searchDraftDirty()||Boolean(workspaceDraft)||(telegramDraftOpen&&Boolean($('telegram-token').value))||Boolean($('root-path-input').value.trim());if(!dirty)return;event.preventDefault();event.returnValue='';});
-setInterval(()=>{if(authenticated)refresh();},2000);
+// #1232: a running Work is checked every second so its reply shows sooner; idle stays at two.
+(function pollLoop(){setTimeout(()=>{if(authenticated)void refresh();pollLoop();},lastHome?.state==='working'?1000:2000);})();
 }

@@ -2415,6 +2415,24 @@ class AgentService:
         self.decision_judge=ConversationJudgments(engine,redactor=self.redact_judgment_text)
         self.intent_classifier=IntentClassifier(workspace_search=workspace_search_request,judge=self.decision_judge)
 
+    def record_stage(self, job_id, stage, since, db=None, **extra):
+        """Record how long one stage of a Work took, from observed clock readings only (#1232).
+
+        ``since`` is the wall-clock reading the stage is measured from.  Nothing
+        is estimated and no model is asked; a failure to record never affects
+        the Work.  ``task_events`` leaves these rows out of the owner's steps.
+        """
+        try:
+            now=time.time()
+            detail=json.dumps({'stage':stage,'ms':max(0,int((now-since)*1000)),**extra},ensure_ascii=False)
+            row=(job_id,'response_timing','recorded',detail,now)
+            sql='INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)'
+            if db is not None:db.execute(sql,row)
+            else:
+                with self.store.db() as conn:conn.execute(sql,row)
+        except Exception as exc:
+            LOG.info('response timing not recorded: %s',type(exc).__name__)
+
     def classify_intent(self, prompt, model_suggestion=None, calendar_pending=None, owner_id=None):
         """Decide where one owner utterance goes, before anything is invoked.
 
@@ -8760,6 +8778,8 @@ class AgentService:
                 db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',('user',job['message'],job['channel'],time.time(),job.get('workspace_id'),job['id']))
             if self.fold_delivered_steer(job):return True
             self.current_work_id=job['id']
+            claimed_at=time.time()
+            self.record_stage(job['id'],'queue_wait',job.get('created') or claimed_at)
             self.update_task_card(job,'running')
             response=''
             provider='builtin'
@@ -8923,6 +8943,7 @@ class AgentService:
                 elif decision.intent not in (INTENT_CALENDAR_CREATE,INTENT_AMBIGUOUS) and self.calendar_conversation.has_pending(connector_owner):
                     if self.calendar_conversation.clear(connector_owner):calendar_notice+=CALENDAR_DROPPED_NOTICE+'\n\n'
                 self.conversation_focus.record(decision,job['id'])
+                self.record_stage(job['id'],'routed',claimed_at)
                 self.present_turn(job)
                 owner=self.settings_owner(job)
                 # A parked request was promised to run once after its
@@ -9793,6 +9814,7 @@ class AgentService:
                     cause,spoken,observed,note=scrub(cause),scrub(spoken),scrub(observed),scrub(self._redact_reason(note) if note else None)
                     db.execute("UPDATE jobs SET status=?,response=?,error=?,provider=?,model=?,delivery=?,owner_cause=?,owner_verified=?,owner_note=? WHERE id=?",
                                (outcome,response,cause,provider,model,'pending' if job['chat_id'] else 'none',spoken,observed,note,job['id']))
+                    self.record_stage(job['id'],'finished',claimed_at,db=db,total_ms=int((time.time()-(job.get('created') or claimed_at))*1000))
                     # #805: one pending owner-model upkeep, settled with the Work.
                     if self.owner_model_eligible(job,outcome,provider):self.owner_model.enqueue(db,job['id'])
                     # #998: a Work a worker AI answered that failed gets one self-review instead.

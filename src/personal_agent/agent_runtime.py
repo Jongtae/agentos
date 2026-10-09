@@ -1482,6 +1482,9 @@ EFFECT_FREE_READS=frozenset({'list_roots','find_files','read_file','list_notes',
 #: as an effect for that one action.  A click or typing, a declared ``mutate``
 #: or ``payment``, and a call with no recorded declaration stay effects.
 PAGE_LOAD_EFFECTS=frozenset({'read','navigate'})
+#: #899: a click or typing step that declared ``read``/``navigate`` changed nothing AgentOS
+#: could observe when it started no non-GET form submission and spent no owner approval.
+OBSERVED_INPUT_ACTIONS=frozenset({'browser_click','browser_type'})
 
 def declared_effect(action,args):
  """``{'declared_effect': value}`` of a browser call's valid declared effect, else ``{}`` (#787).
@@ -1494,16 +1497,29 @@ def declared_effect(action,args):
  value=args.get('effect') if action in BROWSER_ACTIONS and isinstance(args,dict) else None
  return {'declared_effect':value} if isinstance(value,str) and value in EFFECT['enum'] else {}
 
-def page_load_only(action,detail):
+def page_load_only(action,detail,status=None):
  """Whether one recorded call only loaded a page: a ``browser_open`` declared ``read``/``navigate`` (#787).
 
- ``detail`` is the call's recorded event detail.  Only ``browser_open``
- qualifies: it navigates by URL and submits nothing and presses nothing.
+ ``detail`` is the call's recorded event detail.  ``browser_open`` qualifies
+ on its declaration: it navigates by URL and submits nothing and presses
+ nothing.  #899: a click or typing step qualifies on its declaration while it
+ runs (``status`` ``running``), and once it ``succeeded`` only when its
+ evidence shows AgentOS observed no non-GET form submission and no spent owner
+ approval (``browser_session.observe_step``).  A failed, unobserved or
+ status-less one stays an effect.
  """
- # #1216: an API call AgentOS classified read/navigate (a GET/HEAD) changed nothing either.
- if action not in ('browser_open',*API_ACTIONS) or not isinstance(detail,dict):return False
+ if not isinstance(detail,dict):return False
  value=detail.get('declared_effect')
- return isinstance(value,str) and value in PAGE_LOAD_EFFECTS
+ declared=isinstance(value,str) and value in PAGE_LOAD_EFFECTS
+ if action in OBSERVED_INPUT_ACTIONS:
+  if not declared:return False
+  if status=='running':return True
+  evidence=detail.get('evidence') if isinstance(detail.get('evidence'),dict) else {}
+  seen=evidence.get('observed_step')
+  return status=='succeeded' and isinstance(seen,dict) and seen.get('posted') is False and seen.get('approved') is False
+ # #1216: an API call AgentOS classified read/navigate (a GET/HEAD) changed nothing either.
+ if action not in ('browser_open',*API_ACTIONS):return False
+ return declared
 
 #: Public network reads that may be retried once after a transient failure.
 NETWORK_READS=frozenset({'web_search','public_page_read','weather'})
@@ -2937,6 +2953,9 @@ def evidence_summary(name,result):
  """
  if not isinstance(result,dict):return {'kind':'invalid-result'}
  summary=_evidence_detail(name,result)
+ # #899: what AgentOS observed of a click or typing step (no payload).
+ seen=result.get('observed_step') if name in OBSERVED_INPUT_ACTIONS else None
+ if isinstance(seen,dict):summary={**summary,'observed_step':{'posted':seen.get('posted') is True,'approved':seen.get('approved') is True}}
  qualifiers=evidence_qualifiers(result)
  if qualifiers:summary['qualifiers']=qualifiers
  return summary

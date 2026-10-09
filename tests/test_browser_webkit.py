@@ -633,6 +633,7 @@ class WorkerGuardLogicTests(unittest.TestCase):
         worker.guard_off, worker.cancelled, worker.reported, worker.held = False, None, [], None
         worker.pending, worker.deciding, worker.failed, worker.ran = {}, 0, [], []
         worker.refused_submits = worker.step_refused = 0
+        worker.posted_submits = worker.step_posted = 0
         worker.fail = lambda ident, code: worker.failed.append((ident, code))
         worker.run = lambda body, arguments, done, world=None: worker.ran.append((body, arguments, done))
         for key, value in fields.items():
@@ -689,6 +690,19 @@ class WorkerGuardLogicTests(unittest.TestCase):
         worker.finish_input(5, 0)
         self.assertEqual(worker.failed, [(5, 'submit_refused')])
         self.assertIsNone(worker.cancelled)
+
+    def test_a_step_answers_whether_the_page_started_a_non_get_submit(self):
+        """#899: counted per step, from the step's own baseline."""
+        for posted, expected in ((0, False), (1, True)):
+            with self.subTest(posted=posted):
+                bw, worker = self.worker()
+                worker.posted_submits, worker.step_posted, worker.blocked = 3 + posted, 3, 0
+                worker.pending[5] = True
+                replies = []
+                worker.reply = lambda ident, ok=True, **fields: replies.append(fields)
+                worker.run = lambda body, arguments, done, world=None: done({'cancelled': None}, None)
+                worker.finish_input(5, 0)
+                self.assertEqual(replies, [{'posted': expected}])
 
     def test_a_page_set_press_handler_property_is_signalled_to_the_client_world(self):
         """#1181: the page-world wrapper marks ``el.onclick = f`` (invisible from the client world)."""

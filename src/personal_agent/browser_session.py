@@ -214,6 +214,27 @@ def _commit_text(text):
     return ' '.join(''.join(char for char in text if unicodedata.category(char) != 'Cf').split())
 
 
+def step_posted(message):
+    """``{'posted': bool}`` when the worker reported whether the step started a non-GET form submission (#899)."""
+    value = message.get('posted') if isinstance(message, dict) else None
+    return {'posted': value} if isinstance(value, bool) else {}
+
+
+def observe_step(page, answer, approved):
+    """Add what AgentOS observed of one click or typing step to its result (#899).
+
+    ``observed_step`` exists only when the driver reported ``posted``: whether
+    the page started a non-GET form submission during the step, and whether the
+    step spent an owner approval (a guarded payment or commit control).  A
+    ``fetch``/XHR request is not observable here (#758), so this narrows, never
+    proves, what the step changed; re-delegation also requires the call's own
+    declared ``read``/``navigate`` (``agent_runtime.page_load_only``).
+    """
+    if isinstance(answer, dict) and isinstance(answer.get('posted'), bool):
+        page['observed_step'] = {'posted': answer['posted'], 'approved': bool(approved)}
+    return page
+
+
 def commit_name(name, link=False):
     """The text carries a purchase or payment commitment signal (#758).
 
@@ -1105,7 +1126,7 @@ class BrowserSession:
         if (isinstance(answer, dict) and answer.get('navigated')) or page_reference(page.get('url')) != before:
             page['navigated'] = True
             self._last_input = None
-        return self._with_dialogs(page, answer)
+        return self._with_dialogs(observe_step(page, answer, approved), answer)
 
     def _with_dialogs(self, page, answer):
         """#936: a page's own alert/confirm/prompt during the step, mediated like page text."""
@@ -1136,7 +1157,7 @@ class BrowserSession:
         answer = self._input(lambda timeout: self._driver().type(element['index'], text, timeout, approved=approved,
                                                                  confirm_ok=confirm_ok),
                     description)
-        return self._with_dialogs(self._page_state(), answer)
+        return self._with_dialogs(observe_step(self._page_state(), answer, approved), answer)
 
     @staticmethod
     def _destinations(snapshot, element):
@@ -1662,13 +1683,13 @@ class WebKitWorkerDriver:
         # this press; ``confirm_ok`` is False on a page that shows a payment field.
         message = self._request('click', timeout, approved=approved is True, dialog_approved=approved is True,
                                 confirm_ok=confirm_ok is True, **self._target(index))
-        return {'navigated': bool(message.get('navigated')), 'dialogs': step_dialogs(message)}
+        return {'navigated': bool(message.get('navigated')), 'dialogs': step_dialogs(message), **step_posted(message)}
 
     def type(self, index, text, timeout, approved=False, confirm_ok=False):
         # #937 review: an approval to type into a field never confirms a payment question.
         message = self._request('type', timeout, text=text, approved=approved is True, dialog_approved=False,
                                 confirm_ok=confirm_ok is True, **self._target(index))
-        return {'dialogs': step_dialogs(message)}
+        return {'dialogs': step_dialogs(message), **step_posted(message)}
 
     def release_submit(self, record, timeout):
         """Release the cancelled payment-form submit ``record`` names, which the owner approved (#700).

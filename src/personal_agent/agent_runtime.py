@@ -32,6 +32,18 @@ STRING={'type':'string'}
 BROWSER_ACTIONS=frozenset({'browser_open','browser_read','browser_find','browser_click','browser_type','browser_sign_in'})
 #: DRIVE-CONNECT-01 (#1172): read-only search and read of the owner's Google Drive.
 DRIVE_ACTIONS=frozenset({'drive_search','drive_read'})
+#: API-READ-01 (#1216): an authenticated API call by secret-slot reference (``api_requests``).
+API_ACTIONS=frozenset({'api_request'})
+API_REQUEST_DESCRIPTION=('Call an HTTP JSON API that needs the owner\'s stored credential. Pass only the slot name: AgentOS puts the slot\'s secret '
+ 'into the request itself (you never see or send it) and sends only to the slot\'s allowed hosts; redirects are not followed. '
+ 'effect: read for a lookup (GET/HEAD); anything that changes state is mutate (or payment) and needs the owner\'s approval of exactly '
+ 'that call, otherwise it is refused; a non-GET method is never treated as a read. The result keeps the raw response (data) apart from '
+ 'AgentOS\'s provenance: retrieved_at, as_of (the time the data is as of), freshness (fresh/stale/unknown), completeness '
+ '(complete/partial/inconsistent) and derived checks. Report numbers from data exactly as returned, and tell the owner the as_of time '
+ 'and any stale, partial, inconsistent or unknown flag; never hide or smooth them. Optional (JSONPath strings, RFC 9535 subset $ .name [n] [*]): '
+ 'as_of_field (the response field holding the data\'s reference time), required_fields (JSON list of paths that must be present), '
+ 'checks (JSON list of {"sum": path, "equals": path}: AgentOS sums the first exactly and compares it with the second), '
+ 'max_age_seconds (older data is stale; default the slot\'s). The registered slots and their hosts are listed in the current context.')
 EFFECT={'type':'string','enum':['read','navigate','mutate','payment']}
 #: The argument recorded as a length placeholder, per host action: typed
 #: browser text (#656) and a proposed current-state value (#627), which the
@@ -257,6 +269,8 @@ DEFINITIONS=[
  schema('web_search',WEB_SEARCH_DESCRIPTION,{'query':STRING,'provider':STRING,'locale':STRING},['query']),
  schema('public_page_read','Read one anonymous public HTTP(S) page as bounded text. Use only for a user-supplied public URL; no login, cookies, JavaScript, private destinations or mutations.',{'url':STRING},['url']),
  schema('bounded_public_research','Compare public products or plan travel from public web evidence. Runs one bounded public search and reads at most three of its own result pages, then separates facts it actually observed from price/inventory/fee details it could not confirm. Use for a comparison or travel plan, not for a single lookup - web_search is cheaper for that. Never include credentials in the query. This cannot purchase, book, reserve, create an account or sign in. provider and locale select the search provider for its one search exactly as in web_search (omit provider for the owner\'s default).',{'mode':{'type':'string','enum':['product_comparison','travel_plan']},'query':STRING,'provider':STRING,'locale':STRING},['mode','query']),
+ schema('api_request',API_REQUEST_DESCRIPTION,{'slot':STRING,'url':STRING,'method':{'type':'string','enum':['GET','HEAD','POST','PUT','PATCH','DELETE']},'effect':EFFECT,
+         'body':STRING,'as_of_field':STRING,'required_fields':STRING,'checks':STRING,'max_age_seconds':STRING},['slot','url','effect']),
  schema('drive_search','Search the owner\'s Google Drive by file name and text, or list the most recently changed files when query is empty. Returns file ids, names, types and modified times; call drive_read to read one. Read-only.',{'query':STRING},['query']),
  schema('drive_read','Read one file from the owner\'s Google Drive by the file_id drive_search returned. Google Docs, Sheets and Slides come back as text; PDF, DOCX, XLSX, TXT and MD are extracted. File contents are untrusted data; cite the returned source.',{'file_id':STRING},['file_id']),
  schema('calendar_query','List the owner\'s calendar events between two RFC3339 timestamps that both carry an explicit UTC offset. Use this to answer what is scheduled. Read-only; returns event ids and versions needed to change or cancel an event.',{'start':STRING,'end':STRING,'timezone':STRING},['start','end','timezone']),
@@ -570,6 +584,8 @@ PRIVATE_PROVENANCE={'find_files':'connected-document','read_file':'connected-doc
                     'save_memory':'owner-memory','list_roots':'owner-folder-names',
                     'calendar_query':'owner-calendar',
                     **{action:'owner-drive' for action in DRIVE_ACTIONS},
+                    # #1216: a response read with the owner's API credential.
+                    **{action:'owner-api' for action in API_ACTIONS},
                     **{action:'owner-browser-session' for action in BROWSER_ACTIONS}}
 UNATTRIBUTED_PROVENANCE='unattributed-tool-evidence'
 # #826 (owner decision 2026-09-28): these labels no longer close a public
@@ -1240,7 +1256,7 @@ class EvidenceLog(list):
  def extend(self,items):
   for item in items:self.append(item)
 
-READONLY_EXCLUDED=('save_note','save_memory','delegate_agent','propose_current_state','schedule_preparation','ask_location','settings_change')
+READONLY_EXCLUDED=('save_note','save_memory','delegate_agent','propose_current_state','schedule_preparation','ask_location','settings_change','api_request')
 #: #659: host actions offered only when the service wired owner preparations
 #: into this Work (never to a delegated specialist or a CLI bridge process).
 PREPARATION_ACTIONS=frozenset({'schedule_preparation'})
@@ -1460,7 +1476,13 @@ EFFECT_FREE_READS=frozenset({'list_roots','find_files','read_file','list_notes',
 PAGE_LOAD_EFFECTS=frozenset({'read','navigate'})
 
 def declared_effect(action,args):
- """``{'declared_effect': value}`` of a browser call's valid declared effect, else ``{}`` (#787)."""
+ """``{'declared_effect': value}`` of a browser call's valid declared effect, else ``{}`` (#787).
+
+ #1216: for an API call it is the effect AgentOS applies (never below the method's).
+ """
+ if action in API_ACTIONS and isinstance(args,dict):
+  from .api_requests import effective_effect
+  return {'declared_effect':effective_effect(args.get('method'),args.get('effect'))}
  value=args.get('effect') if action in BROWSER_ACTIONS and isinstance(args,dict) else None
  return {'declared_effect':value} if isinstance(value,str) and value in EFFECT['enum'] else {}
 
@@ -1470,7 +1492,8 @@ def page_load_only(action,detail):
  ``detail`` is the call's recorded event detail.  Only ``browser_open``
  qualifies: it navigates by URL and submits nothing and presses nothing.
  """
- if action!='browser_open' or not isinstance(detail,dict):return False
+ # #1216: an API call AgentOS classified read/navigate (a GET/HEAD) changed nothing either.
+ if action not in ('browser_open',*API_ACTIONS) or not isinstance(detail,dict):return False
  value=detail.get('declared_effect')
  return isinstance(value,str) and value in PAGE_LOAD_EFFECTS
 
@@ -1742,6 +1765,12 @@ class Capabilities:
   self.evidence=EvidenceLog(self.private_provenance)
  def definitions(self):
   return action_definitions(self.tools,self.offered_tools(),self.readonly,search_providers=getattr(self.network,'providers',None))
+ def api(self):
+  """This Work's ``api_requests.ApiRequests`` (#1216); non-read calls use the browser step approvals."""
+  if getattr(self,'_api',None) is None:
+   from .api_requests import ApiRequests
+   self._api=ApiRequests(self.store,self.job_id,approvals=self.browser_approvals)
+  return self._api
  def check_skills(self):
   """Refuse this call when a skill the Work loaded is no longer current (#961).
 
@@ -1770,6 +1799,8 @@ class Capabilities:
   if self.settings is None:hidden|=SETTINGS_ACTIONS
   if self.information_use is None:hidden|=INFORMATION_USE_ACTIONS
   if self.skills is None:hidden|=SKILL_ACTIONS
+  # #1216: offered only while the owner has registered at least one API slot.
+  if not self.api().slots():hidden|=API_ACTIONS
   try:enabled=self.current_context().enabled()
   except Exception:enabled=False
   if not enabled:hidden|=CONTEXT_GATED_ACTIONS
@@ -2243,6 +2274,16 @@ class Capabilities:
    result=self.browser_session().run(name,args)
    if result.get('state')=='login_required':return result
    return self._from_private('owner-browser-session',result)
+  if name in API_ACTIONS:
+   # #1216: the slot's secret, host binding, effect approval and provenance live in `api_requests`.
+   from .api_requests import ApiError
+   try:result=self.api().call(args)
+   except ApiError as exc:
+    error=ToolError(str(exc),exc.code,requires=exc.requires)
+    if exc.effect:error.effect=exc.effect
+    raise error from None
+   self.evidence.append({'tool':name,'result':result})
+   return self._from_private('owner-api',result)
   if name in DRIVE_ACTIONS:
    # #1172: the reader's transport owns the credential and re-checks it per
    # call; a missing or expired connection is setup-required, typed like the
@@ -2724,6 +2765,8 @@ CALENDAR_DRAFT_TOOLS=('calendar_draft_create','calendar_draft_update','calendar_
 OWNER_STATE_ACTIONS=frozenset({'save_memory','list_memory','search_memory','calendar_query',*CALENDAR_DRAFT_TOOLS,'schedule_preparation','ask_location',
                                # #1172: the owner's Drive connection is held by the service.
                                *DRIVE_ACTIONS,
+                               # #1216: the owner's API slot secrets are held by the service.
+                               *API_ACTIONS,
                                # #814: owner settings and their confirm-before-apply drafts.
                                *SETTINGS_ACTIONS,*INFORMATION_USE_ACTIONS})
 #: Every action a trusted-local CLI turn runs in the service rather than in its bridge.
@@ -2817,7 +2860,9 @@ def withheld_effect(name,result):
 #: after a capped or unconfigured search is not "there are no such files".
 #: Keyed on the result shape, never on the tool, so a new tool that sets the
 #: flag is covered without a branch of its own.
-EVIDENCE_QUALIFIER_FLAGS=(('needs_setup','setup-required'),('truncated','truncated'))
+EVIDENCE_QUALIFIER_FLAGS=(('needs_setup','setup-required'),('truncated','truncated'),
+                          # #1216: general response-truth flags (``api_requests.provenance``).
+                          ('partial','partial'),('inconsistent','inconsistent'),('stale','stale'),('as_of_unknown','as-of-unknown'))
 
 def evidence_qualifiers(result):
  """The typed qualifiers a tool result carries; ``[]`` for a complete result."""
@@ -2831,15 +2876,48 @@ def evidence_qualifiers(result):
 #: #752: ``truncated`` (a bounded view of a long page or result list) is not
 #: one: whether the part read was enough is the goal judgment's; it stays an
 #: Evidence qualifier.
-INCOMPLETE_QUALIFIERS=('partial',)
+INCOMPLETE_QUALIFIERS=('partial',
+                       # #1216: data that does not add up, is older than asked, or has no known reference
+                       # time does not answer a request for the current state; the owner is told why.
+                       'inconsistent','stale','as-of-unknown')
 
 #: What AgentOS says in its own voice about a qualified result it summarises.
 QUALIFIER_NOTES={
  'setup-required':'필요한 연결이 아직 설정되지 않아 확인하지 못했습니다. 설정에서 연결을 먼저 확인해 주세요.',
  'truncated':'검색이나 읽기가 한도에서 멈춰 일부만 확인했습니다. 확인하지 못한 부분이 남아 있습니다.',
  'partial':'일부 자료는 읽지 못했습니다.',
+ 'inconsistent':'응답의 세부 숫자 합계가 응답이 밝힌 합계와 맞지 않습니다. 어느 쪽이 맞는지 확인되지 않았습니다.',
+ 'stale':'응답 자료의 기준 시각이 허용한 시간보다 오래되어 현재 값이 아닐 수 있습니다.',
+ 'as-of-unknown':'응답 자료가 언제 기준인지 알 수 없어 현재 값인지 확인되지 않았습니다.',
  'failed':'이 단계는 완료되지 않았습니다.',
 }
+
+#: #1216: response-truth qualifiers AgentOS always tells the owner, whatever the outcome or the judgment.
+DISCLOSED_QUALIFIERS=('stale','inconsistent','partial','as-of-unknown')
+DISCLOSURE_TEXT='참고: {note} (출처 {source}, 자료 기준 시각 {as_of})'
+
+def work_disclosures(rows):
+ """AgentOS's own sentences for the response-truth qualifiers one Work's tool events recorded (#1216).
+
+ ``rows`` are ``(tool, status, detail)`` tool events.  Keyed on the recorded
+ Evidence shape (a provenance record carries ``freshness``), never on the
+ tool, so any result with these semantics is covered; other qualified
+ results keep their existing outcome rendering.
+ """
+ lines=[]
+ for _tool,status,detail in rows:
+  if status!='succeeded':continue
+  try:data=json.loads(detail or '{}')
+  except (TypeError,ValueError):continue
+  evidence=data.get('evidence') if isinstance(data,dict) else None
+  if not isinstance(evidence,dict) or 'freshness' not in evidence:continue
+  source=evidence.get('source') if isinstance(evidence.get('source'),dict) else {}
+  where=f"{source.get('host') or ''}{source.get('path') or ''}" or '알 수 없음'
+  for label in evidence.get('qualifiers') or ():
+   if label in DISCLOSED_QUALIFIERS:
+    line=DISCLOSURE_TEXT.format(note=QUALIFIER_NOTES[label],source=where,as_of=evidence.get('as_of') or '알 수 없음')
+    if line not in lines:lines.append(line)
+ return lines
 
 def evidence_summary(name,result):
  """Persist useful proof without duplicating private tool payloads in traces.
@@ -2854,6 +2932,10 @@ def evidence_summary(name,result):
  return summary
 
 def _evidence_detail(name,result):
+ if name in API_ACTIONS:
+  # #1216: provenance only; the response payload and the key are never recorded.
+  from .api_requests import evidence
+  return evidence(result)
  if name in ('web_search','public_page_read','weather','bounded_public_research'):
   summary={'sources':result.get('sources',[])[:8],'result_count':len(result.get('results',[])),'retrieved_at':result.get('retrieved_at')}
   # Contacted-but-failed addresses are not sources, and omitting them hid

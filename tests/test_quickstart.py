@@ -65,6 +65,8 @@ class QuickstartTests(unittest.TestCase):
             if url.endswith('/editMessageText'):return {'ok':True,'result':True}
             if url.endswith('/deleteMessage'):return {'ok':True,'result':True}
             if url.endswith('/answerCallbackQuery'):return {'ok':True,'result':True}
+            # #1224: a tap that cannot act settles the message's buttons in place.
+            if url.endswith('/editMessageReplyMarkup'):return {'ok':True,'result':True}
             raise AssertionError(url)
         self.transport=transport
         self.service=AgentService(self.store,ModelAdapter(transport),transport)

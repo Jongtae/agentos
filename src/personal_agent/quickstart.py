@@ -230,6 +230,26 @@ def build_google_connectors(store, client, port, key_provider, registry, *, gmai
     return built
 
 
+def register_google_connections(service):
+    """Register every Google OAuth connection this service holds for connector-agnostic surfaces (#1213).
+
+    The wiring layer is where connectors are named; the service's phone link
+    and other generic surfaces only read ``service.connection_handlers``.
+    """
+    names=service.CONNECTION_NAMES
+    if service.gmail is not None:
+        service.register_connection(GMAIL_CONNECTOR.connector_id,names.get(GMAIL_CONNECTOR.connector_id,'Gmail'),
+                                    service.gmail.redirect_uri,service.begin_gmail_connection,service.complete_gmail_connection)
+    if service.calendar_oauth is not None:
+        for connector_id,grant in (('google-calendar','read'),('google-calendar-write','write')):
+            service.register_connection(connector_id,names.get(connector_id,connector_id),service.calendar_oauth.redirect_uri,
+                                        lambda grant=grant:service.begin_calendar_connection(grant),
+                                        service.complete_calendar_connection)
+    if service.drive_oauth is not None:
+        service.register_connection('google-drive',names.get('google-drive','Google Drive'),service.drive_oauth.redirect_uri,
+                                    service.begin_drive_connection,service.complete_drive_connection)
+
+
 def install_google_connectors(service, built):
     """Attach :func:`build_google_connectors` output to a service (startup or Settings)."""
     service.connector_registry=built['registry']
@@ -247,6 +267,7 @@ def install_google_connectors(service, built):
     service.drive_read_token_exchange=built['exchange']
     service.google_client_source=built['source']
     service.google_client_id=built['client_id']
+    register_google_connections(service)
 
 
 def google_oauth_key(store):
@@ -626,6 +647,7 @@ def configured_service(store, environ=None):
             store,client,port,key_provider,service.connector_registry,
             gmail=service.gmail is None,calendar=service.calendar_oauth is None))
     service.google_client_installer=install_google_client
+    register_google_connections(service)
     own=google_own_client(environ,store)
     if own:
         install_google_client(own)

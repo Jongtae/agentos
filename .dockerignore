@@ -1,9 +1,0 @@
-*
-!src/
-!src/personal_agent/
-!src/personal_agent/**
-!Dockerfile
-!pyproject.toml
-!compose.yaml
-**/__pycache__/
-**/*.pyc

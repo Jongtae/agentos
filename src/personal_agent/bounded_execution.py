@@ -219,8 +219,7 @@ CLI_PROFILES = {
             'calendar_draft_update', 'calendar_draft_cancel', 'save_memory', 'list_memory', 'search_memory',
             'list_agents', 'delegate_agent', 'propose_current_state', 'schedule_preparation', 'ask_location',
             'settings_read', 'settings_change', 'information_use', *_BROWSER_ACTIONS, *_SKILL_ACTIONS)},
-        # Pinned in Dockerfile.engine; a test keeps the two in step.
-        'runtimes': {'codex': {'pinned_version': '0.153.4', 'live_tested_version': None}},
+                'runtimes': {'codex': {'pinned_version': '0.153.4', 'live_tested_version': None}},
     },
     'strict-isolated': {
         # #616: the same host CLI and stdio bridge as trusted-local, launched

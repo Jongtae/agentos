@@ -4,7 +4,7 @@ Run this gate from a clean product checkout before claiming that a release
 meets the maintained Personal AgentOS v1 baseline:
 
 ```sh
-python3 scripts/product_validate.py --unit --homebrew --compose \
+python3 scripts/product_validate.py --unit --homebrew \
   --output /tmp/agentos-product-validation.json \
   --markdown /tmp/agentos-product-validation.md
 ```
@@ -26,8 +26,3 @@ the shared web history and the delivery trace; no bot token is printed or
 stored in the report.
 
 The gate is a maintained v1 release decision aid, not the Hub v2 product gate. Hub v2 consumer installation, subscription engines, owner-created BotFather personal bots, and context capture each require their own named acceptance evidence.
-
-When Docker is available, `--compose` builds an isolated Compose project,
-waits for `/healthz`, writes an AgentOS note into its named volume, recreates
-the container, and checks that the note remains. It then removes the temporary
-project and volume.

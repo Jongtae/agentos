@@ -132,11 +132,6 @@ def test_mcp_sdk_is_exact_and_host_only_in_the_resolved_package_graph() -> None:
     assert packages["mcp"]["wheels"][0]["hash"] == "sha256:dd0c44c089d16453e8ae31a3877a0054d7a2314caaa81f5e0541b9b1734b2377"
     assert packages["mcp"]["sdist"]["hash"] == "sha256:8b147a50441cf059dc88c684e0aeed3687f0aa0f39c6cde7b90330effd2b34d8"
 
-    # The isolated image consumes PEP 621 base dependencies, not host extras.
-    engine_image = (ROOT / "Dockerfile.engine").read_text(encoding="utf-8")
-    assert "pip install --no-cache-dir . \\" in engine_image
-    assert "mcp-host" not in engine_image
-
 
 def test_host_profile_executes_the_pinned_public_sdk_apis() -> None:
     from mcp.server.stdio import stdio_server

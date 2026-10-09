@@ -27,7 +27,7 @@ dependencies = ["pypdf>=5.0", "python-docx>=1.1", "openpyxl>=3.1", "cryptography
 [project.optional-dependencies]
 schema-validation = ["jsonschema[format]>=4.23"]
 # Official stdio transport/dispatcher for host profiles only (#1025). MIT.
-# Keep the HTTP/OAuth/server closure outside Dockerfile.engine's base install.
+# Keep the HTTP/OAuth/server closure outside the base install.
 mcp-host = ["mcp==2.3.0"]
 
 [dependency-groups]

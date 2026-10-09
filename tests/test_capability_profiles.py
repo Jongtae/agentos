@@ -5,7 +5,6 @@ no model, CLI or provider is contacted.  The real-bridge wire and host
 invocation checks are in tests/test_mcp_bridge_protocol.py.
 """
 import json
-import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -183,8 +182,6 @@ class DeclaredProfileLimits(unittest.TestCase):
         for profile in CLI_PROFILES.values():
             for runtime in profile['runtimes'].values():
                 self.assertIsNone(runtime['live_tested_version'], 'no live AgentOS-mediated run is claimed')
-        pinned = re.search(r'@openai/codex@([0-9.]+)', (ROOT / 'Dockerfile.engine').read_text()).group(1)
-        self.assertEqual(CLI_PROFILES[ISOLATED_PROFILE]['runtimes']['codex']['pinned_version'], pinned)
 
     def test_the_isolated_profile_stays_restricted_to_the_argumentless_read(self):
         """The proxy forwards only ``arguments == {}``; a wider profile must revisit it."""

@@ -96,7 +96,7 @@ class ProductValidator:
         self.add("VISION-002", "Additional message channels", "future", "gap", "Telegram is the first implemented channel; KakaoTalk and WeChat require separate platform feasibility and approval designs.", "Create channel-specific integration epics after Telegram contract stabilization.")
         self.add("VISION-003", "Managed and multi-tenant hosting", "future", "gap", "v1 supports one owner on macOS or one Linux/VPS runtime; hosted tenancy is excluded by the PRD.", "Design tenant isolation, billing, and operations separately from the single-owner runtime.")
 
-    def local_checks(self, include_unit=False, include_homebrew=False, include_compose=False):
+    def local_checks(self, include_unit=False, include_homebrew=False):
         if include_unit:
             self.command(["python3", "-m", "unittest", "discover", "-s", "tests", "-q"], "Automated contract suite")
         if include_homebrew:
@@ -105,12 +105,6 @@ class ProductValidator:
                 self.add("INST-001", "Installed Homebrew acceptance", "v1", "blocked", "agentos is not on PATH; run this check from a Homebrew-installed machine.")
             else:
                 self.command(["python3", "scripts/quickstart_install_check.py"], "Installed Homebrew acceptance")
-        if include_compose:
-            if not shutil.which("docker"):
-                self.add("OPS-001", "Docker Compose configuration", "v1", "blocked", "Docker is not installed on this machine.")
-            else:
-                self.command(["docker", "compose", "config", "--quiet"], "Docker Compose configuration")
-                self.command(["python3", "scripts/verify_compose_acceptance.py"], "Docker Compose persistence acceptance")
 
     def live_checks(self, live_model=False, live_telegram=False):
         if live_model:

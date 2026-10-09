@@ -247,6 +247,42 @@ class ClaimAndObservationForget(ContextCase):
         self.forget.undo(MEMORY_OWNER, receipt['receipt'])
         self.assertEqual(['obs:' + e['id'] for e in self.obs.usable()], [ref])
 
+    def test_a_later_claim_of_the_same_kind_before_undo_is_never_overwritten(self):
+        """Review P1: the newer statement wins; undo refuses instead of reviving a conflicting claim."""
+        job, _ = self.request('오늘 재택이야')
+        self.assertTrue(self.propose(job, predicate='work_mode', value='remote').get('recorded'))
+        [first] = self.context.hypotheses()
+        receipt = self.forget.forget(MEMORY_OWNER, 'state:' + first['id'])
+        later, _ = self.request('사무실 나왔어')
+        self.assertTrue(self.propose(later, predicate='work_mode', value='office').get('recorded'))
+        with self.assertRaises(ForgetError) as caught:
+            self.forget.undo(MEMORY_OWNER, receipt['receipt'])
+        self.assertEqual(caught.exception.code, 'later_value')
+        self.assertEqual([claim['value'] for claim in self.context.hypotheses()], ['office'])
+
+    def test_a_superseded_claim_chain_is_forgotten_with_its_head(self):
+        """Review P3: ``supersedes`` is stored as ``state:<id>``; the chain walk follows it."""
+        job, _ = self.request('오늘 재택이야')
+        self.propose(job, predicate='work_mode', value='remote')
+        again, _ = self.request('아니 오늘 사무실')
+        self.propose(again, predicate='work_mode', value='office')
+        [head] = self.context.hypotheses()
+        receipt = self.forget.forget(MEMORY_OWNER, 'state:' + head['id'])
+        self.assertEqual(receipt['items'], len(self.claims()))
+        self.assertEqual({row['state'] for row in self.claims()}, {'forgotten'})
+
+    def test_another_owner_id_has_no_claims_or_observations_here(self):
+        """Review P2: the context belongs to this installation's owner only."""
+        ref = self.live()
+        job, _ = self.request('오늘 재택이야')
+        self.propose(job, predicate='work_mode', value='remote')
+        [claim] = self.context.hypotheses()
+        for target in (ref, 'state:' + claim['id']):
+            with self.subTest(target=target), self.assertRaises(ForgetError) as caught:
+                self.forget.forget('someone-else', target)
+            self.assertEqual(caught.exception.code, 'stale')
+        self.assertEqual(len(self.context.hypotheses()), 1)
+
     def test_a_forgotten_claim_is_purged_with_its_exposures(self):
         job, _ = self.request('오늘 재택이야')
         result = self.propose(job, predicate='work_mode', value='remote')

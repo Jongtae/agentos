@@ -131,14 +131,26 @@ class OwnerForget:
                    (owner_key, current['memory_key']))
         return {'rows': items}
 
-    @staticmethod
-    def _context_scope(db):
-        """Claims and observations belong to the paired Telegram owner and generation (``current_context``)."""
+    def _context_scope(self, db, owner_key=None):
+        """Claims and observations belong to the paired Telegram owner and generation (``current_context``).
+
+        That context belongs to this installation's one owner; any other owner
+        id has no claims or observations here (review P2).
+        """
+        from .agent_runtime import MEMORY_OWNER
         from .current_context import _owner_scope
+        if owner_key is not None and owner_key != self.store._memory_binding(MEMORY_OWNER):
+            raise _refuse('stale')
         return tuple(_owner_scope(db))
 
+    @staticmethod
+    def _claim_id(value):
+        """A claim's ``supersedes`` is stored as ``state:<id>`` (``current_context``)."""
+        value = str(value or '')
+        return value[len(CLAIM_PREFIX):] if value.startswith(CLAIM_PREFIX) else value
+
     def _exclude_claim(self, db, owner_key, claim_id, receipt_id, now):
-        scope = self._context_scope(db)
+        scope = self._context_scope(db, owner_key)
         current = db.execute("SELECT * FROM current_state_claims WHERE id=? AND owner_key=? AND generation=? AND state='current'",
                              (claim_id, *scope)).fetchone()
         if current is None:
@@ -149,11 +161,11 @@ class OwnerForget:
                 items.append({'table': 'current_state_claims', 'id': cursor['id'], 'prior': cursor['state']})
                 db.execute('UPDATE current_state_claims SET state=? WHERE id=?', (FORGOTTEN, cursor['id']))
             cursor = (db.execute('SELECT * FROM current_state_claims WHERE id=? AND owner_key=? AND generation=?',
-                                 (cursor['supersedes'], *scope)).fetchone() if cursor['supersedes'] else None)
-        return {'rows': items, 'scope': list(scope)}
+                                 (self._claim_id(cursor['supersedes']), *scope)).fetchone() if cursor['supersedes'] else None)
+        return {'rows': items, 'scope': list(scope), 'predicate': current['predicate']}
 
     def _exclude_observation(self, db, owner_key, observation_id, receipt_id, now):
-        scope = self._context_scope(db)
+        scope = self._context_scope(db, owner_key)
         row = db.execute("SELECT * FROM context_observations WHERE id=? AND owner_key=? AND generation=? "
                          "AND state NOT IN ('invalidated',?)", (observation_id, *scope, FORGOTTEN)).fetchone()
         if row is None:
@@ -191,7 +203,7 @@ class OwnerForget:
     def _refuse_later_value(self, db, owner_key, kind, items, rows):
         ids = [row['id'] for row in rows]
         # A re-paired or disconnected Telegram owner is another context owner: never restored for them.
-        if items.get('scope') is not None and list(self._context_scope(db)) != items['scope']:
+        if items.get('scope') is not None and list(self._context_scope(db, owner_key)) != items['scope']:
             raise _refuse('no_receipt')
         if kind == 'memory':
             current = [row for row in rows if row['table'] == 'memories' and row['prior'] == 'current']
@@ -201,9 +213,11 @@ class OwnerForget:
                                              (owner_key, key['memory_key'])).fetchone():
                     raise _refuse('later_value')
         elif kind == 'claim':
-            marks = ','.join('?' for _ in ids) or "''"
-            if db.execute(f"SELECT 1 FROM current_state_claims WHERE supersedes IN ({marks}) AND state='current'",
-                          tuple(ids)).fetchone():
+            # Review P1: a later statement of the same kind is a new, independent claim (the forgotten one
+            # was out of use, so nothing supersedes it); either way the newer claim wins.
+            scope = items.get('scope') or []
+            if db.execute("SELECT 1 FROM current_state_claims WHERE owner_key=? AND generation=? AND predicate=? AND state='current'",
+                          (*scope, items.get('predicate'))).fetchone():
                 raise _refuse('later_value')
         for row in rows:
             found = db.execute(f"SELECT state{', source_revision' if row['table'] == 'context_observations' else ''} "

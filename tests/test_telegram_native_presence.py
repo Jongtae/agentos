@@ -1228,6 +1228,21 @@ class StartLatencyTests(NativePresenceTestCase):
         self.assertEqual(job['status'], 'succeeded')
         self.assertEqual(self.emojis(), [RECEIVED_REACTION, '🤗', '🎉'])
 
+    def test_a_work_records_observed_stage_timings_the_owner_steps_leave_out(self):
+        # #1232: where the time went is recorded from clock readings; no model is asked and
+        # the owner's step list does not show these rows.
+        self.connect_model()
+        self.install_judgments({'turn-reaction': '🤗', 'closing-reaction': '🎉'})
+        job, _ = self.turn('고마워')
+        with self.service.store.db() as db:
+            rows = [json.loads(row['detail']) for row in db.execute(
+                "SELECT detail FROM tool_events WHERE job_id=? AND tool='response_timing' ORDER BY id", (job['id'],))]
+        self.assertEqual([row['stage'] for row in rows], ['queue_wait', 'routed', 'finished'])
+        self.assertTrue(all(isinstance(row['ms'], int) and row['ms'] >= 0 for row in rows))
+        self.assertGreaterEqual(rows[-1]['total_ms'], rows[-1]['ms'])
+        self.assertFalse([event for event in self.service.store.task_events(job['id'])
+                          if event['tool'] == 'response_timing'])
+
     # -- message-only judgments overlap ----------------------------------------
 
     def followup_turn(self, delay=0.0):

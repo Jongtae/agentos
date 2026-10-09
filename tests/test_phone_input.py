@@ -253,3 +253,25 @@ class FlowTest(PhoneInputServiceCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ReviewFollowupTest(PhoneInputServiceCase):
+    def test_the_consent_address_is_a_link_to_tap_not_a_popup(self):
+        session = phone_input.PhoneInput(DRIVE_CONNECTOR_ID, 'Google Drive 연결')
+        page = phone_input.page(session, 'n')
+        self.assertIn('id="consent"', page)
+        self.assertNotIn('window.open', page)
+
+    def test_an_unexpected_failure_still_answers_the_phone(self):
+        self.pair()
+        self.service.start_phone_input(phone_input.GOOGLE_CLIENT)
+        session = self.service.phone_input_session()
+        cookie = self.open_page(session)
+
+        def boom(session, body):
+            raise OSError('token endpoint unreachable')
+        self.service.phone_input_client = boom
+        status, body, _ = self.request(f'{phone_input.CLIENT_PATH}?code={session.code}', 'POST', {'client_json': 'x'},
+                                       cookie=cookie)
+        self.assertEqual(status, 502)
+        self.assertNotIn('unreachable', body.decode())

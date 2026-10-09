@@ -232,7 +232,7 @@ class OrchestratorCategories(_Case):
         for secret in (TELEGRAM_SECRET, OPENAI_KEY, OPENROUTER_KEY, 'decision-owner-key-value-0003'):
             self.assertNotIn(secret, text)
         self.assertNotIn('https://', text, 'no endpoint is reported')
-        self.assertEqual(set(read['settings']), {'current_context', 'judgment_ai', 'main_ai', 'owner_model', 'family', 'skills'})
+        self.assertEqual(set(read['settings']), {'current_context', 'judgment_ai', 'main_ai', 'owner_model', 'family', 'skills', 'phone_link'})
         self.assertEqual([o['value'] for o in read['settings']['main_ai']['route']['options']], ['openai', 'openrouter'])
         self.assertEqual(read['settings']['current_context']['enabled']['value'], 'off')
         self.assertIn('기본 AI · 경로: OpenRouter', read['response'])

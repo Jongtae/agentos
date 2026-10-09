@@ -48,7 +48,8 @@ MAX_CLIENT_CHARS = 20_000
 ISSUED_KEPT = 8
 DONE_DELAY_SECONDS = 0.3
 
-LINK_TEXT = ('휴대폰에서 {label} 설정을 하는 링크예요. 이 링크를 연 휴대폰 한 대만 쓸 수 있고, 약 {minutes}분 뒤에 닫혀요.\n{link}')
+LINK_TEXT = ('휴대폰에서 {label} 설정을 하는 링크예요. 이 링크를 연 휴대폰 한 대만 쓸 수 있고, 약 {minutes}분 뒤에 닫혀요. '
+             '중간에 이 화면을 닫았다면 새 링크를 요청해 주세요.\n{link}')
 NO_NGROK_TEXT = '휴대폰 링크를 만들 ngrok이 이 Mac에 없어요. Mac에서 설정해 주세요.'
 NO_PORT_TEXT = '이 Mac의 AgentOS 주소를 아직 알 수 없어 휴대폰 링크를 만들지 못했어요.'
 BUSY_TEXT = '이미 휴대폰 링크가 열려 있어요. 그 링크가 닫힌 뒤에 다시 요청해 주세요.'
@@ -226,18 +227,22 @@ def page(session, nonce):
 $('save').onclick=async()=>{{const d=await post('{CLIENT_PATH}',{{client_json:$('json').value}});if(d&&d.ok)end('저장했어요. 이제 대화에서 서비스 연결을 요청하세요.');else say(d&&d.error||'저장하지 못했어요.')}};'''
     else:
         body = '''<p class="note">1. 아래 버튼을 누르면 새 탭에서 Google 승인 화면이 열려요. 계정을 고르고, 확인되지 않은 앱 경고가 나오면 고급(Advanced)을 눌러 계속하고, 권한 체크박스는 모두 체크하세요.</p>
-<button id="start" class="main">Google에서 승인</button>
-<p class="note">2. 승인하면 그 탭에 "연결할 수 없음"이 떠요. 정상이에요. 그 탭의 주소창 주소 전체를 복사해 이 화면에 붙여 넣고 [연결]을 누르세요.</p>
+<button id="start" class="main">Google 승인 주소 받기</button>
+<a id="consent" class="button main hidden" target="_blank" rel="noopener noreferrer">Google에서 승인하기</a>
+<p class="note">2. 승인하면 그 탭에 "연결할 수 없음"이 떠요. 정상이에요. 그 탭의 주소 전체를 복사해(주소창이 짧게 보이면 공유 → 복사) 이 화면으로 돌아와 붙여 넣고 [연결]을 누르세요.</p>
 <textarea id="url" rows="4" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="http://127.0.0.1:..." maxlength="8192"></textarea>
 <button id="finish" class="main">연결</button>'''
-        script = f'''$('start').onclick=async()=>{{const d=await post('{START_PATH}',{{}});if(d&&d.authorization_url){{window.open(d.authorization_url,'_blank','noopener')}}else say(d&&d.error||'승인 화면을 열지 못했어요.')}};
+        # The consent address is shown as a link the owner taps: a window opened
+        # after an awaited request is outside the tap, and iOS / in-app browsers
+        # block it (#1213 review P2).
+        script = f'''$('start').onclick=async()=>{{const d=await post('{START_PATH}',{{}});if(d&&d.authorization_url){{const a=$('consent');a.href=d.authorization_url;a.classList.remove('hidden');$('start').classList.add('hidden');say('아래 [Google에서 승인하기]를 누르세요.')}}else say(d&&d.error||'승인 주소를 받지 못했어요.')}};
 $('finish').onclick=async()=>{{const d=await post('{FINISH_PATH}',{{url:$('url').value}});if(d&&d.ok)end('연결했어요. 대화에도 알려 드렸어요.');else say(d&&d.error||'연결하지 못했어요. 주소를 다시 확인해 주세요.')}};'''
     return f'''<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{label}</title>
 <style nonce="{nonce}">body{{font:16px/1.45 -apple-system,system-ui,sans-serif;margin:0;padding:14px;background:#1c1c1e;color:#f2f2f7}}
 h1{{font-size:17px;margin:0 0 10px}}.note{{display:block;font-size:14px;color:#c7c7cc;margin:10px 0 6px}}
 textarea,input{{width:100%;box-sizing:border-box;font-size:15px;padding:10px;border-radius:10px;border:1px solid #48484a;background:#2c2c2e;color:#fff}}
-button{{width:100%;font-size:17px;padding:14px;border-radius:10px;border:0;margin-top:10px;background:#3a3a3c;color:#fff}}button.main{{background:#0a84ff}}
+button,a.button{{display:block;box-sizing:border-box;width:100%;font-size:17px;padding:14px;border-radius:10px;border:0;margin-top:10px;background:#3a3a3c;color:#fff;text-align:center;text-decoration:none}}button.main,a.button.main{{background:#0a84ff}}
 #msg{{color:#ffd60a;font-size:14px;min-height:1em}}#end{{display:none;text-align:center;padding:30px 0;font-size:18px}}.hidden{{display:none}}</style></head><body>
 <h1>{label}</h1><div id="live">{body}<p id="msg" role="status"></p></div><p id="end"></p>
 <script nonce="{nonce}">

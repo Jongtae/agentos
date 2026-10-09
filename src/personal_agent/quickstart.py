@@ -942,6 +942,10 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path==phone_input.FINISH_PATH:return self.reply(200,service.phone_input_finish(session,body))
             except ValueError as exc:
                 return self.reply(400,{'ok':False,'error':str(exc)})
+            except Exception as exc:
+                # #1213 review P2: a token exchange or delivery failure still answers the phone; nothing it carried is logged.
+                logging.getLogger('personal_agent.phone_input').warning('phone input request failed (%s)',type(exc).__name__)
+                return self.reply(502,{'ok':False,'error':'지금은 처리하지 못했어요. 잠시 후 다시 해 주세요.'})
             return self.reply(405,{'error':'지원하지 않는 요청입니다.'})
 
         def cookie(self,token,max_age=86400):

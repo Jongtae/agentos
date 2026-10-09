@@ -582,6 +582,11 @@ class AgentService:
         self.drive_oauth=drive_oauth
         self.drive_reader_factory=drive_reader_factory
         self.drive_read_token_exchange=None
+        # #1172: the owner's own Google client.  `configured_service` sets the
+        # installer; the source is 'settings' or 'environment' once installed.
+        self.google_client_installer=None
+        self.google_client_source=None
+        self.google_client_id=None
         # The natural-language create flow: literal-rule slot collection, an
         # exact preview, and the owner's explicit approval spending the
         # connector's own one-time token.  It resolves the connector per turn
@@ -2917,7 +2922,7 @@ class AgentService:
                     'subscription_engines':self.subscription_engine_status(),
                     'subscription_execution':self.subscription_execution_profile(),
                     'telegram':{'enabled':tg.get('enabled',False),'mode':tg.get('mode','owner-token'),'username':tg.get('username',''),'paired':bool(tg.get('user_id')),'user_id':tg.get('user_id')},
-                    'file_roots':[{**root,'blocked':folder_grants.blocked(root.get('path',''),self.store)} for root in self.store.config('file_roots',[])], 'file_workspace':FileWorkspace(self.store).projection(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'connectors':self.google_connection_rows(),'current_context':self.current_state.status(),'browser':self.browser_status()}
+                    'file_roots':[{**root,'blocked':folder_grants.blocked(root.get('path',''),self.store)} for root in self.store.config('file_roots',[])], 'file_workspace':FileWorkspace(self.store).projection(), 'document_boundary':boundary, 'context_inbox':__import__('personal_agent.context_inbox',fromlist=['ContextInbox']).ContextInbox(self.store).status(), 'agents':[{'id':role['id'],'name':role['name'],'permissions':role['permissions'],'package_id':package['id']} for package in active_packages for role in package['roles']], 'packages':packages, 'tool_run':self.store.config('tool_run'), 'model_test':model_test, 'model_ready':self.model_ready(model,model_test), 'telegram_status':self.store.config('telegram_status'),'connectors':self.google_connection_rows(),'google_client':self.google_client_status(),'current_context':self.current_state.status(),'browser':self.browser_status()}
 
     def home(self):
         """Return the minimal, credential-free read model for the owner home."""
@@ -5742,7 +5747,11 @@ class AgentService:
         drive=self.drive_connection_row()
         if drive:
             rows.append(drive)
-        return rows
+        # #1172: which connections run on the owner's own Google client.
+        own={cid for cid,holder in ((GMAIL_CONNECTOR_ID,self.gmail),(CALENDAR_CONNECTOR_ID,self.calendar_oauth),
+                                     (CALENDAR_WRITE_CONNECTOR_ID,self.calendar_oauth),(DRIVE_CONNECTOR_ID,self.drive_oauth))
+             if self.google_client_id and holder is not None and getattr(holder,'client_id',None)==self.google_client_id}
+        return [{**row,'source':'own-client'} if row.get('connector_id') in own else row for row in rows]
 
     def settings_connection_rows(self):
         """Owner-visible connections for the conversation Settings read model."""
@@ -6811,6 +6820,40 @@ class AgentService:
         if self.drive_reader_factory is None:
             return None
         return self.drive_reader_factory(self.connector_owner_id(job))
+
+    GOOGLE_CLIENT_SECRET_KEY='google_oauth_client'
+
+    def google_client_status(self):
+        """The owner's own Google client as Settings shows it: never the secret, only a short id hint."""
+        stored=bool(self.store.secret(self.GOOGLE_CLIENT_SECRET_KEY))
+        client_id=self.google_client_id or ''
+        return {'configured':bool(self.google_client_source),'source':self.google_client_source,
+                'saved':stored,'restart_required':stored and not self.google_client_source,
+                'client_hint':('…'+client_id.split('.apps.googleusercontent.com')[0][-6:]) if client_id else '',
+                'available':callable(self.google_client_installer)}
+
+    def save_google_client(self, body):
+        """Save the owner's own Google "Desktop app" client and offer Gmail, Calendar and Drive (#1172).
+
+        The value goes only to the owner-local secret store.  Saving grants
+        nothing: each service still needs the owner's own Google consent.
+        A first client is installed at once; replacing one that is already
+        in use takes effect after AgentOS restarts, because existing
+        connections were issued to the previous client.
+        """
+        from .quickstart import google_client_from_json
+        if not callable(self.google_client_installer):
+            raise ValueError('이 실행 방식에서는 자체 Google client를 설정할 수 없습니다.')
+        raw=(body or {}).get('client_json') if isinstance(body,dict) else None
+        if not isinstance(raw,str) or not raw.strip() or len(raw)>20_000:
+            raise ValueError('Google Cloud에서 내려받은 Desktop app client JSON을 붙여 넣어 주세요.')
+        client=google_client_from_json(raw.strip())
+        if self.google_client_source=='environment':
+            raise ValueError('자체 Google client가 AGENTOS_GOOGLE_CLIENT_FILE로 지정돼 있어 설정에서 바꿀 수 없습니다.')
+        self.store.secret(self.GOOGLE_CLIENT_SECRET_KEY,{'installed':{'client_id':client[0],'client_secret':client[1]}})
+        if not self.google_client_source:
+            self.google_client_installer((*client,'settings'))
+        return self.google_client_status()
 
     def begin_drive_connection(self):
         """One owner-local Google Drive authorization URL (#1172); issuing it grants nothing."""

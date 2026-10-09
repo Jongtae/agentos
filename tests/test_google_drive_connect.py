@@ -325,8 +325,8 @@ if __name__ == '__main__':
     unittest.main()
 
 
-class PublisherGoogleConnectorsTest(unittest.TestCase):
-    """The same publisher client offers Gmail and Calendar too (#1172)."""
+class OwnClientConnectorsTest(unittest.TestCase):
+    """One own client offers Gmail and Calendar too (#1172)."""
 
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
@@ -470,3 +470,74 @@ class CalendarRenewalTest(unittest.TestCase):
         store = EncryptedCalendarSecretStore(QuickStore(temp.name), Fernet.generate_key())
         with self.assertRaises(ValueError):
             calendar_transport(store, ConnectorRegistry(store, ()), OWNER, exchange=lambda payload: {})
+
+
+class OwnClientFromSettingsTest(unittest.TestCase):
+    """The owner adds their own Desktop client in Settings; no client ships with AgentOS (#1172)."""
+
+    CLIENT = json.dumps({'installed': {'client_id': '123-abcdefgh.apps.googleusercontent.com',
+                                       'client_secret': 'GOCSPX-owner-secret'}})
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = pathlib.Path(temp.name)
+        self.store = QuickStore(str(self.root / 'data'))
+        self.env = {'AGENTOS_GOOGLE_LOCAL_PORT': '9911', 'AGENTOS_GOOGLE_OAUTH_KEY': Fernet.generate_key().decode()}
+
+    def test_nothing_is_offered_until_the_owner_adds_a_client(self):
+        service = configured_service(self.store, self.env)
+        self.assertIsNone(service.drive_oauth)
+        self.assertIsNone(service.gmail)
+        status = service.google_client_status()
+        self.assertEqual((status['configured'], status['available']), (False, True))
+
+    def test_a_saved_client_offers_all_three_services_at_once_without_a_restart(self):
+        from personal_agent.gmail import GMAIL_CONNECTOR_ID
+        service = configured_service(self.store, self.env)
+        status = service.save_google_client({'client_json': self.CLIENT})
+        self.assertEqual((status['configured'], status['source'], status['client_hint']), (True, 'settings', '…cdefgh'))
+        self.assertNotIn('GOCSPX', json.dumps(status))
+        self.assertNotIn('GOCSPX', json.dumps(service.settings()))
+        self.assertEqual(service.connector_connect_url(DRIVE_CONNECTOR_ID), f'http://127.0.0.1:9911{DRIVE_CONNECT_PATH}')
+        self.assertEqual(service.connector_connect_url(GMAIL_CONNECTOR_ID), 'http://127.0.0.1:9911/google-gmail')
+        self.assertIsNotNone(service.connector_handoff)
+        rows = {row['connector_id']: row for row in service.google_connection_rows()}
+        self.assertEqual(rows[DRIVE_CONNECTOR_ID]['source'], 'own-client')
+        self.assertEqual(rows[GMAIL_CONNECTOR_ID]['source'], 'own-client')
+
+    def test_a_saved_client_is_installed_again_after_a_restart(self):
+        configured_service(self.store, self.env).save_google_client({'client_json': self.CLIENT})
+        restarted = configured_service(self.store, self.env)
+        self.assertEqual(restarted.google_client_status()['source'], 'settings')
+        self.assertIsNotNone(restarted.drive_oauth)
+
+    def test_replacing_a_client_in_use_waits_for_a_restart(self):
+        service = configured_service(self.store, self.env)
+        service.save_google_client({'client_json': self.CLIENT})
+        first = service.drive_oauth
+        other = json.dumps({'installed': {'client_id': '999-zzzzzz.apps.googleusercontent.com', 'client_secret': 's2'}})
+        service.save_google_client({'client_json': other})
+        self.assertIs(service.drive_oauth, first)
+        self.assertEqual(configured_service(self.store, self.env).google_client_id, '999-zzzzzz.apps.googleusercontent.com')
+
+    def test_web_clients_and_junk_are_refused_and_nothing_is_saved(self):
+        service = configured_service(self.store, self.env)
+        for value in ('', 'not json', json.dumps({'web': {'client_id': 'a.apps.googleusercontent.com', 'client_secret': 's'}})):
+            with self.assertRaises(ValueError):
+                service.save_google_client({'client_json': value})
+        self.assertEqual(self.store.secret('google_oauth_client'), '')
+        self.assertIsNone(service.drive_oauth)
+
+    def test_an_environment_client_cannot_be_overwritten_from_settings(self):
+        path = self.root / 'client.json'
+        path.write_text(self.CLIENT)
+        service = configured_service(self.store, {**self.env, 'AGENTOS_GOOGLE_CLIENT_FILE': str(path)})
+        self.assertEqual(service.google_client_status()['source'], 'environment')
+        with self.assertRaises(ValueError):
+            service.save_google_client({'client_json': self.CLIENT})
+
+    def test_an_unreadable_stored_client_offers_nothing_instead_of_failing_startup(self):
+        self.store.secret('google_oauth_client', {'installed': {'client_id': 'broken'}})
+        service = configured_service(self.store, self.env)
+        self.assertIsNone(service.drive_oauth)

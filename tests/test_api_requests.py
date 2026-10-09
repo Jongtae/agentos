@@ -671,6 +671,22 @@ class OwnerVariations(Base):
         self.assertIn('fake-holdings (broker.fake.test)', prompt)
 
 
+class SlotNote(Base):
+    """The owner's API description reaches the AI with the slot, so it does not guess paths (first live try, 2026-10-09)."""
+
+    def test_the_note_is_in_the_context_line_and_a_missing_path_says_so(self):
+        from fake_holdings_api import NOTE
+        save_slot(self.store, 'fake-holdings', [HOST], self.key, subject_field='$.account_id', subject_value=ACCOUNT, note=NOTE)
+        self.assertIn(f'fake-holdings (broker.fake.test: GET {HOLDINGS_PATH}', context_line(self.store))
+        with self.assertRaises(ToolError) as missing:
+            self.caps().execute('api_request', {**READ, 'url': f'https://{HOST}/v1/portfolio'})
+        self.assertIn('GET /v1/portfolio', str(missing.exception))
+
+    def test_a_note_never_carries_the_secret(self):
+        with self.assertRaises(ApiError):
+            save_slot(self.store, 'fake-holdings', [HOST], self.key, note=f'key {self.key}')
+
+
 class DomainFree(unittest.TestCase):
     """C16: the new core module names no domain, site or provider; the existing guard scans it too."""
 

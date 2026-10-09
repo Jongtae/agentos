@@ -36,6 +36,9 @@ OTHER_ACCOUNT = 'ACC-2002'
 HOLDINGS_PATH = '/v1/holdings'
 ORDERS_PATH = '/v1/orders'
 SLOT = 'fake-holdings'
+#: What an owner would write about this API when registering it (endpoints and fields).
+NOTE = (f'GET {HOLDINGS_PATH}: holdings[] (symbol, name, quantity, average_price, market_value), cash, '
+        'total_market_value, total_value, currency, account_id, as_of (data time). Read-only.')
 FAULTS = ('no_auth', 'other_account', 'stale', 'partial', 'mismatch', 'timeout_once')
 
 
@@ -144,7 +147,7 @@ def main():
         print('removed' if remove_slot(store, SLOT) else 'no slot')
         return
     key = fake_key()
-    save_slot(store, SLOT, [f'127.0.0.1:{args.port}'], key, subject_field='$.account_id', subject_value=ACCOUNT)
+    save_slot(store, SLOT, [f'127.0.0.1:{args.port}'], key, subject_field='$.account_id', subject_value=ACCOUNT, note=NOTE)
     api = FakeHoldingsApi(key, now=time.time, fault=args.fault)
     server = serve(api, args.port)
     print(f'slot {SLOT} -> http://127.0.0.1:{args.port}{HOLDINGS_PATH} (fault: {args.fault or "none"}); Ctrl-C to stop')

@@ -48,6 +48,10 @@ class FakeGoogle:
         self.asked.append((owner_id, write))
         return self.current
 
+    def credential_renewable(self, owner_id, write=False):
+        # #1172: also a pure local check (a stored refresh token), no network.
+        return False
+
     def __getattr__(self, name):
         raise AssertionError(f"Settings must not call {name}")
 

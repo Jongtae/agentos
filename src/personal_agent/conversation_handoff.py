@@ -1625,6 +1625,7 @@ from .calendar import CALENDAR_WRITE_CONNECTOR_ID
 from .connector_contract import (ConnectorContractError, ConnectorResult, ConnectorResultKind,
                                  ConnectorState, PendingWorkRegistry, RecoveryAction, _owner_key)
 from .gmail import GMAIL_CONNECTOR_ID
+from .google_drive_read import DRIVE_CONNECTOR_ID
 
 #: Which connector one routing decision needs, decided by AgentOS before any
 #: capability is touched.  A missing entry means the intent needs no connector.
@@ -1641,6 +1642,7 @@ CONNECTOR_BY_INTENT = {
 CONNECTOR_LABELS = {
     GMAIL_CONNECTOR_ID: 'Gmail',
     CALENDAR_WRITE_CONNECTOR_ID: 'Google Calendar 일정 만들기',
+    DRIVE_CONNECTOR_ID: 'Google Drive',
 }
 
 #: One sentence of guidance per unmet state, naming exactly one next action.

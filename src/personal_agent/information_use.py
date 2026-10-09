@@ -42,6 +42,8 @@ READ_CATEGORIES = {
     'calendar_query': 'calendar', 'calendar_draft_create': 'calendar', 'calendar_draft_update': 'calendar',
     'calendar_draft_cancel': 'calendar',
     'find_files': 'files', 'read_file': 'files', 'list_roots': 'files',
+    # #1172: the owner's connected Google Drive.
+    'drive_search': 'drive', 'drive_read': 'drive',
     'list_notes': 'notes', 'save_note': 'notes',
     'propose_current_state': 'current_context',
     'settings_read': 'settings',
@@ -56,7 +58,7 @@ READ_CATEGORIES = {
 LOOKUP_ACTIONS = frozenset({'web_search', 'bounded_public_research', 'weather', 'public_page_read'})
 #: Korean names of the categories, in the order the section shows them.
 CATEGORY_NAMES = {
-    'profile': '프로필', 'memory': '기억', 'calendar': '캘린더', 'files': '파일',
+    'profile': '프로필', 'memory': '기억', 'calendar': '캘린더', 'files': '파일', 'drive': 'Google Drive',
     'current_context': '현재 상황', 'notes': '메모', 'browser': '로그인한 브라우저 페이지',
     'settings': '설정', 'spliced': '요청에 붙인 자료', 'prepared': '준비해 둔 답변',
     'records': '이전 답변의 사용 기록', 'attention': '기다리는 동안 알린 것',
@@ -197,6 +199,11 @@ def _event_items(action, evidence):
         return files or [f"일치하는 파일 {int(evidence.get('file_count') or 0)}개"]
     if action == 'read_file':
         return [_text(evidence.get('path'))]
+    if action == 'drive_search':
+        files = [_text(row.get('name')) for row in evidence.get('files') or () if isinstance(row, dict)]
+        return files or [f"일치하는 Drive 파일 {int(evidence.get('file_count') or 0)}개"]
+    if action == 'drive_read':
+        return [_text(evidence.get('name'))]
     if action == 'list_roots':
         roots = [f'폴더: {_text(name, 60)}' for name in evidence.get('roots') or ()]
         return roots or [f"연결 폴더 {int(evidence.get('root_count') or 0)}개"]

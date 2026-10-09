@@ -177,6 +177,8 @@ class StrictLaunchArguments(unittest.TestCase):
                        'mcp__agentos__settings_read,mcp__agentos__settings_change,'
                        # #826: the information-use audit, relayed the same way.
                        'mcp__agentos__information_use,'
+                       # #1172: the owner's Drive reads, relayed the same way.
+                       'mcp__agentos__drive_search,mcp__agentos__drive_read,'
                        # #961: the Work's pinned skills, read in the bridge.
                        'mcp__agentos__skill_load,mcp__agentos__skill_resource')
         self.assertEqual(trusted[-2:], [allow[0], trusted_allow + browser + owner_state])

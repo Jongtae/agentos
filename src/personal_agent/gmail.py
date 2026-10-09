@@ -127,25 +127,46 @@ class EncryptedGmailSecretStore:
 
     encrypted_secrets = True
 
-    def __init__(self, store, key: str | bytes):
+    def __init__(self, store, key):
+        self._store = store
+        self._cipher = None
+        self._key_provider = None
+        if callable(key):
+            # #1172: a Keychain-held key is fetched on the first read or write
+            # of an actual secret, so wiring and empty reads never touch it.
+            self._key_provider = key
+            return
         if not isinstance(key, (str, bytes)):
             raise ValueError("A local encryption key is required for Gmail OAuth.")
+        self._cipher = self._make_cipher(key)
+
+    @staticmethod
+    def _make_cipher(key):
         try:
-            self._cipher = Fernet(key.encode() if isinstance(key, str) else key)
+            return Fernet(key.encode() if isinstance(key, str) else key)
         except (TypeError, ValueError) as exc:
             raise ValueError("A valid local encryption key is required for Gmail OAuth.") from exc
-        self._store = store
+
+    def _active_cipher(self):
+        if self._cipher is None:
+            try:
+                self._cipher = self._make_cipher(self._key_provider())
+            except Exception:
+                raise GmailError("unreadable_secret") from None
+        return self._cipher
 
     def secret(self, key: str, value=None):
         namespaced = "encrypted:gmail:" + key
         if value is not None:
             payload = json.dumps(value, separators=(",", ":")).encode()
-            self._store.secret(namespaced, self._cipher.encrypt(payload).decode())
+            self._store.secret(namespaced, self._active_cipher().encrypt(payload).decode())
         raw = self._store.secret(namespaced)
         if not raw:
             return ""
         try:
-            return json.loads(self._cipher.decrypt(str(raw).encode()).decode())
+            return json.loads(self._active_cipher().decrypt(str(raw).encode()).decode())
+        except GmailError:
+            raise
         except (InvalidToken, TypeError, ValueError, json.JSONDecodeError):
             raise GmailError("unreadable_secret") from None
 
@@ -405,9 +426,12 @@ class GmailConnector:
         now: Callable[[], float] = time.time,
         oauth_ttl_seconds: float = 600,
         allow_localhost: bool = False,
+        token_exchange: Callable[[dict], dict] | None = None,
     ):
         if not getattr(store, "encrypted_secrets", False):
             raise ValueError("Gmail OAuth requires an encrypted owner-local secret store.")
+        if token_exchange is not None and not callable(token_exchange):
+            raise ValueError("The Gmail token exchange must be callable.")
         if not isinstance(client_id, str) or not client_id.strip() or len(client_id) > 512:
             raise ValueError("A Gmail OAuth client id is required.")
         parsed = urlsplit(redirect_uri) if isinstance(redirect_uri, str) else None
@@ -436,6 +460,9 @@ class GmailConnector:
         self.client_id = client_id
         self.redirect_uri = redirect_uri
         self.transport = transport
+        # #1172: with an exchange, an expired access token is renewed with the
+        # stored refresh token before a request instead of requiring reconnect.
+        self.token_exchange = token_exchange
         self.now = now
         self.oauth_ttl_seconds = float(oauth_ttl_seconds)
         self.registry = registry or ConnectorRegistry(store, (GMAIL_CONNECTOR,), clock=now)
@@ -676,6 +703,67 @@ class GmailConnector:
         self._assert_current_request(owner_id, connection_revision, access_token)
         return GmailMessage(message_id, thread_id, connection_revision, mime_type, body)
 
+    def refresh(self, owner_id: str, exchange: Callable[[dict], dict]) -> dict:
+        """Replace the access token without changing authority (#1172).
+
+        Revision-pinned and never widening, as ``CalendarOAuth.refresh``: a
+        connection rotated or disconnected while the exchange was in flight
+        keeps its new state, and the response must carry exactly the Gmail
+        scope (Google may omit it on refresh; the stored grant is then kept).
+        """
+        if not callable(exchange):
+            raise GmailError("invalid_callback")
+        owner = _owner_key(owner_id)
+        token_key = _owner_secret_key(TOKEN_SECRET_KEY, owner_id)
+        with _OAUTH_LOCK:
+            with self._lifecycle_guard(owner_id):
+                try:
+                    status = self.registry.require_connected(owner_id, GMAIL_CONNECTOR_ID, (GMAIL_READONLY_SCOPE,))
+                except ConnectorContractError:
+                    raise GmailReauthenticationRequired("reauth_required") from None
+                tokens = self.store.secret(token_key)
+                refresh_token = tokens.get("refresh_token") if isinstance(tokens, dict) else None
+                if (
+                    not isinstance(tokens, dict)
+                    or tokens.get("owner") != owner
+                    or not isinstance(refresh_token, str)
+                    or not refresh_token
+                ):
+                    raise GmailError("refresh_unavailable")
+                revision = status.connection_revision
+            try:
+                response = exchange(
+                    {"refresh_token": refresh_token, "client_id": self.client_id, "grant_type": "refresh_token"}
+                )
+            except Exception:
+                raise GmailError("token_refresh_failed") from None
+            if isinstance(response, dict) and response.get("scope") is None:
+                response = {**response, "scope": GMAIL_READONLY_SCOPE}
+            renewed = self._validated_tokens(response, owner)
+            renewed.setdefault("refresh_token", refresh_token)
+            with self._lifecycle_guard(owner_id):
+                current = self.registry.status(owner_id, GMAIL_CONNECTOR_ID)
+                if current.state is not ConnectorState.CONNECTED or current.connection_revision != revision:
+                    raise GmailError("superseded_connection")
+                self.store.secret(token_key, renewed)
+        return self.status(owner_id)
+
+    def credential_renewable(self, owner_id: str) -> bool:
+        """Read-only: does the stored credential carry a refresh token this install can use?"""
+        if self.token_exchange is None:
+            return False
+        try:
+            tokens = self.store.secret(_owner_secret_key(TOKEN_SECRET_KEY, owner_id))
+        except GmailError:
+            return False
+        refresh_token = tokens.get("refresh_token") if isinstance(tokens, dict) else None
+        return bool(
+            isinstance(tokens, dict)
+            and tokens.get("owner") == _owner_key(owner_id)
+            and isinstance(refresh_token, str)
+            and refresh_token
+        )
+
     def mark_reauthentication_required(
         self,
         owner_id: str,
@@ -834,6 +922,14 @@ class GmailConnector:
             return False
 
     def _authorization_context(self, owner_id: str) -> tuple[dict, str, str]:
+        # Renew first, outside the lifecycle guard, so the OAuth lock is taken
+        # before the dispatch/authority locks as everywhere else.  A failed
+        # renewal leaves the expired credential for the check below to refuse.
+        if self.token_exchange is not None and not self.credential_current(owner_id):
+            try:
+                self.refresh(owner_id, self.token_exchange)
+            except GmailError:
+                pass
         with self._lifecycle_guard(owner_id):
             try:
                 status = self.registry.require_connected(owner_id, GMAIL_CONNECTOR_ID, (GMAIL_READONLY_SCOPE,))

@@ -183,6 +183,58 @@ agentos service uninstall --instance spouse             # data is retained
 - **Google Calendar and Gmail.** An instance's callbacks use its own port, for example `http://localhost:8797/oauth/calendar/callback` and `.../oauth/gmail/callback`. Add those as authorised redirect URIs in your Google OAuth client.
 - **Not yet covered.** The same "not covered" notes as [Background service](#background-service-macos) apply: tests substitute `launchctl`, and a real login service is owner operating validation.
 
+## Google Drive, Gmail and Calendar
+
+**Default: your AI's own Google connection.** Most AIs you can connect already offer a
+Google connection of their own. Claude Code has claude.ai connectors, and Codex has ChatGPT
+connector plugins. Letting AgentOS work use that connection is planned separately; AgentOS
+keeps what was read and why, not the connection itself.
+
+**Optional: your own Google client.** If you want AgentOS itself to hold the connection (for
+example because your AI has no Google connection), add one Google OAuth client of your own.
+One client covers all three services:
+
+1. In Google Cloud Console, create a project and enable the Google Drive API, Gmail API and
+   Google Calendar API.
+2. Configure the OAuth consent screen as *External*. Add the `drive.readonly`,
+   `gmail.readonly`, `calendar.events.readonly` and `calendar.events` scopes, then publish it
+   (*In production*). In *Testing*, Google expires the connection every 7 days.
+3. Create an OAuth client of type **Desktop app** and download its JSON.
+4. In AgentOS, open **설정 → 외부 연결 → 자체 Google client → client 넣기**, paste the JSON
+   and save. Alternatively, point `AGENTOS_GOOGLE_CLIENT_FILE` at the file; an environment
+   file wins over the saved one.
+
+Then press **연결** on each service in the same section and approve Google's consent screen:
+
+| Service | Address | Access |
+|---|---|---|
+| Google Drive | `http://127.0.0.1:8787/google-drive-connect` | read the whole Drive (`drive.readonly`) |
+| Gmail | `http://127.0.0.1:8787/google-gmail` | search and read mail (`gmail.readonly`) |
+| Google Calendar | `http://127.0.0.1:8787/google-calendar?grant=read` | read events (`calendar.events.readonly`) |
+| Calendar changes | `http://127.0.0.1:8787/google-calendar?grant=write` | create or change events, each after your approval (`calendar.events`) |
+
+Google shows "Google hasn't verified this app" because the client is your own unverified
+app. Choose *Advanced → continue*. You are its only user, so Google's verification and its
+100-user limit for unverified apps do not apply to you.
+
+After connecting Drive, your AI can search your Drive and read a file. Google Docs, Sheets
+and Slides come back as text; PDF, DOCX, XLSX, TXT and MD are extracted on this computer.
+The connections keep working after the one-hour Google access token expires, because
+AgentOS renews it with the stored refresh token.
+
+What this does and does not do:
+
+- **Read-only Drive and Gmail.** AgentOS cannot change Drive files or send, delete or label
+  mail. A calendar change is only drafted, and runs after you approve it.
+- **Everything stays on this computer.** The client is kept in the AgentOS secret store.
+  Tokens are stored encrypted, with the key in the macOS Keychain. No AgentOS server sits
+  between you and Google, and no client ships with AgentOS. On Linux, set
+  `AGENTOS_GOOGLE_OAUTH_KEY` to a Fernet key you keep outside the data folder.
+- **Replacing the client** applies after AgentOS restarts, and each service must then be
+  connected again.
+- **A per-service client still wins.** If you configured Gmail or Calendar with a separate
+  client (sections below), that configuration is used for that service.
+
 ## Google Calendar (source checkout)
 
 AgentOS can read your calendar and draft changes to it, so `내일 일정 뭐 있어?` is

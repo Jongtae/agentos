@@ -19,7 +19,9 @@ HOST_ACTIONS={'web_search','public_page_read','bounded_public_research','weather
               # #826: which owner information an earlier answer used and where it went (read-only).
               'information_use',
               # #961: read one pinned skill this Work may load, or one of its packaged text files.
-              'skill_load','skill_resource'}
+              'skill_load','skill_resource',
+              # #1172: read-only search and read of the owner's connected Google Drive.
+              'drive_search','drive_read'}
 WRITE_ACTIONS={'save_note','save_memory','delegate_agent','calendar_draft_create','calendar_draft_update','calendar_draft_cancel','browser_click','browser_type','propose_current_state','schedule_preparation','ask_location','settings_change'}
 #: #627: declared host actions ``Capabilities.offered_tools`` offers only while
 #: the owner has current context on.  Off, every route's surface is exactly the

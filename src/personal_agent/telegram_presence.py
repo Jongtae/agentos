@@ -252,6 +252,8 @@ FALLBACK_STEP_LINES = {
     'list_roots': (None, '연결된 폴더 확인 중'),
     'find_files': (None, '파일 찾는 중'),
     'read_file': (None, '파일 읽는 중'),
+    'drive_search': (None, 'Drive 파일 찾는 중'),
+    'drive_read': (None, 'Drive 파일 읽는 중'),
     'list_notes': (None, '메모 확인 중'),
     'save_note': (None, '메모 저장 중'),
     'list_memory': (None, '기억 확인 중'),

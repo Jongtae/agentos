@@ -655,6 +655,7 @@ SETTINGS_WEB_CHANGES={
     '/api/context-inbox/telegram-policy':('임시 자료 Telegram 공유 설정','저장했습니다'),
     '/api/context-inbox/share-policy':('임시 자료 공유 설정','저장했습니다'),
     '/api/browser/sessions/delete':('브라우저 로그인 세션','지웠습니다'),
+    '/api/ai-connections':('AI의 연결 서비스 사용',None),
 }
 
 #: CONNECTOR-REVOKE-01 #588 owner routes (backend only; Settings UI is #619).
@@ -1248,6 +1249,8 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                 if path=='/api/main-ai/key':return self.reply(200,service.save_main_ai_key(body))
                 # #655: web search provider keys and the default the model falls back to.
                 if path=='/api/search-providers/key':return self.reply(200,service.save_search_provider_key(body))
+                # #1197: the owner's AI-side connections switch.
+                if path=='/api/ai-connections':return self.reply(200,service.set_ai_connections(body))
                 # #1172: the owner's own Google client, entered on this computer only.
                 if path=='/api/google/client':
                     if self.tunneled():return self.reply(400,{'error':'자체 Google client는 이 컴퓨터의 AgentOS 화면에서만 설정할 수 있습니다.'})

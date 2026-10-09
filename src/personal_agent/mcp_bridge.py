@@ -253,8 +253,17 @@ def _with_steer(result, store, job_id, record):
     return result
 
 
+#: #1197: Claude Code's permission prompt for the owner's AI connector tools.
+#: Listed only with ``--ai-connections``; never pre-approved, so a model call
+#: to it is itself a permission prompt, which this tool refuses.
+CONNECTOR_PERMISSION = 'connector_permission'
+def _permission_text(decision):
+    """Exactly one text block, as Claude Code requires of a permission prompt tool (observed, 2.1.280)."""
+    return {'content': [{'type': 'text', 'text': json.dumps(decision, ensure_ascii=False)}]}
+
+
 def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROFILE, browser_relay=None,
-          search_off_reason='', relay_browser=True, skills=()):
+          search_off_reason='', relay_browser=True, skills=(), ai_connections=False):
     """Serve one Work's AgentOS tools over stdio for the route profile the host named (#701).
 
     ``profile`` is ``trusted-local`` or ``strict-isolated``; anything else
@@ -313,7 +322,24 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
         if method == 'initialize':
             offered = params.get('protocolVersion') if isinstance(params, dict) else None
             result = {'protocolVersion':negotiated_protocol_version(offered),'capabilities':{'tools':{}},'serverInfo':{'name':'agentos','version':'1'}}
-        elif method == 'tools/list': result = {'tools': tools.definitions()}
+        elif method == 'tools/list':
+            from .agent_runtime import CONNECTOR_PERMISSION_DEFINITION
+            from .bounded_execution import mcp_tool
+            # Never read-only: a client must not auto-approve a direct call to it (review on #1197).
+            extra = [mcp_tool(CONNECTOR_PERMISSION_DEFINITION, 'bounded_write', profile)] if ai_connections and relay else []
+            result = {'tools': tools.definitions() + extra}
+        elif method == 'tools/call' and ai_connections and relay and (params or {}).get('name') == CONNECTOR_PERMISSION:
+            # #1197: the service decides (reads allowed, everything else refused for now)
+            # and records the call; nothing here is shown to the model as a tool result.
+            arguments = (params or {}).get('arguments') or {}
+            try:
+                decision = relay.call(CONNECTOR_PERMISSION, {'tool_name': arguments.get('tool_name'),
+                                                             'input': arguments.get('input')})
+            except Exception:
+                decision = None
+            if not isinstance(decision, dict) or decision.get('behavior') not in ('allow', 'deny'):
+                decision = {'behavior': 'deny', 'message': 'AgentOS could not decide this action, so it was not run.'}
+            return _permission_text(decision)
         elif method == 'tools/call':
             params = params or {}; name = params.get('name')
             # A CLI-chosen name is stored only when it is an offered tool.
@@ -395,7 +421,8 @@ if __name__ == '__main__':
     parser.add_argument('--browser-relay',default=None)
     parser.add_argument('--relay-no-browser',action='store_true')
     parser.add_argument('--skill',action='append',default=[])
+    parser.add_argument('--ai-connections',action='store_true')
     args=parser.parse_args()
     serve(args.data, args.job, args.provenance, native_search=args.native_search, profile=args.profile,
           browser_relay=args.browser_relay, search_off_reason=args.search_off_reason,
-          relay_browser=not args.relay_no_browser, skills=args.skill)
+          relay_browser=not args.relay_no_browser, skills=args.skill, ai_connections=args.ai_connections)

@@ -42,6 +42,8 @@ READ_CATEGORIES = {
     'calendar_query': 'calendar', 'calendar_draft_create': 'calendar', 'calendar_draft_update': 'calendar',
     'calendar_draft_cancel': 'calendar',
     'find_files': 'files', 'read_file': 'files', 'list_roots': 'files',
+    # #1197: a read through the owner's AI-side connection (claude.ai connector) the turn's stream showed completing.
+    'connector_read': 'ai_connection',
     # #1172: the owner's connected Google Drive.
     'drive_search': 'drive', 'drive_read': 'drive',
     # #1216: a response read with the owner's API credential (the slot, never its value).
@@ -60,7 +62,7 @@ READ_CATEGORIES = {
 LOOKUP_ACTIONS = frozenset({'web_search', 'bounded_public_research', 'weather', 'public_page_read'})
 #: Korean names of the categories, in the order the section shows them.
 CATEGORY_NAMES = {
-    'profile': '프로필', 'memory': '기억', 'calendar': '캘린더', 'files': '파일', 'drive': 'Google Drive', 'api': '인증 API',
+    'profile': '프로필', 'memory': '기억', 'calendar': '캘린더', 'files': '파일', 'ai_connection': 'AI에 연결된 서비스', 'drive': 'Google Drive', 'api': '인증 API',
     'current_context': '현재 상황', 'notes': '메모', 'browser': '로그인한 브라우저 페이지',
     'settings': '설정', 'spliced': '요청에 붙인 자료', 'prepared': '준비해 둔 답변',
     'records': '이전 답변의 사용 기록', 'attention': '기다리는 동안 알린 것',
@@ -213,6 +215,8 @@ def _event_items(action, evidence):
         query = f"?{_text(source.get('query'), 80)}" if source.get('query') else ''
         return [f"{_text(source.get('slot'), 40)} → {_text(source.get('host'), 80)}{_text(source.get('path'), 80)}{query} "
                 f"(기준 {basis}{', ' + flags if flags else ''})"]
+    if action == 'connector_read':
+        return [f"{_text(evidence.get('service'), 60)} · {_text(evidence.get('operation'), 60)}"]
     if action == 'list_roots':
         roots = [f'폴더: {_text(name, 60)}' for name in evidence.get('roots') or ()]
         return roots or [f"연결 폴더 {int(evidence.get('root_count') or 0)}개"]

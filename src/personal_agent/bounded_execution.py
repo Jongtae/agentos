@@ -170,6 +170,9 @@ STRICT_ISOLATED_LIMITATION = ('the CLI gets no shell, file or image tool and its
 #: engine runtime root must not be under one for strict isolation.
 BASELINE_READABLE_ROOTS = ('/tmp', '/private/tmp', '/var/tmp', '/private/var/tmp')
 
+#: #1197: the bridge tool Claude Code asks before any connector tool runs.
+CONNECTOR_PERMISSION_TOOL = 'mcp__agentos__connector_permission'
+
 #: Name of the Codex permissions profile AgentOS defines on the command line.
 CODEX_STRICT_PERMISSIONS = 'agentos-strict-isolated'
 #: Codex permissions profile (official `[permissions.<name>]` config): the
@@ -837,6 +840,8 @@ def cli_metadata(engine_id, raw):
             continue
         if isinstance(value, dict):
             records.append(value)
+    connector_calls = {}
+    meta['connector_reads'] = []
     for record in records:
         models = record.get('modelUsage')
         if isinstance(models, dict) and models:
@@ -854,6 +859,16 @@ def cli_metadata(engine_id, raw):
             for part in message['content']:
                 if isinstance(part, dict) and part.get('type') == 'tool_use':
                     meta['tool_calls'].append({'type': 'tool_use', 'name': str(part.get('name') or '')[:80], 'status': 'requested'})
+                    # #1197: an AI-connector call, matched to its result below (names only, never content).
+                    if str(part.get('name') or '').startswith('mcp__claude_ai_') and isinstance(part.get('id'), str):
+                        connector_calls[part['id']] = str(part['name'])[:120]
+        reply = record.get('message') if record.get('type') == 'user' else None
+        if isinstance(reply, dict) and isinstance(reply.get('content'), list):
+            for part in reply['content']:
+                if (isinstance(part, dict) and part.get('type') == 'tool_result'
+                        and part.get('tool_use_id') in connector_calls):
+                    meta['connector_reads'].append({'tool': connector_calls.pop(part['tool_use_id']),
+                                                    'status': 'failed' if part.get('is_error') else 'succeeded'})
         for denial in record.get('permission_denials') or []:
             if isinstance(denial, dict):
                 meta['tool_calls'].append({'type': 'tool_use', 'name': str(denial.get('tool_name') or '')[:80], 'status': 'denied'})
@@ -862,6 +877,9 @@ def cli_metadata(engine_id, raw):
             name = item.get('tool') or item.get('name') or item.get('type')
             meta['tool_calls'].append({'type': item.get('type'), 'name': str(name)[:80], 'status': str(item.get('status') or '')[:20]})
     meta['tool_calls'] = meta['tool_calls'][:30]
+    meta['connector_reads'] = meta['connector_reads'][:30]
+    if not meta['connector_reads']:
+        meta.pop('connector_reads')
     meta['native_searches'] = native_searches(engine_id, records)
     # #795: how the stream ended, content-free, so a run with no final answer is
     # diagnosable: the last event types and any error text the CLI itself reported.
@@ -1284,9 +1302,16 @@ class BoundedExecutionAdapter:
         # CLAUDE_CODE_OAUTH_TOKEN; HOME stays the empty per-turn directory.
         self.credentials = credentials or (lambda engine_id: '')
 
-    def environment(self, engine_id, binary, run_dir):
+    def environment(self, engine_id, binary, run_dir, ai_connections=False):
         env = {'HOME': str(run_dir), 'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}
         env['PYTHONPATH'] = str(Path(__file__).resolve().parents[1])
+        if engine_id == 'claude-code' and ai_connections:
+            # #1197 (owner opt-in, owner instance only): the Mac's regular
+            # Claude Code login, whose claude.ai connectors (Google Drive)
+            # load only under it, not under the long-lived token (observed,
+            # 2.1.280).  User settings stay out (--setting-sources project).
+            env['HOME'] = str(Path.home())
+            return env
         if engine_id == 'claude-code':
             token = self.credentials('claude-code')
             if isinstance(token, str) and token:
@@ -1357,7 +1382,8 @@ class BoundedExecutionAdapter:
         return {'state': 'unknown', 'detail': 'unparsed status'}
 
     def command(self, engine_id, binary, prompt, mcp_config, instructions='', profile=BOUNDED_PROFILE,
-                disabled_features=(), model=None, native_search=False, tool_timeout=None, image_paths=()):
+                disabled_features=(), model=None, native_search=False, tool_timeout=None, image_paths=(),
+                ai_connections=False):
         """The argv of one Work turn.
 
         ``native_search`` (#678) lets the trusted-local turn use the CLI's own
@@ -1422,7 +1448,16 @@ class BoundedExecutionAdapter:
             # #961: no Claude Code skill or slash command of its own ("Disable all skills");
             # AgentOS serves the Work's pinned skills through the bridge.
             argv = [binary, '-p', prompt, '--output-format', 'stream-json', '--verbose',
-                    '--strict-mcp-config', '--mcp-config', str(mcp_config), '--disable-slash-commands', *model_args]
+                    *(() if ai_connections else ('--strict-mcp-config',)), '--mcp-config', str(mcp_config),
+                    '--disable-slash-commands', *model_args]
+            if ai_connections:
+                # #1197: the owner's AI connectors load beside the bridge; none is
+                # pre-approved, so every connector call asks AgentOS
+                # (CONNECTOR_PERMISSION_TOOL) and only reads are allowed.
+                # Review on #1197: the regular login would keep each turn's transcript under
+                # ~/.claude/projects, out of reach of AgentOS retention and forget.
+                argv += ['--setting-sources', 'project', '--no-session-persistence',
+                         '--permission-prompt-tool', CONNECTOR_PERMISSION_TOOL]
             if instructions:
                 # #569: AgentOS instructions travel as a system-prompt addition,
                 # the conversation and request as the prompt.
@@ -1794,6 +1829,10 @@ class BoundedExecutionAdapter:
             native_search = bool(getattr(tools, 'native_search', False)) and profile == BOUNDED_PROFILE
             # #701: only the trusted-local route is ever given the service's browser relay.
             relay = getattr(tools, 'browser_relay', None) if profile == BOUNDED_PROFILE else None
+            # #1197: the owner's AI connections, only for Claude Code on the trusted-local
+            # route and only with the service relay that decides each connector call.
+            ai_connections = (bool(getattr(tools, 'ai_connections', False)) and engine_id == 'claude-code'
+                              and profile == BOUNDED_PROFILE and relay is not None)
             search_off = str(getattr(tools, 'native_search_reason', '') or '') if not native_search else ''
             # Both supported CLIs receive this per-turn bridge configuration.
             # The engine gets no store handle; the bridge alone owns validated
@@ -1814,10 +1853,12 @@ class BoundedExecutionAdapter:
                          *([f'--browser-relay={relay}'] if relay else []),
                          # #774: the relay serves owner-state tools even when no browser is served.
                          *(['--relay-no-browser'] if relay and not getattr(tools, 'relay_browser', True) else []),
+                         # #1197: the bridge answers Claude Code's permission prompts for connector tools.
+                         *(['--ai-connections'] if ai_connections else []),
                          # #961: the exact skill revisions this Work may load (trusted-local only).
                          *[f'--skill={ref}' for ref in (skill_refs(tools.capabilities) if profile == BOUNDED_PROFILE else ())]],
             }}}, ensure_ascii=False), encoding='utf-8')
-            env = self.environment(engine_id, binary, run_dir)
+            env = self.environment(engine_id, binary, run_dir, ai_connections=ai_connections)
             disabled = ()
             if profile == STRICT_PROFILE:
                 # #616: never launch an unqualified CLI under the strict
@@ -1860,7 +1901,8 @@ class BoundedExecutionAdapter:
                        if (relay is not None and getattr(tools, 'relay_browser', True)) or action not in _BROWSER_ACTIONS]
             argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile, disabled_features=disabled,
                                 model=model or None, native_search=native_search,
-                                tool_timeout=bridge_tool_timeout(offered, timeout), image_paths=image_paths)
+                                tool_timeout=bridge_tool_timeout(offered, timeout), image_paths=image_paths,
+                                ai_connections=ai_connections)
             run_meta = {'argv': display_argv(argv, prompt, instructions), 'requested_model': model or None}
             try:
                 if self.runner is subprocess.run:

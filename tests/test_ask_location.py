@@ -57,6 +57,13 @@ class ToolDeclaration(unittest.TestCase):
             self.caps().execute('ask_location', {'reason': '출발했는지 확인하려고요.'})
         self.assertEqual(refused.exception.code, 'location_unavailable')
 
+    def test_button_label_is_passed_only_when_valid(self):
+        caps = self.caps(location_request=lambda *a: self.asked.append(a))
+        caps.execute('ask_location', {'reason': 'where are you?', 'button_label': '  Share location  '})
+        caps.execute('ask_location', {'reason': 'where are you?', 'button_label': 'x' * 41})
+        caps.execute('ask_location', {'reason': 'where are you?'})
+        self.assertEqual(self.asked, [('where are you?', 'Share location'), ('where are you?',), ('where are you?',)])
+
     def test_a_call_asks_once_with_the_reason_and_reports_the_channel(self):
         caps = self.caps(location_request=self.asked.append)
         self.assertEqual(caps.execute('ask_location', {'reason': '  지금 어디세요?  '}),

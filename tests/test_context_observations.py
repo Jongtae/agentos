@@ -157,11 +157,19 @@ class OwnerControlTests(ContextInputCase):
 
 
 class CT01OwnerAndForeignTests(ContextInputCase):
+    def test_ai_written_button_label_reaches_the_keyboard(self):
+        job = self.store.enqueue('nearest store?', 'tg:g1:1', f'telegram:{GENERATION}', CHAT)
+        self.service.request_current_location(job, 'Please share your location.', 'Send my location')
+        prompt = [body for method, body in self.calls if method == 'sendMessage'][-1]
+        self.assertEqual('Send my location', prompt['reply_markup']['keyboard'][0][0]['text'])
+
     def test_requested_static_location_from_owner_is_a_current_position_report(self):
         job = self.store.enqueue('여기 날씨 알려줘', 'tg:g1:1', f'telegram:{GENERATION}', CHAT)
         self.service.request_current_location(job, '이 위치로 날씨를 확인할게요.')
         prompt = [body for method, body in self.calls if method == 'sendMessage'][-1]
         self.assertTrue(prompt['reply_markup']['keyboard'][0][0]['request_location'])
+        # #1230: no AI-written label -> the neutral default, never a fixed Korean string.
+        self.assertEqual('Share my current location', prompt['reply_markup']['keyboard'][0][0]['text'])
         self.assertTrue(prompt['reply_markup']['one_time_keyboard'])
         self.now += 10
         self.pin()

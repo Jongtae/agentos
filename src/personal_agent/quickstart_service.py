@@ -8179,7 +8179,7 @@ class AgentService:
         self.context_observations.set_controls(body)
         return self.current_state.status()
 
-    def request_current_location(self, job_id, prompt):
+    def request_current_location(self, job_id, prompt, button_label=None):
         """Ask the paired owner for a current position for one Work (#626 I3).
 
         A one-time reply keyboard with ``request_location``; the matching
@@ -8199,7 +8199,7 @@ class AgentService:
             request_id=self.context_observations.open_location_request(job_id,cfg['user_id'],cfg.get('generation'))
         for work_id in superseded:
             if work_id!=job_id:self.store.remove_telegram_photo(work_id)
-        markup={'keyboard':[[{'text':'현재 위치 보내기','request_location':True}]],
+        markup={'keyboard':[[{'text':button_label or self.LOCATION_BUTTON_DEFAULT,'request_location':True}]],
                 'one_time_keyboard':True,'resize_keyboard':True}
         try:
             self.telegram.send_message(cfg['user_id'],prompt.strip(),markup)
@@ -8212,6 +8212,8 @@ class AgentService:
 
     #: #992: config row set while a location keyboard may still be showing in the owner's chat.
     LOCATION_KEYBOARD_KEY='telegram_location_keyboard'
+    #: Neutral fallback; the owner's AI normally writes the label in the owner's language (#1230).
+    LOCATION_BUTTON_DEFAULT='Share my current location'
 
     def location_keyboard_removal(self, chat_id):
         """``ReplyKeyboardRemove`` for the next answer to ``chat_id``, or None (#992).
@@ -8242,10 +8244,11 @@ class AgentService:
         """
         if not answerable_work(job):
             return None
-        def ask(reason):
+        def ask(reason, button_label=None):
             try:
                 # Pilot boundary 1: a stored secret never reaches the prompt text.
-                return self.request_current_location(job['id'],self._redact_known_secrets(reason))
+                return self.request_current_location(job['id'],self._redact_known_secrets(reason),
+                                                     self._redact_known_secrets(button_label) if button_label else None)
             except ToolError:
                 raise
             except ValueError as exc:

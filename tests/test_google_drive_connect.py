@@ -733,3 +733,16 @@ class ConnectionNoticeTest(unittest.TestCase):
         response = self.service.conversation_settings_request({'operation': 'read', 'category': 'connections'})['response']
         self.assertIn(f'http://127.0.0.1:9911{DRIVE_CONNECT_PATH}', response)
         self.assertIn('http://127.0.0.1:9911/google-gmail', response)
+
+
+class ParkedConnectionNoticeTest(ConnectionNoticeTest):
+    def test_a_parked_request_is_told_it_continues(self):
+        class Handoff:
+            def record(self, connector_id):
+                return {'owner': 'x'}
+        self.service.connector_handoff = Handoff()
+        self.service.resume_connector_work = lambda connector_id, owner, granted: None
+        self.complete_drive()
+        rows = self.assistant_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertIn('기다리던 요청을 이어서 처리합니다', rows[0]['content'])

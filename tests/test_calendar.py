@@ -73,7 +73,7 @@ class CalendarTests(unittest.TestCase):
             "owner",
             CALENDAR_CONNECTOR_ID,
             ConnectorState.CONNECTED,
-            granted_scopes=(CALENDAR_READ_SCOPE,),
+            granted_scopes=CALENDAR_SPEC.required_scopes,
         )
         self.registry.transition(
             "owner",
@@ -136,7 +136,7 @@ class CalendarTests(unittest.TestCase):
             "reader",
             CALENDAR_CONNECTOR_ID,
             ConnectorState.CONNECTED,
-            granted_scopes=(CALENDAR_READ_SCOPE,),
+            granted_scopes=CALENDAR_SPEC.required_scopes,
         )
 
         result = calendar.query(
@@ -389,7 +389,7 @@ class CalendarTests(unittest.TestCase):
         other_store=QuickStore(self.temp.name+"-independent-runtime")
         other_registry=ConnectorRegistry(other_store,(CALENDAR_SPEC,CALENDAR_WRITE_SPEC))
         other_registry.transition("owner",CALENDAR_CONNECTOR_ID,ConnectorState.CONNECTED,
-                                  granted_scopes=(CALENDAR_READ_SCOPE,))
+                                  granted_scopes=CALENDAR_SPEC.required_scopes)
         lease_started=threading.Event();release_lease=threading.Event();transition_finished=threading.Event()
 
         def hold_lease():
@@ -574,7 +574,7 @@ class CalendarTests(unittest.TestCase):
             "owner",
             CALENDAR_CONNECTOR_ID,
             ConnectorState.CONNECTED,
-            granted_scopes=(CALENDAR_READ_SCOPE,),
+            granted_scopes=CALENDAR_SPEC.required_scopes,
         )
         with self.assertRaises(CalendarError):
             self.calendar.query(
@@ -595,7 +595,7 @@ class CalendarTests(unittest.TestCase):
             "owner",
             CALENDAR_CONNECTOR_ID,
             ConnectorState.CONNECTED,
-            granted_scopes=(CALENDAR_READ_SCOPE,),
+            granted_scopes=CALENDAR_SPEC.required_scopes,
         )
         self.registry.transition(
             "owner",
@@ -625,7 +625,7 @@ class CalendarTests(unittest.TestCase):
                 "owner",
                 CALENDAR_CONNECTOR_ID,
                 ConnectorState.CONNECTED,
-                granted_scopes=(CALENDAR_READ_SCOPE,),
+                granted_scopes=CALENDAR_SPEC.required_scopes,
             )
             self.assertNotEqual(reconnected.connection_revision, read_before)
             raise GoogleCalendarError("scope-expired")

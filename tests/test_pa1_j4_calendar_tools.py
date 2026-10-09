@@ -86,7 +86,7 @@ class CalendarToolTests(unittest.TestCase):
         if read:
             self.registry.transition(MEMORY_OWNER, CALENDAR_SPEC.connector_id,
                                      ConnectorState.CONNECTED,
-                                     granted_scopes=(CALENDAR_READ_SCOPE,))
+                                     granted_scopes=CALENDAR_SPEC.required_scopes)
         if write:
             self.registry.transition(MEMORY_OWNER, CALENDAR_WRITE_SPEC.connector_id,
                                      ConnectorState.CONNECTED,
@@ -558,7 +558,7 @@ class CalendarTransportGrantTests(unittest.TestCase):
                                                    _secret_slot)
         status = self.registry.transition(MEMORY_OWNER, spec.connector_id,
                                           ConnectorState.CONNECTED,
-                                          granted_scopes=(scope,))
+                                          granted_scopes=tuple(scope.split()))
         self.secrets.secret(_secret_slot(TOKEN_SECRET_KEY, grant, MEMORY_OWNER), {
             'access_token': f'{grant}-token',
             'expires_at': 4_102_444_800.0,
@@ -588,7 +588,7 @@ class CalendarTransportGrantTests(unittest.TestCase):
         """
         from personal_agent.calendar_oauth import CalendarOAuthError
         from personal_agent.calendar_oauth import READ_GRANT
-        self.connect(READ_GRANT, CALENDAR_SPEC, CALENDAR_READ_SCOPE)
+        self.connect(READ_GRANT, CALENDAR_SPEC, " ".join(CALENDAR_SPEC.required_scopes))
         # Precondition: the read grant genuinely works, so a later refusal is
         # about authority and not about a missing token.
         self.transport()('GET', 'https://www.googleapis.com/calendar/v3/calendars/primary/events',
@@ -603,7 +603,7 @@ class CalendarTransportGrantTests(unittest.TestCase):
     def test_a_write_spends_the_write_credential_not_the_read_one(self):
         """The grant follows the method, and they are different tokens."""
         from personal_agent.calendar_oauth import READ_GRANT, WRITE_GRANT
-        self.connect(READ_GRANT, CALENDAR_SPEC, CALENDAR_READ_SCOPE)
+        self.connect(READ_GRANT, CALENDAR_SPEC, " ".join(CALENDAR_SPEC.required_scopes))
         self.connect(WRITE_GRANT, CALENDAR_WRITE_SPEC, CALENDAR_WRITE_SCOPE)
         send = self.transport(allow_writes=True)
         send('GET', 'https://www.googleapis.com/calendar/v3/calendars/primary/events', None, {})
@@ -614,7 +614,7 @@ class CalendarTransportGrantTests(unittest.TestCase):
 
     def test_a_read_carrying_a_body_is_refused_even_with_a_valid_token(self):
         from personal_agent.calendar_oauth import CalendarOAuthError, READ_GRANT
-        self.connect(READ_GRANT, CALENDAR_SPEC, CALENDAR_READ_SCOPE)
+        self.connect(READ_GRANT, CALENDAR_SPEC, " ".join(CALENDAR_SPEC.required_scopes))
         with self.assertRaises(CalendarOAuthError):
             self.transport()('GET', 'https://www.googleapis.com/calendar/v3/calendars/primary/events',
                              {'summary': 'x'}, {})

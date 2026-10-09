@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .connector_contract import ConnectorContractError, ConnectorRegistry, ConnectorSpec, ConnectorState
 from .google_calendar import (
+    CALENDAR_LIST_SCOPE,
     CALENDAR_READ_SCOPE,
     CALENDAR_WRITE_SCOPE,
     GoogleCalendar,
@@ -36,7 +37,10 @@ CALENDAR_STATE_KEY = "calendar_create"
 _MAX_DRAFTS = 100
 CALENDAR_SPEC = ConnectorSpec(
     CALENDAR_CONNECTOR_ID,
-    (CALENDAR_READ_SCOPE,),
+    # #1225: the list scope finds the calendars the owner shows in Google
+    # Calendar.  A connection granted before it reads REAUTH_REQUIRED (the
+    # registry's definition-change rule) until the owner reconnects once.
+    (CALENDAR_READ_SCOPE, CALENDAR_LIST_SCOPE),
 )
 CALENDAR_WRITE_SPEC = ConnectorSpec(
     CALENDAR_WRITE_CONNECTOR_ID,
@@ -302,7 +306,9 @@ class CalendarConnector:
             "window": {"start": start, "end": end, "timezone": timezone},
             "evidence": {
                 "operation": "calendar-query",
-                "calendar": "primary",
+                "calendar": "shown",
+                "calendars": sorted({event.get("calendar") or "primary" for event in events}),
+                "skipped_calendars": list(getattr(self.provider, "skipped_calendars", ()) or ()),
                 "window_hash": _canonical({"start": start, "end": end, "timezone": timezone}),
                 "result_count": len(events),
                 "effect": "none",

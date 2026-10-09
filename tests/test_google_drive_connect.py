@@ -8,6 +8,7 @@ import json
 import pathlib
 import tempfile
 import unittest
+from personal_agent.calendar import CALENDAR_SPEC
 from urllib.parse import parse_qs, urlparse
 
 from cryptography.fernet import Fernet
@@ -450,8 +451,8 @@ class CalendarRenewalTest(unittest.TestCase):
 
         def exchange(payload):
             if payload['grant_type'] == 'refresh_token':
-                return {'access_token': 'renewed', 'expires_in': 3600, 'scope': CALENDAR_READ_SCOPE}
-            return {'access_token': 'first', 'expires_in': 3600, 'refresh_token': 'r', 'scope': CALENDAR_READ_SCOPE}
+                return {'access_token': 'renewed', 'expires_in': 3600, 'scope': " ".join(CALENDAR_SPEC.required_scopes)}
+            return {'access_token': 'first', 'expires_in': 3600, 'refresh_token': 'r', 'scope': " ".join(CALENDAR_SPEC.required_scopes)}
 
         offer = oauth.begin_oauth(OWNER)
         state = parse_qs(urlparse(offer['authorization_url']).query)['state'][0]
@@ -563,8 +564,8 @@ class CalendarRenewalLockOrderTest(unittest.TestCase):
 
         def exchange(payload):
             if payload['grant_type'] == 'refresh_token':
-                return {'access_token': 'renewed', 'expires_in': 3600, 'scope': CALENDAR_READ_SCOPE}
-            return {'access_token': 'first', 'expires_in': 3600, 'refresh_token': 'r', 'scope': CALENDAR_READ_SCOPE}
+                return {'access_token': 'renewed', 'expires_in': 3600, 'scope': " ".join(CALENDAR_SPEC.required_scopes)}
+            return {'access_token': 'first', 'expires_in': 3600, 'refresh_token': 'r', 'scope': " ".join(CALENDAR_SPEC.required_scopes)}
 
         offer = oauth.begin_oauth(OWNER)
         oauth.complete_oauth(OWNER, {'state': parse_qs(urlparse(offer['authorization_url']).query)['state'][0],

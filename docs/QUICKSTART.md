@@ -204,13 +204,13 @@ The same steps, with direct links, are in **설정 → 외부 연결 → 자체 
 6. [Create a client](https://console.cloud.google.com/auth/clients/create) of type **Desktop app**. Tick *Use this client for an AI-powered agent*, then download its JSON right away; Google shows the secret only at creation.
 7. In AgentOS, open **설정 → 외부 연결 → 자체 Google client → client 넣기**, choose the downloaded file (or paste its contents) and save. Alternatively, point `AGENTOS_GOOGLE_CLIENT_FILE` at the file; an environment file wins over the saved one.
 
-Then press **연결** on each service in the same section and approve Google's consent screen:
+Then, on this computer, press **연결** on each service in the same section and approve Google's consent screen. Google consent is done on the desktop; a phone cannot reach this computer's sign-in callback.
 
 | Service | Address | Access |
 |---|---|---|
 | Google Drive | `http://127.0.0.1:8787/google-drive-connect` | read the whole Drive (`drive.readonly`) |
 | Gmail | `http://127.0.0.1:8787/google-gmail` | search and read mail (`gmail.readonly`) |
-| Google Calendar | `http://127.0.0.1:8787/google-calendar?grant=read` | read events (`calendar.events.readonly`) |
+| Google Calendar | `http://127.0.0.1:8787/google-calendar?grant=read` | read events from every calendar you show in Google Calendar (`calendar.events.readonly`, `calendar.calendarlist.readonly`) |
 | Calendar changes | `http://127.0.0.1:8787/google-calendar?grant=write` | create or change events, each after your approval (`calendar.events`) |
 
 Google shows "Google hasn't verified this app" because the client is your own unverified

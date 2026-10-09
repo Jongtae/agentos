@@ -37,14 +37,16 @@ class GoogleCalendarTests(unittest.TestCase):
 
         self.calendar = GoogleCalendar(transport, "access-secret")
 
-    def test_exact_get_is_primary_only_and_has_explicit_window(self):
+    def test_exact_get_reads_the_primary_with_an_explicit_window(self):
         result = self.calendar.query(
             "2026-09-21T00:00:00+09:00",
             "2026-09-28T00:00:00+09:00",
             "Asia/Seoul",
             20,
         )
-        method, url, body, headers = self.calls[0]
+        # #1225: the calendar list comes first; the fixture shows no other calendar.
+        self.assertEqual(urlparse(self.calls[0][1]).path, "/calendar/v3/users/me/calendarList")
+        method, url, body, headers = self.calls[1]
         query = parse_qs(urlparse(url).query)
         self.assertEqual((method, urlparse(url).path, body), ("GET", "/calendar/v3/calendars/primary/events", None))
         self.assertEqual(query["timeMin"], ["2026-09-21T00:00:00+09:00"])
@@ -279,3 +281,69 @@ class GoogleCalendarTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ShownCalendarsTests(unittest.TestCase):
+    """#1225: every calendar the owner shows in Google Calendar is read; writes stay on primary."""
+
+    WINDOW = ("2026-10-11T00:00:00+09:00", "2026-10-12T00:00:00+09:00", "Asia/Seoul", 20)
+
+    def provider(self, listing, events, failing=()):
+        calls = []
+
+        def transport(method, url, body, headers):
+            path = urlparse(url).path
+            calls.append(path)
+            if path.endswith("/users/me/calendarList"):
+                if isinstance(listing, Exception):
+                    raise listing
+                return listing
+            calendar_id = path.split("/calendars/", 1)[1].split("/events", 1)[0]
+            from urllib.parse import unquote
+            calendar_id = unquote(calendar_id)
+            if calendar_id in failing:
+                raise GoogleCalendarHTTPError(404)
+            return {"items": events.get(calendar_id, [])}
+        return GoogleCalendar(transport, "token"), calls
+
+    @staticmethod
+    def event(ident, start):
+        return {"id": ident, "etag": f'"{ident}"', "summary": ident,
+                "start": {"dateTime": start}, "end": {"dateTime": start}, "status": "confirmed"}
+
+    def test_shown_calendars_are_read_tagged_and_merged_in_time_order(self):
+        listing = {"items": [
+            {"id": "me@example.com", "summary": "jongtae lee", "primary": True, "selected": True},
+            {"id": "family#cal", "summary": "Family", "selected": True},
+            {"id": "birthdays", "summary": "Birthdays", "selected": False},
+            {"id": "ko.south_korea#holiday", "summary": "Holidays", "summaryOverride": "공휴일", "selected": True},
+        ]}
+        events = {"primary": [self.event("mine", "2026-10-11T10:00:00+09:00")],
+                  "family#cal": [self.event("dinner", "2026-10-11T09:00:00+09:00")],
+                  "birthdays": [self.event("never", "2026-10-11T08:00:00+09:00")],
+                  "ko.south_korea#holiday": [self.event("holiday", "2026-10-11T00:00:00+09:00")]}
+        provider, calls = self.provider(listing, events)
+        result = provider.query(*self.WINDOW)
+        self.assertEqual([row["id"] for row in result], ["holiday", "dinner", "mine"])
+        self.assertEqual([row["calendar"] for row in result], ["공휴일", "Family", "jongtae lee"])
+        self.assertEqual([row["etag"] for row in result], ["", "", '"mine"'], "only primary events can be changed")
+        self.assertNotIn("/calendar/v3/calendars/birthdays/events", calls)
+
+    def test_a_failing_shown_calendar_is_skipped_and_named(self):
+        listing = {"items": [{"id": "me", "primary": True, "selected": True, "summary": "me"},
+                             {"id": "gone", "summary": "Gone", "selected": True}]}
+        provider, _calls = self.provider(listing, {"primary": [self.event("mine", "2026-10-11T10:00:00+09:00")]},
+                                         failing=("gone",))
+        self.assertEqual([row["id"] for row in provider.query(*self.WINDOW)], ["mine"])
+        self.assertEqual(provider.skipped_calendars, ["Gone"])
+
+    def test_an_unreadable_list_falls_back_to_the_primary_calendar(self):
+        provider, calls = self.provider(GoogleCalendarHTTPError(403), {"primary": [self.event("mine", "2026-10-11T10:00:00+09:00")]})
+        self.assertEqual([row["id"] for row in provider.query(*self.WINDOW)], ["mine"])
+        self.assertEqual(calls[-1], "/calendar/v3/calendars/primary/events")
+
+    def test_an_expired_grant_is_not_hidden_by_the_fallback(self):
+        provider, _calls = self.provider(GoogleCalendarHTTPError(401), {})
+        with self.assertRaises(GoogleCalendarError) as caught:
+            provider.query(*self.WINDOW)
+        self.assertEqual(caught.exception.reason, "scope-expired")

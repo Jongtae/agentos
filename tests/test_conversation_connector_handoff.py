@@ -831,14 +831,14 @@ class PrerequisiteAndGuidanceTests(HandoffTestCase):
 
     def test_a_missing_calendar_write_grant_parks_even_when_the_read_grant_exists(self):
         self.registry.transition(OWNER, CALENDAR_SPEC.connector_id, ConnectorState.CONNECTED,
-                                 granted_scopes=(CALENDAR_READ_SCOPE,))
+                                 granted_scopes=CALENDAR_SPEC.required_scopes)
         job_id = self.park(CALENDAR_REQUEST)
         guidance = self.store.job(job_id)['response']
         self.assertIn('Google Calendar', guidance)
         self.assertIn('실행하지 않았습니다', guidance)
         # A read grant never became a write grant on the way through.
         self.assertEqual(self.registry.status(OWNER, CALENDAR_SPEC.connector_id).granted_scopes,
-                         (CALENDAR_READ_SCOPE,))
+                         CALENDAR_SPEC.required_scopes)
         self.assertEqual(self.registry.status(OWNER, CALENDAR_WRITE_CONNECTOR_ID).state,
                          ConnectorState.DISCONNECTED)
 

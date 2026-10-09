@@ -5,11 +5,11 @@ gets a temporary HTTPS link (ngrok, as the remote login's, #939, and the family
 setup's, #897) in the paired Telegram chat.  The page does one of two things:
 
 * ``google-client``: take the owner's own Google "Desktop app" client JSON
-  (``AgentService.save_google_client``, #1172);
-* a Google connector id: open Google's consent in a new tab and, after the
-  phone lands on this Mac's unreachable loopback callback, take that address
-  pasted back and complete the connection through the existing signed,
-  single-use ``complete_*_connection`` (the PKCE verifier never leaves AgentOS).
+  (``AgentService.save_google_client``, #1172).
+
+Google consent itself is done on the desktop only (owner decision
+2026-10-09, #1225): a phone cannot reach this Mac's loopback callback, and
+in-app browsers stall on it.
 
 Boundaries, as #939's:
 - a 32-byte code; the link expires in ``SESSION_SECONDS`` or less; it is sent
@@ -28,7 +28,7 @@ import subprocess
 import threading
 import time
 from html import escape
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import quote
 
 from .family_setup import start_tunnel
 
@@ -37,13 +37,10 @@ LOG = logging.getLogger('personal_agent.phone_input')
 SESSION_SECONDS = 10 * 60
 PAGE_PATH = '/phone-input'
 CLIENT_PATH = '/api/phone-input/google-client'
-START_PATH = '/api/phone-input/connect/start'
-FINISH_PATH = '/api/phone-input/connect/finish'
-PUBLIC_PATHS = frozenset({PAGE_PATH, CLIENT_PATH, START_PATH, FINISH_PATH})
+PUBLIC_PATHS = frozenset({PAGE_PATH, CLIENT_PATH})
 COOKIE_NAME = 'agentos_phone_input'
 GOOGLE_CLIENT = 'google-client'
-#: Longest pasted callback address or client JSON accepted.
-MAX_URL_CHARS = 8_192
+#: Longest client JSON accepted.
 MAX_CLIENT_CHARS = 20_000
 ISSUED_KEPT = 8
 DONE_DELAY_SECONDS = 0.3
@@ -68,39 +65,6 @@ def cookie_header(token):
 
 def _same(value, expected):
     return isinstance(value, str) and bool(value) and bool(expected) and hmac.compare_digest(value.encode(), str(expected).encode())
-
-
-def callback_params(pasted, expected_redirect):
-    """``{state, code | error}`` from a pasted loopback callback address, or None.
-
-    Accepted only when it is this computer's callback for the requested
-    service: http, a loopback host, and exactly the path of
-    ``expected_redirect``.  Single values only; nothing else is kept.
-    """
-    if not isinstance(pasted, str) or not 0 < len(pasted) <= MAX_URL_CHARS:
-        return None
-    expected = urlsplit(expected_redirect or '')
-    try:
-        given = urlsplit(pasted.strip())
-    except ValueError:
-        return None
-    if (given.scheme != 'http' or given.hostname not in ('127.0.0.1', 'localhost', '::1')
-            or given.path != expected.path or not expected.path or given.username or given.password):
-        return None
-    try:
-        query = parse_qs(given.query, strict_parsing=False, max_num_fields=8)
-    except ValueError:
-        return None
-    params = {}
-    for key in ('state', 'code', 'error'):
-        values = query.get(key)
-        if values:
-            if len(values) != 1:
-                return None
-            params[key] = values[0]
-    if 'state' not in params or not ('code' in params or 'error' in params):
-        return None
-    return params
 
 
 class PhoneInput:
@@ -218,31 +182,19 @@ def page(session, nonce):
     label = escape(session.label)
     code = json.dumps(session.code)
     nonce = escape(nonce)
-    if session.kind == GOOGLE_CLIENT:
-        body = f'''<p class="note">Google Cloud에서 만든 데스크톱 앱(Desktop app) client의 JSON 파일을 고르거나 내용을 붙여 넣고 저장하세요.</p>
+    body = f'''<p class="note">Google Cloud에서 만든 데스크톱 앱(Desktop app) client의 JSON 파일을 고르거나 내용을 붙여 넣고 저장하세요.</p>
 <label class="note" for="file">JSON 파일</label><input id="file" type="file" accept=".json,application/json">
 <label class="note" for="json">또는 JSON 내용</label><textarea id="json" rows="6" autocomplete="off" spellcheck="false" maxlength="{MAX_CLIENT_CHARS}"></textarea>
 <button id="save" class="main">저장</button>'''
-        script = f'''$('file').onchange=async()=>{{const f=$('file').files[0];if(!f)return;if(f.size>{MAX_CLIENT_CHARS}){{say('파일이 너무 커요.');return}}$('json').value=await f.text()}};
-$('save').onclick=async()=>{{const d=await post('{CLIENT_PATH}',{{client_json:$('json').value}});if(d&&d.ok)end('저장했어요. 이제 대화에서 서비스 연결을 요청하세요.');else say(d&&d.error||'저장하지 못했어요.')}};'''
-    else:
-        body = '''<p class="note">1. 아래 버튼을 누르면 새 탭에서 Google 승인 화면이 열려요. 계정을 고르고, 확인되지 않은 앱 경고가 나오면 고급(Advanced)을 눌러 계속하고, 권한 체크박스는 모두 체크하세요.</p>
-<button id="start" class="main">Google 승인 주소 받기</button>
-<a id="consent" class="button main hidden" target="_blank" rel="noopener noreferrer">Google에서 승인하기</a>
-<p class="note">2. 승인하면 그 탭에 "연결할 수 없음"이 떠요. 정상이에요. 그 탭의 주소 전체를 복사해(주소창이 짧게 보이면 공유 → 복사) 이 화면으로 돌아와 붙여 넣고 [연결]을 누르세요.</p>
-<textarea id="url" rows="4" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="http://127.0.0.1:..." maxlength="8192"></textarea>
-<button id="finish" class="main">연결</button>'''
-        # The consent address is shown as a link the owner taps: a window opened
-        # after an awaited request is outside the tap, and iOS / in-app browsers
-        # block it (#1213 review P2).
-        script = f'''$('start').onclick=async()=>{{const d=await post('{START_PATH}',{{}});if(d&&d.authorization_url){{const a=$('consent');a.href=d.authorization_url;a.classList.remove('hidden');$('start').classList.add('hidden');say('아래 [Google에서 승인하기]를 누르세요.')}}else say(d&&d.error||'승인 주소를 받지 못했어요.')}};
-$('finish').onclick=async()=>{{const d=await post('{FINISH_PATH}',{{url:$('url').value}});if(d&&d.ok)end('연결했어요. 대화에도 알려 드렸어요.');else say(d&&d.error||'연결하지 못했어요. 주소를 다시 확인해 주세요.')}};'''
+    script = f'''$('file').onchange=async()=>{{const f=$('file').files[0];if(!f)return;if(f.size>{MAX_CLIENT_CHARS}){{say('파일이 너무 커요.');return}}$('json').value=await f.text()}};
+$('save').onclick=async()=>{{const d=await post('{CLIENT_PATH}',{{client_json:$('json').value}});if(d&&d.ok)end('저장했어요. 서비스 연결은 Mac의 설정 → 외부 연결에서 해 주세요.');else say(d&&d.error||'저장하지 못했어요.')}};'''
+
     return f'''<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{label}</title>
 <style nonce="{nonce}">body{{font:16px/1.45 -apple-system,system-ui,sans-serif;margin:0;padding:14px;background:#1c1c1e;color:#f2f2f7}}
 h1{{font-size:17px;margin:0 0 10px}}.note{{display:block;font-size:14px;color:#c7c7cc;margin:10px 0 6px}}
 textarea,input{{width:100%;box-sizing:border-box;font-size:15px;padding:10px;border-radius:10px;border:1px solid #48484a;background:#2c2c2e;color:#fff}}
-button,a.button{{display:block;box-sizing:border-box;width:100%;font-size:17px;padding:14px;border-radius:10px;border:0;margin-top:10px;background:#3a3a3c;color:#fff;text-align:center;text-decoration:none}}button.main,a.button.main{{background:#0a84ff}}
+button{{display:block;box-sizing:border-box;width:100%;font-size:17px;padding:14px;border-radius:10px;border:0;margin-top:10px;background:#3a3a3c;color:#fff}}button.main{{background:#0a84ff}}
 #msg{{color:#ffd60a;font-size:14px;min-height:1em}}#end{{display:none;text-align:center;padding:30px 0;font-size:18px}}.hidden{{display:none}}</style></head><body>
 <h1>{label}</h1><div id="live">{body}<p id="msg" role="status"></p></div><p id="end"></p>
 <script nonce="{nonce}">

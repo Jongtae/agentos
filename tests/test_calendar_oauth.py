@@ -14,6 +14,7 @@ import pathlib
 import tempfile
 import traceback
 import unittest
+from personal_agent.calendar import CALENDAR_SPEC
 from urllib.parse import parse_qs, urlparse
 
 from cryptography.fernet import Fernet
@@ -101,7 +102,7 @@ class CalendarOAuthTestCase(unittest.TestCase):
             response = {
                 "access_token": access_token,
                 "expires_in": expires_in,
-                "scope": CALENDAR_WRITE_SCOPE if write else CALENDAR_READ_SCOPE,
+                "scope": CALENDAR_WRITE_SCOPE if write else " ".join(CALENDAR_SPEC.required_scopes),
             }
             if scope is not None:
                 response["scope"] = scope
@@ -143,7 +144,7 @@ class GrantSeparationTests(CalendarOAuthTestCase):
         self.connect()
         self.assertEqual(self.connector_state(CALENDAR_CONNECTOR_ID), ConnectorState.CONNECTED)
         read_status = self.oauth.status("owner-a")
-        self.assertEqual(read_status["granted_scopes"], [CALENDAR_READ_SCOPE])
+        self.assertEqual(read_status["granted_scopes"], list(CALENDAR_SPEC.required_scopes))
         self.assertNotIn(CALENDAR_WRITE_SCOPE, read_status["granted_scopes"])
 
         write_status = self.oauth.status("owner-a", write=True)
@@ -168,7 +169,7 @@ class GrantSeparationTests(CalendarOAuthTestCase):
         )
         with self.assertRaises(ConnectorContractError):
             self.registry.require_connected(
-                "owner-a", CALENDAR_CONNECTOR_ID, (CALENDAR_READ_SCOPE,)
+                "owner-a", CALENDAR_CONNECTOR_ID, CALENDAR_SPEC.required_scopes
             )
         self.assertEqual(self.store.secret(self.token_slot(READ_GRANT)), "")
 
@@ -208,7 +209,7 @@ class GrantSeparationTests(CalendarOAuthTestCase):
                 lambda request: {
                     "access_token": "access-2",
                     "expires_in": 3_600,
-                    "scope": CALENDAR_READ_SCOPE,
+                    "scope": " ".join(CALENDAR_SPEC.required_scopes),
                 },
             )
 
@@ -227,7 +228,7 @@ class GrantSeparationTests(CalendarOAuthTestCase):
             self.store.secret(self.token_slot(READ_GRANT))["access_token"], "access-3"
         )
         self.assertEqual(
-            self.store.secret(self.token_slot(READ_GRANT))["scope"], [CALENDAR_READ_SCOPE]
+            self.store.secret(self.token_slot(READ_GRANT))["scope"], list(CALENDAR_SPEC.required_scopes)
         )
 
 
@@ -241,7 +242,7 @@ class SignedStateTests(CalendarOAuthTestCase):
             return {
                 "access_token": "access-1",
                 "expires_in": 3_600,
-                "scope": CALENDAR_READ_SCOPE,
+                "scope": " ".join(CALENDAR_SPEC.required_scopes),
             }
 
         self.oauth.complete_oauth("owner-a", {"state": state, "code": "auth-code"}, exchange)
@@ -312,7 +313,7 @@ class SignedStateTests(CalendarOAuthTestCase):
             lambda request: {
                 "access_token": "access-a",
                 "expires_in": 3_600,
-                "scope": CALENDAR_READ_SCOPE,
+                "scope": " ".join(CALENDAR_SPEC.required_scopes),
             },
         )
         self.assertEqual(
@@ -366,11 +367,11 @@ class SignedStateTests(CalendarOAuthTestCase):
             self.connector_state(CALENDAR_CONNECTOR_ID), ConnectorState.DISCONNECTED
         )
         self.oauth.complete_oauth(
-            "owner-a", {"state": read_state, "code": "code-r"}, exchange_for(CALENDAR_READ_SCOPE)
+            "owner-a", {"state": read_state, "code": "code-r"}, exchange_for(" ".join(CALENDAR_SPEC.required_scopes))
         )
         self.assertEqual(self.connector_state(CALENDAR_CONNECTOR_ID), ConnectorState.CONNECTED)
         self.assertEqual(
-            self.store.secret(self.token_slot(READ_GRANT))["scope"], [CALENDAR_READ_SCOPE]
+            self.store.secret(self.token_slot(READ_GRANT))["scope"], list(CALENDAR_SPEC.required_scopes)
         )
         self.assertEqual(
             self.store.secret(self.token_slot(WRITE_GRANT))["scope"], [CALENDAR_WRITE_SCOPE]
@@ -398,7 +399,7 @@ class AuthorizationRequestTests(CalendarOAuthTestCase):
             "owner-a",
             {"state": state, "code": "auth-code"},
             lambda request: seen.append(request)
-            or {"access_token": "a", "expires_in": 60, "scope": CALENDAR_READ_SCOPE},
+            or {"access_token": "a", "expires_in": 60, "scope": " ".join(CALENDAR_SPEC.required_scopes)},
         )
         verifier = seen[0]["code_verifier"]
         self.assertRegex(verifier, r"\A[A-Za-z0-9._~-]{43,128}\Z")
@@ -413,7 +414,7 @@ class AuthorizationRequestTests(CalendarOAuthTestCase):
         )
         self.assertEqual(read_query["access_type"], ["offline"])
         self.assertEqual(read_query["include_granted_scopes"], ["false"])
-        self.assertEqual(read_query["scope"], [CALENDAR_READ_SCOPE])
+        self.assertEqual(read_query["scope"], [" ".join(CALENDAR_SPEC.required_scopes)])
         self.assertEqual(read_query["redirect_uri"], ["https://connect.example.test/calendar/callback"])
         _write_offer, _write_state, write_query = self.begin(write=True)
         self.assertEqual(write_query["scope"], [CALENDAR_WRITE_SCOPE])
@@ -448,7 +449,7 @@ class TransportTests(CalendarOAuthTestCase):
             lambda request: {
                 "access_token": "access-2",
                 "expires_in": 3_600,
-                "scope": CALENDAR_READ_SCOPE,
+                "scope": " ".join(CALENDAR_SPEC.required_scopes),
             },
         )
         # Same transport object, built before the refresh.
@@ -543,7 +544,8 @@ class TransportTests(CalendarOAuthTestCase):
                 }
             ]
         }
-        opener, calls = self.recording_opener([payload, GoogleCalendarHTTPError(401)])
+        # #1225: the calendar list is read first (here: no other calendar shown).
+        opener, calls = self.recording_opener([{"items": []}, payload, {"items": []}, GoogleCalendarHTTPError(401)])
         provider = GoogleCalendar(
             calendar_transport(
                 self.store, self.registry, "owner-a", opener=opener, now=lambda: self.clock[0]
@@ -574,7 +576,7 @@ class TransportTests(CalendarOAuthTestCase):
                 "owner-a",
                 CALENDAR_CONNECTOR_ID,
                 ConnectorState.CONNECTED,
-                granted_scopes=(CALENDAR_READ_SCOPE,),
+                granted_scopes=CALENDAR_SPEC.required_scopes,
             )
             return {"items": []}
 
@@ -669,7 +671,7 @@ class ClientSecretBoundaryTests(CalendarOAuthTestCase):
                 "access_token": "access-1",
                 "refresh_token": "refresh-1",
                 "expires_in": 3_600,
-                "scope": CALENDAR_READ_SCOPE,
+                "scope": " ".join(CALENDAR_SPEC.required_scopes),
                 "client_secret": self.SECRET,
                 "id_token": self.SECRET,
             },

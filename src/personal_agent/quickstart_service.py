@@ -2,7 +2,6 @@
 import concurrent.futures
 import hmac
 import json
-from collections import namedtuple
 import logging
 import re
 import secrets
@@ -444,10 +443,6 @@ BROWSER_SIGNINS_LINE=('Browser sign-ins (stored sessions browser_open uses; no p
                       'page is not the owner\'s data; call browser_sign_in): ')
 
 
-#: #1213: one OAuth connection as connector-agnostic surfaces see it.
-ConnectionHandler=namedtuple('ConnectionHandler','label redirect_uri begin complete')
-
-
 class AgentService:
     #: #953: a Telegram login prompt is followed by the phone link at once.  The test suite turns this
     #: off (tests/conftest.py) so no test ever starts a real tunnel; a test that wants it injects a fake.
@@ -631,9 +626,6 @@ class AgentService:
         self._remote_login_started=False
         self.remote_login_popen=None   # a test injects a fake ngrok here
         # #1213: the one phone input session (own Google client, Google consent from the phone).
-        #: ``{connector_id: ConnectionHandler}`` registered by the wiring layer for
-        #: every OAuth connection this install offers; the phone surface reads only this.
-        self.connection_handlers={}
         self._phone_input=None
         self._phone_input_started=False
         self.phone_input_popen=None   # a test injects a fake ngrok here
@@ -6835,23 +6827,13 @@ class AgentService:
 
     # -- the phone's one-time link to the login window (#939) -------------------------------
     # -- phone input (PHONE-INPUT-01 #1213) ------------------------------------
-    def register_connection(self, connector_id, label, redirect_uri, begin, complete):
-        """Offer one OAuth connection to connector-agnostic surfaces (the phone link, #1213).
-
-        ``begin()`` returns ``{'authorization_url': ...}``; ``complete(params)``
-        takes the callback's ``{state, code | error}``.  Registering grants
-        nothing: both still run the connector's own signed, owner-bound flow.
-        """
-        self.connection_handlers[connector_id]=ConnectionHandler(label,redirect_uri,begin,complete)
-
     def phone_input_kinds(self):
         """``{kind: owner word}`` this install can open a phone link for, now."""
         from . import phone_input
         kinds={}
+        # Google consent itself is done on the desktop only (owner decision 2026-10-09, #1225).
         if callable(self.google_client_installer) and self.google_client_source!='environment':
             kinds[phone_input.GOOGLE_CLIENT]='자체 Google client'
-        for connector_id,handler in self.connection_handlers.items():
-            kinds[connector_id]=handler.label+' 연결'
         return kinds
 
     def phone_input_session(self):
@@ -6907,29 +6889,6 @@ class AgentService:
         self.save_google_client({'client_json':body.get('client_json')})
         notice=self.settings_web_change_notice('자체 Google client','저장했습니다',before)
         if notice:self._conversation_notice(notice.replace('설정 화면에서','휴대폰 링크에서',1))
-        session.finish_later('done')
-        return {'ok':True}
-
-    def phone_input_start(self, session):
-        """The phone page asks for Google's consent address of its connector."""
-        connector=self.connection_handlers.get(session.kind)
-        if connector is None:raise ValueError('이 링크로는 연결을 시작할 수 없습니다.')
-        try:offer=connector.begin()
-        except ValueError as exc:
-            raise ValueError('이미 연결돼 있거나 지금은 연결을 시작할 수 없습니다.') from exc
-        return {'ok':True,'authorization_url':offer['authorization_url']}
-
-    def phone_input_finish(self, session, body):
-        """The phone page hands back the loopback callback address; the connection completes as on the Mac."""
-        from . import phone_input
-        connector=self.connection_handlers.get(session.kind)
-        if connector is None:raise ValueError('이 링크로는 연결을 마칠 수 없습니다.')
-        params=phone_input.callback_params(body.get('url'),connector.redirect_uri)
-        if params is None:
-            raise ValueError('승인 후 "연결할 수 없음" 탭의 주소 전체(http://127.0.0.1:...)를 붙여 넣어 주세요.')
-        try:connector.complete(params)
-        except ValueError:
-            raise ValueError('연결하지 못했어요. [Google에서 승인]부터 다시 해 주세요.') from None
         session.finish_later('done')
         return {'ok':True}
 

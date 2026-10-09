@@ -347,3 +347,30 @@ class ShownCalendarsTests(unittest.TestCase):
         with self.assertRaises(GoogleCalendarError) as caught:
             provider.query(*self.WINDOW)
         self.assertEqual(caught.exception.reason, "scope-expired")
+
+
+class ShownCalendarsReviewTests(unittest.TestCase):
+    WINDOW = ShownCalendarsTests.WINDOW
+    provider = ShownCalendarsTests.provider
+    event = staticmethod(ShownCalendarsTests.event)
+
+    def test_events_are_merged_by_instant_not_by_string(self):
+        listing = {"items": [{"id": "me", "primary": True, "selected": True, "summary": "me"},
+                             {"id": "abroad", "summary": "Abroad", "selected": True}]}
+        events = {"primary": [self.event("later", "2026-10-11T01:15:00-05:00")],
+                  "abroad": [self.event("earlier", "2026-10-11T01:30:00-04:00")]}
+        provider, _calls = self.provider(listing, events)
+        self.assertEqual([row["id"] for row in provider.query(*self.WINDOW)], ["earlier", "later"])
+
+    def test_the_calendars_read_include_ones_without_events(self):
+        listing = {"items": [{"id": "me", "primary": True, "selected": True, "summary": "me"},
+                             {"id": "quiet", "summary": "Quiet", "selected": True}]}
+        provider, _calls = self.provider(listing, {})
+        self.assertEqual(provider.query(*self.WINDOW), [])
+        self.assertEqual(provider.read_calendars, ["me", "Quiet"])
+        self.assertFalse(provider.calendar_list_failed)
+
+    def test_a_failed_discovery_is_marked(self):
+        provider, _calls = self.provider(GoogleCalendarHTTPError(500), {})
+        provider.query(*self.WINDOW)
+        self.assertTrue(provider.calendar_list_failed)

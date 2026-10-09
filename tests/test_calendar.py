@@ -1028,3 +1028,26 @@ class CalendarTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IncompleteReadTests(unittest.TestCase):
+    """Review on #1228: a partial calendar read says so in its result and evidence."""
+
+    setUp = CalendarTests.setUp
+    tearDown = CalendarTests.tearDown
+
+    def test_a_complete_read_has_no_note(self):
+        result = self.calendar.query("owner", "2026-10-11T00:00:00+09:00", "2026-10-12T00:00:00+09:00", "Asia/Seoul")
+        self.assertNotIn("incomplete", result)
+        self.assertTrue(result["evidence"]["complete"])
+
+    def test_a_failed_discovery_or_a_skipped_calendar_is_marked(self):
+        self.provider.calendar_list_failed = True
+        result = self.calendar.query("owner", "2026-10-11T00:00:00+09:00", "2026-10-12T00:00:00+09:00", "Asia/Seoul")
+        self.assertIn("기본 캘린더만", result["incomplete"])
+        self.assertFalse(result["evidence"]["complete"])
+        self.provider.calendar_list_failed = False
+        self.provider.skipped_calendars = ["Family"]
+        result = self.calendar.query("owner", "2026-10-11T00:00:00+09:00", "2026-10-12T00:00:00+09:00", "Asia/Seoul")
+        self.assertIn("Family", result["incomplete"])
+        self.assertEqual(result["evidence"]["skipped_calendars"], ["Family"])

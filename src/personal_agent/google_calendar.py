@@ -24,6 +24,22 @@ MAX_CALENDARS = 25
 CALENDAR_WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events"
 
 
+def _instant(value: str, timezone: str):
+    """A sort key that orders RFC3339 starts by instant, all-day dates at local midnight (review on #1228)."""
+    from datetime import datetime, timezone as utc
+    from zoneinfo import ZoneInfo
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.max.replace(tzinfo=utc.utc)
+    if moment.tzinfo is None:
+        try:
+            moment = moment.replace(tzinfo=ZoneInfo(timezone))
+        except Exception:
+            moment = moment.replace(tzinfo=utc.utc)
+    return moment
+
+
 @dataclass(frozen=True)
 class GoogleCalendarError(ValueError):
     """A provider failure with an explicit external-effect classification."""
@@ -120,12 +136,17 @@ class GoogleCalendar:
         """
         query = urlencode({"minAccessRole": "freeBusyReader", "maxResults": 250,
                            "fields": "items(id,summary,summaryOverride,primary,selected)"})
+        self.calendar_list_failed = False
         try:
             response = self._call("GET", f"{CALENDAR_API}/users/me/calendarList?{query}", None, {}, mutation=False)
         except GoogleCalendarError as error:
             if error.reason == "scope-expired":
                 raise
             response = None
+        if not isinstance(response, dict) or not isinstance(response.get("items"), list):
+            # Review on #1228: a primary-only read after a failed discovery is
+            # an incomplete read, and says so.
+            self.calendar_list_failed = True
         primary = {"id": "primary", "name": "", "primary": True}
         shown = []
         items = response.get("items") if isinstance(response, dict) else None
@@ -148,7 +169,7 @@ class GoogleCalendar:
         """
         if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 100:
             raise GoogleCalendarError("malformed-response")
-        events, self.skipped_calendars = [], []
+        events, self.skipped_calendars, self.read_calendars = [], [], []
         for calendar in self.calendars():
             try:
                 rows = self._query_calendar(calendar["id"], time_min, time_max, timezone, max_results)
@@ -157,6 +178,7 @@ class GoogleCalendar:
                     raise
                 self.skipped_calendars.append(calendar["name"] or calendar["id"])
                 continue
+            self.read_calendars.append(calendar["name"] or ("primary" if calendar["primary"] else calendar["id"]))
             for row in rows:
                 row["calendar"] = calendar["name"]
                 row["calendar_primary"] = calendar["primary"]
@@ -164,7 +186,7 @@ class GoogleCalendar:
                     # Writes go to the primary calendar only: no version to draft a change against.
                     row["etag"] = ""
                 events.append(row)
-        events.sort(key=lambda row: row["start"])
+        events.sort(key=lambda row: _instant(row["start"], timezone))
         return events[:max_results]
 
     def _query_calendar(self, calendar_id: str, time_min: str, time_max: str, timezone: str, max_results: int) -> list[dict]:

@@ -9662,11 +9662,10 @@ class AgentService:
                                 self._remember_engine_login(subscription['id'],'signed-in','run')
                             response,provider,model=result.content,'subscription',result.engine
                             engine_meta=getattr(result,'meta',None)
-                            # #678: the CLI's own searches become web_search evidence, and
-                            # the URLs it reported are listed under the answer.
-                            native_urls=[] if isolated else self.record_cli_native_searches(job['id'],subscription['id'],getattr(result,'meta',None),record,native_search)
-                            missing=[url for url in native_urls if url not in response]
-                            if missing:response=response.rstrip()+'\n\n조회 출처:\n'+'\n'.join(missing[:8])
+                            # #678: the CLI's own searches become web_search evidence.  #1009: their
+                            # result URLs are candidates the search returned, not sources the answer
+                            # used, so they stay in the Work's evidence and are not listed under it.
+                            if not isolated:self.record_cli_native_searches(job['id'],subscription['id'],getattr(result,'meta',None),record,native_search)
                             # #606 T3: a zero exit says the CLI ended, not that the
                             # request was satisfied; the Work's own events decide.
                             outcome,cli_refusals=self.cli_work_outcome(job['id'],capabilities.tools,since=attempt_start)

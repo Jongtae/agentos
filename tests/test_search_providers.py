@@ -923,7 +923,8 @@ class ServiceIntegration(unittest.TestCase):
         self.assertIn('built-in web search', launched['prompt'])
         row = service.store.job(job)
         self.assertEqual(row['status'], 'succeeded')
-        self.assertIn('https://weather.example/seoul', row['response'])
+        # #1009: a search's result URLs are candidates, not sources the answer used; the reply is the CLI's own.
+        self.assertEqual(row['response'], '오늘 서울은 맑습니다.')
         events = [event for event in service.store.task_events(job) if event['tool'] == 'web_search']
         done = [event['trace'] for event in events if event['status'] == 'succeeded']
         self.assertEqual(done[0]['scope'], 'cli-native')
@@ -1020,7 +1021,9 @@ class ServiceIntegration(unittest.TestCase):
         self.assertTrue(service.run_one())
         self.assertNotIn('IGNORE ALL', service.store.job(job)['response'])
         self.assertNotIn('IGNORE ALL', json.dumps(service.store.task_events(job), ensure_ascii=False))
-        self.assertIn('https://ok.example/', service.store.job(job)['response'])
+        # #1009: the reported URL stays in the Work's evidence; it is not listed under the answer.
+        self.assertNotIn('https://ok.example/', service.store.job(job)['response'])
+        self.assertIn('https://ok.example/', json.dumps(service.store.task_events(job), ensure_ascii=False))
 
     def test_recheck_clears_a_remembered_refusal(self):
         service = self.service()

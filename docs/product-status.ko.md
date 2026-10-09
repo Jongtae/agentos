@@ -96,7 +96,7 @@ README 데모는 2026-10-07에 녹화한 Telegram 화면 녹화 네 개를 편�
 <!-- readme-section:release -->
 ## Homebrew 배포본
 
-**Homebrew 패키지는 태그가 붙은 main 커밋의 최신 공개 배포본 `v1.1.1`(2026-10-07)을 설치합니다.** [release manifest](release-manifest.json)에 포함 소스와 로컬 설치 검증을 기록했습니다. 그 검증은 패키지 설치와 포그라운드 동작에 대한 것이며 실제 Telegram·Google·쇼핑이나 README의 미팅 장면 전체를 입증하지 않습니다. README의 일상 사용 화면은 실제 소유자 파일럿 대화를 압축한 것이며 배포본별 검증은 아닙니다.
+**Homebrew 패키지는 태그가 붙은 main 커밋의 최신 공개 배포본 `v1.3.0`(2026-10-10)을 설치합니다.** [release manifest](release-manifest.json)에 포함 소스와 로컬 설치 검증을 기록했습니다. 그 검증은 패키지 설치와 포그라운드 동작에 대한 것이며 실제 Telegram·Google·쇼핑이나 README의 미팅 장면 전체를 입증하지 않습니다. README의 일상 사용 화면은 실제 소유자 파일럿 대화를 압축한 것이며 배포본별 검증은 아닙니다.
 
 ```sh
 brew install jongtae/agentos/agentos

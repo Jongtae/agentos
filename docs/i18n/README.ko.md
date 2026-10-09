@@ -86,7 +86,7 @@ agentos start
 
 Windows에서는 PowerShell에서 `wsl --install`을 실행하고 재시작한 뒤, Ubuntu를 열어 첫 번째 명령을 실행하세요. Windows 안내, 설치 스크립트가 하는 일, 소스 실행, 모든 설정은 [QUICKSTART](../../docs/QUICKSTART.md)에 있습니다. 대화하는 동안 `agentos start`를 켜 두세요.
 
-**배포 상태:** 두 설치 방법 모두 태그가 붙은 main 커밋의 **v1.1.1**(2026-10-07)을 설치합니다. 데모와 일상 사용 화면은 실제 사용 세션을 바탕으로 한 것으로 이 배포본의 종단 간 검증은 아니며, 구조 그림은 제품 방향 예시입니다. [release manifest](../../docs/release-manifest.json)는 배포본마다 포함 범위를 기록하고, [현재 상태](../../docs/product-status.ko.md)는 제공 기능과 테스트 근거와 방향을 구분합니다.
+**배포 상태:** 두 설치 방법 모두 태그가 붙은 main 커밋의 **v1.3.0**(2026-10-10)을 설치합니다. 데모와 일상 사용 화면은 실제 사용 세션을 바탕으로 한 것으로 이 배포본의 종단 간 검증은 아니며, 구조 그림은 제품 방향 예시입니다. [release manifest](../../docs/release-manifest.json)는 배포본마다 포함 범위를 기록하고, [현재 상태](../../docs/product-status.ko.md)는 제공 기능과 테스트 근거와 방향을 구분합니다.
 
 <!-- readme-section:ownership -->
 

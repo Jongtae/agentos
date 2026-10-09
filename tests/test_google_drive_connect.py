@@ -312,6 +312,25 @@ class CapabilityTest(unittest.TestCase):
         self.assertTrue(result['needs_setup'])
         self.assertEqual(result['requires'], DRIVE_CONNECTOR_ID)
 
+    def test_an_empty_or_absent_query_lists_the_recent_files(self):
+        """#1242: "recent Drive files" has no search term; the bridge must not refuse it."""
+        from personal_agent.agent_runtime import DEFINITIONS, check_arguments
+        definition = next(tool for tool in DEFINITIONS if tool['function']['name'] == 'drive_search')
+        parameters = definition['function']['parameters']
+        self.assertEqual(parameters['required'], [])
+        seen = []
+
+        class Reader:
+            def search(self, query):
+                seen.append(query)
+                return {'files': [{'file_id': FILE_ID, 'name': 'a'}], 'truncated': False}
+
+        caps = self.capabilities(Reader())
+        for arguments in ({}, {'query': ''}):
+            check_arguments(parameters, arguments)
+            self.assertEqual(caps.execute('drive_search', arguments)['files'][0]['file_id'], FILE_ID)
+        self.assertEqual(seen, ['', ''])
+
     def test_a_read_is_labelled_as_owner_drive_provenance(self):
         class Reader:
             def read(self, file_id):

@@ -746,3 +746,102 @@ class ParkedConnectionNoticeTest(ConnectionNoticeTest):
         rows = self.assistant_rows()
         self.assertEqual(len(rows), 1)
         self.assertIn('기다리던 요청을 이어서 처리합니다', rows[0]['content'])
+
+
+class SettingsWebNoticeTest(unittest.TestCase):
+    """#1211: a Settings-web change is told to the conversation; the chat links to the input surface."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.store = QuickStore(str(pathlib.Path(temp.name) / 'data'))
+        env = {'AGENTOS_GOOGLE_LOCAL_PORT': '9911', 'AGENTOS_GOOGLE_OAUTH_KEY': Fernet.generate_key().decode()}
+        self.service = configured_service(self.store, env)
+        self.service.local_server_port = 9911
+
+    def assistant_rows(self):
+        with self.store.db() as db:
+            return [row['content'] for row in db.execute("SELECT content FROM messages WHERE role='assistant'")]
+
+    def test_a_change_is_described_from_the_redacted_read_model(self):
+        before = self.service.settings_snapshot()
+        self.service.save_google_client({'client_json': OwnClientFromSettingsTest.CLIENT})
+        text = self.service.notify_settings_web_change('자체 Google client', before)
+        self.assertIn('설정 화면에서 자체 Google client을(를) 바꿨습니다.', text)
+        self.assertIn('자체 Google client: 설정 안 됨 → 설정됨', text)
+        self.assertIn('Google Drive: 연결 안 됨', text)
+        self.assertNotIn('GOCSPX', text)
+        self.assertEqual(self.assistant_rows(), [text])
+
+    def test_a_change_the_read_model_does_not_show_states_the_action_only(self):
+        before = self.service.settings_snapshot()
+        text = self.service.notify_settings_web_change('웹 검색 키', before, verb='저장했습니다')
+        self.assertEqual(text, '설정 화면에서 웹 검색 키을(를) 저장했습니다.')
+
+    def test_nothing_changed_means_no_notice(self):
+        before = self.service.settings_snapshot()
+        self.assertIsNone(self.service.notify_settings_web_change('현재 맥락', before))
+        self.assertEqual(self.assistant_rows(), [])
+
+    def test_the_conversation_links_to_the_own_client_input(self):
+        response = self.service.conversation_settings_request({'operation': 'read', 'category': 'connections'})['response']
+        self.assertIn('http://127.0.0.1:9911/#settings/external', response)
+
+
+class SettingsWebRouteNoticeTest(unittest.TestCase):
+    """The HTTP boundary sends the notice only for a declared route that succeeded (#1211)."""
+
+    def test_only_successful_declared_routes_notify(self):
+        from personal_agent import quickstart
+        self.assertIn('/api/google/client', quickstart.SETTINGS_WEB_CHANGES)
+        for excluded in ('/api/chat', '/api/settings/request', '/api/claim', '/api/model/test'):
+            self.assertNotIn(excluded, quickstart.SETTINGS_WEB_CHANGES)
+
+
+class SettingsWebNoticeOverHttpTest(unittest.TestCase):
+    def test_a_successful_settings_post_notifies_and_a_refused_one_does_not(self):
+        import threading
+        from http.cookiejar import CookieJar
+        from http.server import ThreadingHTTPServer
+        from urllib.error import HTTPError
+        from urllib.request import HTTPCookieProcessor, Request, build_opener
+        from personal_agent.quickstart import make_handler
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        store = QuickStore(str(pathlib.Path(temp.name) / 'data'))
+        service = configured_service(store, {'AGENTOS_GOOGLE_LOCAL_PORT': '9911',
+                                             'AGENTOS_GOOGLE_OAUTH_KEY': Fernet.generate_key().decode()})
+        store.claim(store.bootstrap.read_text(), 'long-password-test')
+        server = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(service))
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        client = build_opener(HTTPCookieProcessor(CookieJar()))
+        url = 'http://127.0.0.1:' + str(server.server_port)
+
+        def request(path, body):
+            req = Request(url + path, data=json.dumps(body).encode(),
+                          headers={'Content-Type': 'application/json', 'Origin': url})
+            with client.open(req, timeout=5) as response:
+                return json.load(response)
+
+        def notices():
+            with store.db() as db:
+                return [row['content'] for row in db.execute("SELECT content FROM messages WHERE role='assistant'")]
+
+        try:
+            request('/api/login', {'password': 'long-password-test'})
+            with self.assertRaises(HTTPError):
+                request('/api/google/client', {'client_json': 'not json'})
+            self.assertEqual(notices(), [])
+            request('/api/google/client', {'client_json': OwnClientFromSettingsTest.CLIENT})
+            # Recorded before the success is exposed: no wait needed.
+            self.assertEqual(len(notices()), 1)
+            self.assertIn('설정 화면에서 자체 Google client을(를) 저장했습니다.', notices()[0])
+            # Re-submitting the current value of a setting the read model shows says nothing.
+            current = service.current_state.status()
+            request('/api/current-context', {'enabled': bool(current.get('enabled'))})
+            self.assertEqual(len(notices()), 1)
+        finally:
+            server.shutdown()
+            thread.join()
+            server.server_close()

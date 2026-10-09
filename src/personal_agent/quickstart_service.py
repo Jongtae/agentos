@@ -5768,19 +5768,16 @@ class AgentService:
             ident=row.get('connector_id')
             rows.append({'id':ident,'service':names.get(ident,row.get('label') or ident),'state':row.get('state'),
                          'connectable':bool(row.get('connect_path')),'connect_hint':row.get('connect_hint','')})
-        # #1204: the owner's own Google client, so a conversation can say how to add one.
+        # #1204: the owner's own Google client as setup state, never as a
+        # connection: saving a client grants nothing.  The steps for making
+        # one stay on the Settings page; this only says where to go.
         if callable(self.google_client_installer):
-            status=self.google_client_status()
+            configured=self.google_client_status()['configured']
             rows.append({'id':'google-own-client','service':'자체 Google client',
-                         'state':'connected' if status['configured'] else 'disconnected','connectable':False,
-                         'connect_hint':self.GOOGLE_CLIENT_GUIDE})
+                         'state':'configured' if configured else 'not_configured','connectable':False,
+                         'connect_hint':('Google 서비스마다 설정 > 외부 연결에서 연결하세요.' if configured else
+                                         '설정 > 외부 연결 > 자체 Google client에서 넣을 수 있고, 만드는 방법도 그 화면에 있습니다.')})
         return rows
-
-    #: #1204: how an owner adds their own Google client, as conversation text.
-    GOOGLE_CLIENT_GUIDE=('Google Cloud에서 데스크톱 앱 OAuth client를 만들어 그 JSON을 설정 > 외부 연결 > 자체 Google client에 넣으세요. '
-                         '순서: 1) 프로젝트 만들기 2) Drive·Gmail·Calendar API 켜기 3) Google 인증 플랫폼 시작(대상: 외부) '
-                         '4) 대상 화면에서 앱 게시(프로덕션) 5) 클라이언트 만들기(데스크톱 앱) 후 바로 JSON 다운로드. '
-                         '설정 화면에 단계별 링크가 있고, 넣은 뒤 서비스마다 연결을 누르면 됩니다.')
 
     # -- owner disconnect / provider revocation (CONNECTOR-REVOKE-01 #588) --
     # Backend only.  The Settings row wiring is deliberately left to the

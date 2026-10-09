@@ -49,6 +49,9 @@ STATE_LABELS = {
     "reauth_required": "다시 인증 필요",
     "blocked": "차단됨",
     "pending": "확인 필요",
+    # #1204: a saved credential is setup, not a connection or a grant.
+    "configured": "설정됨",
+    "not_configured": "설정 안 됨",
 }
 UNKNOWN_STATE_LABEL = "확인 필요"
 

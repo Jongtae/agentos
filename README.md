@@ -67,10 +67,10 @@ These are guiding principles, not a claim that every scenario already works. The
 On macOS or Linux, one command installs and starts AgentOS. You do not need Homebrew, Python or Docker:
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh
 ```
 
-The URL pins the installer itself. [Inspect the pinned script](https://github.com/Jongtae/agentos/blob/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh) before running it; the script verifies the published AgentOS archive and the uv installer it downloads.
+The URL pins the installer itself. [Inspect the pinned script](https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh) before running it; the script verifies the published AgentOS archive and the uv installer it downloads.
 
 If you use [Homebrew](https://brew.sh) on macOS:
 

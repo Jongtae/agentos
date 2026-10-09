@@ -67,10 +67,10 @@ Personal AgentOS 探索的答案是：*不必*。在一个由你安装和掌控�
 在 macOS 或 Linux 上，一条命令即可安装并启动，无需 Homebrew、Python 或 Docker：
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh
 ```
 
-该 URL 也把安装脚本本身固定到一个明确提交。运行前可以[检查固定版本的脚本](https://github.com/Jongtae/agentos/blob/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh)；脚本会校验公开的 AgentOS 归档和它下载的 uv 安装程序。
+该 URL 也把安装脚本本身固定到一个明确提交。运行前可以[检查固定版本的脚本](https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh)；脚本会校验公开的 AgentOS 归档和它下载的 uv 安装程序。
 
 如果你在 macOS 上使用 [Homebrew](https://brew.sh)：
 

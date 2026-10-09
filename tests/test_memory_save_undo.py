@@ -262,7 +262,7 @@ class SaveAndTell(TelegramHarness):
         self.tap(f"p7u:{row['id']}:1", row['message_id'])
         self.assertEqual(len(self.edits()), 1)
         self.assertEqual(self.memory_states(), [(VALUE, 'retracted'), ('매운 음식', 'current')])
-        self.assertEqual(self.answers()[-1], '처리할 수 있는 요청이 아닙니다.')
+        self.assertFalse(self.answers()[-1], 'a tap that changes nothing shows no system toast')
 
     def test_undo_restores_the_superseded_value(self):
         self.store.save_memory(KEY, '서울 역삼 오피스')

@@ -826,7 +826,7 @@ class FailedTurnTests(NativePresenceTestCase):
             self.tap(data, 1, callback_id=f'stale-{index}')
         answers = [body for method, body in self.calls if method == 'answerCallbackQuery']
         self.assertEqual([a['callback_query_id'] for a in answers], [f'stale-{i}' for i in range(5)])
-        self.assertTrue(all(a['text'] == '처리할 수 있는 요청이 아닙니다.' for a in answers))
+        self.assertTrue(all(not a.get('text') for a in answers))
         self.assertEqual(self.sends(), [])
         self.assertEqual(self.store.jobs(), [])
 

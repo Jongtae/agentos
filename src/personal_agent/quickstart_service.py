@@ -7784,7 +7784,7 @@ class AgentService:
             return
         # #814 review P2-3: the tap is answered first; a slow setter then runs off this poll thread.
         if isinstance(callback_id,str):
-            text=('적용을 시작했습니다.' if rows and parts[2]=='confirm' else '처리했습니다.' if rows else '처리할 수 있는 요청이 아닙니다.')
+            text=('적용을 시작했습니다.' if rows and parts[2]=='confirm' else '처리했습니다.' if rows else '')
             try:self.telegram.answer_callback_query(callback_id,text,show_alert=False)
             except ProviderError:pass
         if not rows:return
@@ -7812,7 +7812,7 @@ class AgentService:
         parts=str(callback.get('data') or '').split(':')
         selected_name=None
         selected_engine=None
-        reason='처리할 수 있는 요청이 아닙니다.'
+        reason=''
         job=None
         with self.lock:
             cfg=self.store.config('telegram',{})
@@ -8166,7 +8166,7 @@ class AgentService:
                         except ProviderError:pass
                         changed=True
             if authorized and isinstance(callback_id,str):
-                text,show=alert or ('처리했습니다.' if changed else '처리할 수 있는 요청이 아닙니다.',False)
+                text,show=alert or ('처리했습니다.' if changed else '',False)
                 try:self.telegram.answer_callback_query(callback_id,text,show_alert=show)
                 except ProviderError:pass
 

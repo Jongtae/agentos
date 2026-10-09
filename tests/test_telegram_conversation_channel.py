@@ -215,7 +215,7 @@ class TelegramPolicyRoutingTests(unittest.TestCase):
                                       'message': {'message_id': 5, 'chat': {'id': 42, 'type': 'private'}}}, 'g')
         self.assertEqual(self.channel.names, ['answer_callback_query'])
         self.assertEqual(self.channel.calls[0][1],
-                         {'callback_query_id': 'cb-1', 'text': '처리할 수 있는 요청이 아닙니다.', 'show_alert': False})
+                         {'callback_query_id': 'cb-1', 'text': '', 'show_alert': False})
 
     def test_connect_verifies_the_candidate_token_through_the_seam_before_storing_it(self):
         self.channel = RecordingChannel(results={'get_me': {'username': 'owner_bot'},

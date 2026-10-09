@@ -473,7 +473,8 @@ class UnsupportedCapabilityTests(ProjectionTestCase):
         self.assertEqual(job['status'], 'succeeded')
         self.assertEqual(bubbles, [('send', decision.clarification)])
         with self.store.db() as db:
-            self.assertEqual(db.execute('SELECT COUNT(*) FROM tool_events WHERE job_id=?',
+            # #1237: #1232's stage timings are clock readings, not tool calls.
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM tool_events WHERE job_id=? AND tool!='response_timing'",
                                         (job['id'],)).fetchone()[0], 0)
 
 

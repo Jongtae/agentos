@@ -249,7 +249,8 @@ class DraftAndPreviewTests(ConversationTestCase):
         self.say('내일 오후 3시에 치과 검진 일정 잡아줘')
         self.say('승인')
         with self.store.db() as db:
-            rows = [dict(row) for row in db.execute("SELECT tool,status,detail FROM tool_events ORDER BY id")]
+            # #1237: #1232's stage timings are clock readings with no content, not evidence rows.
+            rows = [dict(row) for row in db.execute("SELECT tool,status,detail FROM tool_events WHERE tool!='response_timing' ORDER BY id")]
         self.assertEqual([(row['tool'], row['status']) for row in rows],
                          [('calendar_draft', 'succeeded'), ('calendar_create', 'succeeded')])
         # The detail is persisted with `ensure_ascii=True`, so Korean is

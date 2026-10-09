@@ -28,9 +28,10 @@ profile, lock Git blob, and command. The initial claimed profiles are:
 The universal lock also contains Linux and macOS markers and hashes for other
 compatible Python versions, but no installed behavior is claimed for an
 unobserved version or architecture. The current Homebrew formula installs
-with Python 3.13 in the separate tap, and the Dockerfiles still install the
-published ranges with pip. Those paths remain explicit resolution gaps; this
-change does not modify a published formula, running container, or owner
+with Python 3.13 in the separate tap. That path remains an explicit resolution
+gap (the Dockerfiles that once installed the published ranges with pip were
+removed in #1198); this change does not modify a published formula, running
+container, or owner
 installation. A later issue must test and migrate them before claiming that
 they consume this lock.
 
@@ -53,7 +54,7 @@ boundary tests, branch protection, and the relationship/ownership map from
 parallel status record exists or is added.
 
 Repository search covered the root manifest, optional dependencies, all
-workflows, three Dockerfiles, Compose, Homebrew template and release guidance,
+workflows, the then-present three Dockerfiles and Compose (removed in #1198), Homebrew template and release guidance,
 `evals/requirements.txt`, copied skill provenance, and the real
 `publicsuffixlist` consumer and tests. The evaluation environment, container
 base images, npm command pin, and versioned skill content remain outside this
@@ -126,7 +127,7 @@ updater/configuration is a stop condition, not permission to run both.
   safety, semantic compatibility, provenance beyond the named source, or
   freedom from vulnerabilities.
 - The MCP SDK is selected only by the `mcp-host` extra. It does not enter the
-  base dependency set shared with `Dockerfile.engine`. `mcp-types==2.3.0`
+  base dependency set (the former `Dockerfile.engine` image was removed in #1198). `mcp-types==2.3.0`
   remains a shared base dependency for the protocol-version registry.
 
 Contributor commands:
@@ -209,9 +210,9 @@ Install the source host profile with the locked contributor command above. A
 published PEP 621 install uses `pip install '.[mcp-host]'`, which retains the
 exact direct SDK/types pins but is not a lock-backed transitive installation.
 The base command is `uv sync --locked --no-dev --no-python-downloads`;
-`Dockerfile.engine` continues to use `pip install --no-cache-dir .` and does
-not select the host extra. Container and Homebrew transitive lock consumption
-remain the resolution gaps stated above; a base sync on macOS is not proof of
+The base install does not select the host extra (the former
+`Dockerfile.engine` was removed in #1198). Homebrew transitive lock consumption
+remains the resolution gap stated above; a base sync on macOS is not proof of
 an observed Linux container run.
 
 For a future SDK update, save the known-good commit and lock Git blob, link one

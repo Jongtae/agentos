@@ -198,10 +198,11 @@ The same steps, with direct links, are in **설정 → 외부 연결 → 자체 
 
 1. [Create a project](https://console.cloud.google.com/projectcreate) in Google Cloud.
 2. [Enable the Drive, Gmail and Calendar APIs](https://console.cloud.google.com/flows/enableapi?apiid=drive.googleapis.com,gmail.googleapis.com,calendar-json.googleapis.com) in that project.
-3. [Get started with Google Auth Platform](https://console.cloud.google.com/auth/overview): enter an app name and your email, and choose *External* as the audience.
-4. On [Audience](https://console.cloud.google.com/auth/audience), press *Publish app* to move it to production. In *Testing*, Google expires the connection every 7 days.
-5. [Create a client](https://console.cloud.google.com/auth/clients/create) of type **Desktop app** and download its JSON right away; Google shows the secret only at creation.
-6. In AgentOS, open **설정 → 외부 연결 → 자체 Google client → client 넣기**, choose the downloaded file (or paste its contents) and save. Alternatively, point `AGENTOS_GOOGLE_CLIENT_FILE` at the file; an environment file wins over the saved one.
+3. [Get started with Google Auth Platform](https://console.cloud.google.com/auth/overview): enter an app name and your email, and choose *External* as the audience. If *OAuth Overview* already shows, this step is done.
+4. In [Branding](https://console.cloud.google.com/auth/branding), enter a home page and a privacy policy URL under *App domain*, add their domain under *Authorized domains*, and save. For example: `https://github.com/Jongtae/agentos`, `https://github.com/Jongtae/agentos/blob/main/site/privacy.html`, `github.com`. Without these, *Publish app* stays disabled (Google reports "Missing domain"). Do not upload a logo; a logo requires verification.
+5. On [Audience](https://console.cloud.google.com/auth/audience), press *Publish app*, then *Confirm*. In *Testing*, Google expires the connection every 7 days.
+6. [Create a client](https://console.cloud.google.com/auth/clients/create) of type **Desktop app**. Tick *Use this client for an AI-powered agent*, then download its JSON right away; Google shows the secret only at creation.
+7. In AgentOS, open **설정 → 외부 연결 → 자체 Google client → client 넣기**, choose the downloaded file (or paste its contents) and save. Alternatively, point `AGENTOS_GOOGLE_CLIENT_FILE` at the file; an environment file wins over the saved one.
 
 Then press **연결** on each service in the same section and approve Google's consent screen:
 

@@ -5757,6 +5757,54 @@ class AgentService:
                       'google-calendar-write':'Google Calendar 일정 만들기','google-drive-read':'Google Drive',
                       DRIVE_CONNECTOR_ID:'Google Drive'}
 
+    def settings_snapshot(self):
+        """Owner-visible settings and connection states, from the redacted read model (#1211).
+
+        ``{key: (label, value)}``.  Built only from ``SettingsOrchestrator.read``,
+        which already carries value labels and states and never a secret.
+        """
+        try:
+            read=self.settings_orchestrator.read('local-owner')
+        except Exception:
+            return {}
+        snapshot={}
+        for category,rows in (read.get('settings') or {}).items():
+            for name,row in (rows.items() if isinstance(rows,dict) else ()):
+                if isinstance(row,dict) and ('value_label' in row or 'value' in row):
+                    value=row.get('value_label') if row.get('value_label') not in (None,'') else row.get('value')
+                    snapshot[f'{category}.{name}']=(str(row.get('label') or name),str(value))
+        for row in read.get('connections') or ():
+            if isinstance(row,dict) and row.get('id'):
+                snapshot[f"connection.{row['id']}"]=(str(row.get('service') or row['id']),str(row.get('state_label') or row.get('state')))
+        return snapshot
+
+    def notify_settings_web_change(self, label, before):
+        """Tell the conversation what a Settings-web change did (#1211), like ``settings_followup``.
+
+        The lines are the before/after difference of ``settings_snapshot``; a
+        change the read model does not show (a saved key, a folder) is named
+        by ``label`` alone, never with its value.
+        """
+        after=self.settings_snapshot()
+        lines=[f'- {after[key][0]}: {before[key][1]} → {after[key][1]}' for key in after
+               if key in before and before[key][1]!=after[key][1]]
+        lines+=[f'- {after[key][0]}: {after[key][1]}' for key in after if key not in before]
+        text=f'설정 화면에서 {label}을(를) 바꿨습니다.'+('\n'+'\n'.join(lines[:8]) if lines else '')
+        self._conversation_notice(text)
+        return text
+
+    def _conversation_notice(self, text):
+        """One assistant row in the owner's conversation, and Telegram when paired (best effort)."""
+        cfg=self.store.config('telegram',{})
+        paired=bool(cfg.get('enabled') and cfg.get('user_id') is not None and cfg.get('generation'))
+        channel=f"telegram:{cfg.get('generation')}" if paired else 'web'
+        with self.store.db() as db:
+            db.execute('INSERT INTO messages(role,content,channel,created) VALUES (?,?,?,?)',
+                       ('assistant',text,channel,time.time()))
+        if paired:
+            try:self.telegram.send_message(int(cfg['user_id']),text)
+            except (ProviderError,TypeError,ValueError):LOG.warning('conversation notice not delivered')
+
     def notify_connection_completed(self, connector_id, resuming=False):
         """Tell the owner's conversation that a connection completed (#1207).
 
@@ -5771,16 +5819,16 @@ class AgentService:
         name=self.CONNECTION_NAMES.get(connector_id,connector_id)
         text=(f'{name} 연결이 완료되었습니다. 기다리던 요청을 이어서 처리합니다.' if resuming else
               f'{name} 연결이 완료되었습니다. 이제 대화에서 바로 요청하시면 됩니다.')
-        cfg=self.store.config('telegram',{})
-        paired=bool(cfg.get('enabled') and cfg.get('user_id') is not None and cfg.get('generation'))
-        channel=f"telegram:{cfg.get('generation')}" if paired else 'web'
-        with self.store.db() as db:
-            db.execute('INSERT INTO messages(role,content,channel,created) VALUES (?,?,?,?)',
-                       ('assistant',text,channel,time.time()))
-        if paired:
-            try:self.telegram.send_message(int(cfg['user_id']),text)
-            except (ProviderError,TypeError,ValueError):LOG.warning('connection notice not delivered connector=%s',connector_id)
+        self._conversation_notice(text)
         return text
+
+    def own_client_input_hint(self):
+        """Where the owner adds their own Google client, with this computer's direct address (#1211)."""
+        base=self.local_settings_url()
+        if base:
+            return (f'이 컴퓨터(Mac)의 브라우저에서 {base}#settings/external 을 열면 자체 Google client를 넣을 수 있고, '
+                    '만드는 방법도 그 화면에 있습니다.')
+        return '설정 > 외부 연결 > 자체 Google client에서 넣을 수 있고, 만드는 방법도 그 화면에 있습니다.'
 
     def settings_connection_rows(self):
         """Owner-visible connections for the conversation Settings read model."""
@@ -5805,7 +5853,7 @@ class AgentService:
             rows.append({'id':'google-own-client','service':'자체 Google client',
                          'state':'configured' if configured else 'not_configured','connectable':False,
                          'connect_hint':('Google 서비스마다 설정 > 외부 연결에서 연결하세요.' if configured else
-                                         '설정 > 외부 연결 > 자체 Google client에서 넣을 수 있고, 만드는 방법도 그 화면에 있습니다.')})
+                                         self.own_client_input_hint())})
         return rows
 
     # -- owner disconnect / provider revocation (CONNECTOR-REVOKE-01 #588) --

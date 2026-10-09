@@ -1590,7 +1590,12 @@ class RouteAndIdentity(LocalHttp, PresenceEval):
         context = json.dumps(self.model_bodies[0]['messages'], ensure_ascii=False)
         self.assertIn('내일은 우산을 챙기세요', context)
         # Owner-visible: every reply is the assistant's; no worker announces itself.
-        texts = self.texts()
+        # #1211: the owner's own Settings change is told to the conversation; it
+        # reports that change, so it may name the route the owner picked.
+        all_texts = self.texts()
+        notices = [text for text in all_texts if text.startswith('설정 화면에서 ')]
+        texts = [text for text in all_texts if not text.startswith('설정 화면에서 ')]
+        self.assertEqual(len(notices), 1)
         self.assertEqual(len(texts), 3)
         for text in texts:
             for worker in ('Codex', 'codex', 'Claude Code', 'eval-model', 'ollama', 'Ollama'):

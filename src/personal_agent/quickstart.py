@@ -631,6 +631,24 @@ def configured_service(store, environ=None):
     return service
 
 
+#: #1211: Settings-web routes that change owner settings, and the owner
+#: word for each.  A change through one of these is told to the conversation
+#: (described from the redacted settings read model; secrets are named, never
+#: shown).  Conversation-made changes report themselves and are not here.
+SETTINGS_WEB_CHANGES={
+    '/api/ai-route':'기본 AI 경로','/api/main-ai/activate':'기본 AI','/api/main-ai/key':'기본 AI 키',
+    '/api/model':'AI 모델','/api/decision-route/activate':'판단 AI','/api/decision-route/credential':'판단 AI 키',
+    '/api/subscription-engines/connect':'구독 AI 연결','/api/subscription-engines/credential':'구독 AI 인증 정보',
+    '/api/subscription-engines/isolation':'구독 AI 격리 방식','/api/openrouter/connect':'OpenRouter 연결',
+    '/api/search-providers/key':'웹 검색 키','/api/search-providers/default':'기본 웹 검색 제공자',
+    '/api/search-providers/bing':'Bing 검색','/api/google/client':'자체 Google client',
+    '/api/connections/google/disconnect':'Google 연결 해제','/api/files/roots':'연결 폴더',
+    '/api/context-inbox/config':'임시 자료 수집','/api/context-inbox/telegram-policy':'임시 자료 Telegram 공유',
+    '/api/context-inbox/share-policy':'임시 자료 공유','/api/current-context':'현재 맥락',
+    '/api/browser/sessions/delete':'브라우저 로그인 세션','/api/telegram':'Telegram 봇',
+    '/api/telegram/disconnect':'Telegram 연결',
+}
+
 #: CONNECTOR-REVOKE-01 #588 owner routes (backend only; Settings UI is #619).
 GOOGLE_DISCONNECT_PATHS=('/api/connections/google/disconnect/preview','/api/connections/google/disconnect',
                          '/api/connections/google/revocation/retry')
@@ -662,6 +680,12 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             if cookie:self.send_header('Set-Cookie',cookie)
             self.end_headers()
             self.wfile.write(data)
+            change=getattr(self,'settings_change',None)
+            if change:
+                self.settings_change=None
+                if status==200:
+                    try:service.notify_settings_web_change(SETTINGS_WEB_CHANGES[change[0]],change[1])
+                    except Exception:logging.getLogger('personal_agent.quickstart').warning('settings change notice failed path=%s',change[0])
 
         def token(self):
             cookie=SimpleCookie()
@@ -1068,6 +1092,7 @@ def make_handler(service, public_hosts=(), public_access_token=''):
             self.reply(404,{'error':'경로를 찾을 수 없습니다.'})
 
         def do_POST(self):
+            self.settings_change=None
             if not self.valid_host():return
             parts=urlsplit(self.path)
             if self.family_gate(parts.path) or self.remote_login_gate(parts.path):return
@@ -1130,6 +1155,11 @@ def make_handler(service, public_hosts=(), public_access_token=''):
                     if not token:return self.reply(401,{'error':'비밀번호가 올바르지 않습니다.'})
                     return self.reply(200,{'ok':True},cookie=self.cookie(token))
                 if not self.auth():return
+                # #1211: a change made on the Settings web is told to the
+                # conversation; the snapshot before it is taken here and the
+                # notice is sent by `reply` only when the change succeeded.
+                if path in SETTINGS_WEB_CHANGES:
+                    self.settings_change=(path,service.settings_snapshot())
                 if path=='/api/logout':
                     store.logout(self.token())
                     return self.reply(200,{'ok':True},cookie='agentos_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')

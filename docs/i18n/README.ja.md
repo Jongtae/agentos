@@ -67,10 +67,10 @@ Personal AgentOS は、その必要はないという可能性を探ります。
 macOS と Linux では、コマンド一つでインストールしてそのまま起動します。Homebrew、Python、Docker は不要です。
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh
 ```
 
-この URL はインストーラー自体も特定のコミットに固定します。実行前に[固定されたスクリプトを確認](https://github.com/Jongtae/agentos/blob/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh)でき、スクリプトは公開済み AgentOS アーカイブと、ダウンロードする uv インストーラーのチェックサムを検証します。
+この URL はインストーラー自体も特定のコミットに固定します。実行前に[固定されたスクリプトを確認](https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh)でき、スクリプトは公開済み AgentOS アーカイブと、ダウンロードする uv インストーラーのチェックサムを検証します。
 
 macOS で [Homebrew](https://brew.sh) を使っている場合：
 

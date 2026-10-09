@@ -67,10 +67,10 @@ Personal AgentOS는 *그럴 필요가 없다*는 가능성을 탐구합니다. �
 macOS나 Linux에서는 명령 하나로 설치하고 바로 시작합니다. Homebrew, Python, Docker가 없어도 됩니다.
 
 ```sh
-curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh
 ```
 
-URL은 설치 스크립트 자체도 특정 커밋에 고정합니다. 실행 전에 [고정된 스크립트 내용을 확인](https://github.com/Jongtae/agentos/blob/137681f2617bf6350ba0b24316d8766921d084f7/scripts/install.sh)할 수 있고, 스크립트는 공개 AgentOS 아카이브와 내려받는 uv 설치 프로그램의 체크섬을 검증합니다.
+URL은 설치 스크립트 자체도 특정 커밋에 고정합니다. 실행 전에 [고정된 스크립트 내용을 확인](https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh)할 수 있고, 스크립트는 공개 AgentOS 아카이브와 내려받는 uv 설치 프로그램의 체크섬을 검증합니다.
 
 macOS에서 [Homebrew](https://brew.sh)를 쓴다면:
 

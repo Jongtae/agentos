@@ -647,3 +647,29 @@ class CodexReviewFollowupsTest(unittest.TestCase):
         self.assertIn('123-abcdefgh', json.dumps(store.secret('google_oauth_client')))
         # The same client again is not a replacement.
         service.save_google_client({'client_json': OwnClientFromSettingsTest.CLIENT})
+
+
+class OwnClientGuideTest(unittest.TestCase):
+    """#1204: a conversation can tell the owner how to add their own Google client."""
+
+    def test_settings_read_points_to_the_setup_and_never_reports_a_connection(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        store = QuickStore(str(pathlib.Path(temp.name) / 'data'))
+        env = {'AGENTOS_GOOGLE_LOCAL_PORT': '9911', 'AGENTOS_GOOGLE_OAUTH_KEY': Fernet.generate_key().decode()}
+        service = configured_service(store, env)
+        response = service.conversation_settings_request({'operation': 'read', 'category': 'connections'})['response']
+        self.assertIn('자체 Google client · 설정 안 됨', response)
+        self.assertIn('설정 > 외부 연결 > 자체 Google client', response)
+        self.assertNotIn('console.cloud.google.com', response)
+        service.save_google_client({'client_json': OwnClientFromSettingsTest.CLIENT})
+        response = service.conversation_settings_request({'operation': 'read', 'category': 'connections'})['response']
+        self.assertIn('자체 Google client · 설정됨', response)
+        self.assertNotIn('자체 Google client · 연결됨', response)
+
+    def test_an_install_that_cannot_take_a_client_offers_no_guide(self):
+        from personal_agent.quickstart_service import AgentService
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        rows = AgentService(QuickStore(temp.name)).settings_connection_rows()
+        self.assertNotIn('google-own-client', {row['id'] for row in rows})

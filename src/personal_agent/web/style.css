@@ -287,6 +287,8 @@ details.technical details>summary{color:var(--muted)}
 .settings-row>.settings-disclosure{grid-column:1/-1;margin-top:-6px}
 .settings-disclosure>summary{font-size:var(--fs-1);min-height:22px}
 .settings-technical-line{display:block;padding:3px 0 0 16px;overflow-wrap:anywhere}
+.settings-steps{margin:6px 0 4px;padding-left:22px;display:grid;gap:6px;color:var(--text,inherit);line-height:1.5}
+.settings-step-link{white-space:nowrap}
 .settings-empty{margin:0;padding:14px 0;border-bottom:1px solid var(--line);color:var(--muted);font-size:var(--fs-2)}
 .settings-inline-confirm{display:flex;gap:var(--sp-2);flex-wrap:wrap;justify-content:flex-end}
 .settings-list-actions{display:flex;justify-content:flex-end;padding-top:var(--sp-3)}

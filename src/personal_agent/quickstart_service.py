@@ -5768,6 +5768,15 @@ class AgentService:
             ident=row.get('connector_id')
             rows.append({'id':ident,'service':names.get(ident,row.get('label') or ident),'state':row.get('state'),
                          'connectable':bool(row.get('connect_path')),'connect_hint':row.get('connect_hint','')})
+        # #1204: the owner's own Google client as setup state, never as a
+        # connection: saving a client grants nothing.  The steps for making
+        # one stay on the Settings page; this only says where to go.
+        if callable(self.google_client_installer):
+            configured=self.google_client_status()['configured']
+            rows.append({'id':'google-own-client','service':'자체 Google client',
+                         'state':'configured' if configured else 'not_configured','connectable':False,
+                         'connect_hint':('Google 서비스마다 설정 > 외부 연결에서 연결하세요.' if configured else
+                                         '설정 > 외부 연결 > 자체 Google client에서 넣을 수 있고, 만드는 방법도 그 화면에 있습니다.')})
         return rows
 
     # -- owner disconnect / provider revocation (CONNECTOR-REVOKE-01 #588) --

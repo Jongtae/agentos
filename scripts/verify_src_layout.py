@@ -160,24 +160,9 @@ def main():
     _require((ROOT / "scripts" / "dev" / "handoff.py").is_file(),
              "repository handoff loop is missing from scripts/dev", failures)
 
-    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
-    engine_dockerfile = (ROOT / "Dockerfile.engine").read_text(encoding="utf-8")
-    egress_dockerfile = (ROOT / "Dockerfile.egress").read_text(encoding="utf-8")
-    _require("COPY src/personal_agent /app/src/personal_agent" in dockerfile,
-             "Dockerfile does not preserve the src layout", failures)
-    _require("COPY src/personal_agent /app/src/personal_agent" in engine_dockerfile,
-             "Dockerfile.engine does not preserve the src layout", failures)
-    _require("COPY src/personal_agent/limited_egress_proxy.py" in egress_dockerfile,
-             "Dockerfile.egress does not copy the source package", failures)
-
-    dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
-    _require("!src/personal_agent/" in dockerignore and "!src/personal_agent/**" in dockerignore,
-             ".dockerignore does not include the source package", failures)
-
     package_scripts = (
         "agentos-backup.py",
         "agentos-restore.py",
-        "operating_preflight.py",
         "verify_continuity_acceptance.py",
         "verify_document_acceptance.py",
         "verify_document_boundary.py",

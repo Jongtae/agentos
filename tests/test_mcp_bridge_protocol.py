@@ -54,7 +54,7 @@ class ProtocolVersionRegistryTests(unittest.TestCase):
         Retiring the hardcoded literal made backward drift visible. Without
         this pin it made forward drift *less* visible than before, because
         previously a human had to edit a literal to change the answer. There
-        is no lockfile, so a rebuild of Dockerfile.engine is enough.
+        is no lockfile.
 
         A failure here is not a bug: it means the SDK added a revision and a
         human must decide whether these bridges implement it.

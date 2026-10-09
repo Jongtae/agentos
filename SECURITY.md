@@ -34,4 +34,4 @@ The project is in a single-owner pilot: one owner, on their own machine, with th
 
 Reports about these deferred areas are still welcome, and they inform the hardening program. They are not treated as regressions of an enforced guarantee.
 
-The canonical boundaries are in the [Owner Control Contract](docs/owner-control-contract.en.md), the [Secretary Agency Contract](docs/secretary-agency-contract.en.md) and [runtime isolation](docs/runtime-isolation.md).
+The canonical boundaries are in the [Owner Control Contract](docs/owner-control-contract.en.md), the [Secretary Agency Contract](docs/secretary-agency-contract.en.md) and [Personal AgentOS Architecture](docs/personal-agentos-architecture.en.md).

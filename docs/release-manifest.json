@@ -53,14 +53,14 @@
   ],
   "unpublished": [
     {
-      "version": "1.1.2",
+      "version": "1.2.0",
       "tag": null,
       "commit": null,
       "why_no_commit": "The future tagged main merge commit does not exist; no earlier source SHA can stand in for it.",
       "archive_sha256": null,
       "state": "unpublished",
-      "why_no_checksum": "No v1.1.2 GitHub tag archive exists; its served SHA-256 must be measured only after publication.",
-      "carries": "Next development-source version after v1.1.1. This bookkeeping bump does not claim a new product capability or release."
+      "why_no_checksum": "No v1.2.0 GitHub tag archive exists; its served SHA-256 must be measured only after publication.",
+      "carries": "Main source since v1.1.1: the checksum-pinned one-line uv installer with Homebrew kept and Windows through WSL2 (#1167, #1169, #1173); browser pages loaded as their mobile version (#1183); payment approval again for links whose purchase handler a page sets by script (#1181); phone sign-in AutoFill (#1170); nightly macOS 15/26 real-WebKit suite and install-smoke matrix (#1176, #1178); README and public-launch documentation. A minor version because the installer is a new install path. Tests and CI do not prove live external integrations."
     }
   ]
 }

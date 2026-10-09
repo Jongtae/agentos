@@ -603,3 +603,47 @@ class CalendarRenewalLockOrderTest(unittest.TestCase):
             thread.join(5)
         self.assertEqual([thread.is_alive() for thread in threads], [False, False])
         self.assertEqual(oauth.status(OWNER)['state'], 'disconnected')
+
+
+class CodexReviewFollowupsTest(unittest.TestCase):
+    def test_a_google_sheet_is_exported_as_xlsx_so_every_sheet_is_read(self):
+        meta = json.dumps({'id': FILE_ID, 'name': '예산', 'mimeType': 'application/vnd.google-apps.spreadsheet'}).encode()
+        from io import BytesIO
+        from openpyxl import Workbook
+        book = Workbook()
+        book.active.title = 'first'
+        book.active.append(['a', 1])
+        second = book.create_sheet('second')
+        second.append(['only-in-second', 2])
+        buffer = BytesIO()
+        book.save(buffer)
+        transport = Recorder([(f'{DRIVE_API}/files/{FILE_ID}/export?', buffer.getvalue()),
+                              (f'{DRIVE_API}/files/{FILE_ID}?', meta)])
+        result = GoogleDriveReader(transport).read(FILE_ID)
+        self.assertIn('spreadsheetml.sheet', transport.urls[1])
+        self.assertIn('only-in-second', result['content'])
+
+    def test_truncation_is_reported_from_the_rendered_content(self):
+        meta = json.dumps({'id': FILE_ID, 'name': 'lines', 'mimeType': 'application/vnd.google-apps.document'}).encode()
+        body = '\n'.join('x' for _ in range(6_000)).encode()
+        transport = Recorder([(f'{DRIVE_API}/files/{FILE_ID}/export?', body), (f'{DRIVE_API}/files/{FILE_ID}?', meta)])
+        result = GoogleDriveReader(transport).read(FILE_ID)
+        self.assertEqual(len(result['content']), 24_000)
+        self.assertTrue(result['truncated'])
+
+    def test_replacing_a_connected_client_is_refused_until_disconnected(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        store = QuickStore(str(pathlib.Path(temp.name) / 'data'))
+        env = {'AGENTOS_GOOGLE_LOCAL_PORT': '9911', 'AGENTOS_GOOGLE_OAUTH_KEY': Fernet.generate_key().decode()}
+        service = configured_service(store, env)
+        service.save_google_client({'client_json': OwnClientFromSettingsTest.CLIENT})
+        owner = service.connector_callback_owner(DRIVE_CONNECTOR_ID)
+        service.drive_oauth.registry.transition(owner, DRIVE_CONNECTOR_ID, ConnectorState.CONNECTED,
+                                                granted_scopes=(DRIVE_READONLY_SCOPE,))
+        other = json.dumps({'installed': {'client_id': '999-zzzzzz.apps.googleusercontent.com', 'client_secret': 's2'}})
+        with self.assertRaises(ValueError):
+            service.save_google_client({'client_json': other})
+        self.assertIn('123-abcdefgh', json.dumps(store.secret('google_oauth_client')))
+        # The same client again is not a replacement.
+        service.save_google_client({'client_json': OwnClientFromSettingsTest.CLIENT})

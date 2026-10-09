@@ -40,7 +40,8 @@ _FIELDS = 'id,name,mimeType,modifiedTime,size,webViewLink'
 #: Google-native files and the plain format each is exported as.
 _EXPORTS = {
     'application/vnd.google-apps.document': ('text/plain', '.txt'),
-    'application/vnd.google-apps.spreadsheet': ('text/csv', '.txt'),
+    # XLSX, not CSV: Drive exports only the first sheet as CSV.
+    'application/vnd.google-apps.spreadsheet': ('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.xlsx'),
     'application/vnd.google-apps.presentation': ('text/plain', '.txt'),
 }
 #: Ordinary files the local extractor reads, by MIME type.
@@ -140,10 +141,11 @@ class GoogleDriveReader:
             raise DriveReadError('too_large', '10MB 이하 파일만 읽을 수 있습니다.')
         document = self._extract(bytes(raw), suffix)
         segments = document.segments
-        content = '\n'.join(f"[{segment['location']}] {segment['text']}" for segment in segments)[:MAX_CONTENT_CHARS]
+        rendered = '\n'.join(f"[{segment['location']}] {segment['text']}" for segment in segments)
+        content = rendered[:MAX_CONTENT_CHARS]
         return {**_row(meta), 'kind': document.kind, 'content': content,
                 'locations': [segment['location'] for segment in segments[:100]],
-                'sources': [f'Google Drive: {name}'], 'truncated': len(document.text) > len(content)}
+                'sources': [f'Google Drive: {name}'], 'truncated': len(rendered) > len(content)}
 
     @staticmethod
     def _extract(raw, suffix):

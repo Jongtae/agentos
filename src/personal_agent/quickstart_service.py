@@ -6850,6 +6850,13 @@ class AgentService:
         client=google_client_from_json(raw.strip())
         if self.google_client_source=='environment':
             raise ValueError('자체 Google client가 AGENTOS_GOOGLE_CLIENT_FILE로 지정돼 있어 설정에서 바꿀 수 없습니다.')
+        # Grants were issued to the client in use: replacing it under a live
+        # connection would keep rows "connected" on tokens the new client can
+        # neither renew nor reconnect over.  Disconnect first.
+        if self.google_client_id and client[0]!=self.google_client_id and any(
+                row.get('source')=='own-client' and row.get('state') in ('connected','reauth_required')
+                for row in self.google_connection_rows()):
+            raise ValueError('지금 client로 연결된 Google 서비스가 있습니다. 서비스마다 연결을 해제한 뒤 client를 바꿔 주세요.')
         self.store.secret(self.GOOGLE_CLIENT_SECRET_KEY,{'installed':{'client_id':client[0],'client_secret':client[1]}})
         if not self.google_client_source:
             self.google_client_installer((*client,'settings'))

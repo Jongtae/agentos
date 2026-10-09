@@ -6,9 +6,9 @@ AgentOS is a self-hosted personal agent preview. One local process serves browse
 
 The current owner test remains the small file-workspace journey below: configure a supported direct provider, explicitly grant a reference folder and output workspace, save a result, restart and find it again. DOGFOOD-01's repository evidence uses simulated providers and temporary files; actual owner browser/provider operation is a separate test. Check the installed revision when comparing a released Homebrew build with current source; a merged documentation PR is not a new application release.
 
-[USE-01 / #358](https://github.com/Jongtae/agentos/issues/358) is prepared to improve ordinary research, substantive file results and follow-up continuity. It does not run merely because its issue exists. Public full-page reading, measured 24-case model quality, the expanded receipt/control UX and v0.1 agent installation are **not delivered by the preparation**. Current public search returns snippets, not full-page/inventory/checkout proof. The [usefulness specification](docs/default-agent-usefulness.en.md) separates deterministic development tests from live-quality promotion; an unrun live gate is pending, not passed.
+[USE-01 / #358](https://github.com/Jongtae/agentos/issues/358) is prepared to improve ordinary research, substantive file results and follow-up continuity. It does not run merely because its issue exists. Public full-page reading, measured 24-case model quality, the expanded receipt/control UX and v0.1 agent installation are **not delivered by the preparation**. Current public search returns snippets, not full-page/inventory/checkout proof. The [usefulness specification](default-agent-usefulness.en.md) separates deterministic development tests from live-quality promotion; an unrun live gate is pending, not passed.
 
-[Owner control requirements](docs/owner-control-contract.en.md) describe implemented versus planned boundaries. A local install can use an external model; approve only the data/destinations you intend. No ticket/cart/booking/payment, account creation or new external action is part of the recommended test. Do not publish private documents, credentials or full tool payloads as repository evidence.
+[Owner control requirements](owner-control-contract.en.md) describe implemented versus planned boundaries. A local install can use an external model; approve only the data/destinations you intend. No ticket/cart/booking/payment, account creation or new external action is part of the recommended test. Do not publish private documents, credentials or full tool payloads as repository evidence.
 
 ## Install on macOS or Linux
 
@@ -18,7 +18,7 @@ One command installs and starts AgentOS. You do not need Homebrew, Python, Docke
 curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/main/scripts/install.sh | sh
 ```
 
-The [installer](scripts/install.sh) first downloads the published release archive and checks its SHA-256 against the [release manifest](docs/release-manifest.json); on a mismatch it installs nothing. If you do not already have a current [uv](https://docs.astral.sh/uv/), it installs a pinned version through Astral's official installer, which adds `~/.local/bin` to your shell `PATH`. It then installs AgentOS with a uv-managed Python, ignoring your own uv settings, and starts it. Set `AGENTOS_NO_START=1` to install without starting. Later, open a new terminal and run `agentos start`. Running the same command again after a release updates AgentOS. `uv tool uninstall personal-agentos` removes the program and keeps your data.
+The [installer](../scripts/install.sh) first downloads the published release archive and checks its SHA-256 against the [release manifest](release-manifest.json); on a mismatch it installs nothing. If you do not already have a current [uv](https://docs.astral.sh/uv/), it installs a pinned version through Astral's official installer, which adds `~/.local/bin` to your shell `PATH`. It then installs AgentOS with a uv-managed Python, ignoring your own uv settings, and starts it. Set `AGENTOS_NO_START=1` to install without starting. Later, open a new terminal and run `agentos start`. Running the same command again after a release updates AgentOS. `uv tool uninstall personal-agentos` removes the program and keeps your data.
 
 If you use Homebrew on macOS, this installs the same release:
 
@@ -134,11 +134,11 @@ What this does **not** yet cover, stated exactly:
   `Jongtae/homebrew-agentos` — it is not in this repository by design, so its absence from
   `git ls-files` here does not mean no artifact exists. `brew install` / `brew upgrade
   jongtae/agentos/agentos` at `v1.1.0` or later provides `agentos service`; `v1.0.4` and
-  earlier do not. See [the release procedure](docs/release.en.md).
+  earlier do not. See [the release procedure](release.en.md).
 - **Not covered by automated tests of real launchd.** Repository CI runs on Linux and cannot
   execute launchd. The automated evidence for these commands is injected-runner tests that
   substitute `launchctl`. The v1.1.1 Homebrew upgrade and foreground smoke were observed
-  on the owner's Mac ([release manifest](docs/release-manifest.json)); a real login service
+  on the owner's Mac ([release manifest](release-manifest.json)); a real login service
   surviving a machine restart and an end-to-end Telegram result with no terminal open
   remain owner operating validation.
 
@@ -287,7 +287,7 @@ What this does **not** yet cover, stated exactly:
   a real calendar, and the behaviour of a revoked grant are owner validation this
   repository has not performed.
 - **Released from `v1.1.0` (2026-09-23).** `v1.0.4` and earlier Homebrew builds do not
-  include it; see [the release procedure](docs/release.en.md).
+  include it; see [the release procedure](release.en.md).
 - **The natural-language create path still asks a question.** `내일 3시에 회의 잡아줘`
   parks for a connection and then asks for the missing detail rather than producing a
   draft on its own; ask for the calendar explicitly, or read first and draft from what
@@ -363,7 +363,7 @@ On a remote host, keep the default loopback binding and connect through SSH forw
 
 Implemented paths include single owner, password login, model adapters, persistent chat/notes, queued requests, private Telegram pairing/deduplication, connected TXT/Markdown/PDF/DOCX/XLSX folders with sources, explicit external-model document approval, Docker Compose and backup/restore scripts. Each path's actual operating evidence remains scoped to its recorded revision/configuration. Interrupted model work and uncertain Telegram delivery are shown without automatic replay.
 
-Arbitrary shell, native desktop/mobile apps, managed unattended installation, multi-user hosting and the complete AgentPackage ecosystem are not this preview. Calendar/Drive-related design or mock-validated code elsewhere in the repository is not proof of a currently configured live integration. See the [roadmap](docs/roadmap.md) for exact historical and planned states.
+Arbitrary shell, native desktop/mobile apps, managed unattended installation, multi-user hosting and the complete AgentPackage ecosystem are not this preview. Calendar/Drive-related design or mock-validated code elsewhere in the repository is not proof of a currently configured live integration. See the [roadmap](roadmap.md) for exact historical and planned states.
 
 ## Advanced: local manifest plugins
 

@@ -18,7 +18,7 @@ Goal: `STRUCT-01 — AgentOS 저장소 구조 정리`
 - `README.md` / `README.ko.md` / `README.ja.md` / `README.zh-CN.md`
   - [AGENTS.md](AGENTS.md)
   - [PRD.md](PRD.md)
-  - [TASKS.md](TASKS.md)
+  - [TASKS.md](../../../TASKS.md)
   - [docs/roadmap.md](docs/roadmap.md)
   - [docs/goal-execution-contract.en.md](docs/goal-execution-contract.en.md)
   - [docs/goal-execution-contract.ko.md](docs/goal-execution-contract.ko.md)

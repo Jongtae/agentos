@@ -29,8 +29,8 @@ class ProductValidationTests(unittest.TestCase):
     def fixture(self):
         folder = tempfile.TemporaryDirectory(); root = Path(folder.name)
         (root / "docs").mkdir(); (root / "src/personal_agent").mkdir(parents=True)
-        (root / "TASKS.md").write_text("# tasks\n")
-        (root / "QUICKSTART.md").write_text("PDF and Office documents are supported.\n")
+        (root / "docs/TASKS.md").write_text("# tasks\n")
+        (root / "docs/QUICKSTART.md").write_text("PDF and Office documents are supported.\n")
         (root / "docs/roadmap.md").write_text("## M3 — continuity and installation\nCompleted: yes\n## M4 — extensibility\nCompleted: yes\n## M5 — v1 release\nCompleted: yes\n")
         (root / "src/personal_agent/quickstart_service.py").write_text("model_ready document_boundary connect_telegram")
         (root / "src/personal_agent/agent_runtime.py").write_text("delegate_agent")
@@ -41,7 +41,7 @@ class ProductValidationTests(unittest.TestCase):
     def test_stale_documents_fail(self):
         folder, root = self.fixture()
         try:
-            (root / "TASKS.md").write_text("| M3 | Persistent runtime and official server install | Planned |\n")
+            (root / "docs/TASKS.md").write_text("| M3 | Persistent runtime and official server install | Planned |\n")
             validator = ProductValidator(root); validator.documentation()
             self.assertEqual(validator.findings[0].status, "failed")
         finally: folder.cleanup()

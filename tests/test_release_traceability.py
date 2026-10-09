@@ -33,7 +33,7 @@ from verify_readme_localization import README_RELEASE_BOUNDARIES, visible_prose
 TEMPLATE = ROOT / 'deploy' / 'homebrew' / 'agentos.rb.template'
 MANIFEST = ROOT / 'docs' / 'release-manifest.json'
 RUNBOOK = ROOT / 'docs' / 'release.en.md'
-READMES = ('README.md', 'README.ko.md', 'README.ja.md', 'README.zh-CN.md')
+READMES = ('README.md', 'docs/i18n/README.ko.md', 'docs/i18n/README.ja.md', 'docs/i18n/README.zh-CN.md')
 
 #: The tap this repository's formula is published to. Hardcoded on purpose:
 #: if the tap moves, this test should fail and make someone update the

@@ -6,7 +6,7 @@ Personal AgentOS keeps current contracts, delivery selection, research, evidence
 
 | Question | Source of truth |
 | --- | --- |
-| Why the project exists and the concept map | [VISION.md](../VISION.md) |
+| Why the project exists and the concept map | [VISION.md](VISION.md) |
 | Contribution invariants and repository workflow entry point | [AGENTS.md](../AGENTS.md) and the [Development Constitution](development-constitution.en.md) |
 | Which goal/substep is selected now | repository-root [delivery-plan.yaml](../delivery-plan.yaml) `next_goal` and the selected program record |
 | Issue, pull request, merge and required-check status | GitHub Issues, Pull Requests and Checks |

@@ -400,7 +400,7 @@ class GmailRouteReachabilityTest(unittest.TestCase):
         the documentation an owner reads first.  This is the assertion that
         notices.
         """
-        quickstart = (Path(__file__).resolve().parents[1] / 'QUICKSTART.md').read_text()
+        quickstart = (Path(__file__).resolve().parents[1] / 'docs/QUICKSTART.md').read_text()
         self.assertIn('\nagentos gmail-config \\\n', quickstart)
         # The documented name must be the name the CLI actually dispatches.
         dispatcher = (Path(__file__).resolve().parents[1]

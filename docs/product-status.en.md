@@ -91,7 +91,7 @@ Your personal AI should not be identical to one model, one vendor or one agent, 
 
 Models, coding agents, connectors and delegated runtimes request capabilities; you and your policy decide. The [owner-control contract](owner-control-contract.en.md) spells out six things you can always do: inspect what a worker is and asks for, choose the data it may use, see where your information goes, bound actions separately from installing or connecting, stop and revoke with honest reporting, and keep and move your state when a worker is replaced. Owner state exports and restores with integrity checks through the backup and restore scripts; credentials, sessions and folder permissions are deliberately excluded and must be reconnected.
 
-For installable agents the same rule holds: `downloaded != installed != enabled != connected != authorized-for-action`. Installing a package never grants it anything, updates that widen data or actions need fresh approval, and removal revokes the package's authority while keeping your outputs. The full picture, including the five-plane architecture and the BDI-inspired attention lens (a design lens, not a shipped state machine), is in the [concept page](../VISION.md), [architecture](personal-agentos-architecture.en.md), [platform foundation](agent-distribution-platform-foundation.en.md) and [roadmap](roadmap.md).
+For installable agents the same rule holds: `downloaded != installed != enabled != connected != authorized-for-action`. Installing a package never grants it anything, updates that widen data or actions need fresh approval, and removal revokes the package's authority while keeping your outputs. The full picture, including the five-plane architecture and the BDI-inspired attention lens (a design lens, not a shipped state machine), is in the [concept page](VISION.md), [architecture](personal-agentos-architecture.en.md), [platform foundation](agent-distribution-platform-foundation.en.md) and [roadmap](roadmap.md).
 
 <!-- readme-section:release -->
 ## The Homebrew release
@@ -108,9 +108,9 @@ The [release procedure](release.en.md) tracks publication. `v1.0.4` and earlier 
 <!-- readme-section:license -->
 ## License
 
-The code is [AGPL-3.0-only](../LICENSE): run it, change it and share it; if you distribute a modified version or run one as a network service, make your modified source available to its users. The “Personal AgentOS” name and logo are covered by the [trademark notice](../TRADEMARKS.md), not by the code licence. Contributions are accepted under the same licence; there is no CLA.
+The code is [AGPL-3.0-only](../LICENSE): run it, change it and share it; if you distribute a modified version or run one as a network service, make your modified source available to its users. The “Personal AgentOS” name and logo are covered by the [trademark notice](TRADEMARKS.md), not by the code licence. Contributions are accepted under the same licence; there is no CLA.
 
 <!-- readme-section:development -->
 ## How it is built
 
-This is **not a coding harness, swarm framework, host kernel or replacement for macOS/Linux**. The GitHub/Codex delivery automation in this repository builds Personal AgentOS; it is not the product. To contribute, start with [CONTRIBUTING.md](../CONTRIBUTING.md). Contributors follow [AGENTS.md](../AGENTS.md), the [Development Constitution](development-constitution.en.md) and the [Goal Execution Contract](goal-execution-contract.en.md). Product completion needs useful-outcome evidence and denial/recovery evidence; green CI alone is not a product claim.
+This is **not a coding harness, swarm framework, host kernel or replacement for macOS/Linux**. The GitHub/Codex delivery automation in this repository builds Personal AgentOS; it is not the product. To contribute, start with [CONTRIBUTING.md](../.github/CONTRIBUTING.md). Contributors follow [AGENTS.md](../AGENTS.md), the [Development Constitution](development-constitution.en.md) and the [Goal Execution Contract](goal-execution-contract.en.md). Product completion needs useful-outcome evidence and denial/recovery evidence; green CI alone is not a product claim.

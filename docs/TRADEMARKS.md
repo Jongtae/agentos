@@ -1,7 +1,7 @@
 # Personal AgentOS trademark notice
 
 The source code of Personal AgentOS is licensed under the GNU Affero General
-Public License v3.0 only (`AGPL-3.0-only`, see [LICENSE](LICENSE)). That
+Public License v3.0 only (`AGPL-3.0-only`, see [LICENSE](../LICENSE)). That
 licence covers the code. It does not grant rights to the project's names and
 marks.
 
@@ -41,4 +41,4 @@ under applicable law.
 
 Questions and permission requests: open an issue in the official repository
 at <https://github.com/Jongtae/agentos> or contact the copyright
-holder listed in [NOTICE](NOTICE).
+holder listed in [NOTICE](../NOTICE).

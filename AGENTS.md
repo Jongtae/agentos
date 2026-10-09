@@ -171,7 +171,7 @@ Enable repository hooks once per clone with `git config core.hooksPath .githooks
 
 ## Licensing and marks
 
-Personal AgentOS is licensed under `AGPL-3.0-only` ([LICENSE](LICENSE), [NOTICE](NOTICE)). Contributions are accepted under that same licence (inbound = outbound); there is no CLA. A contribution must not add code whose licence is incompatible with AGPL-3.0 or that obliges redistribution under different terms; record the licence of every new dependency in its reuse review. The "Personal AgentOS" name and logo are governed by [TRADEMARKS.md](TRADEMARKS.md), not by the code licence.
+Personal AgentOS is licensed under `AGPL-3.0-only` ([LICENSE](LICENSE), [NOTICE](NOTICE)). Contributions are accepted under that same licence (inbound = outbound); there is no CLA. A contribution must not add code whose licence is incompatible with AGPL-3.0 or that obliges redistribution under different terms; record the licence of every new dependency in its reuse review. The "Personal AgentOS" name and logo are governed by [TRADEMARKS.md](docs/TRADEMARKS.md), not by the code licence.
 
 ## AgentPackage / runtime issue requirements
 

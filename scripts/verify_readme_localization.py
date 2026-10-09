@@ -22,9 +22,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 READMES = (
     "README.md",
-    "README.ko.md",
-    "README.ja.md",
-    "README.zh-CN.md",
+    "docs/i18n/README.ko.md",
+    "docs/i18n/README.ja.md",
+    "docs/i18n/README.zh-CN.md",
 )
 
 LOCALIZED_READMES = READMES[1:]
@@ -48,13 +48,13 @@ CORE_SECTION_IDS = (
 # READMEs link to the English page.
 STATUS_DOCS = {
     "docs/product-status.en.md": "README.md",
-    "docs/product-status.ko.md": "README.ko.md",
+    "docs/product-status.ko.md": "docs/i18n/README.ko.md",
 }
 STATUS_DOC_LINKS = {
     "README.md": "docs/product-status.en.md",
-    "README.ko.md": "docs/product-status.ko.md",
-    "README.ja.md": "docs/product-status.en.md",
-    "README.zh-CN.md": "docs/product-status.en.md",
+    "docs/i18n/README.ko.md": "docs/product-status.ko.md",
+    "docs/i18n/README.ja.md": "docs/product-status.en.md",
+    "docs/i18n/README.zh-CN.md": "docs/product-status.en.md",
 }
 
 SECTION_MARKER_RE = re.compile(
@@ -70,18 +70,23 @@ CAPABILITY_MARKERS = (
     "<!-- capability:current-supported-slice -->",
 )
 
-NAV_LINKS = (
-    "[English](README.md)",
-    "[한국어](README.ko.md)",
-    "[简体中文](README.zh-CN.md)",
-    "[日本語](README.ja.md)",
-)
+def nav_links(name: str) -> tuple[str, ...]:
+    """Language switcher links; translations live in docs/i18n/, README.md at the root."""
+    root = "" if name == "README.md" else "../../"
+    localized = "docs/i18n/" if name == "README.md" else ""
+    return (
+        f"[English]({root}README.md)",
+        f"[한국어]({localized}README.ko.md)",
+        f"[简体中文]({localized}README.zh-CN.md)",
+        f"[日本語]({localized}README.ja.md)",
+    )
+
 
 PRODUCT_DIRECTION_LABELS = {
     "README.md": "> **Product direction — not a current capability claim.**",
-    "README.ko.md": "> **Product direction — 현재 지원 기능을 뜻하지 않습니다.**",
-    "README.ja.md": "> **Product direction — 現在の対応機能を意味しません。**",
-    "README.zh-CN.md": "> **Product direction — 不代表当前已支持。**",
+    "docs/i18n/README.ko.md": "> **Product direction — 현재 지원 기능을 뜻하지 않습니다.**",
+    "docs/i18n/README.ja.md": "> **Product direction — 現在の対応機能を意味しません。**",
+    "docs/i18n/README.zh-CN.md": "> **Product direction — 不代表当前已支持。**",
 }
 
 PRODUCT_DIRECTION_DISCLAIMERS = {
@@ -89,15 +94,15 @@ PRODUCT_DIRECTION_DISCLAIMERS = {
         "**This scene is illustrative product direction, not a claim that "
         "autonomous shopping or checkout is shipped today.**"
     ),
-    "README.ko.md": (
+    "docs/i18n/README.ko.md": (
         "**이 장면은 product direction을 설명하기 위한 예시이며, 현재 자율 "
         "구매나 결제가 제공된다는 뜻이 아닙니다.**"
     ),
-    "README.ja.md": (
+    "docs/i18n/README.ja.md": (
         "**この場面は product direction を説明する例であり、現在 autonomous "
         "shopping や checkout が提供されているという意味ではありません。**"
     ),
-    "README.zh-CN.md": (
+    "docs/i18n/README.zh-CN.md": (
         "**这个场景用于说明 product direction，并不表示今天已经支持 "
         "autonomous shopping 或 checkout。**"
     ),
@@ -109,16 +114,16 @@ STATUS_ROW_EVIDENCE_TOKEN = "Synthetic **pass-with-friction**"
 # a shipped integration claim when the README narrative changes.
 README_DIRECTION_DISCLAIMERS = {
     "README.md": "Condensed from real conversations with the PA and redrawn: in Telegram the replies arrive as text and links, not cards.",
-    "README.ko.md": "PA와 실제로 나눈 대화를 압축해 다시 그린 화면입니다. 실제 Telegram에서는 카드가 아니라 텍스트와 링크로 답합니다.",
-    "README.ja.md": "PA と実際に交わした会話を要約して描き直した画面です。実際の Telegram では、カードではなくテキストとリンクで返信します。",
-    "README.zh-CN.md": "这是根据与 PA 的真实对话浓缩后重新绘制的画面。在实际的 Telegram 中，回复是文字和链接，而不是卡片。",
+    "docs/i18n/README.ko.md": "PA와 실제로 나눈 대화를 압축해 다시 그린 화면입니다. 실제 Telegram에서는 카드가 아니라 텍스트와 링크로 답합니다.",
+    "docs/i18n/README.ja.md": "PA と実際に交わした会話を要約して描き直した画面です。実際の Telegram では、カードではなくテキストとリンクで返信します。",
+    "docs/i18n/README.zh-CN.md": "这是根据与 PA 的真实对话浓缩后重新绘制的画面。在实际的 Telegram 中，回复是文字和链接，而不是卡片。",
 }
 
 README_RELEASE_BOUNDARIES = {
     "README.md": "both installers install **v{version}** ({date}), built from the tagged main commit. The demo and the everyday-use image come from real sessions and are not release-specific end-to-end validation; the architecture figure is product direction.",
-    "README.ko.md": "두 설치 방법 모두 태그가 붙은 main 커밋의 **v{version}**({date})을 설치합니다. 데모와 일상 사용 화면은 실제 사용 세션을 바탕으로 한 것으로 이 배포본의 종단 간 검증은 아니며, 구조 그림은 제품 방향 예시입니다.",
-    "README.ja.md": "どちらのインストール方法でも、タグを付けた main コミットの **v{version}**（{date}）が入ります。デモと日常利用の画面は実際の利用セッションにもとづくもので、この版の一連の動作を検証したものではありません。構成図は製品の方向性を示す例です。",
-    "README.zh-CN.md": "两种安装方式安装的都是从已打标签的 main 提交构建的 **v{version}**（{date}）。演示和日常使用画面来自真实使用会话，并非该发行版本的端到端验证；架构图属于产品方向。",
+    "docs/i18n/README.ko.md": "두 설치 방법 모두 태그가 붙은 main 커밋의 **v{version}**({date})을 설치합니다. 데모와 일상 사용 화면은 실제 사용 세션을 바탕으로 한 것으로 이 배포본의 종단 간 검증은 아니며, 구조 그림은 제품 방향 예시입니다.",
+    "docs/i18n/README.ja.md": "どちらのインストール方法でも、タグを付けた main コミットの **v{version}**（{date}）が入ります。デモと日常利用の画面は実際の利用セッションにもとづくもので、この版の一連の動作を検証したものではありません。構成図は製品の方向性を示す例です。",
+    "docs/i18n/README.zh-CN.md": "两种安装方式安装的都是从已打标签的 main 提交构建的 **v{version}**（{date}）。演示和日常使用画面来自真实使用会话，并非该发行版本的端到端验证；架构图属于产品方向。",
 }
 
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
@@ -296,22 +301,22 @@ def visible_prose(section: str) -> str:
 # rather than forcing implementation caveats into the opening thesis.
 HERO_LOCAL_FIRST_LABELS = {
     "README.md": "Local-first is not local-only",
-    "README.ko.md": "로컬 우선(local-first)은 로컬 전용(local-only)이 아닙니다",
-    "README.ja.md": "ローカルファースト（local-first）はローカル限定（local-only）ではありません",
-    "README.zh-CN.md": "本地优先（local-first）不等于只在本地（local-only）",
+    "docs/i18n/README.ko.md": "로컬 우선(local-first)은 로컬 전용(local-only)이 아닙니다",
+    "docs/i18n/README.ja.md": "ローカルファースト（local-first）はローカル限定（local-only）ではありません",
+    "docs/i18n/README.zh-CN.md": "本地优先（local-first）不等于只在本地（local-only）",
 }
 
 LOCALE_PRESENCE_VISUALS = {
     "README.md": "docs/assets/readme/presence-overview.en.svg",
-    "README.ko.md": "docs/assets/readme/presence-overview.ko.svg",
-    "README.ja.md": "docs/assets/readme/presence-overview.ja.svg",
-    "README.zh-CN.md": "docs/assets/readme/presence-overview.zh-CN.svg",
+    "docs/i18n/README.ko.md": "docs/assets/readme/presence-overview.ko.svg",
+    "docs/i18n/README.ja.md": "docs/assets/readme/presence-overview.ja.svg",
+    "docs/i18n/README.zh-CN.md": "docs/assets/readme/presence-overview.zh-CN.svg",
 }
 LOCALE_SCENE_VISUALS = {
     "README.md": "docs/assets/readme/owner-pilot-conversation.en.png",
-    "README.ko.md": "docs/assets/readme/owner-pilot-conversation.ko.png",
-    "README.ja.md": "docs/assets/readme/owner-pilot-conversation.ja.png",
-    "README.zh-CN.md": "docs/assets/readme/owner-pilot-conversation.zh-CN.png",
+    "docs/i18n/README.ko.md": "docs/assets/readme/owner-pilot-conversation.ko.png",
+    "docs/i18n/README.ja.md": "docs/assets/readme/owner-pilot-conversation.ja.png",
+    "docs/i18n/README.zh-CN.md": "docs/assets/readme/owner-pilot-conversation.zh-CN.png",
 }
 SECTION_VISUALS = {
     "presence": LOCALE_PRESENCE_VISUALS,
@@ -374,6 +379,7 @@ def validate_localized_picture(
     # Each localized conversation image uses one source at every width;
     # the architecture SVG still has a separate narrow composition.
     narrow = desktop if section_id == "conversation" else desktop.removesuffix(".svg") + ".narrow.svg"
+    rel = "" if name == "README.md" else "../../"  # translations live in docs/i18n/
     parser = PictureParser()
     parser.feed(standalone_picture_html(section))
     if len(parser.pictures) != 1:
@@ -383,7 +389,7 @@ def validate_localized_picture(
         errors.append(f"{name}: {section_id} picture needs source before img")
     images = [attrs for tag, attrs in entries if tag == "img"]
     sources = [attrs for tag, attrs in entries if tag == "source"]
-    if len(images) != 1 or images[0].get("src") != desktop:
+    if len(images) != 1 or images[0].get("src") != rel + desktop:
         errors.append(f"{name}: {section_id} picture must use localized img src {desktop!r}")
     if len(images) == 1:
         alt = (images[0].get("alt") or "").strip()
@@ -391,7 +397,7 @@ def validate_localized_picture(
         # is reviewed with the rendered figure instead of pinned word-for-word.
         if not alt or alt in (desktop, narrow, Path(desktop).name, Path(narrow).name):
             errors.append(f"{name}: {section_id} picture needs meaningful alt text")
-    if (len(sources) != 1 or sources[0].get("srcset") != narrow
+    if (len(sources) != 1 or sources[0].get("srcset") != rel + narrow
             or sources[0].get("media") != "(max-width: 600px)"):
         errors.append(f"{name}: {section_id} picture needs narrow source {narrow!r} at 600px")
     for visual in set((desktop, narrow)):
@@ -402,15 +408,14 @@ def validate_localized_picture(
 
 STATUS_EVIDENCE_BOUNDARIES = {
     "README.md": "**live provider operation was not run**",
-    "README.ko.md": "**실제 외부 제공자 운영은 실행하지 않았습니다.**",
-    "README.ja.md": "**live provider operation は実行していません。**",
-    "README.zh-CN.md": "**live provider operation 没有运行。**",
+    "docs/i18n/README.ko.md": "**실제 외부 제공자 운영은 실행하지 않았습니다.**",
+    "docs/i18n/README.ja.md": "**live provider operation は実行していません。**",
+    "docs/i18n/README.zh-CN.md": "**live provider operation 没有运行。**",
 }
 
-STATIC_SHARED_FACTS = (
-    "[QUICKSTART](QUICKSTART.md)",
-    "docs/release-manifest.json",
-)
+def static_shared_facts(name: str) -> tuple[str, ...]:
+    prefix = "docs/" if name == "README.md" else "../../docs/"
+    return (f"[QUICKSTART]({prefix}QUICKSTART.md)", "docs/release-manifest.json")
 
 # Facts the status page must carry so the README can stay short without
 # the boundaries disappearing from the repository's public surface.
@@ -539,7 +544,7 @@ def validate_body(
 
     if "<!-- readme-parity:v1 -->" not in body:
         errors.append(f"{name}: missing readme-parity:v1 marker")
-    for token in NAV_LINKS + STATIC_SHARED_FACTS + (STATUS_DOC_LINKS[name],):
+    for token in nav_links(name) + static_shared_facts(name) + (STATUS_DOC_LINKS[name],):
         if token not in COMMENT_RE.sub("", body):
             errors.append(f"{name}: expected {token!r}, found none")
     if body.count(f"v{release_version}") != 1:

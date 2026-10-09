@@ -18,6 +18,7 @@ import verify_readme_localization as verifier
 class ReadmeLocalizationParityTests(unittest.TestCase):
     def copy_public_readmes(self, root):
         for name in verifier.READMES:
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, root / name)
         assets = tuple(
             path
@@ -43,7 +44,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
     def test_missing_semantic_section_is_detected(self):
         tmp, root = self.temp_root()
         with tmp:
-            target = root / "README.ja.md"
+            target = root / "docs/i18n/README.ja.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace(
                 "<!-- readme-section:presence -->", "", 1
@@ -53,7 +54,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             errors = verifier.validate_readmes(root)
             self.assertTrue(
                 any(
-                    "README.ja.md" in error
+                    "docs/i18n/README.ja.md" in error
                     and (
                         "section sequence differs" in error
                         or "missing a readme-section marker" in error
@@ -83,7 +84,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             errors = verifier.validate_readmes(root)
             self.assertTrue(
                 any(
-                    "README.ko.md" in error
+                    "docs/i18n/README.ko.md" in error
                     and "section sequence differs" in error
                     and "pricing" in error
                     for error in errors
@@ -145,7 +146,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             target = root / "docs" / "product-status.ko.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace(
-                verifier.PRODUCT_DIRECTION_DISCLAIMERS["README.ko.md"],
+                verifier.PRODUCT_DIRECTION_DISCLAIMERS["docs/i18n/README.ko.md"],
                 "",
                 1,
             )
@@ -167,7 +168,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             target = root / "docs" / "product-status.ko.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace(
-                verifier.PRODUCT_DIRECTION_DISCLAIMERS["README.ko.md"],
+                verifier.PRODUCT_DIRECTION_DISCLAIMERS["docs/i18n/README.ko.md"],
                 "**이 장면처럼 자율 구매와 결제를 지금 사용할 수 있습니다.**",
                 1,
             )
@@ -189,7 +190,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             target = root / "docs" / "product-status.ko.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace(
-                verifier.PRODUCT_DIRECTION_LABELS["README.ko.md"],
+                verifier.PRODUCT_DIRECTION_LABELS["docs/i18n/README.ko.md"],
                 "",
                 1,
             )
@@ -360,17 +361,17 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
     def test_ownership_local_first_sentence_deletion_is_detected(self):
         tmp, root = self.temp_root()
         with tmp:
-            target = root / "README.ko.md"
+            target = root / "docs/i18n/README.ko.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace(
-                verifier.HERO_LOCAL_FIRST_LABELS["README.ko.md"], "완전히 로컬에서만 처리됩니다", 1
+                verifier.HERO_LOCAL_FIRST_LABELS["docs/i18n/README.ko.md"], "완전히 로컬에서만 처리됩니다", 1
             )
             target.write_text(body, encoding="utf-8")
 
             errors = verifier.validate_readmes(root)
             self.assertTrue(
                 any(
-                    "README.ko.md" in error
+                    "docs/i18n/README.ko.md" in error
                     and "local-first != local-only" in error
                     for error in errors
                 ),
@@ -384,14 +385,14 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                 with self.subTest(section=section_id, source=suffix):
                     tmp, root = self.temp_root()
                     with tmp:
-                        target = root / "README.ja.md"
+                        target = root / "docs/i18n/README.ja.md"
                         body = target.read_text(encoding="utf-8")
                         wrong = locales["README.md"] if section_id == "conversation" else locales["README.md"].removesuffix(".svg") + suffix
-                        expected = locales["README.ja.md"] if section_id == "conversation" else locales["README.ja.md"].removesuffix(".svg") + suffix
+                        expected = locales["docs/i18n/README.ja.md"] if section_id == "conversation" else locales["docs/i18n/README.ja.md"].removesuffix(".svg") + suffix
                         self.assertIn(expected, body)
                         target.write_text(body.replace(expected, wrong, 1), encoding="utf-8")
                         errors = verifier.validate_readmes(root)
-                        self.assertTrue(any("README.ja.md" in error and expected in error
+                        self.assertTrue(any("docs/i18n/README.ja.md" in error and expected in error
                                             for error in errors), errors)
 
     def test_missing_picture_asset_is_detected(self):
@@ -400,7 +401,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
                 with self.subTest(section=section_id, source=suffix):
                     tmp, root = self.temp_root()
                     with tmp:
-                        asset = locales["README.ko.md"].removesuffix(".svg") + suffix
+                        asset = locales["docs/i18n/README.ko.md"].removesuffix(".svg") + suffix
                         (root / asset).unlink()
                         errors = verifier.validate_readmes(root)
                         self.assertTrue(any(f"missing {section_id} asset" in error and asset in error
@@ -608,7 +609,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
     def test_license_fact_drift_is_detected(self):
         tmp, root = self.temp_root()
         with tmp:
-            target = root / "README.zh-CN.md"
+            target = root / "docs/i18n/README.zh-CN.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace("AGPL-3.0-only", "MIT", 1)
             target.write_text(body, encoding="utf-8")
@@ -616,7 +617,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             errors = verifier.validate_readmes(root)
             self.assertTrue(
                 any(
-                    "README.zh-CN.md" in error and "'AGPL-3.0-only'" in error
+                    "docs/i18n/README.zh-CN.md" in error and "'AGPL-3.0-only'" in error
                     for error in errors
                 ),
                 errors,
@@ -727,7 +728,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
     def test_shared_install_fact_drift_is_detected(self):
         tmp, root = self.temp_root()
         with tmp:
-            target = root / "README.zh-CN.md"
+            target = root / "docs/i18n/README.zh-CN.md"
             body = target.read_text(encoding="utf-8")
             body = body.replace(
                 "brew install jongtae/agentos/agentos",
@@ -739,7 +740,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
             errors = verifier.validate_readmes(root)
             self.assertTrue(
                 any(
-                    "README.zh-CN.md" in error
+                    "docs/i18n/README.zh-CN.md" in error
                     and "brew install jongtae/agentos/agentos" in error
                     for error in errors
                 ),
@@ -941,10 +942,10 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
         self.assertIn("product-status.ko.md", errors[0])
 
     def test_canonical_readme_change_requires_all_locales(self):
-        errors = verifier.validate_changed_paths({"README.md", "README.ko.md"})
+        errors = verifier.validate_changed_paths({"README.md", "docs/i18n/README.ko.md"})
         self.assertEqual(1, len(errors))
-        self.assertIn("README.ja.md", errors[0])
-        self.assertIn("README.zh-CN.md", errors[0])
+        self.assertIn("docs/i18n/README.ja.md", errors[0])
+        self.assertIn("docs/i18n/README.zh-CN.md", errors[0])
 
     def test_canonical_readme_change_with_all_locales_passes(self):
         self.assertEqual(
@@ -955,7 +956,7 @@ class ReadmeLocalizationParityTests(unittest.TestCase):
     def test_locale_only_fix_does_not_force_unrelated_locale_churn(self):
         self.assertEqual(
             [],
-            verifier.validate_changed_paths({"README.ko.md"}),
+            verifier.validate_changed_paths({"docs/i18n/README.ko.md"}),
         )
 
 

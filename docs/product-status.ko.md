@@ -1,6 +1,6 @@
 # Personal AgentOS: 지금 되는 것, 아직 마찰이 있는 것, 앞으로 가려는 곳
 
-[README](../README.ko.md) 뒤에 있는 근거와 경계 페이지입니다. 최신 공개 배포본과 더 새로운 `main` 구현을 구분하고 synthetic/fixture, installed-smoke, owner-live, product-direction 증거를 서로 섞지 않습니다.
+[README](i18n/README.ko.md) 뒤에 있는 근거와 경계 페이지입니다. 최신 공개 배포본과 더 새로운 `main` 구현을 구분하고 synthetic/fixture, installed-smoke, owner-live, product-direction 증거를 서로 섞지 않습니다.
 
 ## 증거를 읽는 기준
 
@@ -91,7 +91,7 @@ README 데모는 2026-10-07에 녹화한 Telegram 화면 녹화 네 개를 편�
 
 모델, 코딩 에이전트, 커넥터, 위임된 런타임은 능력을 요청하고, 나와 내 정책이 결정합니다. [owner-control contract](owner-control-contract.en.md)는 내가 언제나 할 수 있는 여섯 가지를 정합니다. 일꾼이 무엇이고 무엇을 요청하는지 확인하기, 사용할 데이터 고르기, 내 정보가 가는 곳 보기, 설치나 연결과 별개로 행동 제한하기, 솔직한 보고와 함께 멈추고 회수하기, 일꾼을 교체할 때 내 상태를 보존하고 옮기기입니다. 오너 상태는 백업·복원 스크립트로 무결성 검사와 함께 내보내고 복원할 수 있으며, 자격 증명·세션·폴더 허용은 의도적으로 제외되어 다시 연결해야 합니다.
 
-설치형 에이전트에도 같은 규칙이 적용됩니다. `downloaded != installed != enabled != connected != authorized-for-action`. 패키지를 설치해도 아무 권한도 생기지 않고, 데이터나 행동을 넓히는 업데이트는 새 승인이 필요하며, 제거는 패키지 권한을 회수하되 내 산출물은 남깁니다. 다섯 개의 plane 구조와 BDI에서 영감을 받은 attention 렌즈(설계 렌즈이지 출시된 상태 기계가 아님)를 포함한 전체 그림은 [컨셉 페이지](../VISION.md), [architecture](personal-agentos-architecture.en.md), [platform foundation](agent-distribution-platform-foundation.en.md), [roadmap](roadmap.md)에 있습니다.
+설치형 에이전트에도 같은 규칙이 적용됩니다. `downloaded != installed != enabled != connected != authorized-for-action`. 패키지를 설치해도 아무 권한도 생기지 않고, 데이터나 행동을 넓히는 업데이트는 새 승인이 필요하며, 제거는 패키지 권한을 회수하되 내 산출물은 남깁니다. 다섯 개의 plane 구조와 BDI에서 영감을 받은 attention 렌즈(설계 렌즈이지 출시된 상태 기계가 아님)를 포함한 전체 그림은 [컨셉 페이지](VISION.md), [architecture](personal-agentos-architecture.en.md), [platform foundation](agent-distribution-platform-foundation.en.md), [roadmap](roadmap.md)에 있습니다.
 
 <!-- readme-section:release -->
 ## Homebrew 배포본
@@ -108,9 +108,9 @@ agentos start
 <!-- readme-section:license -->
 ## 라이선스
 
-코드는 [AGPL-3.0-only](../LICENSE)입니다. 실행하고, 고치고, 나눌 수 있으며, 수정본을 배포하거나 네트워크 서비스로 운영하면 그 사용자에게 수정된 소스를 제공해야 합니다. “Personal AgentOS” 이름과 로고는 코드 라이선스가 아니라 [상표 고지](../TRADEMARKS.md)를 따릅니다. 기여는 같은 라이선스로 받으며 CLA는 없습니다.
+코드는 [AGPL-3.0-only](../LICENSE)입니다. 실행하고, 고치고, 나눌 수 있으며, 수정본을 배포하거나 네트워크 서비스로 운영하면 그 사용자에게 수정된 소스를 제공해야 합니다. “Personal AgentOS” 이름과 로고는 코드 라이선스가 아니라 [상표 고지](TRADEMARKS.md)를 따릅니다. 기여는 같은 라이선스로 받으며 CLA는 없습니다.
 
 <!-- readme-section:development -->
 ## 어떻게 만드는가
 
-이 프로젝트는 **코딩 하네스, 스웜 프레임워크, 호스트 커널, macOS/Linux 대체품이 아닙니다.** 이 저장소의 GitHub/Codex 전달 자동화는 Personal AgentOS를 만드는 도구이지 제품이 아닙니다. 기여하려면 [CONTRIBUTING.md](../CONTRIBUTING.md)부터 읽어 주세요. 기여자는 [AGENTS.md](../AGENTS.md), [Development Constitution](development-constitution.en.md), [Goal Execution Contract](goal-execution-contract.en.md)를 따릅니다. 제품 완료에는 유용한 결과 증거와 거부/복구 증거가 필요하며, 초록색 CI만으로는 제품 주장이 되지 않습니다.
+이 프로젝트는 **코딩 하네스, 스웜 프레임워크, 호스트 커널, macOS/Linux 대체품이 아닙니다.** 이 저장소의 GitHub/Codex 전달 자동화는 Personal AgentOS를 만드는 도구이지 제품이 아닙니다. 기여하려면 [CONTRIBUTING.md](../.github/CONTRIBUTING.md)부터 읽어 주세요. 기여자는 [AGENTS.md](../AGENTS.md), [Development Constitution](development-constitution.en.md), [Goal Execution Contract](goal-execution-contract.en.md)를 따릅니다. 제품 완료에는 유용한 결과 증거와 거부/복구 증거가 필요하며, 초록색 CI만으로는 제품 주장이 되지 않습니다.

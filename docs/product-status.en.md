@@ -96,7 +96,7 @@ For installable agents the same rule holds: `downloaded != installed != enabled 
 <!-- readme-section:release -->
 ## The Homebrew release
 
-**The Homebrew package installs the newest published release, `v1.1.1` (2026-10-07), from its tagged main commit.** The [release manifest](release-manifest.json) records source coverage and local installed checks. Those checks establish package installation and foreground operation, not live Telegram, Google, shopping or the complete README meeting scene. The README’s everyday-use image is condensed from real owner-pilot conversations, not release-specific validation.
+**The Homebrew package installs the newest published release, `v1.3.0` (2026-10-10), from its tagged main commit.** The [release manifest](release-manifest.json) records source coverage and local installed checks. Those checks establish package installation and foreground operation, not live Telegram, Google, shopping or the complete README meeting scene. The README’s everyday-use image is condensed from real owner-pilot conversations, not release-specific validation.
 
 ```sh
 brew install jongtae/agentos/agentos

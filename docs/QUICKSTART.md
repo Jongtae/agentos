@@ -137,7 +137,7 @@ What this does **not** yet cover, stated exactly:
   earlier do not. See [the release procedure](release.en.md).
 - **Not covered by automated tests of real launchd.** Repository CI runs on Linux and cannot
   execute launchd. The automated evidence for these commands is injected-runner tests that
-  substitute `launchctl`. The v1.1.1 Homebrew upgrade and foreground smoke were observed
+  substitute `launchctl`. The v1.3.0 Homebrew upgrade and foreground smoke were observed
   on the owner's Mac ([release manifest](release-manifest.json)); a real login service
   surviving a machine restart and an end-to-end Telegram result with no terminal open
   remain owner operating validation.

@@ -25,7 +25,7 @@ from personal_agent.plugins import PluginRegistry
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.skills import (BUNDLED_PACKAGE, MAX_FILE_BYTES, MAX_LOADS, SkillBinding, SkillError, SkillLibrary,
-                                   inspect_skill, parse_frontmatter, parse_source)
+                                   fetch_github, inspect_skill, parse_frontmatter, parse_source)
 from test_agency_loop import CFG, Script, call, finish, judgments
 
 FIXTURE = Path(__file__).resolve().parent / 'fixtures' / 'skills' / 'internal-comms'
@@ -645,6 +645,76 @@ class ReviewRemediations(_Store):
                                                               'LICENSE.txt': apache})
             with self.subTest(declared=declared):
                 self.assertEqual(inspect_skill(folder)['status'], [status])
+
+    def install_from_collection(self, name, folder_files, root_files, revision):
+        """Install one skill from a collection whose licence may sit only at the repository root (#1219)."""
+        files = {f'skills/{name}/{rel}': data for rel, data in folder_files.items()}
+        files.update(root_files)
+        self.github.archives[revision] = tarball(UPSTREAM, revision, files)
+        return self.library.install(f'https://github.com/{UPSTREAM}/tree/{revision}/skills/{name}')
+
+    def test_a_repository_root_licence_is_used_when_the_folder_has_none(self):
+        """#1219: root-only MIT/Apache collections are accepted, labelled as repository-sourced."""
+        apache = (FIXTURE / 'LICENSE.txt').read_text()
+        mit = 'MIT License\n\nCopyright (c) 2026 Example\n\nPermission is hereby granted, free of charge, ...\n'
+        bare = '---\nname: {name}\ndescription: d\n---\nb\n'
+        for index, (text, label) in enumerate(((mit, 'MIT (repository LICENSE)'), (apache, 'Apache-2.0 (repository LICENSE)'))):
+            name = f'collected{index}'
+            with self.subTest(licence=label):
+                manifest = self.install_from_collection(name, {'SKILL.md': bare.format(name=name)},
+                                                        {'LICENSE': text, 'README.md': 'not staged'}, f'{index + 1:x}' * 40)
+                skill = manifest['skills'][0]
+                self.assertEqual((skill['licence'], skill['licence_source'], skill['status']),
+                                 (label, 'repository', ['supported_as_is']))
+                # Only the skill folder is stored, so the digest is the folder's own.
+                self.assertEqual(sorted(skill['files']), ['SKILL.md'])
+
+    def test_a_folder_licence_wins_and_unknown_text_is_still_refused(self):
+        apache = (FIXTURE / 'LICENSE.txt').read_text()
+        mit = 'MIT License\n\nPermission is hereby granted, free of charge, ...\n'
+        bare = '---\nname: {name}\ndescription: d\n{front}---\nb\n'
+        folder = self.skill_dir('own', {'SKILL.md': bare.format(name='own', front=''), 'LICENSE.txt': apache})
+        staged = self.root / 'fx-repo'
+        staged.mkdir()
+        (staged / 'LICENSE').write_text(mit)
+        record = inspect_skill(folder, staged)
+        self.assertEqual((record['licence'], record['licence_source']), ('Apache-2.0 (LICENSE.txt)', 'skill'))
+        refused = {
+            # An unrecognised folder licence is never replaced by the repository's MIT.
+            'proprietary-folder': ({'LICENSE': 'All rights reserved. Proprietary.'}, '', mit),
+            # A declared non-SPDX licence is not overridden by repository words.
+            'declared-proprietary': ({}, 'license: Proprietary\n', mit),
+            # Unknown repository text is not recognised.
+            'unknown-repository': ({}, '', 'All rights reserved. Do not copy.'),
+            # No licence anywhere.
+            'nowhere': ({}, '', None),
+        }
+        for name, (extra, front, root_text) in refused.items():
+            repository = self.root / f'fx-{name}'
+            repository.mkdir()
+            if root_text is not None:
+                (repository / 'LICENSE').write_text(root_text)
+            with self.subTest(case=name):
+                record = inspect_skill(self.skill_dir(name, {'SKILL.md': bare.format(name=name, front=front), **extra}), repository)
+                self.assertEqual((record['status'], record['licence_source']), (['licence_unknown'], ''))
+        with self.assertRaises(SkillError) as refused_install:
+            self.install_from_collection('unknown-root', {'SKILL.md': bare.format(name='unknown-root', front='')},
+                                         {'LICENSE': 'All rights reserved.'}, 'e' * 40)
+        self.assertEqual(refused_install.exception.code, 'unsupported')
+
+    def test_only_root_licence_files_are_staged(self):
+        """A nested LICENSE is not the repository's; other root files are never written (#1219)."""
+        bare = '---\nname: nested\ndescription: d\n---\nb\n'
+        mit = 'MIT License\n\nPermission is hereby granted, free of charge, ...\n'
+        revision = 'f' * 40
+        self.github.archives[revision] = tarball(UPSTREAM, revision, {
+            'skills/nested/SKILL.md': bare, 'other/LICENSE': mit, 'README.md': 'x', 'LICENSE-BIG': 'MIT License ' * 10000})
+        source = parse_source(f'https://github.com/{UPSTREAM}/tree/{revision}/skills/nested', self.github)
+        dest = self.root / 'stage' / 'nested'
+        fetch_github(source, dest, self.github)
+        self.assertEqual(sorted(p.relative_to(dest.parent).as_posix() for p in dest.parent.rglob('*') if p.is_file()),
+                         ['nested/SKILL.md'])
+        self.assertEqual(inspect_skill(dest, dest.parent / '.repository-licence')['status'], ['licence_unknown'])
 
     def test_shebang_and_nested_script_folders_are_executable(self):
         for name, files in (('shebang', {'tool': '#!/bin/sh\necho'}), ('nested', {'x/Scripts/a.txt': 'run me'})):

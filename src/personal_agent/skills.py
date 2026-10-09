@@ -69,6 +69,12 @@ LICENCE_TEXTS = (('Apache-2.0', ('apache license', 'version 2.0')), ('MIT', ('mi
                  ('MIT', ('permission is hereby granted, free of charge',)), ('MPL-2.0', ('mozilla public license', '2.0')),
                  ('BSD-3-Clause', ('redistribution and use in source and binary forms', 'neither the name')),
                  ('BSD-2-Clause', ('redistribution and use in source and binary forms',)), ('ISC', ('isc license',)))
+LICENCE_NAMES = ('LICENSE', 'LICENCE', 'COPYING')
+#: #1219: the pinned commit's repository-root licence files, staged beside (never inside) the skill
+#: folder and used only when the folder carries no licence file of its own.
+REPOSITORY_LICENCES = '.repository-licence'
+MAX_REPOSITORY_LICENCES = 4
+MAX_LICENCE_BYTES = 64 * 1024
 #: The reviewed skills shipped with AgentOS, under one reserved package id.
 BUNDLED_PACKAGE = 'agentos'
 BUNDLED_ROOT = Path(__file__).with_name('bundled_skills')
@@ -174,30 +180,54 @@ def _walk(root):
     return files
 
 
-def _licence(frontmatter, files):
-    """``(label, recognised)`` of a skill's licence; a referenced file must be packaged."""
+def _licence(frontmatter, files, repository=None):
+    """``(label, recognised, source)`` of a skill's licence; a referenced file must be packaged.
+
+    ``repository`` (``{name: bytes}``) is the pinned commit's root licence files; it
+    is consulted only when the skill folder has no licence file at all, so an
+    unrecognised folder licence is never replaced by the repository's (#1219).
+    """
     declared = frontmatter.get('license')
     if declared is not None and not isinstance(declared, str):
-        return '', False
+        return '', False, ''
     declared = (declared or '').strip()
     if declared in SPDX_LICENCES:
-        return declared, True
-    named = [rel for rel in files if '/' not in rel and rel.upper().startswith(('LICENSE', 'LICENCE', 'COPYING'))]
+        return declared, True, 'frontmatter'
+    candidates = {rel: data for rel, data in files.items() if '/' not in rel and rel.upper().startswith(LICENCE_NAMES)}
+    source, where = 'skill', '{}'
+    if not candidates and repository:
+        candidates, source, where = repository, 'repository', 'repository {}'
+    named = sorted(candidates)
     # A declared non-SPDX licence counts only when it points to the packaged file (review P3):
     # "Proprietary" is not overridden by words that happen to appear in a LICENSE file.
     if declared:
         named = [rel for rel in named if rel.lower() in declared.lower()]
     for rel in named:
-        head = files[rel][:4000].decode('utf-8', 'replace').lower()
+        head = candidates[rel][:4000].decode('utf-8', 'replace').lower()
         for spdx, words in LICENCE_TEXTS:
             if all(word in head for word in words):
-                return f'{spdx} ({rel})', True
-    return declared[:80], False
+                return f'{spdx} ({where.format(rel)})', True, source
+    return declared[:80], False, ''
 
 
-def inspect_skill(root):
+def _repository_licences(folder):
+    """``{name: bytes}`` of the staged repository-root licence files; bounded, regular files only."""
+    folder = Path(folder) if folder else None
+    if folder is None or folder.is_symlink() or not folder.is_dir():
+        return {}
+    found = {}
+    for path in sorted(folder.iterdir())[:MAX_REPOSITORY_LICENCES]:
+        if (path.is_file() and not path.is_symlink() and path.name.upper().startswith(LICENCE_NAMES)
+                and path.stat().st_size <= MAX_LICENCE_BYTES):
+            found[path.name] = path.read_bytes()
+    return found
+
+
+def inspect_skill(root, repository_licences=None):
     """The inspected record of one skill folder: identity, statuses and file digests.
 
+    ``repository_licences`` is the folder ``fetch_github`` staged the pinned
+    commit's root licence files in; it never changes the digest.
     Never runs or imports anything from the folder.  ``invalid_package`` is
     raised for a malformed or hostile folder; anything AgentOS could hold but
     not use is a status in ``status``.
@@ -238,14 +268,14 @@ def inspect_skill(root):
     if not isinstance(allowed_tools, str):
         raise SkillError('allowed-tools는 글자여야 해요.', 'invalid_package')
     allowed_tools = allowed_tools.split()
-    licence, recognised = _licence(frontmatter, files)
+    licence, recognised, licence_source = _licence(frontmatter, files, _repository_licences(repository_licences))
     if not recognised:
         status.add('licence_unknown')
     if len(body.encode()) > MAX_BODY_BYTES or body.count('\n') > MAX_BODY_LINES:
         raise SkillError(f'SKILL.md 본문이 너무 길어요({MAX_BODY_LINES}줄, {MAX_BODY_BYTES // 1024}KB 이하).', 'invalid_package')
     digests = {rel: hashlib.sha256(data).hexdigest() for rel, data in files.items()}
     return {'name': name, 'description': ' '.join(description.split()), 'compatibility': compatibility.strip(),
-            'licence': licence, 'allowed_tools': allowed_tools[:32],
+            'licence': licence, 'licence_source': licence_source, 'allowed_tools': allowed_tools[:32],
             'status': sorted(status) or ['supported_as_is'], 'notes': notes,
             'files': digests, 'digest': tree_digest(digests)}
 
@@ -326,14 +356,25 @@ def source_address(source):
 
 
 def fetch_github(source, dest, transport=http_get):
-    """Extract exactly ``source['path']`` of the pinned commit into ``dest``; nothing else is written."""
+    """Extract exactly ``source['path']`` of the pinned commit into ``dest``.
+
+    The only other thing written is that commit's repository-root licence files
+    (#1219), into the sibling ``REPOSITORY_LICENCES`` folder, bounded.
+    """
     data = transport(f"https://codeload.github.com/{source['repo']}/tar.gz/{source['revision']}")
     prefix = source['path'].strip('/') + '/'
-    written = count = 0
+    written = count = licences = 0
     try:
         with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as archive:
             for member in archive:
                 top, _sep, rest = member.name.partition('/')
+                if ('/' not in rest and rest.upper().startswith(LICENCE_NAMES) and member.isfile()
+                        and member.size <= MAX_LICENCE_BYTES and licences < MAX_REPOSITORY_LICENCES):
+                    licences += 1
+                    folder = Path(dest).parent / REPOSITORY_LICENCES
+                    folder.mkdir(parents=True, exist_ok=True)
+                    (folder / rest).write_bytes(archive.extractfile(member).read())
+                    continue
                 if not rest.startswith(prefix) and rest != prefix.rstrip('/'):
                     continue
                 rel = rest[len(prefix):]
@@ -504,7 +545,7 @@ class SkillLibrary:
         staging = self.root / '.staging' / uuid.uuid4().hex
         try:
             folder = fetch_github(source, staging / name, self.transport)
-            record = inspect_skill(folder)
+            record = inspect_skill(folder, staging / REPOSITORY_LICENCES)
             blocked = sorted(set(record['status']) - ENABLE_STATUSES)
             if blocked:
                 reasons = {'scripts_or_hooks_required': '스크립트나 훅을 실행해야 하는 스킬이에요',
@@ -527,7 +568,8 @@ class SkillLibrary:
                     raise SkillError(f"이미 '{package_id}'라는 다른 패키지가 있어 추가하지 않았어요.", 'identity_collision')
                 # An update keeps the owner's on/off choice for this package (review P3).
                 enabled = previous.get('enabled') is True
-            skill = {key: record[key] for key in ('name', 'description', 'digest', 'licence', 'compatibility', 'status', 'files')}
+            skill = {key: record[key] for key in ('name', 'description', 'digest', 'licence', 'licence_source', 'compatibility',
+                                                  'status', 'files')}
             if record['allowed_tools']:
                 skill['allowed_tools'] = record['allowed_tools']  # foreign metadata, never a grant
             try:

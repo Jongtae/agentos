@@ -1120,13 +1120,19 @@ class Worker:
         self.AppHelper.callLater(POLL_SECONDS, poll)
 
     def settle(self, ident, finish):
-        """Wait until no navigation is loading for a short quiet period, then ``finish``."""
+        """Wait until no navigation is loading or being decided for a short quiet period, then ``finish``.
+
+        #899 review P1: a pending policy decision (a form submission being
+        checked) counts as not quiet, as it does for a click (``click_settled``),
+        so a typing step never answers ``posted: False`` while its submit is
+        still being decided.
+        """
         quiet_since = [None]
 
         def poll():
             if ident not in self.pending:
                 return
-            if self.view.isLoading():
+            if self.view.isLoading() or self.deciding > 0:
                 quiet_since[0] = None
             elif quiet_since[0] is None:
                 quiet_since[0] = time.monotonic()
@@ -1249,9 +1255,10 @@ class Worker:
             if blocked_before is not None and self.blocked > blocked_before:
                 return self.fail(ident, 'blocked_destination')
             dialogs = (step or {}).get('dialogs') or []
-            # #899: whether the page started a non-GET form submission during this step.
+            # #899: whether the page started a non-GET form submission during this step; a decision
+            # still pending when the step answers counts as one (review P1: unknown is not "none").
             self.reply(ident, **({'navigated': True} if navigated else {}), **({'dialogs': dialogs} if dialogs else {}),
-                       posted=self.posted_submits > self.step_posted)
+                       posted=self.posted_submits > self.step_posted or self.deciding > 0)
         step, self.dialog_step = getattr(self, 'dialog_step', None), None
         self.end_step(answer)
 

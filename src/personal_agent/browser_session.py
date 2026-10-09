@@ -1702,7 +1702,8 @@ class WebKitWorkerDriver:
         record = record if isinstance(record, dict) else {}
         form = {key: record.get(key) for key in ('dom', 'method', 'action', 'page', 'state')}
         message = self._request('release_submit', timeout, form=form)
-        return {'navigated': bool(message.get('navigated'))}
+        # #899 review P2: reported like a click; a released submit spent an approval, so it stays an effect anyway.
+        return {'navigated': bool(message.get('navigated')), **step_posted(message)}
 
     # -- the owner's login window ---------------------------------------------------
     def show(self, url, timeout):

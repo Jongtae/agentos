@@ -704,6 +704,45 @@ class WorkerGuardLogicTests(unittest.TestCase):
                 worker.finish_input(5, 0)
                 self.assertEqual(replies, [{'posted': expected}])
 
+    def test_a_decision_still_pending_when_a_step_answers_counts_as_posted(self):
+        """#899 review P1: unknown is not "nothing posted"."""
+        bw, worker = self.worker()
+        worker.posted_submits, worker.step_posted, worker.blocked, worker.deciding = 3, 3, 0, 1
+        worker.pending[5] = True
+        replies = []
+        worker.reply = lambda ident, ok=True, **fields: replies.append(fields)
+        worker.run = lambda body, arguments, done, world=None: done({'cancelled': None}, None)
+        worker.finish_input(5, 0)
+        self.assertEqual(replies, [{'posted': True}])
+
+    def test_typing_settles_only_once_no_decision_is_pending(self):
+        """#899 review P1: ``settle`` waits for a pending policy decision as a click does."""
+        bw, worker = self.worker()
+        worker.pending[7] = True
+        calls = []
+
+        class View:
+            def isLoading(self):
+                return False
+        worker.view = View()
+        worker.AppHelper = type('Helper', (), {'callLater': staticmethod(lambda delay, fn: calls.append(fn))})
+        finished = []
+        worker.deciding = 1
+        worker.settle(7, lambda: finished.append(True))
+        clock = [0.0]
+        import unittest.mock as um
+        with um.patch.object(bw.time, 'monotonic', lambda: clock[0]):
+            for _ in range(5):
+                clock[0] += 1.0
+                calls.pop(0)()
+            self.assertEqual(finished, [], 'still deciding: not settled')
+            worker.deciding = 0
+            for _ in range(3):
+                clock[0] += 1.0
+                if calls:
+                    calls.pop(0)()
+        self.assertEqual(finished, [True])
+
     def test_a_page_set_press_handler_property_is_signalled_to_the_client_world(self):
         """#1181: the page-world wrapper marks ``el.onclick = f`` (invisible from the client world)."""
         import re

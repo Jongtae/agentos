@@ -578,6 +578,7 @@ class Orchestration:
         self.owner_situation = False
         self.notice = ''
         self.orchestrated = False
+        self.early_used = False
         #: The evaluation of the last attempt when no further attempt followed
         #: (the caller keeps a CLI Work judged short from being stored as succeeded).
         self.terminal = None
@@ -641,15 +642,8 @@ class Orchestration:
                         f'answer excerpt (model-stated)={one_line(answer, ANSWER_EXCERPT_CHARS)}')
         return '\n'.join(rows)[-ATTEMPTS_CHARS:]
 
-    def _ask(self, candidates):
-        """``(data, failure)`` for one plan call over ``candidates``."""
-        engine = getattr(self.judgments, 'engine', None)
-        method = getattr(engine, 'structured', None)
-        if method is None or not candidates:
-            return None, FALLBACK_UNAVAILABLE
-        # The Work's deadline is checked before the call, never after spending it.
-        if not self.budget_allows():
-            return None, FALLBACK_BUDGET
+    def _plan_context(self, candidates):
+        """The ``DecisionContext`` one plan call over ``candidates`` reads."""
         request = self._redact(self.request, private=False)
         workers = render_catalogue(candidates)
         tools_text = render_tool_descriptions(candidates, getattr(self.catalogue, 'descriptions', {}))
@@ -667,9 +661,37 @@ class Orchestration:
                  'tool_descriptions': tools_text,
                  'budget': self._budget_text(),
                  'previous_attempts': self._redact(self._attempts_text())}
-        context = DecisionContext(PURPOSE, facts, work_id=self.work_id,
-                                  max_chars=MAX_CONTEXT_CHARS + len(request) + len(workers) + len(tools_text)
-                                  + len(profile) + len(current))
+        return DecisionContext(PURPOSE, facts, work_id=self.work_id,
+                               max_chars=MAX_CONTEXT_CHARS + len(request) + len(workers) + len(tools_text)
+                               + len(profile) + len(current))
+
+    def plan_digest(self, candidates):
+        """#1261: what a plan call over ``candidates`` would be asked, except the budget's
+        remaining seconds (the only fact that moves while routing runs)."""
+        facts = dict(self._plan_context(candidates).facts)
+        facts.pop('budget', None)
+        return digest({'facts': facts, 'question': QUESTION, 'schema': plan_schema(candidates)})
+
+    def early_plan(self):
+        """#1261: the first plan call, asked ahead of routing: ``{'digest', 'data', 'failure'}``.
+
+        Records nothing; ``first(early=...)`` uses the answer only when the
+        inputs it would ask over are the same.
+        """
+        candidates = self.catalogue.available()
+        data, failure = self._ask(candidates)
+        return {'digest': self.plan_digest(candidates), 'data': data, 'failure': failure}
+
+    def _ask(self, candidates):
+        """``(data, failure)`` for one plan call over ``candidates``."""
+        engine = getattr(self.judgments, 'engine', None)
+        method = getattr(engine, 'structured', None)
+        if method is None or not candidates:
+            return None, FALLBACK_UNAVAILABLE
+        # The Work's deadline is checked before the call, never after spending it.
+        if not self.budget_allows():
+            return None, FALLBACK_BUDGET
+        context = self._plan_context(candidates)
         try:
             decision = method(context, QUESTION, plan_schema(candidates), plan_shape)
         except Exception:
@@ -772,6 +794,8 @@ class Orchestration:
 
     def _planned(self, attempt):
         self.record(PLANNED, {'attempt': attempt.number, 'worker': attempt.worker, 'model': attempt.model or None,
+                              # #1261: whether this plan was asked while routing ran (first attempt only).
+                              **({'early': True} if attempt.number == 1 and getattr(self, 'early_used', False) else {}),
                               'account_change': getattr(attempt, 'account_change', False),
                               'owner_situation': getattr(attempt, 'owner_situation', False),
                               'lifted_from': getattr(attempt, 'lifted_from', None),
@@ -798,10 +822,27 @@ class Orchestration:
             return False
 
     # -- the loop -------------------------------------------------------------
-    def first(self):
-        """The first attempt: the validated plan, or the default Main AI with the raw request."""
+    def first(self, early=None):
+        """The first attempt: the validated plan, or the default Main AI with the raw request.
+
+        ``early`` (#1261) is a Future of ``early_plan()`` started while routing ran.  Its
+        answer (a plan or a failure) stands in for the plan call only when the budget still
+        allows a call here, the early call was not itself stopped by the budget, and the
+        inputs it was asked over equal the ones this call would read.
+        """
         candidates = self.catalogue.available()
-        data, failure = self._ask(candidates)
+        self.early_used = False
+        ahead = None
+        if early is not None:
+            try:
+                ahead = early.result()
+            except Exception:
+                ahead = None
+        if (isinstance(ahead, dict) and ahead.get('failure') != FALLBACK_BUDGET and self.budget_allows()
+                and ahead.get('digest') == self.plan_digest(candidates)):
+            data, failure, self.early_used = ahead.get('data'), ahead.get('failure') or '', True
+        else:
+            data, failure = self._ask(candidates)
         attempt, invalid = (self.validate(data, candidates, 1) if data is not None else (None, ''))
         if attempt is not None:
             self.orchestrated = True

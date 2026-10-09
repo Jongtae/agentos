@@ -104,6 +104,72 @@ class Engine:
         return {'state': 'signed-in'}
 
 
+class EarlyPlan(unittest.TestCase):
+    """#1261: the plan call asked while routing runs stands in only for the same inputs."""
+
+    def catalogue(self):
+        return OrchestrationUnit.catalogue(self)
+
+    def orchestration(self, asked, request='요청', budget=None):
+        def structured(context, question, schema):
+            asked.append(context.facts['owner_request'])
+            return decided(plan('b', 'g'))
+        engine = FixtureDecisionEngine(structured=structured)
+        events = []
+        orchestration = Orchestration(ConversationJudgments(engine), self.catalogue(), request=request, budget=budget,
+                                      record=lambda status, detail: events.append((status, detail)))
+        return orchestration, events
+
+    @staticmethod
+    def future(value):
+        import concurrent.futures
+        future = concurrent.futures.Future()
+        future.set_result(value)
+        return future
+
+    def test_the_same_inputs_use_the_early_answer_without_a_second_call(self):
+        asked = []
+        early = self.orchestration(asked, budget=WorkBudget())[0].early_plan()
+        orchestration, events = self.orchestration(asked, budget=WorkBudget())
+        attempt = orchestration.first(early=self.future(early))
+        self.assertEqual((attempt.worker, asked), ('b', ['요청']), 'one plan call, asked early')
+        self.assertEqual(events[0][0], 'planned')
+        self.assertTrue(events[0][1]['early'])
+
+    def test_changed_inputs_ask_again(self):
+        asked = []
+        early = self.orchestration(asked, request='처음 메시지')[0].early_plan()
+        orchestration, events = self.orchestration(asked, request='다시 쓴 메시지')
+        orchestration.first(early=self.future(early))
+        self.assertEqual(asked, ['처음 메시지', '다시 쓴 메시지'])
+        self.assertNotIn('early', events[0][1])
+
+    def test_a_failed_early_answer_stands_but_a_budget_stop_or_an_error_does_not(self):
+        asked = []
+        orchestration, events = self.orchestration(asked)
+        digest = orchestration.plan_digest(self.catalogue().available())
+        attempt = orchestration.first(early=self.future({'digest': digest, 'data': None, 'failure': 'plan_malformed'}))
+        self.assertEqual((attempt.fallback, asked), ('plan_malformed', []), 'the same call already answered')
+        for early in (self.future({'digest': digest, 'data': None, 'failure': 'budget_short'}),
+                      self.future(None)):
+            asked.clear()
+            self.orchestration(asked)[0].first(early=early)
+            self.assertEqual(asked, ['요청'])
+        import concurrent.futures
+        broken = concurrent.futures.Future()
+        broken.set_exception(RuntimeError('early thread failed'))
+        asked.clear()
+        self.orchestration(asked)[0].first(early=broken)
+        self.assertEqual(asked, ['요청'])
+
+    def test_the_budget_is_checked_where_the_plan_was_asked_before(self):
+        asked = []
+        early = self.orchestration(asked)[0].early_plan()
+        asked.clear()
+        spent, _events = self.orchestration(asked, budget=WorkBudget(seconds=30))
+        self.assertEqual(spent.first(early=self.future(early)).fallback, 'budget_short')
+
+
 class Harness(unittest.TestCase):
     """Two configured workers: Codex (the default Main AI) and a verified OpenAI API route."""
 
@@ -176,6 +242,14 @@ class Harness(unittest.TestCase):
 
 
 class RoutingAndBriefs(Harness):
+    def test_an_ordinary_new_request_is_planned_while_routing_runs(self):
+        """#1261: the routed Work reads the plan asked alongside routing; nothing is asked twice."""
+        self.script([plan('codex', 'Look it up.')], goals=[True])
+        job, row = self.run_work('이 두 가지 비교해줘')
+        self.assertEqual(row['status'], 'succeeded')
+        self.assertEqual(len(self.asked_plans), 1)
+        self.assertTrue(self.events(job, 'planned')[0][1]['early'])
+
     def test_different_requests_go_to_different_workers_and_models_with_their_own_briefs(self):
         self.script([plan('codex', 'Find and compare the two options the owner named; cite each source.',
                           model='gpt-5.6-luna'),

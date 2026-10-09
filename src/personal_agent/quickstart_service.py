@@ -4450,6 +4450,19 @@ class AgentService:
                              sections={**sections,'history':len(earlier)},budget=budget,record=event,state=state,
                              work_id=job['id'],qualifying=self.decision_routes.qualifying)
 
+    def early_work_plan(self, job, prompt):
+        """#1261: the Work's first plan call, asked while routing runs, over the inputs the
+        ordinary path builds for a new request (``Orchestration.early_plan``); None when the
+        Work would not be orchestrated.  An in-memory budget: the Work's own starts later."""
+        stored=(self.preparation_history(job) if prep.preparation_of(job.get('request_key'))
+                else self.store.history()[-16:])
+        document_jobs=set(self.store.config('file_workspace_document_jobs',[]))
+        sections={'profile':self.owner_profile_snapshot(),'current_context':self.current_context_text(job),
+                  'prepared':self.prepared_text(job)}
+        orchestration=self.work_orchestration(job,prompt,list(stored),sections,
+                                              WorkBudget(stop=lambda:self.work_stopped(job['id'])),document_jobs=document_jobs)
+        return orchestration.early_plan() if orchestration else None
+
     def cli_shortfall(self, job_id, since, request, evaluation):
         """``(outcome, report)`` of an attempt the one outcome judgment found short or could not judge (#710 review, #820).
 
@@ -8849,6 +8862,9 @@ class AgentService:
             return self._run_one()
         finally:
             self.current_work_id=None
+            # #1261: an early plan the Work never read does not outlive it (#969).
+            early,self._early_plan=getattr(self,'_early_plan',None),None
+            self.settle_early_judgment(early)
 
     def _run_one(self):
         # One conversation worker: ordering is shared across all connected channels.
@@ -8936,6 +8952,12 @@ class AgentService:
                               self.start_early_judgment(job['id'],self.classify_intent,owner_prompt,
                                                         calendar_pending=False if continued else None,
                                                         owner_id=connector_owner))
+                # #1261: the plan call reads the message, the stored conversation, the
+                # always-given sections and the worker catalogue, none of which routing
+                # writes for a new request; it starts now too, and ``first`` uses it only
+                # when the inputs it would ask over are still the same.
+                self._early_plan=(None if resumed or continued or settings_answer else
+                                  self.start_early_judgment(job['id'],self.early_work_plan,job,owner_prompt))
                 continuity=None if resumed or continued or settings_answer else self.continuity_relation(owner_prompt,connector_owner,current_work_id=job['id'])
                 if continuity:
                     relation,previous=continuity['relation'],continuity['previous']
@@ -9368,7 +9390,9 @@ class AgentService:
                     # #826: material spliced into this turn (documents, Drive, the context inbox,
                     # notes) no longer pins the worker; the plan may choose any available worker.
                     orchestration=self.work_orchestration(job,prompt,base_rows,section_values,work_budget,document_jobs=document_jobs)
-                    attempt=orchestration.first() if orchestration else None
+                    early_plan,self._early_plan=getattr(self,'_early_plan',None),None
+                    attempt=orchestration.first(early=early_plan) if orchestration else None
+                    if not orchestration:self.settle_early_judgment(early_plan)
                     while True:
                         config,key,subscription,attempt_test=self.attempt_route(orchestration,attempt,base_config,base_key,route_snapshot)
                         brief=attempt.brief(adjusted=attempt.number>1) if attempt is not None else None

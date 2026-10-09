@@ -23,11 +23,15 @@
 <!-- readme-parity:v1 -->
 <!-- readme-section:hero -->
 
-## Same PA. Different AI.
+## Can we have our own J.A.R.V.I.S. without owning its brain?
 
-If Jarvis belonged to another company, would Tony have to give up Jarvis (what it knows about him, the work they have not finished, the authority he delegated) just to use a better AI?
+**The brain can be borrowed. The assistant should remain yours.**
 
-Personal AgentOS is built on the answer *no*. It is an open-source environment you install and control. One personal agent (PA) keeps your context, open work and permissions there, while the AI doing the work can change.
+Tony Stark had J.A.R.V.I.S.: an assistant that understood his context, stayed available and acted through his computers and systems. But Tony also owned the technology behind it. Most of us won't own the most capable AI brains we use. They come from providers whose models, prices, policies and availability can change.
+
+So the question isn't just *can we build our own Jarvis?* It's **can we keep a personal assistant that is truly ours while borrowing its intelligence?** If a better model appears, should we have to give up what our assistant knows, the work we've left unfinished or the authority we've delegated?
+
+Personal AgentOS explores an answer: *no*. It is an open-source environment you install and control. One personal agent (PA) keeps your context, open work and permissions there, while the AI doing the work can change.
 
 <p align="center">
   <img src="docs/assets/readme/demo/demo-v2.en.gif" width="360" alt="Demo: Korean Telegram conversations with a PA. It plans the route and a restaurant for a dinner meeting, adds one small item to a shopping cart and stops before payment, and says which discount step it could not check. Personal details are blurred.">
@@ -41,6 +45,18 @@ Personal AgentOS is built on the answer *no*. It is an open-source environment y
 - **Your boundaries.** Access begins with the folders, accounts and tools you connect. Supported payment flows require per-action approval; [current browser limitations](https://github.com/Jongtae/agentos/issues/758) are documented. [Secrets](SECURITY.md) are excluded from model prompts, logs and Evidence.
 - **Told, not hidden.** When your AI saves something to memory it says so and offers an exact undo. Each task records which of your information it used and where it went.
 - **Where you already talk.** Chat on Telegram from your phone, or in the browser on macOS or Linux. Windows works through [WSL2 with current limitations](QUICKSTART.md#windows-wsl2).
+
+## Five pillars of Personal AgentOS
+
+These are not features of one particular AI model. They are the criteria by which we judge the assistant we are building.
+
+- **Presence:** An assistant that stays with me where I already communicate, instead of making me open a separate app each time I need something done.
+- **Portable Memory:** My memories and context are not locked into a single AI service.
+- **Model Independence:** I can replace the AI model without losing the continuity of my assistant and our relationship.
+- **Execution:** It doesn't only answer questions; it can act in real services and on computers.
+- **Owner Control:** I retain control over my data, permissions and the outcomes of execution.
+
+These are design goals, not a claim that every scenario already works. The [product status](docs/product-status.en.md), real demo above and [known browser limitations](https://github.com/Jongtae/agentos/issues/758) show what has been observed and what still needs work.
 
 <!-- readme-section:try-today -->
 

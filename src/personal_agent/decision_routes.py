@@ -729,6 +729,11 @@ class DecisionRoutes:
                 self._put_jobs(rows)
         return changed
 
+    def qualifying(self):
+        """Whether the current Main AI's Judgment AI check is queued or running (#1227).  Read-only."""
+        row = self.qualification()
+        return bool(row and row.get('state') in JOB_OPEN)
+
     def qualification(self, main_id=None):
         """The current Main AI's follow job, content free, or None.  Read-only."""
         main_id = self.service.main_ai.current() if main_id is None else main_id

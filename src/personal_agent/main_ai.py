@@ -429,7 +429,8 @@ class MainAiRoutes:
                  f"작업 내용 전송처: {row['destination']}"]
         judgment = result.get('judgment') or {}
         if judgment.get('state') == 'queued':
-            lines.append('판단 AI는 새 기본 AI 확인을 마치면 함께 바뀝니다.')
+            lines.append(f"판단 AI도 {row['name']}에 맞춰 확인하는 중이에요(1분쯤 걸려요). "
+                         f"그동안 보내신 요청은 {row['name']}이(가) 바로 처리합니다.")
         elif judgment.get('message'):
             lines.append(judgment['message'])
         return '\n'.join(lines)

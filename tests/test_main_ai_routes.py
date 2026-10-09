@@ -466,6 +466,9 @@ class MainAiCommandTests(unittest.TestCase):
         self.assertIn('Codex', job['response'])
         self.assertIn('OpenAI (Codex 구독 계정)', job['response'])
         self.assertEqual((engine.calls, self.transport.calls), (0, []))
+        # #1227: the Judgment AI check is shown as a state, with what happens meanwhile.
+        self.assertIn('판단 AI도 Codex에 맞춰 확인하는 중이에요', job['response'])
+        self.assertIn('Codex이(가) 바로 처리합니다', job['response'])
         self.assertEqual(self.service.main_ai.status()['routes'][0]['check']['state'], 'ok')
 
     def test_bare_ai_lists_current_and_targets_and_changes_nothing(self):

@@ -6848,13 +6848,26 @@ class AgentService:
     AI_CONNECTIONS_KEY='ai_connections'
     #: Connector tools whose operation starts with one of these only read; every
     #: other connector operation (create, update, share, trash, send ...) is refused.
-    AI_CONNECTION_READ_VERBS=('search','list','get','read','download','fetch','find','query')
+    AI_CONNECTION_READ_VERBS=frozenset({'search','list','get','read','download','fetch','find','query'})
+    #: Review on #1197: any of these words anywhere in an operation name refuses it,
+    #: so ``get_and_delete`` or ``read_and_archive`` is never taken for a read.
+    AI_CONNECTION_WRITE_WORDS=frozenset({'create','update','delete','remove','trash','move','share','send','insert',
+                                         'replace','archive','copy','upload','batch','write','edit','modify','set',
+                                         'add','rename','post','put','patch','publish','reply','forward','draft',
+                                         'label','mark','permission','permissions','empty','restore','untrash'})
     AI_CONNECTIONS_FAMILY_TEXT='이 Mac의 AI 로그인과 그 연결은 소유자의 것이라 가족 비서에서는 쓸 수 없어요.'
 
     def ai_connections_status(self):
         """Whether Works may use the owner's AI-side connections (claude.ai connectors), and whether this instance may."""
         from . import family_setup
-        family=family_setup.setup_recorded(self.store)
+        from .service_control import DEFAULT_INSTANCES_RELATIVE
+        # Review on #1197: any named instance (a family member's, #893/#897) is refused,
+        # not only one set up through the tunnel page.
+        try:
+            named=(Path.home()/DEFAULT_INSTANCES_RELATIVE).resolve() in Path(self.store.root).resolve().parents
+        except OSError:
+            named=True
+        family=family_setup.setup_recorded(self.store) or named
         enabled=bool((self.store.config(self.AI_CONNECTIONS_KEY,{}) or {}).get('enabled')) and not family
         return {'enabled':enabled,'available':not family,
                 'note':(self.AI_CONNECTIONS_FAMILY_TEXT if family else
@@ -6884,7 +6897,9 @@ class AgentService:
             return {'behavior':'deny','message':'AgentOS가 이 도구 사용을 허용하지 않았습니다. 실행하지 않았습니다.'}
         server,_sep,operation=tool[len('mcp__claude_ai_'):].rpartition('__')
         service_name=server.replace('_',' ').strip()[:60] or '연결된 서비스'
-        allow=bool(operation) and operation.lower().startswith(self.AI_CONNECTION_READ_VERBS)
+        words=[word for word in re.split(r'[^a-z0-9]+',operation.lower()) if word]
+        allow=bool(words) and words[0] in self.AI_CONNECTION_READ_VERBS and not any(
+            word in self.AI_CONNECTION_WRITE_WORDS for word in words)
         detail={'scope':'ai-connection','host_action':'connector_permission',
                 'evidence':{'service':service_name,'operation':operation[:60],'decision':'allow' if allow else 'deny'}}
         with self.store.db() as db:

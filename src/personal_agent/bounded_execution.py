@@ -1439,7 +1439,10 @@ class BoundedExecutionAdapter:
                 # #1197: the owner's AI connectors load beside the bridge; none is
                 # pre-approved, so every connector call asks AgentOS
                 # (CONNECTOR_PERMISSION_TOOL) and only reads are allowed.
-                argv += ['--setting-sources', 'project', '--permission-prompt-tool', CONNECTOR_PERMISSION_TOOL]
+                # Review on #1197: the regular login would keep each turn's transcript under
+                # ~/.claude/projects, out of reach of AgentOS retention and forget.
+                argv += ['--setting-sources', 'project', '--no-session-persistence',
+                         '--permission-prompt-tool', CONNECTOR_PERMISSION_TOOL]
             if instructions:
                 # #569: AgentOS instructions travel as a system-prompt addition,
                 # the conversation and request as the prompt.

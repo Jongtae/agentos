@@ -325,7 +325,8 @@ def serve(data, job_id, provenance=(), native_search=False, profile=BOUNDED_PROF
         elif method == 'tools/list':
             from .agent_runtime import CONNECTOR_PERMISSION_DEFINITION
             from .bounded_execution import mcp_tool
-            extra = [mcp_tool(CONNECTOR_PERMISSION_DEFINITION, 'read_only', profile)] if ai_connections and relay else []
+            # Never read-only: a client must not auto-approve a direct call to it (review on #1197).
+            extra = [mcp_tool(CONNECTOR_PERMISSION_DEFINITION, 'bounded_write', profile)] if ai_connections and relay else []
             result = {'tools': tools.definitions() + extra}
         elif method == 'tools/call' and ai_connections and relay and (params or {}).get('name') == CONNECTOR_PERMISSION:
             # #1197: the service decides (reads allowed, everything else refused for now)

@@ -37,6 +37,7 @@ class LaunchTests(unittest.TestCase):
         env = adapter.environment('claude-code', '/runtime/claude', root, ai_connections=True)
         self.assertEqual(env['HOME'], str(Path.home()))
         self.assertNotIn('CLAUDE_CODE_OAUTH_TOKEN', env)
+        self.assertIn('--no-session-persistence', argv, 'no turn transcript is left under ~/.claude')
 
     def test_off_keeps_todays_isolation(self):
         adapter, root = self.adapter()
@@ -77,6 +78,28 @@ class ServiceDecisionTests(unittest.TestCase):
         self.assertNotIn('secret-id', json.dumps(rows))
         self.assertEqual(json.loads(rows[0]['detail'])['evidence'], {'service': 'Google Drive', 'operation': 'list_recent_files',
                                                                       'decision': 'allow'})
+
+    def test_a_write_word_anywhere_refuses_the_operation(self):
+        self.service.set_ai_connections({'enabled': True})
+        for operation in ('get_and_delete', 'read_and_archive', 'find_and_replace', 'readonly_share', 'getaway',
+                          'list-and-send', 'downloadAndTrash', 'update_file', 'create_file'):
+            decision = self.service.connector_permission(self.job, {'tool_name': 'mcp__claude_ai_X__' + operation, 'input': {}})
+            self.assertEqual(decision['behavior'], 'deny', operation)
+        for operation in ('search_files', 'read_file_content', 'get_file_metadata', 'list_recent_files', 'download_file_content'):
+            decision = self.service.connector_permission(self.job, {'tool_name': 'mcp__claude_ai_X__' + operation, 'input': {}})
+            self.assertEqual(decision['behavior'], 'allow', operation)
+
+    def test_a_named_instance_is_treated_as_a_family_instance(self):
+        from unittest import mock
+        from personal_agent import quickstart_service
+        from personal_agent.service_control import DEFAULT_INSTANCES_RELATIVE
+        fake_home = Path(self.store.root).parent / 'home'
+        instance_root = fake_home / DEFAULT_INSTANCES_RELATIVE / 'family-9'
+        instance_root.mkdir(parents=True)
+        store = QuickStore(instance_root)
+        service = quickstart_service.AgentService(store)
+        with mock.patch.object(quickstart_service.Path, 'home', lambda: fake_home):
+            self.assertFalse(service.ai_connections_status()['available'])
 
     def test_only_connector_tools_are_ever_decided(self):
         self.service.set_ai_connections({'enabled': True})

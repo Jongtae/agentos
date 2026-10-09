@@ -46,6 +46,8 @@ Personal AgentOS explores an answer: *no*. It is an open-source environment you 
 - **Told, not hidden.** When your AI saves something to memory it says so and offers an exact undo. Each task records which of your information it used and where it went.
 - **Where you already talk.** Chat on Telegram from your phone, or in the browser on macOS or Linux. Windows works through [WSL2 with current limitations](QUICKSTART.md#windows-wsl2).
 
+<!-- readme-section:principles -->
+
 ## Five pillars of Personal AgentOS
 
 These are not features of one particular AI model. They are the criteria by which we judge the assistant we are building.

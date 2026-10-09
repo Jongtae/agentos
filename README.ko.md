@@ -46,6 +46,8 @@ Personal AgentOS는 *그럴 필요가 없다*는 가능성을 탐구합니다. �
 - **숨기지 않고 알립니다.** AI가 무언가를 기억하면 그 사실을 알리고 정확히 되돌릴 수 있게 합니다. 맡긴 일마다 내 정보 중 무엇을 썼고 어디로 보냈는지 기록합니다.
 - **늘 쓰는 곳에서 대화.** 휴대폰의 Telegram이나 macOS·Linux의 브라우저에서 대화합니다. Windows는 [현재 제약이 있는 WSL2](QUICKSTART.md#windows-wsl2)에서 동작합니다.
 
+<!-- readme-section:principles -->
+
 ## Personal AgentOS의 다섯 가지 핵심 원칙
 
 그런데 네가 이야기한 핵심은 특정 AI의 기능이 아니잖아.

@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from cryptography.fernet import Fernet
 
+from personal_agent.calendar import CALENDAR_SPEC
 from personal_agent import connector_revocation as revocation
 from personal_agent.calendar import CALENDAR_CONNECTOR_ID, CALENDAR_READ_SCOPE, CALENDAR_WRITE_CONNECTOR_ID, CALENDAR_WRITE_SCOPE
 from personal_agent.calendar_oauth import CalendarOAuth, EncryptedCalendarSecretStore
@@ -61,7 +62,7 @@ class RevocationTestCase(HandoffTestCase):
         state = parse_qs(urlsplit(offer['authorization_url']).query)['state'][0]
         return self.calendar.complete_oauth(OWNER, {'state': state, 'code': 'c'}, lambda request: {
             'access_token': access, 'refresh_token': refresh, 'expires_in': 3600,
-            'scope': CALENDAR_WRITE_SCOPE if write else CALENDAR_READ_SCOPE})
+            'scope': CALENDAR_WRITE_SCOPE if write else " ".join(CALENDAR_SPEC.required_scopes)})
 
     def connect_drive(self):
         offer = self.drive.begin(42)

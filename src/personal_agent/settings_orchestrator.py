@@ -302,7 +302,7 @@ class SettingsOrchestrator:
         kinds = self.service.phone_input_kinds()
         return {"send": self._row("send", "", "", self._options(tuple(kinds), kinds),
                                   note="확인하면 연결된 Telegram으로 약 10분 동안 열리는 일회용 링크를 보냅니다. "
-                                       "자체 Google client를 넣거나 Google 서비스를 휴대폰에서 연결할 때 씁니다.")}
+                                       "휴대폰에서 자체 Google client를 넣을 때 씁니다. Google 서비스 연결은 Mac에서 합니다.")}
 
     def _skills(self):
         """#961: the switch, and the installed skills for ``add`` / ``remove`` (names and pinned sources only)."""

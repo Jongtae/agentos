@@ -112,7 +112,7 @@ class TruthIntegrityTestCase(unittest.TestCase):
         registry = ConnectorRegistry(self.store, (CALENDAR_SPEC, CALENDAR_WRITE_SPEC))
         for spec, scope in ((CALENDAR_SPEC, CALENDAR_READ_SCOPE), (CALENDAR_WRITE_SPEC, CALENDAR_WRITE_SCOPE)):
             registry.transition(CONNECTOR_OWNER, spec.connector_id, ConnectorState.CONNECTED,
-                                granted_scopes=(scope,))
+                                granted_scopes=spec.required_scopes)
         return CalendarConnector(self.store, Provider(), registry=registry)
 
     def claim_completion(self):

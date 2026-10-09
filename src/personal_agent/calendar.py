@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .connector_contract import ConnectorContractError, ConnectorRegistry, ConnectorSpec, ConnectorState
 from .google_calendar import (
+    CALENDAR_LIST_SCOPE,
     CALENDAR_READ_SCOPE,
     CALENDAR_WRITE_SCOPE,
     GoogleCalendar,
@@ -36,7 +37,10 @@ CALENDAR_STATE_KEY = "calendar_create"
 _MAX_DRAFTS = 100
 CALENDAR_SPEC = ConnectorSpec(
     CALENDAR_CONNECTOR_ID,
-    (CALENDAR_READ_SCOPE,),
+    # #1225: the list scope finds the calendars the owner shows in Google
+    # Calendar.  A connection granted before it reads REAUTH_REQUIRED (the
+    # registry's definition-change rule) until the owner reconnects once.
+    (CALENDAR_READ_SCOPE, CALENDAR_LIST_SCOPE),
 )
 CALENDAR_WRITE_SPEC = ConnectorSpec(
     CALENDAR_WRITE_CONNECTOR_ID,
@@ -297,12 +301,20 @@ class CalendarConnector:
                         raise CalendarError("scope-denied", recovery="reconnect")
             else:
                 self._authorize(owner, CALENDAR_READ_SCOPE)
+        skipped = list(getattr(self.provider, "skipped_calendars", ()) or ())
+        incomplete = ("캘린더 목록을 읽지 못해 기본 캘린더만 확인했습니다." if getattr(self.provider, "calendar_list_failed", False)
+                      else f"다음 캘린더는 읽지 못했습니다: {', '.join(skipped)}." if skipped else "")
         return {
             "events": events,
             "window": {"start": start, "end": end, "timezone": timezone},
+            # Review on #1228: a partial read says so, so a free slot is never claimed from it.
+            **({"incomplete": incomplete} if incomplete else {}),
             "evidence": {
                 "operation": "calendar-query",
-                "calendar": "primary",
+                "calendar": "shown",
+                "calendars": list(getattr(self.provider, "read_calendars", ()) or ()),
+                "skipped_calendars": skipped,
+                "complete": not incomplete,
                 "window_hash": _canonical({"start": start, "end": end, "timezone": timezone}),
                 "result_count": len(events),
                 "effect": "none",

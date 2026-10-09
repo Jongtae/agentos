@@ -1,7 +1,9 @@
 """Minimal Google Calendar v3 adapter with an injected HTTP transport.
 
-The adapter owns provider syntax, not owner authority or credentials.  It is
-intentionally fixed to the primary calendar and suppresses attendee updates.
+The adapter owns provider syntax, not owner authority or credentials.  Writes
+are fixed to the primary calendar and suppress attendee updates.  Reads cover
+every calendar the owner shows (``selected``) in Google Calendar, plus the
+primary (#1225); only primary events carry an ``etag`` for later changes.
 The injected transport has the signature ``(method, url, body, headers)``.
 """
 
@@ -14,7 +16,28 @@ from urllib.parse import quote, urlencode
 
 CALENDAR_API = "https://www.googleapis.com/calendar/v3"
 CALENDAR_READ_SCOPE = "https://www.googleapis.com/auth/calendar.events.readonly"
+#: #1225: listing which calendars the owner has (and shows) needs this scope;
+#: the events scope alone cannot discover non-primary calendar ids.
+CALENDAR_LIST_SCOPE = "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
+#: Most calendars read per query (the owner's shown ones, primary first).
+MAX_CALENDARS = 25
 CALENDAR_WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events"
+
+
+def _instant(value: str, timezone: str):
+    """A sort key that orders RFC3339 starts by instant, all-day dates at local midnight (review on #1228)."""
+    from datetime import datetime, timezone as utc
+    from zoneinfo import ZoneInfo
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.max.replace(tzinfo=utc.utc)
+    if moment.tzinfo is None:
+        try:
+            moment = moment.replace(tzinfo=ZoneInfo(timezone))
+        except Exception:
+            moment = moment.replace(tzinfo=utc.utc)
+    return moment
 
 
 @dataclass(frozen=True)
@@ -104,9 +127,69 @@ class GoogleCalendar:
             # attempt, conservatively preserve an unknown-effect receipt.
             raise GoogleCalendarError("provider-error", "unknown" if mutation else "none") from None
 
+    def calendars(self) -> list[dict]:
+        """The calendars to read: primary first, then each one shown in Google Calendar.
+
+        ``[{"id", "name", "primary"}]``.  When the list cannot be read (an
+        older grant, a provider error), only the primary calendar is returned,
+        so a read never gets worse than before #1225.
+        """
+        query = urlencode({"minAccessRole": "freeBusyReader", "maxResults": 250,
+                           "fields": "items(id,summary,summaryOverride,primary,selected)"})
+        self.calendar_list_failed = False
+        try:
+            response = self._call("GET", f"{CALENDAR_API}/users/me/calendarList?{query}", None, {}, mutation=False)
+        except GoogleCalendarError as error:
+            if error.reason == "scope-expired":
+                raise
+            response = None
+        if not isinstance(response, dict) or not isinstance(response.get("items"), list):
+            # Review on #1228: a primary-only read after a failed discovery is
+            # an incomplete read, and says so.
+            self.calendar_list_failed = True
+        primary = {"id": "primary", "name": "", "primary": True}
+        shown = []
+        items = response.get("items") if isinstance(response, dict) else None
+        for item in items if isinstance(items, list) else ():
+            if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"] or len(item["id"]) > 1024:
+                continue
+            name = item.get("summaryOverride") or item.get("summary") or ""
+            name = name[:200] if isinstance(name, str) else ""
+            if item.get("primary") is True:
+                primary["name"] = name
+            elif item.get("selected") is True:
+                shown.append({"id": item["id"], "name": name, "primary": False})
+        return [primary, *shown][:MAX_CALENDARS]
+
     def query(self, time_min: str, time_max: str, timezone: str, max_results: int) -> list[dict]:
+        """Events in the window from every calendar ``calendars`` names, earliest first.
+
+        A non-primary calendar that fails is skipped (named in ``skipped``
+        by the caller's evidence); the primary calendar failing fails the read.
+        """
         if isinstance(max_results, bool) or not isinstance(max_results, int) or not 1 <= max_results <= 100:
             raise GoogleCalendarError("malformed-response")
+        events, self.skipped_calendars, self.read_calendars = [], [], []
+        for calendar in self.calendars():
+            try:
+                rows = self._query_calendar(calendar["id"], time_min, time_max, timezone, max_results)
+            except GoogleCalendarError as error:
+                if calendar["primary"] or error.reason == "scope-expired":
+                    raise
+                self.skipped_calendars.append(calendar["name"] or calendar["id"])
+                continue
+            self.read_calendars.append(calendar["name"] or ("primary" if calendar["primary"] else calendar["id"]))
+            for row in rows:
+                row["calendar"] = calendar["name"]
+                row["calendar_primary"] = calendar["primary"]
+                if not calendar["primary"]:
+                    # Writes go to the primary calendar only: no version to draft a change against.
+                    row["etag"] = ""
+                events.append(row)
+        events.sort(key=lambda row: _instant(row["start"], timezone))
+        return events[:max_results]
+
+    def _query_calendar(self, calendar_id: str, time_min: str, time_max: str, timezone: str, max_results: int) -> list[dict]:
         query = urlencode(
             {
                 "timeMin": time_min,
@@ -120,7 +203,7 @@ class GoogleCalendar:
         )
         response = self._call(
             "GET",
-            f"{CALENDAR_API}/calendars/primary/events?{query}",
+            f"{CALENDAR_API}/calendars/{quote(calendar_id, safe='')}/events?{query}",
             None,
             {},
             mutation=False,

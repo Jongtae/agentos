@@ -11,15 +11,13 @@ import threading
 import unittest
 from http.server import ThreadingHTTPServer
 from urllib.error import HTTPError
-from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from cryptography.fernet import Fernet
 
 from personal_agent import phone_input
-from personal_agent.google_drive_read import DRIVE_CONNECTOR_ID, DRIVE_READONLY_SCOPE
+from personal_agent.google_drive_read import DRIVE_CONNECTOR_ID
 from personal_agent.quickstart import configured_service, make_handler
-from personal_agent.quickstart_service import DRIVE_CALLBACK_PATH
 from personal_agent.quickstart_store import QuickStore
 
 CHAT = 4242
@@ -40,27 +38,6 @@ class FakeTunnel:
         process = Process()
         self.processes.append(process)
         return process
-
-
-class CallbackParamsTest(unittest.TestCase):
-    REDIRECT = 'http://127.0.0.1:8787' + DRIVE_CALLBACK_PATH
-
-    def test_the_loopback_callback_of_the_service_is_accepted(self):
-        pasted = f'http://127.0.0.1:8787{DRIVE_CALLBACK_PATH}?state=drive.abc.def&code=4/xyz&scope=x'
-        self.assertEqual(phone_input.callback_params(pasted, self.REDIRECT), {'state': 'drive.abc.def', 'code': '4/xyz'})
-        denied = f'http://localhost:8787{DRIVE_CALLBACK_PATH}?state=s&error=access_denied'
-        self.assertEqual(phone_input.callback_params(denied, self.REDIRECT), {'state': 's', 'error': 'access_denied'})
-
-    def test_anything_else_is_refused(self):
-        for pasted in (f'https://127.0.0.1:8787{DRIVE_CALLBACK_PATH}?state=s&code=c',
-                       f'http://evil.test{DRIVE_CALLBACK_PATH}?state=s&code=c',
-                       'http://127.0.0.1:8787/oauth/gmail/callback?state=s&code=c',
-                       f'http://127.0.0.1:8787{DRIVE_CALLBACK_PATH}?code=c',
-                       f'http://127.0.0.1:8787{DRIVE_CALLBACK_PATH}?state=s',
-                       f'http://127.0.0.1:8787{DRIVE_CALLBACK_PATH}?state=a&state=b&code=c',
-                       f'http://u:p@127.0.0.1:8787{DRIVE_CALLBACK_PATH}?state=s&code=c',
-                       'x' * 9000, 7, ''):
-            self.assertIsNone(phone_input.callback_params(pasted, self.REDIRECT), pasted)
 
 
 class SessionTest(unittest.TestCase):
@@ -138,6 +115,10 @@ class PhoneInputServiceCase(unittest.TestCase):
 
 
 class StartTest(PhoneInputServiceCase):
+    def test_google_consent_is_not_offered_on_the_phone_even_with_an_own_client(self):
+        self.service.save_google_client({'client_json': CLIENT})
+        self.assertEqual(list(self.service.phone_input_kinds()), [phone_input.GOOGLE_CLIENT])
+
     def test_the_link_needs_a_paired_telegram_chat(self):
         with self.assertRaises(ValueError):
             self.service.start_phone_input(phone_input.GOOGLE_CLIENT)
@@ -168,7 +149,7 @@ class StartTest(PhoneInputServiceCase):
     def test_an_unoffered_kind_is_refused(self):
         self.pair()
         with self.assertRaises(ValueError):
-            self.service.start_phone_input(DRIVE_CONNECTOR_ID)  # no own client yet: no Drive connector
+            self.service.start_phone_input(DRIVE_CONNECTOR_ID)  # Google consent is desktop-only (#1225)
         with self.assertRaises(ValueError):
             self.service.start_phone_input('anything')
 
@@ -212,31 +193,6 @@ class FlowTest(PhoneInputServiceCase):
         self.assertFalse(session.alive())
         self.assertTrue(self.tunnel.processes[0].terminated)
 
-    def test_a_google_service_is_connected_from_the_phone_by_pasting_the_callback(self):
-        self.pair()
-        self.service.save_google_client({'client_json': CLIENT})
-        self.service.drive_read_token_exchange = lambda payload: {
-            'access_token': 'a', 'expires_in': 3600, 'refresh_token': 'r', 'scope': DRIVE_READONLY_SCOPE}
-        self.service.start_phone_input(DRIVE_CONNECTOR_ID)
-        session = self.service.phone_input_session()
-        cookie = self.open_page(session)
-        status, body, _ = self.request(f'{phone_input.START_PATH}?code={session.code}', 'POST', {}, cookie=cookie)
-        self.assertEqual(status, 200)
-        consent = urlsplit(json.loads(body)['authorization_url'])
-        self.assertEqual(consent.hostname, 'accounts.google.com')
-        query = parse_qs(consent.query)
-        redirect, state = query['redirect_uri'][0], query['state'][0]
-        # A wrong address is refused and connects nothing.
-        status, _body, _ = self.request(f'{phone_input.FINISH_PATH}?code={session.code}', 'POST',
-                                        {'url': 'http://127.0.0.1:1/oauth/gmail/callback?state=x&code=y'}, cookie=cookie)
-        self.assertEqual(status, 400)
-        pasted = redirect + '?' + urlencode({'state': state, 'code': 'phone-code', 'scope': DRIVE_READONLY_SCOPE})
-        status, body, _ = self.request(f'{phone_input.FINISH_PATH}?code={session.code}', 'POST', {'url': pasted}, cookie=cookie)
-        self.assertEqual((status, json.loads(body)), (200, {'ok': True}))
-        self.assertEqual(self.service.drive_oauth.status(self.service.connector_callback_owner(DRIVE_CONNECTOR_ID))['state'],
-                         'connected')
-        self.assertTrue(any('Google Drive 연결이 완료되었습니다' in row for row in self.assistant_rows()))
-
     def test_the_conversation_can_request_the_link_through_a_confirmed_draft(self):
         self.pair()
         read = self.service.conversation_settings_request({'operation': 'read', 'category': 'phone_link'})
@@ -256,12 +212,6 @@ if __name__ == '__main__':
 
 
 class ReviewFollowupTest(PhoneInputServiceCase):
-    def test_the_consent_address_is_a_link_to_tap_not_a_popup(self):
-        session = phone_input.PhoneInput(DRIVE_CONNECTOR_ID, 'Google Drive 연결')
-        page = phone_input.page(session, 'n')
-        self.assertIn('id="consent"', page)
-        self.assertNotIn('window.open', page)
-
     def test_an_unexpected_failure_still_answers_the_phone(self):
         self.pair()
         self.service.start_phone_input(phone_input.GOOGLE_CLIENT)

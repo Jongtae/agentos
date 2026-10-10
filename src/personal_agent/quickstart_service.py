@@ -849,7 +849,7 @@ class AgentService:
             text=f'{text}\n{sessions}' if text else sessions
         # #1216: which API slots the AI may call by name (names and hosts only, never a value).
         from .api_requests import context_line
-        slots=context_line(self.store)
+        slots=context_line(self.store,self.connection_slots(job) if job else None)
         if slots:
             text=f'{text}\n{slots}' if text else slots
         return text
@@ -7141,6 +7141,15 @@ class AgentService:
             return None
         return self.calendar_factory(owner_id)
 
+    def connection_slots(self, job):
+        """CONN-API: this Work owner's AgentOS-held connections as read-only ``api_request`` slots."""
+        from .connection_slots import build
+        try:
+            return build(self, self.connector_owner_id(job))
+        except Exception as exc:
+            LOG.warning('connection slots unavailable (%s)',type(exc).__name__)
+            return {}
+
     def drive_for(self, job):
         """The Drive reader bound to this Work's owner, or None (#1172)."""
         if self.drive_reader_factory is None:
@@ -9466,6 +9475,8 @@ class AgentService:
                                                       **({'memory_request':owner_memory_request,'calendar':self.calendar_for(job),
                                                           'calendar_owner':self.connector_owner_id(job),
                                                           'drive':self.drive_for(job),
+                                                          # CONN-API: AgentOS-held connections through api_request.
+                                                          'connections':lambda job=job:self.connection_slots(job),
                                                           'preparations':self.preparation_scheduler(job,prompt),
                                                           'location_request':self.location_requester(job),
                                                           # #814: settings read / confirm-before-apply drafts.
@@ -9755,7 +9766,7 @@ class AgentService:
                                                       # #605 F4: read on every use, so a page approval revoked
                                                       # during this Work refuses a read that starts afterwards.
                                                       public_page_scope=lambda:self.public_page_boundary(config)['urls'],
-                                                      memory_request=owner_memory_request,inherited_provenance=set(turn_provenance)|shown_sources|work_private,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job),drive=self.drive_for(job),current_packages=self.runtime_packages,
+                                                      memory_request=owner_memory_request,inherited_provenance=set(turn_provenance)|shown_sources|work_private,calendar=self.calendar_for(job),calendar_owner=self.connector_owner_id(job),drive=self.drive_for(job),connections=lambda job=job:self.connection_slots(job),current_packages=self.runtime_packages,
                                                       budget=work_budget,
                                                       # #656: the owner-logged-in browser profile and its per-step approvals.
                                                       browser=self.browser_profile.driver_factory(job['id']),browser_approvals=self.browser_approvals_for(job),

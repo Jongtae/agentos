@@ -215,3 +215,7 @@ The canonical process is [development governance](docs/development-governance.en
 ## Pull request closeout
 
 Use the structured PR closeout required by [Development Governance](docs/development-governance.en.md) and the handoff receipt in [Incremental Delivery](docs/incremental-delivery.en.md). Every PR states what changed, why, validation evidence, known limitations, data/security impact and the Issue it closes. Package/runtime/distribution changes additionally state authority/egress, provenance/revision and rollback impact. Squash merge only after required validation and any genuinely triggered independent review.
+
+## Cross-role product semantics and Presence (2026-10-10)
+
+Read [Professional Roles and Communication Contract](docs/professional-roles-and-communication-contract.en.md) for any ontology, Decision Model, Presence, skill, professional-domain or UX change. “Secretary” in historical program names and C16 describes the persistent owner-facing assistant relationship, **not an exclusive product domain**. Domain/role/mandate interpretation must precede tool selection; role and mandate never confer Grant, regulated status or external-effect authority. Presence must allow meaningful, evidence-grounded communication and owner correction of in-flight Work, not just fixed tool-progress strings. Do not introduce role-specific branches, new authority, extra state stores or live-capability claims by editing documentation. Root delivery-plan selection and existing paused program gates remain unchanged.

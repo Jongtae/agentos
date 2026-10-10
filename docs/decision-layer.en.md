@@ -336,12 +336,14 @@ Authority: the plan chooses among destinations the owner already configured and 
 
 ### Comparison protocol and promotion gate
 
-1. Establish the baseline using the current qualified API/subscription route and versioned `decision_qualification.py` cases; record exact route/model, suite version, and whether evidence is fixture, synthetic or owner-live.
-2. Evaluate specialized providers only for their supported `judge/choose/score` operations on the same frozen cases, including Korean correction, reference resolution, ambiguous abstention, withdrawal, topic change and recovery. Include Jev live only after explicit owner choice.
+**Current coverage:** `decision-qualification/3` exercises `judge` and `choose`, not `score` or `structured`. The capability table describes interface mappings, not measured qualification. Until versioned score cases with a declared scale/rubric, expected mapping and failure behavior are frozen and run against the compared routes, `score` remains unqualified; passing the current suite cannot qualify or promote a provider for scoring.
+
+1. Establish the baseline using the current qualified API/subscription route and versioned `decision_qualification.py` cases; record exact route/model, suite version, case IDs, covered operations, and whether evidence is fixture, synthetic or owner-live.
+2. Evaluate specialized providers only for the supported `judge` and `choose` operations exercised by the same frozen cases, including Korean correction, reference resolution, ambiguous abstention, withdrawal, topic change and recovery. Include Jev live only after explicit owner choice. Do not report `score` compatibility from these results.
 3. Qualify `structured` orchestration separately: plan schema, worker/model eligibility, goal-reached evidence, bounded re-delegation and explicit unavailable behavior. A specialized API with no arbitrary schema support does not pass planner qualification.
 4. Compare end-to-end task latency (p50/p95), number of decision calls, Korean semantic accuracy, false decisions/abstention, malformed/timeouts, cost when usage is observed, confidence calibration, credential/egress/maintenance overhead and provider removal cost. Do not equate uncalibrated confidence scores or compare marketing latency claims as measured results.
 5. Preserve AgentOS authority: judgment never creates Grants, approvals, effect truth or completion truth. No silent cross-route fallback, no task-specific semantic rule tree, and no unverified provider promotion.
-6. Promote a provider only with comparable real account/model evidence, role compatibility, a practical advantage and explicit owner approval.
+6. Promote a provider only for the operations and roles actually covered by comparable real account/model evidence, with role compatibility, a practical advantage and explicit owner approval. A `judge`/`choose` pass is not full DecisionEngine qualification.
 
 **#609 resume condition:** The owner chooses a Jev trial, a controlled comparison identifies a compelling Jev-specific advantage, or sustained volume makes its economics material. Keep its existing live acceptance criteria: official model listing, routed typed judgment, Korean case, requested-versus-observed model, no secret leakage and no cross-route fallback. GitHub has native open/closed states; `status:deferred` distinguishes postponed *open* work from active work, and is not the same as closed/not_planned.
 

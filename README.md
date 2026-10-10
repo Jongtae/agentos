@@ -79,7 +79,7 @@ brew install jongtae/agentos/agentos
 agentos start
 ```
 
-1. AgentOS opens at [http://127.0.0.1:8787](http://127.0.0.1:8787/) in your browser. The screens are in English by default; switch to Korean, Simplified Chinese or Japanese at the bottom left. Some fixed Telegram status lines are still Korean.
+1. AgentOS opens at [http://127.0.0.1:8787](http://127.0.0.1:8787/) in your browser. The screens are in English by default; switch to Korean, Simplified Chinese or Japanese at the bottom left. Some fixed Telegram status/progress lines and certain connection validation errors are still Korean.
 2. Connect your AI: a tool-capable Ollama model, an OpenAI, OpenAI-compatible or Anthropic API key, or a Codex or Claude Code subscription.
 3. Optional: in **Settings → External connections**, add your own Telegram bot token and open the pairing link.
 4. Ask: **“I need to finish a proposal this week. Help me break it into the next few steps.”**

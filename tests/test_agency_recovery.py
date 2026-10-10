@@ -492,5 +492,29 @@ class GoalSummaryTests(unittest.TestCase):
         self.assertFalse(state_change_short(event_trail([miss, retried])[0]), 'the same action succeeded later')
         self.assertFalse(state_change_short(event_trail([('weather', 'failed', '{}'), read])[0]), 'reads never count')
 
+    def test_a_read_declared_browser_step_agentos_did_not_run_recovers_like_a_failed_read(self):
+        """#1276 (live 2026-10-10): two typing steps refused before running, then the result reached another way."""
+        from personal_agent.agent_runtime import event_trail, outcome_from_events, state_change_short
+
+        def step(action, code, declared, effect='none'):
+            return (action, 'failed', json.dumps({'host_action': action, 'code': code, 'effect': effect,
+                                                  'declared_effect': declared, 'error': 'x'}))
+        opened = ('browser_open', 'succeeded', json.dumps({'host_action': 'browser_open', 'evidence': {'state': 'page'}}))
+        missed = step('browser_type', 'target_unavailable', 'read')
+        self.assertEqual(event_trail([missed])[0], [('browser_type', 'missed')])
+        self.assertEqual(outcome_from_events([missed, missed, opened])[0], 'succeeded')
+        self.assertFalse(state_change_short(event_trail([missed, opened])[0]))
+        self.assertEqual(outcome_from_events([step('browser_click', 'target_not_found', 'navigate'), opened])[0], 'succeeded')
+        for kept in (step('browser_type', 'target_unavailable', 'mutate'),
+                     step('browser_click', 'target_unavailable', 'payment'),
+                     step('browser_click', 'approval_required', 'read'),
+                     step('browser_click', 'target_unavailable', 'read', effect='unknown'),
+                     step('browser_click', 'target_unavailable', None)):
+            with self.subTest(kept=kept[2]):
+                self.assertEqual(event_trail([kept])[0][0][1], 'failed')
+                self.assertEqual(outcome_from_events([kept, opened])[0], 'partial')
+                self.assertTrue(state_change_short(event_trail([kept, opened])[0]))
+        self.assertEqual(outcome_from_events([missed])[0], 'failed', 'nothing succeeded after it')
+
 if __name__ == '__main__':
     unittest.main()

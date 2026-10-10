@@ -104,3 +104,7 @@ machine restart plus a Telegram result with no terminal open remain
 install or mutate a launchd service.
 
 Do not describe a release as verified on the strength of steps 1–4.
+
+## Release decision policy
+
+Before following the publication steps above, consult [Release Governance and Version Policy](governance/release-policy.en.md). Merging code does not trigger a release. AI may prepare the release brief but may not authorize publication. The existing fail-closed release helper, archive-checksum ordering, Homebrew tap update, install smoke and manifest evidence rules remain unchanged.

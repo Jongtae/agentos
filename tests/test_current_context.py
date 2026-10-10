@@ -473,6 +473,10 @@ class Snapshot(ContextCase):
         self.propose(job, predicate='work_mode', value='remote', place_ref='profile:place.home')
         body = self.context.snapshot(job)
         self.assertEqual(body['as_of'], '2026-09-21T03:02:00Z')
+        # #1308: to the minute, so a plan asked seconds earlier read the same snapshot.
+        self.now += 37
+        self.assertEqual(self.context.snapshot(job)['as_of'], '2026-09-21T03:02:00Z')
+        self.now -= 37
         self.assertEqual(body['timezone'], SEOUL)
         self.assertTrue(body['local_time'].startswith('2026-09-21T12:02+09:00 Mon'))
         self.assertEqual(body['request_sent_at'], '2026-09-21T03:02:00Z')

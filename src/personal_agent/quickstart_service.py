@@ -322,6 +322,9 @@ CONTINUATION_EFFECT_NOTE_HEAD=('AgentOS note (not from the owner): the request b
                                'earlier Work called tools that may have changed state:')
 #: #774 review: an answered location request whose continuation could not be queued.
 LOCATION_NOT_CONTINUED_TEXT='대기 중인 작업이 많아 보내 주신 위치로 요청을 이어서 처리하지 못했습니다. 잠시 후 위치를 다시 보내 주세요.'
+#: #1308: how a CLI's own web search with unreported results reads in the goal judgment's observations.
+NATIVE_SEARCH_UNSEEN=("the worker's own web search ran; AgentOS cannot see its results (its sources were not reported, "
+                      "which is not the same as finding nothing);")
 #: #1305: the one line that carries the location keyboard's removal once the owner's location arrived.
 LOCATION_RECEIVED_TEXT='위치 받았어요. 이어서 할게요.'
 #: Owner direction 2026-09-30: approval prompts answer with the same pair as the
@@ -4599,8 +4602,15 @@ class AgentService:
             if row['tool'] not in called:called.append(row['tool'])
             if row['status']=='succeeded':
                 evidence=data.get('evidence') if isinstance(data.get('evidence'),dict) else {}
-                observed.append(f"- {row['tool']}: {json.dumps(evidence,ensure_ascii=False)[:600]}")
-                if data.get('scope')=='cli-native' and not evidence.get('sources'):sourceless+=1
+                if data.get('scope')=='cli-native' and not evidence.get('sources'):
+                    sourceless+=1
+                    # #1308: the CLI reports its own search's queries, never its results; "0 results"
+                    # would read as "nothing found", so the line says what AgentOS could not see.
+                    queries=evidence.get('search_queries') or [((data.get('arguments') or {}).get('query') or '')]
+                    observed.append(f"- {row['tool']}: {NATIVE_SEARCH_UNSEEN} queries: "
+                                    f"{json.dumps([query for query in queries if query],ensure_ascii=False)[:500]}")
+                else:
+                    observed.append(f"- {row['tool']}: {json.dumps(evidence,ensure_ascii=False)[:600]}")
             elif row['status']=='failed':
                 failures.append(f"{row['tool']}: {data.get('error') or data.get('code') or 'failed'}")
                 if data.get('code')==TOOL_INCOMPLETE:incomplete.append(row['tool'])

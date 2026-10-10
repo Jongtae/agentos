@@ -88,6 +88,15 @@ h3 { font-size: 1.0625rem; font-weight: 600; letter-spacing: 0; }
 .swap div:first-child li { color: var(--muted); }
 .stays { background: linear-gradient(to bottom, color-mix(in srgb, var(--sage) 28%, transparent), transparent 85%); }
 .proof { margin: 2rem 0 0; max-width: var(--measure); font-size: .9375rem; color: var(--muted); }
+.evidence { margin-top: 1.25rem; }
+.evidence summary { display: inline-flex; align-items: center; gap: .5rem; min-height: 2.75rem; padding: .55rem 1.1rem; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); cursor: pointer; font-size: .9375rem; list-style: none; }
+.evidence summary::-webkit-details-marker { display: none; }
+.evidence summary::after { content: "+"; color: var(--muted); }
+.evidence[open] summary::after { content: "−"; }
+.evidence figure { margin: 1.25rem 0 0; }
+.evidence img { display: block; width: 100%; height: auto; border-radius: 1.25rem; }
+.evidence figcaption ol { margin: 1.25rem 0 0; padding-left: 1.25rem; display: grid; gap: .5rem; max-width: 46rem; font-size: .9375rem; }
+.evidence figcaption p { margin: .75rem 0 0; font-size: .8125rem; color: var(--muted); }
 .limits { list-style: none; margin: 2.25rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
 .limits li { padding-top: 1rem; border-top: 1px solid var(--line); font-size: .9375rem; color: var(--muted); }
 .limits b { display: block; color: var(--ink); margin-bottom: .2rem; }

@@ -97,7 +97,21 @@
       </ul>
     </div>
   </div>
-  <p class="proof">From a real session: the owner switched from Claude Code to Codex in the middle of a shopping task, and Codex finished the next request in the same cart without being told anything again. <a href="https://github.com/Jongtae/agentos/blob/main/docs/assets/readme/ai-switch/ai-switch-conversation.png">See the screenshots</a></p>
+  <p class="proof">From a real session: the owner switched from Claude Code to Codex in the middle of a shopping task, and Codex finished the next request in the same cart without being told anything again.</p>
+  <details class="evidence">
+    <summary>See the real conversation</summary>
+    <figure>
+      <img src="assets/still-ai-switch.jpg" width="1983" height="1023" loading="lazy" alt="Three cropped Telegram screenshots in Korean from one real session. 1 and 2 with Claude Code: asked whether the Spam was added or removed yesterday, the assistant recalls the earlier cart conversation, asks to sign in, then reports one Spam Classic 200 g in the cart. 3 after switching to Codex: asked to take the Spam out, it reports it removed and 22 items left. Names are blurred.">
+      <figcaption>
+        <ol>
+          <li><b>Claude Code.</b> “Did I end up adding the Spam yesterday, or taking it out?” It picks up the earlier shopping conversation and asks to sign in.</li>
+          <li><b>Claude Code.</b> After signing in, it checks the cart: one 200 g can of Spam Classic is still there.</li>
+          <li><b>Codex.</b> After <code>/ai codex</code>: “Take the Spam out.” Removed, rechecked, 22 items left. Nothing had to be explained again.</li>
+        </ol>
+        <p>Telegram, 8 October 2026, Korean interface. The sign-in link is cropped and names are blurred.</p>
+      </figcaption>
+    </figure>
+  </details>
   <ul class="limits" aria-label="Boundaries">
     <li><b>Only what you connect.</b> Folders, accounts and tools you choose; a connected folder is read-only unless you say otherwise.</li>
     <li><b>Payment waits for you.</b> Adding to a cart and paying are different actions, and every payment needs your approval.</li>

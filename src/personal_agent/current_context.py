@@ -662,7 +662,8 @@ class CurrentContext:
         settings = self.observations.settings()
         observations = [e for e in self.observations.usable(now=now, job_id=job_id) if e['kind'] != 'text_edit']
         enabled = settings['enabled']
-        snap = {'version': SNAPSHOT_VERSION, 'as_of': iso(now), 'timezone': settings['timezone'] or 'unknown'}
+        # #1308: to the minute, like local_time; seconds made the #1261 early plan's inputs differ every time.
+        snap = {'version': SNAPSHOT_VERSION, 'as_of': iso(now - now % 60), 'timezone': settings['timezone'] or 'unknown'}
         tz = zone(settings['timezone'])
         if tz is None:
             # #804: the turn always knows the time; the host's zone, said to be the host's.

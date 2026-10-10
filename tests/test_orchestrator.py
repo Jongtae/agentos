@@ -637,8 +637,18 @@ class ToolsAndReplan(Harness):
         self.run_work('얼마나 걸려?')
         # #820: the reply is its own fact, labelled model-stated by the proposition; the observations are tools' results.
         self.assertEqual(seen[0]['reply'], 'about forty minutes by car')
-        self.assertIn('"sources": []', seen[0]['observations'])
+        # #1308 (live 2026-10-10): unreported results are said as unseen, never as "0 results" / nothing found.
+        self.assertIn("AgentOS cannot see its results", seen[0]['observations'])
+        self.assertIn('queries: ["q"]', seen[0]['observations'])
+        self.assertNotIn('result_count', seen[0]['observations'])
         self.assertIn('own web searches that reported no source URL: 1', self.asked_plans[1][0].facts['previous_attempts'])
+
+    def test_the_goal_judgment_reads_an_unseen_search_as_looked_up_not_as_proof_of_an_action(self):
+        """#1308: a hidden native search shows a lookup ran; action claims still need observations."""
+        from personal_agent.conversation_handoff import GOAL_REACHED_PROPOSITION
+        self.assertIn('own web search whose results AgentOS could not see', GOAL_REACHED_PROPOSITION)
+        self.assertIn('looked up, not invented, though unverified', GOAL_REACHED_PROPOSITION)
+        self.assertIn('still needs the observations', GOAL_REACHED_PROPOSITION)
 
 
     def test_goal_reached_reads_the_attempts_latest_page_text_and_the_next_attempt_does_not(self):

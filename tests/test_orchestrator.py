@@ -2324,6 +2324,25 @@ class CliHostActions(unittest.TestCase):
         self.assertEqual(AgentService.cli_host_actions(dict(NOT_LAUNCHED)), ())
 
 
+class CatalogueNamesOwnConnections(Harness):
+    """#1285: the decision model is told which worker reads the owner's services through its own connection."""
+
+    def test_claude_code_lists_reviewed_services_only_while_ai_connections_are_on(self):
+        from personal_agent.orchestrator import render_catalogue, worker_catalogue
+
+        def claude(catalogue):
+            return next(worker for worker in catalogue.workers if worker['id'] == 'claude-code')
+        self.assertNotIn('own_connections', claude(worker_catalogue(self.service)))
+        self.service.store.put('ai_connections', {'enabled': True, 'changed_at': 1})
+        listed = claude(worker_catalogue(self.service))
+        self.assertEqual(listed['own_connections'], sorted(self.service.reviewed_connector_reads()))
+        self.assertIn('Google Drive', listed['own_connections'])
+        line = next(row for row in render_catalogue(worker_catalogue(self.service).workers).splitlines() if 'worker=claude-code' in row)
+        self.assertIn('owner services it reads through its own connection: Google Drive', line)
+        codex = next(row for row in render_catalogue(worker_catalogue(self.service).workers).splitlines() if 'worker=codex' in row)
+        self.assertIn('owner services it reads through its own connection: none', codex)
+
+
 class CatalogueMatchesOffered(Harness):
     """#812 (Work 33d1d85f): a plan never briefs a context-gated tool the turn does not offer."""
 

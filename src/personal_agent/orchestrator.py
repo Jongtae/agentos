@@ -376,6 +376,11 @@ def worker_catalogue(service):
                     reason = reason or ('' if models else 'default_model_refused')
             if not browser:
                 tools = [tool for tool in tools if tool not in BROWSER_ACTIONS]
+            # #1197: a Claude Code turn runs with the owner's AI connections while they are on; the decision
+            # model is told which owner services that worker reads itself (reviewed read operations only).
+            if (route_id == 'claude-code' and not isolated and callable(getattr(service, 'ai_connections_enabled', None))
+                    and service.ai_connections_enabled()):
+                worker['own_connections'] = sorted(service.reviewed_connector_reads())
             substitute = configured and configured in (refused.get(route_id) or set())
             worker.update(available=not reason, reason=reason, models=models,
                           default_model=(models[0] if models else '') if substitute else configured,
@@ -483,7 +488,9 @@ def render_catalogue(workers):
         lines.append(f'- worker={worker["id"]} ({worker["name"]}, {worker["kind"]}; default Main AI: '
                      f'{"yes" if worker["default"] else "no"}; cost: {worker["cost"]}; latency: {worker["latency"]}; '
                      f'own web search: {"available" if worker["native_search"] else "not available"}; browser tools: '
-                     f'{"available" if worker["browser"] else "not available"}; models: {models}; tools: {tools or "none"})')
+                     f'{"available" if worker["browser"] else "not available"}; '
+                     f'owner services it reads through its own connection: {", ".join(worker.get("own_connections") or ()) or "none"}; '
+                     f'models: {models}; tools: {tools or "none"})')
     return '\n'.join(lines)
 
 

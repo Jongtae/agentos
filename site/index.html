@@ -1,7 +1,159 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AgentOS — local-first personal agent</title><link rel="stylesheet" href="assets/site.css"></head><body>
-<header><strong>AgentOS</strong><nav aria-label="Site"><a href="index.html">Home</a><a href="install.html">Install</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a><a href="https://github.com/Jongtae/agentos">GitHub</a></nav></header><main>
-<h1>Work with your files, through conversation.</h1><p>AgentOS is a local-first personal agent. It keeps owner-controlled state, approvals, evidence, recovery, and a managed workspace while using bounded execution engines.</p><p class="notice">This website is information only. It is not an OAuth callback, login service, token broker, or Google Drive proxy.</p>
-<h2>What it does</h2><p>AgentOS can preserve owner originals, create ordinary-file results, and reuse them in later work. Connected reference folders remain read-only by default; managed-workspace writes remain inside explicit owner scope.</p>
-<h2>Current support</h2><p>Support is determined by the repository roadmap and named evidence. A website visit is never required to use a locally installed AgentOS runtime, and it does not establish a connection to Google or any other provider.</p>
-<section class="language" lang="ko"><h2>한국어</h2><p>AgentOS는 파일·폴더를 자료 기반으로, 대화와 작업을 사용자 경험으로 삼는 로컬 우선 개인 에이전트입니다. 이 사이트는 안내·정책 페이지일 뿐 OAuth 콜백, 로그인 중계, 토큰 보관, Drive 프록시가 아닙니다.</p><p>지원 범위는 저장소 로드맵과 검증 근거로 판단합니다. 사이트 방문은 로컬 AgentOS 사용이나 Google 등 외부 서비스 연결의 조건이 아닙니다.</p></section>
-</main><footer><a href="privacy.html">Privacy</a> · <a href="terms.html">Terms</a> · <a href="https://github.com/Jongtae/agentos/issues">Support via GitHub Issues</a></footer></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Personal AgentOS — the brain can be borrowed, the assistant stays yours</title>
+<meta name="description" content="An open-source personal agent you install on your own machine. Swap the AI underneath; keep its memory, open work, permissions and the record of what ran.">
+<meta property="og:title" content="Personal AgentOS">
+<meta property="og:description" content="The brain can be borrowed. The assistant should remain yours.">
+<meta property="og:image" content="https://jongtae.github.io/agentos/assets/social-preview.png">
+<meta name="color-scheme" content="light dark">
+<link rel="preload" href="assets/fonts/newsreader-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/home.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="masthead">
+  <a class="wordmark" href="./">Personal AgentOS</a>
+  <nav aria-label="Site">
+    <a href="#start">Install</a>
+    <a href="https://github.com/Jongtae/agentos/blob/main/docs/product-status.en.md">Status</a>
+    <a href="https://github.com/Jongtae/agentos">GitHub</a>
+  </nav>
+</header>
+
+<main id="main">
+<section class="hero" aria-labelledby="hero-title">
+  <div class="thesis">
+    <h1 id="hero-title">The brain can be borrowed. The assistant should remain yours.</h1>
+    <p class="lede">Personal AgentOS is an open-source environment you install on your own machine. One personal agent keeps your memory, your unfinished work, the permissions you gave it and a record of what actually ran. The AI doing the work can change.</p>
+    <p class="actions"><a class="button" href="#start">Install on macOS or Linux</a> <a class="quiet" href="https://github.com/Jongtae/agentos">Read the source</a></p>
+  </div>
+
+  <figure class="log" aria-labelledby="log-caption">
+    <ol class="transcript">
+      <li class="note"><time datetime="2026-10-08T22:01">10:01 pm</time><p>Default AI changed to <b>Claude Code</b>. Work goes to Anthropic (Claude Code subscription).</p></li>
+      <li class="me"><time datetime="2026-10-08T22:01" aria-label="10:01 pm"></time><p>Did I end up adding the Spam yesterday, or taking it out?</p></li>
+      <li class="pa"><time datetime="2026-10-08T22:01" aria-label="10:01 pm"></time><p>I tried to check the cart directly, but this browser isn’t signed in to the store, so I can’t see what’s in it. I’ve asked for a sign-in window; once you sign in I’ll pick this up.</p></li>
+      <li class="pa"><time datetime="2026-10-08T22:06">10:06 pm</time><p>I checked the cart: one CJ Spam Classic 200&nbsp;g is in it. You didn’t take it out. Some steps I couldn’t check.</p></li>
+      <li class="seam"><time datetime="2026-10-08T22:07">10:07 pm</time><p><code>/ai codex</code> <span class="change">Claude Code → Codex</span></p><p class="mark">The engine changed here. The memory did not.</p></li>
+      <li class="me"><time datetime="2026-10-08T22:07" aria-label="10:07 pm"></time><p>Take the Spam out.</p></li>
+      <li class="pa"><time datetime="2026-10-08T22:08">10:08 pm</time><p>Removed one Spam Classic 200&nbsp;g from the cart. I checked again: the other 22 items are still there.</p></li>
+    </ol>
+    <figcaption id="log-caption">A real session on Telegram, 8 October 2026, translated from Korean and shortened. <a href="https://github.com/Jongtae/agentos/blob/main/docs/assets/readme/ai-switch/ai-switch-conversation.png">See the original screenshots</a>.</figcaption>
+  </figure>
+</section>
+
+<section class="ledger" aria-labelledby="ledger-title">
+  <h2 id="ledger-title">What can change, and what stays with you</h2>
+  <div class="columns">
+    <div class="changes">
+      <h3>Can change</h3>
+      <ul>
+        <li>The model and its provider</li>
+        <li>The CLI agent or API doing the work</li>
+        <li>Tools and connectors</li>
+      </ul>
+    </div>
+    <div class="stays">
+      <h3>Stays with you</h3>
+      <ul>
+        <li>Memory and context about you</li>
+        <li>Open work and its next step</li>
+        <li>Permissions and approvals</li>
+        <li>The record of what actually ran</li>
+      </ul>
+    </div>
+  </div>
+  <p class="coda">When a better AI appears, you switch the worker, not the agent.</p>
+</section>
+
+<section class="engines" aria-labelledby="engines-title">
+  <h2 id="engines-title">Bring the AI you already pay for</h2>
+  <div class="flow" role="img" aria-label="Diagram: Telegram, the local browser page and the folders you connect lead into AgentOS on your machine, which holds memory, open work, permissions and the record of what ran. AgentOS hands each request to one swappable AI: Codex, Claude Code, an OpenAI or Anthropic API key, an OpenAI-compatible endpoint or a local Ollama model.">
+    <div class="machine">
+      <ul class="inputs">
+        <li>Telegram</li>
+        <li>Local browser page</li>
+        <li>Folders you connect</li>
+      </ul>
+      <div class="core">
+        <p class="core-name">Personal AgentOS</p>
+        <ul><li>memory</li><li>open work</li><li>permissions</li><li>record of what ran</li></ul>
+      </div>
+      <p class="bracket">On your Mac or Linux machine</p>
+    </div>
+    <div class="workers">
+      <p class="workers-name">One AI per request, swappable</p>
+      <ul>
+        <li>Codex subscription</li>
+        <li>Claude Code subscription</li>
+        <li>OpenAI or Anthropic API key</li>
+        <li>OpenAI-compatible endpoint</li>
+        <li>Local Ollama model</li>
+      </ul>
+    </div>
+  </div>
+  <p class="aside">For each request a judgment model picks the worker, writes the brief, checks the result and hands the work back when it falls short. Local-first is not local-only: with a hosted model, the context used for a request goes to that provider.</p>
+</section>
+
+<section class="where" aria-labelledby="where-title">
+  <div class="where-text">
+    <h2 id="where-title">Where you already talk</h2>
+    <p>Message it on Telegram from your phone, or open the local page in your browser on macOS or Linux. Windows works through WSL2, with current limitations.</p>
+    <p>It plans the route to a dinner, adds one small item to a cart and stops before payment, and tells you which step it could not check.</p>
+  </div>
+  <figure class="demo">
+    <img src="assets/demo.gif" width="240" height="438" loading="lazy" alt="Demo: Korean Telegram conversations with the agent. It plans the route and a restaurant for a dinner meeting, adds one small item to a shopping cart and stops before payment, and says which discount step it could not check. Personal details are blurred.">
+    <figcaption>Recorded on Telegram with English subtitles. Waiting time cut, personal details blurred.</figcaption>
+  </figure>
+</section>
+
+<section class="limits" aria-labelledby="limits-title">
+  <h2 id="limits-title">Boundaries it keeps</h2>
+  <ul>
+    <li><b>Only what you connect.</b> Access starts with the folders, accounts and tools you connect. A connected folder is read-only unless you say otherwise.</li>
+    <li><b>Payment needs you, every time.</b> Adding to a cart and paying are different actions. Each payment waits for your approval.</li>
+    <li><b>Secrets stay out.</b> Passwords and tokens never go into a model prompt, a log or the evidence record.</li>
+    <li><b>Told, not hidden.</b> When the AI saves something to memory it says so and offers an exact undo. Each task records which of your information it used and where it went.</li>
+  </ul>
+</section>
+
+<section class="start" id="start" aria-labelledby="start-title">
+  <h2 id="start-title">Start</h2>
+  <p>On macOS or Linux, one command installs and starts AgentOS. No Homebrew, Python or Docker needed.</p>
+  <pre><code>curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh</code></pre>
+  <p class="small">The URL pins the installer itself. <a href="https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh">Read the pinned script</a> before you run it.</p>
+  <p>Or with Homebrew:</p>
+  <pre><code>brew install jongtae/agentos/agentos
+agentos start</code></pre>
+  <ol class="steps">
+    <li>AgentOS opens at <code>127.0.0.1:8787</code> in your browser.</li>
+    <li>Connect your AI: a subscription, an API key or a local model.</li>
+    <li>Optionally pair your own Telegram bot.</li>
+    <li>Ask: “I need to finish a proposal this week. Help me break it into the next few steps.”</li>
+  </ol>
+  <p class="small">Windows: run <code>wsl --install</code>, restart, open Ubuntu and run the first command there. Details in the <a href="https://github.com/Jongtae/agentos/blob/main/docs/QUICKSTART.md">quick start guide</a>.</p>
+</section>
+
+<section class="status" aria-labelledby="status-title">
+  <h2 id="status-title">Where it stands</h2>
+  <p class="stamp" aria-hidden="true">v1.3.0<small>10 Oct 2026</small></p>
+  <p>Both installers install <b>v1.3.0</b> (10 October 2026). The demo and the session above come from real use; they are not release-wide end-to-end validation. <a href="https://github.com/Jongtae/agentos/blob/main/docs/product-status.en.md">Product status</a> separates what ships, what is tested and what is still direction, and <a href="https://github.com/Jongtae/agentos/issues/758">known browser limitations</a> are listed in the open.</p>
+  <p>Tried it? <a href="https://github.com/Jongtae/agentos/issues/new?template=feedback.yml">Tell us what worked and what didn’t.</a></p>
+</section>
+
+<section class="ko" lang="ko" aria-labelledby="ko-title">
+  <h2 id="ko-title">한국어</h2>
+  <p>Personal AgentOS는 내 컴퓨터에 설치하는 오픈소스 개인 에이전트 환경입니다. 기억, 하던 일, 맡긴 권한, 실제로 실행된 기록은 내 쪽에 남고, 일을 하는 AI는 바꿀 수 있습니다. Codex·Claude Code 구독, API 키, 로컬 모델 중 하나를 연결해 Telegram이나 브라우저에서 대화합니다. 결제는 매번 승인이 필요하고, 비밀번호와 토큰은 모델 프롬프트·로그·기록에 들어가지 않습니다.</p>
+  <p><a href="https://github.com/Jongtae/agentos/blob/main/docs/i18n/README.ko.md">한국어 README 읽기</a></p>
+</section>
+</main>
+
+<footer class="colophon">
+  <p>Personal AgentOS is licensed under <a href="https://github.com/Jongtae/agentos/blob/main/LICENSE">AGPL-3.0-only</a>. This site is information only. It has no login and no analytics, and it is not an OAuth callback, token broker or Drive proxy.</p>
+  <nav aria-label="Footer"><a href="https://github.com/Jongtae/agentos">GitHub</a><a href="install.html">Connections</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a></nav>
+</footer>
+</body>
+</html>

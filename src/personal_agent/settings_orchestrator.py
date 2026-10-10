@@ -107,17 +107,24 @@ SETTINGS = {"current_context": ("enabled", "timezone"), "judgment_ai": ("mode", 
             # #1213: a one-time phone link for an input only a page can take (own Google client, Google consent).
             "phone_link": ("send",),
             # #1197: Works may use the owner's AI-side connections (claude.ai connectors), read-only.
-            "ai_connections": ("enabled",)}
+            # #1297: which of the owner's MCP servers load, and the owner's trust record per connection.
+            "ai_connections": ("enabled", "servers", "review", "money", "rung")}
 SETTING_LABELS = {"enabled": "사용", "timezone": "시간대", "mode": "방식", "model": "모델", "route": "경로",
                   "daily_calls": "하루 판단 횟수", "add": "새로 만들기", "share_site": "로그인 공유", "unshare_site": "공유 그만",
-                  "remove": "빼기", "send": "보내기"}
+                  "remove": "빼기", "send": "보내기", "servers": "MCP 서버", "review": "동작 검토", "money": "돈이 오가는 연결",
+                  "rung": "신뢰 단계"}
+#: #1297: the trust-record settings, each a "<connection>|..." value naming one connection.
+TRUST_SETTINGS = frozenset({("ai_connections", "servers"), ("ai_connections", "review"), ("ai_connections", "money"),
+                            ("ai_connections", "rung")})
+TRUST_CLASS_LABELS = {"read": "읽기", "mutate": "변경", "payment": "결제", "refused": "막음"}
+TRUST_RUNG_LABELS = {"report": "보고만", "propose": "제안까지", "approve": "건별 승인 후 실행", "mandate": "위임 범위 안에서 실행"}
 #: #934: the value of a share is "<family assistant>|<site>"; a stop may name the site alone.
 FAMILY_SHARE_SETTINGS = frozenset({("family", "share_site"), ("family", "unshare_site")})
 FAMILY_SHARE_NOTE = "비밀번호는 넘기지 않고 지금 로그인된 세션만 전달해요. 내 세션이 갱신되면 따라가고, 결제는 계정 주인만 할 수 있어요."
 VALUE_LABELS = {"on": "켜짐", "off": "꺼짐", "follow_main": "기본 AI 따라가기", "explicit": "따로 지정"}
 JUDGMENT_MODE_LABELS = {"off": "사용 안 함"}
 UNKNOWN_SETTING_MESSAGE = ("대화로 바꿀 수 있는 설정이 아닙니다. 현재 맥락(enabled, timezone), 판단 AI(mode, model), "
-                           "기본 AI(route, model), 알아 두기(enabled, daily_calls), 가족 비서(add, share_site, unshare_site), 스킬(enabled, add, remove), 휴대폰 링크(send), AI의 연결 서비스(enabled)만 바꿀 수 있습니다. API 키, 토큰, 로그인, 엔드포인트는 설정 화면에서 직접 입력하세요.")
+                           "기본 AI(route, model), 알아 두기(enabled, daily_calls), 가족 비서(add, share_site, unshare_site), 스킬(enabled, add, remove), 휴대폰 링크(send), AI의 연결 서비스(enabled, servers, review, money, rung)만 바꿀 수 있습니다. API 키, 토큰, 로그인, 엔드포인트는 설정 화면에서 직접 입력하세요.")
 CREDENTIAL_VALUE_MESSAGE = ("자격 증명처럼 보이는 값은 대화로 설정하지 않습니다. API 키, 토큰, 로그인은 설정 화면에서 직접 입력하세요. "
                             "아무것도 바꾸지 않았습니다.")
 UNAVAILABLE_MESSAGE = "이 설정의 현재 상태를 확인하지 못해 바꾸지 않았습니다. 설정 화면에서 확인하세요."
@@ -305,8 +312,28 @@ class SettingsOrchestrator:
         if not status["available"]:
             return {"unavailable": status["note"]}
         enabled = "on" if status["enabled"] else "off"
+        # #1297: the owner's servers per AI (names only) and the trust record per connection.
+        from . import owner_mcp, trust_record
+        available = self.service.owner_mcp_available()
+        confirmed = {engine_id: owner_mcp.confirmed(self.store, engine_id) for engine_id in owner_mcp.ENGINES}
+        servers = " · ".join(f"{engine_id}: {', '.join(names) or '없음'}" for engine_id, names in confirmed.items())
+        hands = trust_record.hands(self.store)
+        recorded = " / ".join(trust_record.describe(row) for row in hands.values()) or "기록 없음"
         return {"enabled": self._row("enabled", enabled, VALUE_LABELS[enabled], self._options(("on", "off")),
-                                     note=status["note"])}
+                                     note=status["note"]),
+                "servers": self._row("servers", "", servers, None, format="AI|서버 이름(쉼표로 여럿, 비우면 모두 끔), 예: codex|notes",
+                                     note=("확인한 서버만 작업에서 켜지고, 그 서버의 도구 호출은 매번 AgentOS가 허용하거나 막아요. "
+                                           "켜진 서버는 이 Mac에서 실행돼요."),
+                                     available=available, confirmed=confirmed),
+                "review": self._row("review", "", recorded, None,
+                                    format="연결 이름|동작 이름|read, mutate, payment, refused 중 하나 (예: notes|list_notes|read)",
+                                    note="읽기로 정한 동작만 지금 실행돼요. 정한 내용은 다시 묻지 않고, 언제든 바꿀 수 있어요.",
+                                    hands={name: {"money": row["money"], "rung": row["rung"], "operations": row["operations"]}
+                                           for name, row in hands.items()}),
+                "money": self._row("money", "", recorded, None, format="연결 이름|on 또는 off (예: 증권사|on)",
+                                   note="돈이 오가는 연결은 소유자가 읽기로 정한 동작만 실행하고, 보고만 하는 단계에서 시작해요."),
+                "rung": self._row("rung", "", recorded, None, format="연결 이름|report, propose, approve, mandate 중 하나",
+                                  note="단계를 올리는 건 소유자만 할 수 있어요. 돈이 오가는 연결은 위임 단계로 올릴 수 없어요.")}
 
     def _phone_link(self):
         """#1213: what a one-time phone link can be opened for on this install now (``send``'s options)."""
@@ -478,6 +505,8 @@ class SettingsOrchestrator:
             return name, row
         if (category, setting) in FAMILY_SHARE_SETTINGS:
             return self._share_value(setting, value, row), row
+        if (category, setting) in TRUST_SETTINGS:
+            return self._trust_value(setting, value, row), row
         if (category, setting) in (("skills", "add"), ("skills", "remove")):
             from .skills import SkillError
             try:
@@ -495,6 +524,59 @@ class SettingsOrchestrator:
             raise SettingsError(f"{CATEGORY_LABELS[category]} {SETTING_LABELS[setting]}은(는) 다음 중 하나만 고를 수 있습니다: "
                                 f"{listed}. 아무것도 바꾸지 않았습니다.")
         return value, row
+
+    def _trust_value(self, setting, value, row):
+        """#1297: the canonical "<connection>|..." value of one trust-record setting, or a fail-closed error."""
+        from . import owner_mcp, trust_record
+        parts = [part.strip() for part in value.split("|")]
+        unchanged = " 아무것도 바꾸지 않았습니다."
+        if setting == "servers":
+            if len(parts) != 2 or parts[0] not in owner_mcp.ENGINES:
+                raise SettingsError("AI|서버 이름 형식으로 주세요(AI는 claude-code 또는 codex)." + unchanged)
+            names = [name.strip() for name in parts[1].split(",") if name.strip()]
+            offered = set(row["servers"]["available"].get(parts[0]) or ())
+            missing = [name for name in names if name not in offered]
+            if missing:
+                raise SettingsError(f"{parts[0]}에 설정된 MCP 서버가 아니에요: {', '.join(missing)}. "
+                                    f"설정된 서버: {', '.join(sorted(offered)) or '없음'}." + unchanged)
+            if not all(owner_mcp.valid_name(name) for name in names) or len(set(names)) > owner_mcp.MAX_SERVERS:
+                raise SettingsError(f"MCP 서버는 {owner_mcp.MAX_SERVERS}개까지, 이름 형식에 맞게 주세요." + unchanged)
+            if names == row["servers"]["confirmed"].get(parts[0]):
+                raise SettingsError(f"{parts[0]}의 MCP 서버는 이미 그렇게 되어 있어요. 바꿀 것이 없습니다.")
+            return f"{parts[0]}|{','.join(dict.fromkeys(names))}"
+        if not parts or not trust_record.valid_hand(parts[0]):
+            raise SettingsError("연결 이름을 확인하세요." + unchanged)
+        current = row["review"]["hands"].get(parts[0]) or {}
+        if setting == "review":
+            if len(parts) != 3 or not trust_record.valid_operation(parts[1]) or parts[2] not in trust_record.CLASSES:
+                raise SettingsError("연결 이름|동작 이름|read, mutate, payment, refused 형식으로 주세요." + unchanged)
+            if (current.get("operations") or {}).get(parts[1]) == parts[2]:
+                raise SettingsError("이미 그렇게 정해져 있어요. 바꿀 것이 없습니다.")
+        elif setting == "money":
+            if len(parts) != 2 or parts[1] not in ("on", "off"):
+                raise SettingsError("연결 이름|on 또는 off 형식으로 주세요." + unchanged)
+            if bool(current.get("money")) == (parts[1] == "on"):
+                raise SettingsError("이미 그렇게 되어 있어요. 바꿀 것이 없습니다.")
+        else:
+            if len(parts) != 2 or parts[1] not in trust_record.RUNGS:
+                raise SettingsError("연결 이름|report, propose, approve, mandate 형식으로 주세요." + unchanged)
+            if parts[1] == "mandate" and current.get("money"):
+                raise SettingsError("돈이 오가는 연결은 위임 단계로 올릴 수 없어요." + unchanged)
+            if (current.get("rung") or trust_record.default_rung(bool(current.get("money")))) == parts[1]:
+                raise SettingsError("이미 그 단계예요. 바꿀 것이 없습니다.")
+        return "|".join(parts)
+
+    @staticmethod
+    def _trust_summary(setting, after):
+        parts = after.split("|")
+        if setting == "servers":
+            return (f"{parts[0]}에서 작업에 켤 MCP 서버를 {parts[1].replace(',', ', ')}(으)로 정합니다" if parts[1]
+                    else f"{parts[0]}에서 작업에 켠 MCP 서버를 모두 끕니다")
+        if setting == "review":
+            return f"{parts[0]}의 {parts[1]}을(를) '{TRUST_CLASS_LABELS[parts[2]]}' 동작으로 정합니다"
+        if setting == "money":
+            return f"{parts[0]}을(를) 돈이 오가는 연결로 {'표시합니다(보고만 하는 단계에서 시작)' if parts[1] == 'on' else '표시하지 않습니다'}"
+        return f"{parts[0]}의 신뢰 단계를 '{TRUST_RUNG_LABELS[parts[1]]}'(으)로 정합니다"
 
     def _describe(self, category, setting, value, row):
         options = {option["value"]: option["label"] for option in row[setting].get("options") or ()}
@@ -533,6 +615,8 @@ class SettingsOrchestrator:
 
         elif (category, setting) == ("skills", "remove"):
             summary = f"스킬 '{after}'를 뺍니다"
+        elif (category, setting) in TRUST_SETTINGS:
+            summary = self._trust_summary(setting, after)
         elif (category, setting) == ("phone_link", "send"):
             summary = f"휴대폰으로 '{self._describe(category, setting, after, row)}' 링크를 보냅니다(약 10분 동안 열려요)"
         elif (category, setting) in FAMILY_SHARE_SETTINGS:
@@ -582,6 +666,8 @@ class SettingsOrchestrator:
             notify = self.__dict__.get("_family_notify", {}).pop(row["id"], None)
             self.service.start_family_setup(after, notify=notify)
             return "requested"
+        elif (category, setting) in TRUST_SETTINGS:
+            self.service.apply_trust_setting(setting, after)
         elif category == "ai_connections":
             self.service.set_ai_connections({"enabled": after == "on"})
         elif category == "phone_link":
@@ -972,3 +1058,4 @@ class SettingsOrchestrator:
             # keyword table guesses which service the owner meant.
             return self.read(owner)
         return self.draft(owner, channel, value)
+

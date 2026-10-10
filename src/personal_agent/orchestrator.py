@@ -46,6 +46,7 @@ import json
 
 # #804/#833: the owner-model fact bounds and renderer shared with the direct route's outcome judgment.
 from . import owner_mcp
+from . import trust_record
 from .agent_runtime import CURRENT_CONTEXT_FACT_CHARS, PROFILE_FACT_CHARS, owner_context_fact
 from .decision import MAX_CONTEXT_CHARS, OUTCOME_DECIDED, OUTCOME_MALFORMED, DecisionContext, DecisionPolicy
 
@@ -392,10 +393,18 @@ def worker_catalogue(service):
             # Claude Code's claude.ai connectors, and the MCP servers the owner confirmed for that worker.
             if (route_id in owner_mcp.ENGINES and not isolated and callable(getattr(service, 'ai_connections_enabled', None))
                     and service.ai_connections_enabled()):
-                reviewed = {name for name, operations in service.reviewed_connector_reads().items() if operations}
                 store = getattr(service, 'store', None)
+                seed = service.reviewed_connector_reads()
+                # #1297: a connection with at least one operation that runs as a read (owner decision, else seed).
+                names = set(seed) | set(trust_record.hands(store) if store is not None else ())
+                reviewed = {name for name in names
+                            if (trust_record.readable(store, name, seed.get(name, ())) if store is not None else seed.get(name))}
                 servers = set(owner_mcp.confirmed(store, route_id)) & reviewed
-                connectors = {name for name in reviewed if name not in owner_mcp.all_confirmed(store)} if route_id == 'claude-code' else set()
+                # A recorded name that is one of the owner's MCP servers is never listed as a claude.ai connector.
+                server_names = owner_mcp.all_confirmed(store) | {name for names in (service.owner_mcp_available().values()
+                                                                                    if callable(getattr(service, 'owner_mcp_available', None))
+                                                                                    else ()) for name in names}
+                connectors = {name for name in reviewed if name not in server_names} if route_id == 'claude-code' else set()
                 worker['own_connections'] = sorted(servers | connectors)
             substitute = configured and configured in (refused.get(route_id) or set())
             worker.update(available=not reason, reason=reason, models=models,

@@ -39,7 +39,7 @@ assert.equal(body.textContent,'');
 body=render({status_kind:'active',step_line:'웹 검색 중: 경주 휴게소'});
 assert.deepEqual(body.children.map(n=>n.className),['typing-step','typing-dots']);
 assert.equal(body.textContent,'웹 검색 중: 경주 휴게소');
-body=render({status_kind:'active',step_line:'날씨 확인 중',draft_text:'부분 답변',attention_line:'참, 준비해 둔 게 있어요'});
+body=render({status_kind:'active',step_line:'날씨 보고 있어요',draft_text:'부분 답변',attention_line:'참, 준비해 둔 게 있어요'});
 assert.deepEqual(body.children.map(n=>n.className),['rich','typing-step','typing-attention','typing-dots']);
 console.log(JSON.stringify({passed:3}));
 """
@@ -116,7 +116,7 @@ class TypingBubbleReadModelTests(unittest.TestCase):
                             json.dumps({'step': {'action': 'web_search', 'query': '경주 휴게소'}}, ensure_ascii=False),
                             time.time()))
             task = next(t for t in service.task_progress()['tasks'] if t['id'] == job_id)
-            self.assertEqual(task['step_line'], '웹 검색 중: 경주 휴게소')
+            self.assertEqual(task['step_line'], "'경주 휴게소' 찾아보고 있어요")
             self.assertNotIn(task['step_line'], ('running', 'queued', '진행 중'))
 
     def test_a_pending_browser_approval_is_an_owner_wait_not_typing(self):
@@ -150,7 +150,7 @@ class TypingBubbleReadModelTests(unittest.TestCase):
             for row in rows:
                 for value in row:
                     self.assertNotIn('typing', str(value or ''))
-                    self.assertNotIn('웹 검색 중', str(value or ''))
+                    self.assertNotIn('찾아보고 있어요', str(value or ''))
 
 
 if __name__ == '__main__':

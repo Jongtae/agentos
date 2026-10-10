@@ -130,31 +130,31 @@ class StepLineTests(unittest.TestCase):
 
     def test_model_status_wins_and_generic_lines_are_keyed_on_kind_and_target(self):
         self.assertEqual(step_line({'action': 'web_search', 'status': '환율을 찾고 있어요', 'query': 'q'}), '환율을 찾고 있어요')
-        self.assertEqual(step_line({'action': 'web_search', 'query': '오늘 환율'}), '웹 검색 중: 오늘 환율')
-        self.assertEqual(step_line({'action': 'web_search'}), '웹 검색 중')
-        self.assertEqual(step_line({'action': 'browser_open', 'host': 'shop.example'}), 'shop.example 페이지 여는 중')
-        self.assertEqual(step_line({'action': 'browser_type'}, last_host='shop.example'), 'shop.example에서 입력 중')
-        self.assertEqual(step_line({'action': 'weather'}), '날씨 확인 중')
+        self.assertEqual(step_line({'action': 'web_search', 'query': '오늘 환율'}), "'오늘 환율' 찾아보고 있어요")
+        self.assertEqual(step_line({'action': 'web_search'}), '찾아보고 있어요')
+        self.assertEqual(step_line({'action': 'browser_open', 'host': 'shop.example'}), 'shop.example 열어 보고 있어요')
+        self.assertEqual(step_line({'action': 'browser_type'}, last_host='shop.example'), 'shop.example에 입력하고 있어요')
+        self.assertEqual(step_line({'action': 'weather'}), '날씨 보고 있어요')
         self.assertEqual(step_line({'action': 'unknown_kind'}), DEFAULT_STEP_TEXT)
 
     def test_a_masking_mark_is_never_shown(self):
         """#881: a status or target carrying a masking mark gives way to the plainer line."""
         self.assertEqual(step_line({'action': 'browser_open', 'status': "'예약 - [가림]' 여는 중", 'host': 'shop.example'}),
-                         'shop.example 페이지 여는 중')
+                         'shop.example 열어 보고 있어요')
         self.assertEqual(step_line({'action': 'web_search', 'status': '[가림: 12자] 찾는 중', 'query': '[가림] 후기'}),
-                         '웹 검색 중')
-        self.assertEqual(step_line({'action': 'read_file', 'status': '[경로 가림] 읽는 중'}), '파일 읽는 중')
-        self.assertEqual(step_line({'action': 'web_search', 'status': '[redacted] 넣는 중'}), '웹 검색 중')
+                         '찾아보고 있어요')
+        self.assertEqual(step_line({'action': 'read_file', 'status': '[경로 가림] 읽는 중'}), '파일 읽어 보고 있어요')
+        self.assertEqual(step_line({'action': 'web_search', 'status': '[redacted] 넣는 중'}), '찾아보고 있어요')
         # Display-time redaction that masks, or fails, moves on the same way.
         clean = lambda text: text.replace('4719', '[가림]')
         self.assertEqual(step_line({'action': 'web_search', 'status': '4719 찾는 중', 'query': '4719'}, clean=clean),
-                         '웹 검색 중')
+                         '찾아보고 있어요')
 
         def broken(text):
             raise ValueError
         self.assertEqual(step_line({'action': 'web_search', 'status': '찾는 중'}, clean=broken), NO_STEP_LINE)
         events = [running('web_search', {'action': 'web_search', 'status': '[가림] 찾는 중'}, 'c1')]
-        self.assertEqual(draft_step(events), ('웹 검색 중', False))
+        self.assertEqual(draft_step(events), ('찾아보고 있어요', False))
 
     def test_a_step_is_shown_only_while_its_call_runs(self):
         events = [running('web_search', {'action': 'web_search', 'status': '찾는 중'}, 'c1')]
@@ -184,7 +184,7 @@ class StepLineTests(unittest.TestCase):
         events = [running('browser_open', {'action': 'browser_open', 'host': 'shop.example'}),
                   finished('browser_open'),
                   running('browser_click', {'action': 'browser_click'}, created=3.0)]
-        self.assertEqual(draft_step(events), ('shop.example에서 선택하는 중', False))
+        self.assertEqual(draft_step(events), ('shop.example에서 고르고 있어요', False))
 
     def test_payment_step_in_flight_hides_the_draft_line(self):
         events = [running('browser_click', {'action': 'browser_click', 'approval': True})]
@@ -193,11 +193,11 @@ class StepLineTests(unittest.TestCase):
     def test_a_newer_live_cli_step_overrides_and_its_completion_closes_it(self):
         events = [running('list_notes', {'action': 'list_notes'}, created=1.0), finished('list_notes', created=2.0)]
         live = {'at': 3.0, 'running': True, 'id': 'ws1', 'step': {'action': 'web_search', 'query': '환율'}}
-        self.assertEqual(draft_step(events, live), ('웹 검색 중: 환율', False))
+        self.assertEqual(draft_step(events, live), ("'환율' 찾아보고 있어요", False))
         self.assertEqual(draft_step(events, {**live, 'running': False}), (NO_STEP_LINE, False))
         # An older live step does not hide a newer bridge call in flight.
         events.append(running('weather', {'action': 'weather'}, created=4.0))
-        self.assertEqual(draft_step(events, live), ('날씨 확인 중', False))
+        self.assertEqual(draft_step(events, live), ('날씨 보고 있어요', False))
 
 
 class OrchestratedAttemptLineTests(unittest.TestCase):
@@ -210,7 +210,7 @@ class OrchestratedAttemptLineTests(unittest.TestCase):
         events = [self.planned(1, '1번째 시도: Codex · 기본 모델 — 현재 위치가 없어 추가 확인이 필요', 1.0)]
         self.assertEqual(draft_step(events), (NO_STEP_LINE, False), 'the first attempt announces nothing')
         events += [running('web_search', {'action': 'web_search', 'query': '환율'}, 'c1', created=2.0)]
-        self.assertEqual(draft_step(events), ('웹 검색 중: 환율', False))
+        self.assertEqual(draft_step(events), ("'환율' 찾아보고 있어요", False))
         events += [finished('web_search', 'c1', created=3.0),
                    {'tool': 'orchestrator', 'status': 'evaluated', 'created': 4.0, 'trace': {'text': '목표 미달'}}]
         self.assertEqual(draft_step(events), (NO_STEP_LINE, False), 'an evaluation is not a step')
@@ -219,7 +219,7 @@ class OrchestratedAttemptLineTests(unittest.TestCase):
         self.assertEqual(text, RETRY_STEP_TEXT)
         self.assertNotIn('다른 경로', text)
         events += [running('weather', {'action': 'weather'}, 'c2', created=6.0)]
-        self.assertEqual(draft_step(events), ('날씨 확인 중', False), 'the retry line gives way to its steps')
+        self.assertEqual(draft_step(events), ('날씨 보고 있어요', False), 'the retry line gives way to its steps')
 
     def test_attempt_one_closes_an_earlier_step_line(self):
         """#753: attempt 1 planned after a preflight step does not keep that step's line."""
@@ -466,7 +466,7 @@ class ScriptedLoopDraftTests(_TelegramCase):
         self.ticks = {'model': [6, 9, 13], 'list_notes': [8], 'list_memory': [(9.2, 10)]}
         job = self.run_turn('메모랑 기억 좀 정리해줘')
         # #835: each edit advances the dots; the step line (if any) comes first.
-        self.assertEqual(self.drafts(), [DOTS[0], f'저장한 메모를 훑어보고 있어요 {DOTS[1]}', f'기억 확인 중 {DOTS[2]}', DOTS[0]])
+        self.assertEqual(self.drafts(), [DOTS[0], f'저장한 메모를 훑어보고 있어요 {DOTS[1]}', f'기억해 둔 걸 떠올리고 있어요 {DOTS[2]}', DOTS[0]])
         draft_ids = {body['draft_id'] for method, body in self.calls if method in DRAFT_METHODS}
         self.assertEqual(draft_ids, {draft_id_for(job['id'])}, 'one draft, edited in place (Stop maps back)')
         for method, body in self.calls:
@@ -525,7 +525,7 @@ class ScriptedLoopDraftTests(_TelegramCase):
         self.assertTrue(saved, 'the note write ran, so its value is a saved private value of this Work')
         shown = self.drafts()
         # #881: the masked status gives way to the step's plain line.
-        self.assertEqual(shown, [DOTS[0], f'메모 확인 중 {DOTS[1]}'])
+        self.assertEqual(shown, [DOTS[0], f'메모 살펴보고 있어요 {DOTS[1]}'])
         steps = [event['trace']['step'] for event in self.store.task_events(job['id'])
                  if event['status'] == 'running' and event['tool'] == 'list_notes']
         self.assertNotIn('4719', json.dumps(steps, ensure_ascii=False), 'redacted before it is recorded')
@@ -553,7 +553,7 @@ class ScriptedLoopDraftTests(_TelegramCase):
         self.tick = tick
         self.run_turn('사물함 정보 보여줘')
         # #881: the masked status gives way to the step's plain line; the internal mark is never shown.
-        self.assertEqual(self.drafts(), [DOTS[0], f'메모 확인 중 {DOTS[1]}'])
+        self.assertEqual(self.drafts(), [DOTS[0], f'메모 살펴보고 있어요 {DOTS[1]}'])
 
     def test_pending_approval_prompt_is_the_only_surface(self):
         self.script = [[('list_notes', {'status': '메모 보는 중'})], '끝']
@@ -622,7 +622,7 @@ class CliRouteDraftTests(_TelegramCase):
         self.assertEqual(len(during), 1)
         [line] = during[0]
         # #881: the redacted query carries a mark, so the plain search line is shown instead.
-        self.assertTrue(line.startswith('웹 검색 중 '), line)
+        self.assertTrue(line.startswith('찾아보고 있어요 '), line)
         self.assertNotIn(SECRET, line, 'the query is redacted like the recorded event')
         self.assertNotIn('[redacted]', line)
         self.assertNotIn(job_id, self.service.live_steps, 'the live step ends with the run')

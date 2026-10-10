@@ -223,7 +223,7 @@ def pick_attention(items, now, surfaced=None, cooldown=ATTENTION_COOLDOWN):
 # (Constitution C16), and no line is shown for a call that was not observed.
 
 #: Any other tool kind.
-DEFAULT_STEP_TEXT = '도구 실행 중'
+DEFAULT_STEP_TEXT = '잠깐 확인하고 있어요'
 #: #710: the orchestrator's planned-attempt event (``orchestrator.EVENT_TOOL`` /
 #: ``PLANNED``).  #740: a re-delegated attempt is announced with this line
 #: only; the plan's worker, model and reason stay in the Work's Evidence
@@ -231,43 +231,44 @@ DEFAULT_STEP_TEXT = '도구 실행 중'
 #: nothing: the draft shows the dots alone until its first step.
 ORCHESTRATION_TOOL = EVENT_TOOL
 ORCHESTRATION_PLANNED = PLANNED
-RETRY_STEP_TEXT = '다른 방법으로 다시 해보는 중'
+RETRY_STEP_TEXT = '다른 방법으로도 알아보고 있어요'
 #: Host action -> (line with the observed target, line without one).  The
 #: target placeholder is ``{host}`` or ``{query}``.
+#: #1280: soft everyday wording (해요체), not tool labels; still keyed only on the tool kind.
 FALLBACK_STEP_LINES = {
-    'web_search': ('웹 검색 중: {query}', '웹 검색 중'),
-    'bounded_public_research': ('웹 검색 중: {query}', '웹 검색 중'),
-    'public_page_read': ('{host} 페이지 여는 중', '페이지 여는 중'),
-    'browser_open': ('{host} 페이지 여는 중', '페이지 여는 중'),
-    'browser_read': ('{host} 페이지 읽는 중', '페이지 읽는 중'),
-    'browser_find': ('{host} 페이지에서 찾는 중', '페이지에서 찾는 중'),
-    'browser_click': ('{host}에서 선택하는 중', '페이지에서 선택하는 중'),
-    'browser_type': ('{host}에서 입력 중', '페이지에서 입력 중'),
-    'browser_sign_in': ('{host} 로그인 요청 중', '로그인 요청 중'),
-    'weather': (None, '날씨 확인 중'),
-    'calendar_query': (None, '일정 확인 중'),
-    'calendar_draft_create': (None, '일정 변경안 만드는 중'),
-    'calendar_draft_update': (None, '일정 변경안 만드는 중'),
-    'calendar_draft_cancel': (None, '일정 변경안 만드는 중'),
-    'list_roots': (None, '연결된 폴더 확인 중'),
-    'find_files': (None, '파일 찾는 중'),
-    'read_file': (None, '파일 읽는 중'),
-    'drive_search': (None, 'Drive 파일 찾는 중'),
-    'drive_read': (None, 'Drive 파일 읽는 중'),
-    'api_request': (None, 'API 조회 중'),
-    'list_notes': (None, '메모 확인 중'),
-    'save_note': (None, '메모 저장 중'),
-    'list_memory': (None, '기억 확인 중'),
-    'save_memory': (None, '기억 저장 중'),
-    'forget_record': (None, '기억 정리 중'),
-    'list_agents': (None, '에이전트 목록 확인 중'),
-    'delegate_agent': (None, '전문 에이전트에게 맡기는 중'),
-    'propose_current_state': (None, '현재 상황 기록 중'),
-    'schedule_preparation': (None, '예약 만드는 중'),
-    'ask_location': (None, '위치 요청 중'),
-    'settings_read': (None, '설정 확인 중'),
-    'information_use': (None, '사용한 정보 확인 중'),
-    'settings_change': (None, '설정 변경 초안 만드는 중'),
+    'web_search': ("'{query}' 찾아보고 있어요", '찾아보고 있어요'),
+    'bounded_public_research': ("'{query}' 찾아보고 있어요", '찾아보고 있어요'),
+    'public_page_read': ('{host} 열어 보고 있어요', '페이지 열어 보고 있어요'),
+    'browser_open': ('{host} 열어 보고 있어요', '페이지 열어 보고 있어요'),
+    'browser_read': ('{host} 읽어 보고 있어요', '페이지 읽어 보고 있어요'),
+    'browser_find': ('{host}에서 찾아보고 있어요', '페이지에서 찾아보고 있어요'),
+    'browser_click': ('{host}에서 고르고 있어요', '페이지에서 고르고 있어요'),
+    'browser_type': ('{host}에 입력하고 있어요', '페이지에 입력하고 있어요'),
+    'browser_sign_in': ('{host} 로그인을 준비하고 있어요', '로그인을 준비하고 있어요'),
+    'weather': (None, '날씨 보고 있어요'),
+    'calendar_query': (None, '일정 살펴보고 있어요'),
+    'calendar_draft_create': (None, '일정 바꿀 안을 만들고 있어요'),
+    'calendar_draft_update': (None, '일정 바꿀 안을 만들고 있어요'),
+    'calendar_draft_cancel': (None, '일정 바꿀 안을 만들고 있어요'),
+    'list_roots': (None, '연결된 폴더 보고 있어요'),
+    'find_files': (None, '파일 찾아보고 있어요'),
+    'read_file': (None, '파일 읽어 보고 있어요'),
+    'drive_search': (None, 'Drive에서 찾아보고 있어요'),
+    'drive_read': (None, 'Drive 파일 읽어 보고 있어요'),
+    'api_request': (None, '데이터 가져오고 있어요'),
+    'list_notes': (None, '메모 살펴보고 있어요'),
+    'save_note': (None, '메모 남기고 있어요'),
+    'list_memory': (None, '기억해 둔 걸 떠올리고 있어요'),
+    'save_memory': (None, '기억해 두고 있어요'),
+    'forget_record': (None, '기억 정리하고 있어요'),
+    'list_agents': (None, '도와줄 에이전트 찾고 있어요'),
+    'delegate_agent': (None, '전문 에이전트에게 부탁하고 있어요'),
+    'propose_current_state': (None, '지금 상황 정리하고 있어요'),
+    'schedule_preparation': (None, '예약 잡고 있어요'),
+    'ask_location': (None, '위치를 물어보려고 해요'),
+    'settings_read': (None, '설정 보고 있어요'),
+    'information_use': (None, '어떤 정보를 썼는지 보고 있어요'),
+    'settings_change': (None, '설정 바꿀 안을 만들고 있어요'),
 }
 
 

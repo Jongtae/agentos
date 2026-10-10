@@ -184,9 +184,9 @@ def describe(slot):
 CONTEXT_LINE = 'API slots (api_request; AgentOS inserts the credential, never shown): '
 
 
-def context_line(store):
-    """One context line naming the registered slots and their hosts, or None."""
-    listed = slots(store)
+def context_line(store, connections=None):
+    """One context line naming the registered and connection slots and their hosts, or None."""
+    listed = {**(connections or {}), **slots(store)}
     if not listed:
         return None
     return CONTEXT_LINE + '; '.join(f"{name} ({', '.join(slot['hosts'])}{': ' + slot['note'] if slot['note'] else ''})"
@@ -407,13 +407,21 @@ def _transient(exc):
 class ApiRequests:
     """One Work's authenticated API calls.  ``approvals`` has ``consume(binding)``/``request(binding, text)``."""
 
-    def __init__(self, store, work_id, *, approvals=None, transport=None, clock=time.time, sleep=time.sleep):
+    def __init__(self, store, work_id, *, approvals=None, transport=None, clock=time.time, sleep=time.sleep,
+                 connections=None):
         self.store, self.work_id, self.approvals = store, work_id, approvals
         self.transport = transport or http_request
         self.clock, self.sleep = clock, sleep
+        #: CONN-API: ``() -> {name: slot}`` of AgentOS-held connections (``connection_slots.build``).
+        self.connections = connections
 
     def slots(self):
-        return slots(self.store)
+        """Owner-registered slots, plus AgentOS-held connections; an owner slot of the same name wins."""
+        try:
+            held = self.connections() if callable(self.connections) else {}
+        except Exception:
+            held = {}
+        return {**(held if isinstance(held, dict) else {}), **slots(self.store)}
 
     def _target(self, slot, url):
         parts = urlsplit(str(url or '').strip())
@@ -429,6 +437,18 @@ class ApiRequests:
         named = f'{host}:{port}' if port else host
         if named not in slot['hosts']:
             raise ApiError(f"슬롯 '{slot['name']}'은 {', '.join(slot['hosts'])}에만 보낼 수 있어 보내지 않았습니다.",
+                           'api_host_not_allowed')
+        # CONN-API: a connection's token reaches only its own provider API on a shared host.
+        paths = slot.get('paths')
+        if paths:
+            # Review P3: no dot segment or encoded separator may walk out of the prefix.
+            from urllib.parse import unquote
+            decoded = unquote(parts.path or '/')
+            if any(segment in ('.', '..') for segment in decoded.split('/')) or '\\' in decoded or decoded != unquote(decoded) \
+                    or '%2f' in (parts.path or '').lower() or '%5c' in (parts.path or '').lower():
+                raise ApiError(f"연결 '{slot['name']}'의 경로를 확인할 수 없어 보내지 않았습니다.", 'api_host_not_allowed')
+        if paths and not any((parts.path or '/').startswith(prefix) for prefix in paths):
+            raise ApiError(f"연결 '{slot['name']}'은 {', '.join(paths)} 경로에만 쓸 수 있어 보내지 않았습니다.",
                            'api_host_not_allowed')
         return parts, named
 
@@ -456,10 +476,14 @@ class ApiRequests:
         method = str(args.get('method') or 'GET').upper()
         if method not in METHODS:
             raise ApiError('지원하는 메서드는 ' + ', '.join(METHODS) + '입니다.', 'api_argument_invalid')
+        if slot.get('read_only') and method not in READ_METHODS:
+            # CONN-API: a read grant is used for reads only; changes go through the existing drafts and approvals.
+            raise ApiError(f"연결 '{slot['name']}'은 읽기 전용이라 {method} 요청을 보내지 않았습니다.", 'api_read_only')
         url = str(args.get('url') or '').strip()
         parts, named = self._target(slot, url)
         path = parts.path or '/'
-        effect = effective_effect(method, args.get('effect'))
+        # CONN-API: a read grant used with GET/HEAD (enforced above) cannot change anything.
+        effect = 'read' if slot.get('read_only') else effective_effect(method, args.get('effect'))
         body = args.get('body') or None
         if body is not None and (method in READ_METHODS or len(body.encode()) > MAX_BODY_BYTES):
             raise ApiError('본문은 GET/HEAD가 아닌 요청에만, 64KB 이하로 보낼 수 있습니다.', 'api_argument_invalid')
@@ -475,7 +499,18 @@ class ApiRequests:
             # The AI may only tighten the slot's freshness bound, never widen it (review P1).
             max_age = min(int(text), max_age)
         idempotency = self._approve(slot, method, url, body, effect, named, path) if effect in APPROVED_EFFECTS else None
-        secret = self.store.secret(SECRET_PREFIX + slot['name'])
+        finish = None
+        if callable(slot.get('token')):
+            # CONN-API: the connector resolves, renews and checks the token for this one call.
+            try:
+                secret = slot['token']()
+                if isinstance(secret, tuple):
+                    secret, finish = secret
+            except Exception:
+                raise ApiError(f"연결 '{slot['name']}'을 지금 쓸 수 없어 호출하지 않았습니다. 연결을 다시 확인해 주세요.",
+                               'needs_setup', requires=f"connection:{slot['name']}") from None
+        else:
+            secret = self.store.secret(SECRET_PREFIX + slot['name'])
         if not secret:
             raise ApiError(f"슬롯 '{slot['name']}'의 비밀값이 없어 호출하지 않았습니다. 먼저 등록해 주세요.", 'needs_setup',
                            requires=f"api-slot:{slot['name']}")
@@ -504,6 +539,14 @@ class ApiRequests:
                 self.sleep(1)
                 continue
             break
+        if callable(finish):
+            # CONN-API review P2: a 401 marks the connection for reauthentication; a connection that
+            # changed while the call was in flight leaves the response unused.
+            try:
+                finish(status)
+            except Exception:
+                raise ApiError(f"연결 '{slot['name']}'이 그사이 바뀌어 응답을 쓰지 않았습니다. 연결을 다시 확인해 주세요.",
+                               'needs_setup', requires=f"connection:{slot['name']}") from None
         retrieved = datetime.fromtimestamp(self.clock(), timezone.utc)
         if 300 <= status < 400:
             raise ApiError('API가 다른 주소로 보내려 해 따라가지 않았습니다(키는 허용 호스트에만 보냅니다).', 'api_redirect_refused')
@@ -543,6 +586,7 @@ class ApiRequests:
                             as_of_field=args.get('as_of_field') or None, max_age_seconds=max_age,
                             checks=checks, required_fields=required)
         record.update({'source': {'slot': slot['name'], 'host': named, 'path': path, 'method': method,
+                                  **({'connection': slot['connection']} if slot.get('connection') else {}),
                                   # The owner can tell which resource was asked for (the key is never in a URL).
                                   **({'query': parts.query[:200]} if parts.query else {})},
                        'status': status, 'effect': effect, 'attempts': attempts,

@@ -250,13 +250,15 @@ c100 -43 182 -106 232 -178 35 -50 106 -236 106 -276 0 -46 -2 -46 -539 -42
 <section class="install" id="install" aria-labelledby="install-title">
   <div class="install-copy">
     <h2 id="install-title">오늘 밤, Still을 들여 보세요</h2>
-    <p>Mac, Linux, 또는 WSL2를 켠 Windows, 그리고 이미 구독 중인 AI 하나면 됩니다. ChatGPT(Codex로 연결) 또는 Claude(Claude Code로 연결). API 키, Homebrew, Python, Docker는 필요 없습니다.</p>
+    <p>Mac, Linux, Windows(WSL2) 컴퓨터와 이미 쓰고 있는 ChatGPT나 Claude 구독이면 충분합니다.</p>
   </div>
   <ol class="steps">
     <li>
       <h3>설치하고 시작하기</h3>
       <pre><code>curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh</code></pre>
-      <p class="note">설치 스크립트는 주소에 고정되어 있습니다. 실행 전에 <a href="https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh">스크립트를 확인</a>하세요. Homebrew를 쓴다면 <code>brew install jongtae/agentos/agentos</code> 후 <code>agentos start</code>. Windows라면 PowerShell에서 <code>wsl --install</code> 실행 후 재시작하고, Ubuntu를 열어 이 명령을 실행하세요.</p>
+      <p class="note">설치 스크립트는 주소에 버전이 고정되어 있습니다. 실행하기 전에 <a href="https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh">스크립트 내용을 확인</a>할 수 있습니다.</p>
+      <p class="note">Homebrew를 쓴다면 <code>brew install jongtae/agentos/agentos</code>로 설치한 뒤 <code>agentos start</code>로 시작해도 됩니다.</p>
+      <p class="note"><b>Windows</b>에서는 WSL2 안에서 설치합니다. PowerShell에서 <code>wsl --install</code>을 실행하고 컴퓨터를 다시 시작한 뒤, 시작 메뉴에서 Ubuntu를 열고 위의 설치 명령을 붙여 넣으세요.</p>
     </li>
     <li>
       <h3>AI 연결하기</h3>

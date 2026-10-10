@@ -250,13 +250,15 @@ c100 -43 182 -106 232 -178 35 -50 106 -236 106 -276 0 -46 -2 -46 -539 -42
 <section class="install" id="install" aria-labelledby="install-title">
   <div class="install-copy">
     <h2 id="install-title">Bring Still home tonight</h2>
-    <p>You need a Mac, a Linux machine or Windows with WSL2, and an AI subscription you already pay for: ChatGPT (through Codex) or Claude (through Claude Code). No API key, Homebrew, Python or Docker required.</p>
+    <p>A Mac, Linux or Windows (WSL2) computer and the ChatGPT or Claude subscription you already have. That’s all.</p>
   </div>
   <ol class="steps">
     <li>
       <h3>Install and start</h3>
       <pre><code>curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh</code></pre>
-      <p class="note">The URL pins the installer; <a href="https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh">read the script</a> before you run it. With Homebrew instead: <code>brew install jongtae/agentos/agentos</code>, then <code>agentos start</code>. On Windows, run <code>wsl --install</code> in PowerShell, restart, open Ubuntu and run the command there.</p>
+      <p class="note">The URL pins the installer to one version; <a href="https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh">read the script</a> before you run it.</p>
+      <p class="note">With Homebrew, you can instead run <code>brew install jongtae/agentos/agentos</code> and then <code>agentos start</code>.</p>
+      <p class="note"><b>Windows</b> runs AgentOS inside WSL2. In PowerShell, run <code>wsl --install</code> and restart the computer. Then open Ubuntu from the Start menu and paste the install command above.</p>
     </li>
     <li>
       <h3>Connect your AI</h3>

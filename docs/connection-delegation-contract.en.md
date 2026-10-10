@@ -95,7 +95,8 @@ Decision points must be proven before they are relied on. A compatibility test s
 
 Observed decision points (#1296):
 
-- **Claude Code** (2.1.280): `--permission-prompt-tool` answers every AI-side tool call that is not pre-approved: claude.ai connectors (#1197) and the MCP servers the owner confirmed for Works.
+- **Claude Code** (2.1.280): `--permission-prompt-tool` answers every AI-side tool call that is not pre-approved: claude.ai connectors (#1197) and the MCP servers the owner confirmed for Works. Observed 2026-10-10: under `--setting-sources project` a user-scope server in `~/.claude.json` is not started, and the same launch without that flag starts it. Only the confirmed entries reach a Work, through `--mcp-config`.
+- **Names.** No owner server may be named `agentos` or start with `claude_ai`, so none can carry the bridge's or a claude.ai connector's tool name.
 - **Codex** (codex-cli 0.153.4, observed 2026-10-10 on real turns with a local test server):
   - a session-flag `PreToolUse` hook receives the MCP tool name and its actual input;
   - a `deny` holds: the server never received the call;

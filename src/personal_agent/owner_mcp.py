@@ -40,6 +40,18 @@ RESERVED = frozenset({'agentos'})
 #: Environment names AgentOS sets for the CLI itself; an owner server may not replace them.
 RESERVED_ENV = frozenset({'HOME', 'PATH', 'LANG', 'PYTHONPATH', 'USER', 'LOGNAME', 'CODEX_HOME',
                           'CLAUDE_CODE_OAUTH_TOKEN', 'TMPDIR'})
+#: Review P1 on #1296: a server whose name starts like a claude.ai connector would yield the
+#: connector's exact tool name (``mcp__claude_ai_<service>__<operation>``) and inherit its
+#: reviewed reads, so such names are never an owner server.
+RESERVED_PREFIX = 'claude_ai'
+
+
+def valid_name(name):
+    """Whether ``name`` may be an owner server name."""
+    return (isinstance(name, str) and bool(NAME.match(name)) and name not in RESERVED
+            and not name.lower().startswith(RESERVED_PREFIX))
+
+
 ENV_NAME = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,127}$')
 MAX_SERVERS = 8
 #: claude.ai connectors arrive with the Claude Code login, under this tool-name prefix.
@@ -54,7 +66,7 @@ def confirmed(store, engine_id):
     rows = (store.config(CONFIRMED_KEY, {}) or {}) if store is not None else {}
     names = rows.get(engine_id) if isinstance(rows, dict) else None
     return [name for name in (names if isinstance(names, list) else [])
-            if isinstance(name, str) and NAME.match(name) and name not in RESERVED][:MAX_SERVERS]
+            if valid_name(name)][:MAX_SERVERS]
 
 
 def set_confirmed(store, engine_id, names):
@@ -63,7 +75,7 @@ def set_confirmed(store, engine_id, names):
         raise ValueError('지원하는 AI를 선택하세요.')
     clean = []
     for name in names or ():
-        if not isinstance(name, str) or not NAME.match(name) or name in RESERVED:
+        if not valid_name(name):
             raise ValueError('MCP 서버 이름 형식이 아닙니다.')
         if name not in clean:
             clean.append(name)
@@ -95,7 +107,7 @@ def tool_server(tool_name):
         service = server.replace('_', ' ').strip()[:60]
         return ('ai-connection', service, operation[:60]) if service and operation else None
     server, sep, operation = tool_name[len('mcp__'):].partition('__')
-    if not sep or not server or not operation or server in RESERVED:
+    if not sep or not operation or not valid_name(server):
         return None
     return ('owner-mcp', server[:64], operation[:60])
 
@@ -133,7 +145,7 @@ def codex_launch(definitions):
     """
     args, env, secret = [], {}, []
     for index, (name, transport) in enumerate(sorted(definitions.items())):
-        if not NAME.match(name) or name in RESERVED or not isinstance(transport, dict):
+        if not valid_name(name) or not isinstance(transport, dict):
             continue
         prefix = f'mcp_servers.{name}'
         server_args, server_env = [], {}
@@ -202,7 +214,13 @@ def codex_hook_arguments(relay):
 # -- Claude Code ---------------------------------------------------------------------
 
 def claude_definitions(home, names):
-    """The owner's user-scope Claude Code definitions of the confirmed servers (``~/.claude.json``); nothing stored."""
+    """The owner's user-scope Claude Code definitions of the confirmed servers (``~/.claude.json``); nothing stored.
+
+    Claude Code itself loads none of the owner's user-scope servers in a Work:
+    observed on 2.1.280 (2026-10-10), ``--setting-sources project`` leaves a
+    user-scope server unstarted, and the same launch without it starts the
+    server.  Only these confirmed entries reach the turn, through ``--mcp-config``.
+    """
     try:
         data = json.loads((Path(home) / '.claude.json').read_text(encoding='utf-8'))
     except (OSError, ValueError):
@@ -211,4 +229,4 @@ def claude_definitions(home, names):
     if not isinstance(servers, dict):
         return {}
     return {name: dict(servers[name]) for name in names
-            if name in servers and isinstance(servers[name], dict) and name not in RESERVED}
+            if valid_name(name) and name in servers and isinstance(servers[name], dict)}

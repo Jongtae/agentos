@@ -1954,6 +1954,8 @@ class BoundedExecutionAdapter:
             # Both supported CLIs receive this per-turn bridge configuration.
             # The engine gets no store handle; the bridge alone owns validated
             # access to the AgentOS tool facade.
+            # Review P2 on #1296: owner server entries may carry keys, so the file is owner-only.
+            os.close(os.open(config, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
             config.write_text(json.dumps({'mcpServers': {**owner_servers, 'agentos': {
                 'command': sys.executable,
                 # The bridge never needs the CLI's own credential.

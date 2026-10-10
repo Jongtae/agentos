@@ -26,6 +26,9 @@ class ToolNameTests(unittest.TestCase):
                          ('ai-connection', 'Google Drive', 'search_files'))
         self.assertEqual(owner_mcp.tool_server(SAVE), ('owner-mcp', 'notes', 'save_note'))
         self.assertEqual(owner_mcp.tool_server('mcp__notes__get__nested'), ('owner-mcp', 'notes', 'get__nested'))
+        # Review P1: no owner server can carry a claude.ai connector's tool name.
+        self.assertIsNone(owner_mcp.tool_server('mcp__Claude_AI_Google_Drive__search_files'))
+        self.assertEqual(owner_mcp.codex_launch({'claude_ai_Google_Drive': {'type': 'stdio', 'command': '/x'}}), ([], {}, []))
         for name in ('mcp__agentos__file_read', 'Bash', 'mcp__', 'mcp__notes', 'mcp____x', 'mcp__claude_ai_', None, 'x' * 300):
             self.assertIsNone(owner_mcp.tool_server(name), name)
 
@@ -35,12 +38,12 @@ class ToolNameTests(unittest.TestCase):
         store = QuickStore(Path(temp.name) / 'state')
         self.assertEqual(owner_mcp.confirmed(store, 'codex'), [], 'nothing is confirmed by default')
         self.assertEqual(owner_mcp.set_confirmed(store, 'codex', ['notes', 'notes', 'files']), ['notes', 'files'])
-        for bad in (['agentos'], ['has space'], ['a' * 65]):
+        for bad in (['agentos'], ['has space'], ['a' * 65], ['claude_ai_Google_Drive'], ['Claude_AI_x']):
             with self.assertRaises(ValueError):
                 owner_mcp.set_confirmed(store, 'codex', bad)
         with self.assertRaises(ValueError):
             owner_mcp.set_confirmed(store, 'other', ['notes'])
-        store.put(owner_mcp.CONFIRMED_KEY, {'codex': ['notes', 'agentos', 7, 'bad name']})
+        store.put(owner_mcp.CONFIRMED_KEY, {'codex': ['notes', 'agentos', 7, 'bad name', 'claude_ai_Google_Drive']})
         self.assertEqual(owner_mcp.confirmed(store, 'codex'), ['notes'], 'a stored value is re-validated')
 
 
@@ -246,6 +249,7 @@ class CodexWireTests(unittest.TestCase):
             if argv[1:2] != ['exec']:
                 return subprocess.CompletedProcess(argv, 0, 'codex-cli 0.153.4\n', '')
             self.argv, self.env = argv, kwargs['env']
+            self.config_mode = (Path(kwargs['cwd']) / 'agentos-mcp.json').stat().st_mode & 0o777
             hook = next((a for a in argv if a.startswith('hooks.PreToolUse=')), None)
             if hook:
                 command = hook.split('command=', 1)[1].rsplit('}]}]', 1)[0]
@@ -285,6 +289,7 @@ class CodexWireTests(unittest.TestCase):
         self.turn()
         self.assertIn('--dangerously-bypass-hook-trust', self.argv)
         self.assertNotIn('sk-owner-secret', ' '.join(self.argv))
+        self.assertEqual(self.config_mode, 0o600, 'the per-turn MCP configuration is owner-only')
         self.assertEqual(self.env['NOTES_KEY'], 'sk-owner-secret')
         self.assertEqual(self.hook_outputs[LIST], '', 'a reviewed read runs')
         self.assertEqual(json.loads(self.hook_outputs[SAVE])['hookSpecificOutput']['permissionDecision'], 'deny')

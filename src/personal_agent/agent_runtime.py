@@ -35,6 +35,8 @@ CONNECTOR_PERMISSION_DEFINITION=schema('connector_permission',
 #: (``browser_session``).  ``effect`` is the model's declared class; the
 #: deterministic guard there never depends on it.
 #: #953 (BROWSE-09): ``browser_sign_in`` asks the owner for a sign-in directly, without a sign-in page.
+#: #1282: how many distinct pages (by URL) one attempt keeps for its goal judgment.
+BROWSER_PAGES_KEPT=3
 BROWSER_ACTIONS=frozenset({'browser_open','browser_read','browser_find','browser_click','browser_type','browser_sign_in'})
 #: DRIVE-CONNECT-01 (#1172): read-only search and read of the owner's Google Drive.
 DRIVE_ACTIONS=frozenset({'drive_search','drive_read'})
@@ -1781,6 +1783,9 @@ class Capabilities:
   # is the owner's per-step approval surface (consume/request); the model
   # never holds a token.
   self.browser=browser;self.browser_approvals=browser_approvals;self._browser_session=None
+  # #1282: the latest mediated page views this attempt's browser steps returned, newest last
+  # (``{url: (title, text)}``), held in memory only for the attempt's goal judgment.
+  self._browser_pages={}
   # #680: why this computer cannot run the embedded engine (owner-readable
   # text), or None.  A browser call then ends in the typed refusal
   # `browser_unavailable_platform` instead of a setup hint.
@@ -1910,6 +1915,18 @@ class Capabilities:
    self._browser_session=BrowserSession(self.browser,work_id=self.job_id,budget=self.budget,excluded=self._page_excluded,
                                         approvals=self.browser_approvals)
   return self._browser_session
+ def _keep_browser_page(self,result):
+  """Remember a browser result's mediated page text for this attempt's goal judgment (#1282); memory only."""
+  if not isinstance(result,dict) or not isinstance(result.get('text'),str) or not result['text'].strip():return
+  url=str(result.get('url') or '')
+  self._browser_pages.pop(url,None)
+  self._browser_pages[url]=(str(result.get('title') or ''),result['text'])
+  while len(self._browser_pages)>BROWSER_PAGES_KEPT:self._browser_pages.pop(next(iter(self._browser_pages)))
+ def take_browser_pages(self):
+  """``[(url, title, text)]`` newest first, and forget them: one attempt's pages are judged once (#1282)."""
+  pages=[(url,title,text) for url,(title,text) in reversed(self._browser_pages.items())]
+  self._browser_pages={}
+  return pages
  def close_browser(self):
   session,self._browser_session=self._browser_session,None
   if session is not None:session.close()
@@ -2332,6 +2349,7 @@ class Capabilities:
     if self.browser_unavailable:raise ToolError(self.browser_unavailable,UNAVAILABLE_CODE)
     raise ToolError(UNAVAILABLE_TEXT,'needs_setup',requires='browser-profile')
    result=self.browser_session().run(name,args)
+   self._keep_browser_page(result)
    # #1269: a sign-in page's mediated view is a page read like any other.
    if result.get('state')=='login_required' and 'text' not in result:return result
    return self._from_private('owner-browser-session',result)

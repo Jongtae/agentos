@@ -35,7 +35,7 @@ from .conversation_projection import (BLOCKER_DOCUMENT_APPROVAL, BLOCKER_MODEL_U
 from .subscription_engines import SubscriptionEngines
 from .bounded_execution import BRIDGE_UNAVAILABLE, CLI_TOOL_CALLS_KEPT, TOOL_INCOMPLETE, TOOL_INCOMPLETE_TEXT, bridge_sdk_problem, incomplete_bridge_calls
 from .bounded_execution import AgentOSMcpTools, ReadOnlyAgentOSMcpTools, StrictIsolatedAgentOSMcpTools, BoundedExecutionAdapter, ExecutionError, ExecutionResult, MAX_PROMPT_BYTES, BOUNDED_PROFILE, HOST_CLI_PROFILES, STRICT_PROFILE, profile_actions, profile_status, route_unavailable
-from .orchestrator import model_refused, remember_model_refusal
+from .orchestrator import model_refused, observations_with_pages, remember_model_refusal
 from .orchestrator import (EVENT_TOOL as ORCHESTRATION_EVENT, NOT_JUDGED, NOT_REACHED, REACHED, UNJUDGED, WORKER_FAILED,
                            Orchestration, worker_catalogue)
 from .isolated_engine_gateway import EngineGatewayError
@@ -4521,7 +4521,7 @@ class AgentService:
                                              'error':TOOL_INCOMPLETE_TEXT},ensure_ascii=False))
 
     def orchestration_step(self, orchestration, attempt, job_id, since, *, result=None, answer='', outcome=None,
-                           owner_needed=False, failed=None, unmediated=False, engine_meta=None):
+                           owner_needed=False, failed=None, unmediated=False, engine_meta=None, pages=()):
         """Evaluate one attempt and return the next one, or None (#710).
 
         Direct route: the run's own #657 completion judgment, no new call.
@@ -4540,6 +4540,10 @@ class AgentService:
         shows it ran no host action (``cli_host_actions``).  An attempt
         AgentOS ran confined (strict-isolated, the isolated sidecar) or on the
         direct route is evaluated from its tool events alone, as before.
+        #1282: ``pages`` are the attempt's latest mediated browser pages
+        (``Capabilities.take_browser_pages``, memory only); their text joins
+        the observations (``observations_with_pages``) so a reply's details
+        can be checked against what the page showed.
         """
         if orchestration is None or attempt is None or not orchestration.orchestrated:return None
         from .agent_runtime import EFFECT_FREE_READS, INTERNAL_STATE_ACTIONS, page_load_only
@@ -4569,6 +4573,7 @@ class AgentService:
                 if data.get('code')==TOOL_INCOMPLETE:incomplete.append(row['tool'])
                 else:failed_codes.append(f"{row['tool']} ({data.get('code') or 'failed'})")
         failed_steps='; '.join(failures)
+        observations=observations_with_pages(observed,pages,orchestration._redact)
         summary='; '.join(part for part in (
             f"tools called: {', '.join(called) or 'none'}",
             f"failed: {', '.join(failed_codes)}" if failed_codes else '',
@@ -4586,7 +4591,7 @@ class AgentService:
             evaluation=orchestration.evaluate_run(result,owner_needed=owner_needed)
             if evaluation==REACHED and getattr(result,'judgment',None) is None and not effect \
                     and orchestration.budget_allows():
-                if orchestration.evaluate_answer(answer,'\n'.join(observed),failed_steps)==NOT_REACHED:
+                if orchestration.evaluate_answer(answer,observations,failed_steps)==NOT_REACHED:
                     evaluation=NOT_REACHED
         elif owner_needed:
             evaluation='owner_needed'
@@ -4594,10 +4599,10 @@ class AgentService:
             # Nothing may follow an effect, or the Work's time is short.  #752: the goal
             # judgment still decides the outcome of an attempt its steps left short of
             # succeeded (a known effect only); it can end the Work, never repeat it.
-            evaluation=(orchestration.evaluate_answer(answer,'\n'.join(observed),failed_steps,final=True)
+            evaluation=(orchestration.evaluate_answer(answer,observations,failed_steps,final=True)
                         if outcome in ('partial','failed') and orchestration.may_judge() else NOT_JUDGED)
         else:
-            evaluation=orchestration.evaluate_answer(answer,'\n'.join(observed),failed_steps)
+            evaluation=orchestration.evaluate_answer(answer,observations,failed_steps)
         return orchestration.next(attempt,evaluation,answer=str(answer or '')[:600],failed=summary,effect=effect)
 
     def cancel_superseded_work(self, work_ids, notify=True):
@@ -9684,7 +9689,8 @@ class AgentService:
                                 if diagnostics.get('failure_class')==BRIDGE_UNAVAILABLE and orchestration is not None:
                                     orchestration.drop_bridge_workers()
                                 following=self.orchestration_step(orchestration,attempt,job['id'],attempt_start,failed=str(exc),
-                                                                  unmediated=unmediated_turn,engine_meta=getattr(exc,'meta',None))
+                                                                  unmediated=unmediated_turn,engine_meta=getattr(exc,'meta',None),
+                                                                  pages=capabilities.take_browser_pages())
                                 if following is not None:
                                     refusals.clear();owner_steps.clear();verified_parts.clear()
                                     attempt=following
@@ -9824,7 +9830,8 @@ class AgentService:
                                                               provider=runtime_config.get('provider'))
                                 self.record_turn_provenance(job['id'],status='failed',failure_class=type(exc).__name__,egress_taint=sorted(capabilities.private_provenance))
                                 # #710: a failed worker may be re-delegated within the Work's bounds.
-                                following=(self.orchestration_step(orchestration,attempt,job['id'],attempt_start,failed=str(exc))
+                                following=(self.orchestration_step(orchestration,attempt,job['id'],attempt_start,failed=str(exc),
+                                                                   pages=capabilities.take_browser_pages())
                                            if isinstance(exc,ProviderError) else None)
                                 if following is not None:
                                     refusals.clear();owner_steps.clear();verified_parts.clear()
@@ -9870,6 +9877,7 @@ class AgentService:
                         # and the bounds allow (at most two more attempts, the Work budget, no
                         # effect in this attempt).  A fallback run is never re-delegated.
                         following=self.orchestration_step(orchestration,attempt,job['id'],attempt_start,
+                                                          pages=capabilities.take_browser_pages(),
                                                           result=None if subscription.get('id') else result,answer=response,
                                                           outcome=outcome,owner_needed=(approval_needed[0] or context_approval_needed[0]
                                                                                         or waits_for_sign_in),

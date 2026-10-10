@@ -440,6 +440,13 @@ class ApiRequests:
                            'api_host_not_allowed')
         # CONN-API: a connection's token reaches only its own provider API on a shared host.
         paths = slot.get('paths')
+        if paths:
+            # Review P3: no dot segment or encoded separator may walk out of the prefix.
+            from urllib.parse import unquote
+            decoded = unquote(parts.path or '/')
+            if any(segment in ('.', '..') for segment in decoded.split('/')) or '\\' in decoded or decoded != unquote(decoded) \
+                    or '%2f' in (parts.path or '').lower() or '%5c' in (parts.path or '').lower():
+                raise ApiError(f"연결 '{slot['name']}'의 경로를 확인할 수 없어 보내지 않았습니다.", 'api_host_not_allowed')
         if paths and not any((parts.path or '/').startswith(prefix) for prefix in paths):
             raise ApiError(f"연결 '{slot['name']}'은 {', '.join(paths)} 경로에만 쓸 수 있어 보내지 않았습니다.",
                            'api_host_not_allowed')
@@ -492,10 +499,13 @@ class ApiRequests:
             # The AI may only tighten the slot's freshness bound, never widen it (review P1).
             max_age = min(int(text), max_age)
         idempotency = self._approve(slot, method, url, body, effect, named, path) if effect in APPROVED_EFFECTS else None
+        finish = None
         if callable(slot.get('token')):
             # CONN-API: the connector resolves, renews and checks the token for this one call.
             try:
                 secret = slot['token']()
+                if isinstance(secret, tuple):
+                    secret, finish = secret
             except Exception:
                 raise ApiError(f"연결 '{slot['name']}'을 지금 쓸 수 없어 호출하지 않았습니다. 연결을 다시 확인해 주세요.",
                                'needs_setup', requires=f"connection:{slot['name']}") from None
@@ -529,6 +539,14 @@ class ApiRequests:
                 self.sleep(1)
                 continue
             break
+        if callable(finish):
+            # CONN-API review P2: a 401 marks the connection for reauthentication; a connection that
+            # changed while the call was in flight leaves the response unused.
+            try:
+                finish(status)
+            except Exception:
+                raise ApiError(f"연결 '{slot['name']}'이 그사이 바뀌어 응답을 쓰지 않았습니다. 연결을 다시 확인해 주세요.",
+                               'needs_setup', requires=f"connection:{slot['name']}") from None
         retrieved = datetime.fromtimestamp(self.clock(), timezone.utc)
         if 300 <= status < 400:
             raise ApiError('API가 다른 주소로 보내려 해 따라가지 않았습니다(키는 허용 호스트에만 보냅니다).', 'api_redirect_refused')

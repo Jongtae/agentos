@@ -34,8 +34,15 @@ def _slot(name, token):
 
 
 def _oauth_token(oauth, owner_id, grant, exchange):
-    """A current access token for one ``CalendarOAuth`` grant, renewed first when expired (as the transports do)."""
-    from .calendar_oauth import CalendarOAuthError, _authorization_context
+    """``(access_token, finish)`` for one ``CalendarOAuth`` grant, as ``calendar_transport``/``drive_transport`` do it.
+
+    The token is renewed first when expired.  ``finish(status)`` runs after the
+    provider answered: a 401 moves the connection to REAUTH_REQUIRED for the
+    revision that saw it; otherwise the connection must still be the one the
+    token came from, or the response is not used (review P2).
+    """
+    from .calendar_oauth import (CalendarOAuthError, _assert_current_request, _authorization_context,
+                                 _mark_reauthentication_required)
 
     def token():
         if not oauth.credential_current(owner_id, grant=grant):
@@ -43,8 +50,22 @@ def _oauth_token(oauth, owner_id, grant, exchange):
                 oauth.refresh(owner_id, exchange, grant=grant)
             except CalendarOAuthError:
                 pass
-        access_token, _revision = _authorization_context(oauth.store, oauth.registry, owner_id, grant, oauth.now)
-        return access_token
+        access_token, revision = _authorization_context(oauth.store, oauth.registry, owner_id, grant, oauth.now)
+
+        def finish(status):
+            if status == 401:
+                _mark_reauthentication_required(oauth.store, oauth.registry, owner_id, grant, expected_revision=revision)
+                return
+            _assert_current_request(oauth.store, oauth.registry, owner_id, grant, revision, access_token)
+        return access_token, finish
+    return token
+
+
+def _gmail_token(gmail, owner_id):
+    """``(access_token, finish)`` from the Gmail connector, re-checked after the call as its own reads are."""
+    def token():
+        _headers, revision, access_token = gmail._authorization_context(owner_id)
+        return access_token, lambda status: gmail._assert_current_request(owner_id, revision, access_token)
     return token
 
 
@@ -76,5 +97,5 @@ def build(service, owner_id):
     if gmail is not None:
         from .gmail import GMAIL_CONNECTOR_ID
         if connected(GMAIL_CONNECTOR_ID):
-            slots['gmail'] = _slot('gmail', lambda: gmail._authorization_context(owner_id)[2])
+            slots['gmail'] = _slot('gmail', _gmail_token(gmail, owner_id))
     return slots

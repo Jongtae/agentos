@@ -87,6 +87,38 @@ class ConnectionSlots(unittest.TestCase):
             self.assertEqual(caught.exception.code, 'api_host_not_allowed')
         self.assertEqual(transport.calls, [])
 
+    def test_dot_segments_and_encoded_separators_cannot_walk_out_of_the_prefix(self):
+        """Review P3."""
+        transport = Transport()
+        for path in ('/calendar/v3/../drive/v3/files', '/calendar/v3/%2e%2e/drive/v3/files', '/calendar/v3/x%2fy',
+                     '/calendar/v3/./events', '/calendar/v3/%252e%252e/x'):
+            with self.subTest(path=path), self.assertRaises(ApiError) as caught:
+                self.api(transport).call({'slot': 'google-calendar', 'url': 'https://www.googleapis.com' + path})
+            self.assertEqual(caught.exception.code, 'api_host_not_allowed')
+        self.assertEqual(transport.calls, [])
+
+    def test_after_the_call_a_401_marks_reauth_and_a_changed_connection_withholds_the_response(self):
+        """Review P2: the connector's post-call checks run for every connection call."""
+        seen = []
+
+        def token_with(check):
+            return lambda: (TOKEN, check)
+        ok = self.api(Transport(), {'google-calendar': calendar_slot(token_with(seen.append))}).call(
+            {'slot': 'google-calendar', 'url': EVENT_URL})
+        self.assertEqual(seen, [200])
+        self.assertIn('data', ok)
+        with self.assertRaises(ApiError) as caught:
+            self.api(Transport(status=401), {'google-calendar': calendar_slot(token_with(seen.append))}).call(
+                {'slot': 'google-calendar', 'url': EVENT_URL})
+        self.assertEqual((seen[-1], caught.exception.code), (401, 'api_unauthorized'))
+
+        def revoked(status):
+            raise ValueError('connection revision changed')
+        with self.assertRaises(ApiError) as caught:
+            self.api(Transport({'id': 'lunch', 'secret_data': 'x'}), {'google-calendar': calendar_slot(token_with(revoked))}).call(
+                {'slot': 'google-calendar', 'url': EVENT_URL})
+        self.assertEqual(caught.exception.code, 'needs_setup')
+
     def test_an_unusable_connection_is_setup_required_and_nothing_is_sent(self):
         def broken():
             raise ValueError('reauthentication required')

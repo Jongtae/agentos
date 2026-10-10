@@ -74,6 +74,7 @@ from .conversation_handoff import (LOCAL_AUTHORITY_KIND, LOCAL_AUTHORITY_LABELS,
                                    LOCAL_RESULT_WRITE, LOCAL_RESUMED_NOTICE, local_authority_guidance,
                                    local_authority_handoff, local_refusal_text, LOCAL_RESUME_TTL_SECONDS)
 from . import local_folder_picker
+from . import owner_mcp
 # PRESENCE-TG-01 / #581: native Telegram presence (reaction, typing, draft, anchor).
 from .context_observations import ContextObservations, answerable_work, continuation_key, continuation_request
 from .current_context import CLOCK_KEYS, CurrentContext, KNOWN_SECRET_NAMES, redact_known_secrets, render as current_context_render
@@ -2203,15 +2204,7 @@ class AgentService:
         # #1236 review: a connector read the CLI's own stream shows completing is the read that happened.
         reads=fields.pop('connector_reads',None)
         if isinstance(reads,list) and reads:
-            try:
-                with self.store.db() as db:
-                    for read in reads[:30]:
-                        if not isinstance(read,dict) or read.get('status') not in ('succeeded','failed'):continue
-                        server,_sep,operation=str(read.get('tool') or '')[len('mcp__claude_ai_'):].rpartition('__')
-                        detail={'scope':'ai-connection','host_action':'connector_read',
-                                'evidence':{'service':server.replace('_',' ').strip()[:60],'operation':operation[:60]}}
-                        db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
-                                   (job_id,'connector_read',read['status'],json.dumps(detail,ensure_ascii=False),time.time()))
+            try:self.record_connector_calls(job_id,reads)
             except Exception:
                 LOG.warning('connector reads not recorded job=%s',job_id)
         try:
@@ -6982,13 +6975,15 @@ class AgentService:
         information-use audit; the call's input is never recorded.
         """
         tool=arguments.get('tool_name') if isinstance(arguments,dict) else None
-        if not self.ai_connections_enabled() or not isinstance(tool,str) or not tool.startswith('mcp__claude_ai_') or len(tool)>200:
+        found=owner_mcp.tool_server(tool)
+        # #1296: a claude.ai connector, or a server the owner confirmed for Works; nothing else.
+        if (not self.ai_connections_enabled() or found is None
+                or (found[0]=='owner-mcp' and found[1] not in owner_mcp.all_confirmed(self.store))):
             return {'behavior':'deny','message':'AgentOS가 이 도구 사용을 허용하지 않았습니다. 실행하지 않았습니다.'}
-        server,_sep,operation=tool[len('mcp__claude_ai_'):].rpartition('__')
-        service_name=server.replace('_',' ').strip()[:60] or '연결된 서비스'
+        kind,service_name,operation=found
         allow=operation in self.reviewed_connector_reads().get(service_name,frozenset())
         detail={'scope':'ai-connection','host_action':'connector_permission',
-                'evidence':{'service':service_name,'operation':operation[:60],'decision':'allow' if allow else 'deny'}}
+                'evidence':{'service':service_name,'operation':operation,'kind':kind,'decision':'allow' if allow else 'deny'}}
         # A permission is not a read: the read is recorded only when the turn's own
         # stream shows the connector call succeeded (``record_turn_provenance``).
         with self.store.db() as db:
@@ -6998,6 +6993,50 @@ class AgentService:
             return {'behavior':'allow','updatedInput':arguments.get('input') if isinstance(arguments.get('input'),dict) else {}}
         return {'behavior':'deny','message':(f'{service_name}의 {operation}은(는) AgentOS가 읽기 전용으로 검토한 동작이 아니라 막았습니다. '
                                              '실행하지 않았습니다. 필요하면 소유자에게 직접 하도록 안내하세요.')}
+
+    #: #1296: shown in the Work when a worker ran an AI-side call AgentOS never allowed.
+    UNDECIDED_CALL_TEXT=('AI가 AgentOS의 확인 없이 연결된 서비스의 도구를 실행한 기록이 있어, '
+                         '그 AI에서 소유자가 연결한 MCP 서버 사용을 껐어요.')
+
+    def record_connector_calls(self, job_id, calls):
+        """Record the AI-side calls a worker's own stream shows, and fail closed on one AgentOS never allowed.
+
+        A call counts as decided only when this Work holds an ``allowed``
+        decision for the same service and operation (Claude Code's permission
+        prompt or the Codex hook).  An undecided call that ran means the
+        decision point did not hold (for example a CLI that skipped the hook):
+        it is recorded, and the owner's servers are switched off for every
+        engine until the owner confirms them again (contract §6: lowering is
+        automatic and told).
+        """
+        undecided=[]
+        with self.store.db() as db:
+            allowed=set()
+            for row in db.execute("SELECT detail FROM tool_events WHERE job_id=? AND tool='connector_permission' AND status='allowed'",
+                                  (job_id,)).fetchall():
+                try:evidence=json.loads(row['detail'] or '{}').get('evidence') or {}
+                except ValueError:continue
+                allowed.add((evidence.get('service'),evidence.get('operation')))
+            for call in calls[:30]:
+                if not isinstance(call,dict) or call.get('status') not in ('succeeded','failed'):continue
+                found=owner_mcp.tool_server(call.get('tool'))
+                if found is None:continue
+                kind,service_name,operation=found
+                detail={'scope':'ai-connection','host_action':'connector_read',
+                        'evidence':{'service':service_name,'operation':operation,'kind':kind}}
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           (job_id,'connector_read',call['status'],json.dumps(detail,ensure_ascii=False),time.time()))
+                if call['status']=='succeeded' and (service_name,operation) not in allowed:
+                    undecided.append(detail['evidence'])
+            for evidence in undecided[:5]:
+                db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                           (job_id,'connector_undecided','failed',json.dumps({'scope':'ai-connection','host_action':'connector_undecided',
+                                                                              'evidence':evidence,'error':self.UNDECIDED_CALL_TEXT},ensure_ascii=False),time.time()))
+        if undecided:
+            LOG.warning('undecided AI-side call observed job=%s count=%s',job_id,len(undecided))
+            for engine_id in owner_mcp.ENGINES:
+                if owner_mcp.confirmed(self.store,engine_id):owner_mcp.set_confirmed(self.store,engine_id,[])
+        return undecided
 
     # -- phone input (PHONE-INPUT-01 #1213) ------------------------------------
     def phone_input_kinds(self):
@@ -9692,6 +9731,9 @@ class AgentService:
                                             served.relay_browser=capabilities.browser is not None
                                             # #1197: the owner's AI connections for this turn (owner instance, owner opt-in).
                                             served.ai_connections=self.ai_connections_enabled()
+                                            # #1296: the owner's confirmed MCP servers per engine (decided per call).
+                                            served.owner_mcp_servers={engine_id:owner_mcp.confirmed(self.store,engine_id)
+                                                                      for engine_id in owner_mcp.ENGINES}
                                             served.connector_permission=lambda arguments,job=job:self.connector_permission(job,arguments)
                                         except OSError:
                                             LOG.warning('cli browser relay could not start job=%s',job['id'])

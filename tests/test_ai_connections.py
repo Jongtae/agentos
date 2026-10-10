@@ -81,7 +81,7 @@ class ServiceDecisionTests(unittest.TestCase):
         rows = self.events()
         self.assertEqual([row['status'] for row in rows], ['allowed', 'denied'], 'a permission is not a read')
         self.assertNotIn('secret-id', json.dumps(rows))
-        self.assertEqual(json.loads(rows[0]['detail'])['evidence'], {'service': 'Google Drive', 'operation': 'list_recent_files',
+        self.assertEqual(json.loads(rows[0]['detail'])['evidence'], {'service': 'Google Drive', 'operation': 'list_recent_files', 'kind': 'ai-connection',
                                                                       'decision': 'allow'})
 
     def test_only_reviewed_read_operations_run(self):

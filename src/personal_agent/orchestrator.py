@@ -45,6 +45,7 @@ import hashlib
 import json
 
 # #804/#833: the owner-model fact bounds and renderer shared with the direct route's outcome judgment.
+from . import owner_mcp
 from .agent_runtime import CURRENT_CONTEXT_FACT_CHARS, PROFILE_FACT_CHARS, owner_context_fact
 from .decision import MAX_CONTEXT_CHARS, OUTCOME_DECIDED, OUTCOME_MALFORMED, DecisionContext, DecisionPolicy
 
@@ -386,11 +387,16 @@ def worker_catalogue(service):
                     reason = reason or ('' if models else 'default_model_refused')
             if not browser:
                 tools = [tool for tool in tools if tool not in BROWSER_ACTIONS]
-            # #1197: a Claude Code turn runs with the owner's AI connections while they are on; the decision
-            # model is told which owner services that worker reads itself (reviewed read operations only).
-            if (route_id == 'claude-code' and not isolated and callable(getattr(service, 'ai_connections_enabled', None))
+            # #1197/#1296: a CLI turn runs with the owner's AI connections while they are on; the decision
+            # model is told which owner services that worker reads itself (reviewed read operations only):
+            # Claude Code's claude.ai connectors, and the MCP servers the owner confirmed for that worker.
+            if (route_id in owner_mcp.ENGINES and not isolated and callable(getattr(service, 'ai_connections_enabled', None))
                     and service.ai_connections_enabled()):
-                worker['own_connections'] = sorted(service.reviewed_connector_reads())
+                reviewed = {name for name, operations in service.reviewed_connector_reads().items() if operations}
+                store = getattr(service, 'store', None)
+                servers = set(owner_mcp.confirmed(store, route_id)) & reviewed
+                connectors = {name for name in reviewed if name not in owner_mcp.all_confirmed(store)} if route_id == 'claude-code' else set()
+                worker['own_connections'] = sorted(servers | connectors)
             substitute = configured and configured in (refused.get(route_id) or set())
             worker.update(available=not reason, reason=reason, models=models,
                           default_model=(models[0] if models else '') if substitute else configured,

@@ -1612,7 +1612,7 @@ def main():
     store=QuickStore(args.data)
     instance_lock=(store.private/'instance.lock').open('a')
     try:fcntl.flock(instance_lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-    except BlockingIOError:parser.exit(1,'이 데이터 폴더의 AgentOS가 이미 실행 중입니다.\n')
+    except BlockingIOError:parser.exit(1,'AgentOS is already running for this data folder.\n')
     configure_logging(store)
     handoff_port=args.drive_handoff_port or args.port+1
     if handoff_port==args.port:parser.exit(2,'Drive handoff port must differ from the HTTP callback port.\n')
@@ -1630,7 +1630,7 @@ def main():
     public_token=args.public_access_token
     if public_hosts and not public_token:public_token=secrets.token_urlsafe(24)
     try:server=ThreadingHTTPServer((args.host,args.port),make_handler(service,public_hosts,public_token))
-    except OSError as exc:parser.exit(1,f'시작할 수 없습니다: {exc}\n다른 포트는 --port로 지정하세요.\n')
+    except OSError as exc:parser.exit(1,f'Cannot start: {exc}\nChoose another port with --port.\n')
     service.local_server_port=server.server_port
     handoff_server=None
     if service.drive_web_oauth:
@@ -1653,7 +1653,7 @@ def main():
     print(f'AgentOS: {home}',flush=True)
     if public_hosts:
         print(f'Mobile pairing URL: https://{public_hosts[0]}/?access={public_token}',flush=True)
-    if not store.claimed():print(f'초기 설정 링크: {store.private / "setup-link.txt"} (개인 파일)',flush=True)
+    if not store.claimed():print(f'Setup link: {store.private / "setup-link.txt"} (private file)',flush=True)
     if not args.no_browser:threading.Timer(.6,lambda:webbrowser.open(url)).start()
     def shutdown(signum,frame):
         service.stop.set()

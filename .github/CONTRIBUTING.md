@@ -56,4 +56,4 @@ Personal AgentOS is licensed under [AGPL-3.0-only](../LICENSE). Contributions ar
 
 ## Language
 
-Internal design documents and code are in English. Korean companion documents exist for the owner. The four public READMEs (`README.md`, `docs/i18n/README.ko.md`, `docs/i18n/README.ja.md`, `docs/i18n/README.zh-CN.md`) must change together. The app interface is Korean today.
+Internal design documents and code are in English. Korean companion documents exist for the owner. The four public READMEs (`README.md`, `docs/i18n/README.ko.md`, `docs/i18n/README.ja.md`, `docs/i18n/README.zh-CN.md`) must change together. The browser screens default to English with Korean, Simplified Chinese and Japanese selectable; some fixed Telegram status/progress lines and certain connection validation errors are still Korean.

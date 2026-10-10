@@ -17,6 +17,7 @@ import sys
 import tempfile
 import time
 
+from . import owner_mcp
 from .manifests import CONTEXT_GATED_ACTIONS  # noqa: F401 (#627: re-exported for route checks)
 
 
@@ -921,8 +922,9 @@ def cli_metadata(engine_id, raw):
             for part in message['content']:
                 if isinstance(part, dict) and part.get('type') == 'tool_use':
                     meta['tool_calls'].append({'type': 'tool_use', 'name': str(part.get('name') or '')[:80], 'status': 'requested'})
-                    # #1197: an AI-connector call, matched to its result below (names only, never content).
-                    if str(part.get('name') or '').startswith('mcp__claude_ai_') and isinstance(part.get('id'), str):
+                    # #1197/#1296: an AI-side MCP call (claude.ai connector or owner server), matched to its
+                    # result below (names only, never content).
+                    if owner_mcp.tool_server(part.get('name')) and isinstance(part.get('id'), str):
                         connector_calls[part['id']] = str(part['name'])[:120]
         reply = record.get('message') if record.get('type') == 'user' else None
         if isinstance(reply, dict) and isinstance(reply.get('content'), list):
@@ -942,6 +944,12 @@ def cli_metadata(engine_id, raw):
             if item.get('server') is not None:
                 entry['server'] = str(item.get('server'))[:80]
             key = item.get('id')
+            # #1296: a completed Codex call to an owner server, recorded as the call that happened.
+            if (record.get('type') == 'item.completed' and item.get('type') == 'mcp_tool_call'
+                    and owner_mcp.tool_server(f"mcp__{item.get('server')}__{item.get('tool')}")):
+                meta['connector_reads'].append({'tool': f"mcp__{item.get('server')}__{item.get('tool')}"[:120],
+                                                'status': 'failed' if item.get('error') or item.get('status') != 'completed'
+                                                else 'succeeded'})
             if isinstance(key, str) and key in codex_items:
                 # Review P2: one id reported as two kinds is not one call; do not merge it away.
                 if codex_items[key]['type'] != entry['type']:
@@ -1469,7 +1477,7 @@ class BoundedExecutionAdapter:
 
     def command(self, engine_id, binary, prompt, mcp_config, instructions='', profile=BOUNDED_PROFILE,
                 disabled_features=(), model=None, native_search=False, tool_timeout=None, image_paths=(),
-                ai_connections=False):
+                ai_connections=False, owner_mcp_args=()):
         """The argv of one Work turn.
 
         ``native_search`` (#678) lets the trusted-local turn use the CLI's own
@@ -1518,7 +1526,9 @@ class BoundedExecutionAdapter:
                     # #709: AgentOS decides its own bridge tools (see CODEX_BRIDGE_APPROVAL_MODE).
                     '-c', codex_bridge_approval_argument(),
                     # #729: the agentos server's own tool-call timeout (see CODEX_TOOL_TIMEOUT_KEY).
-                    *(['-c', codex_bridge_timeout_argument(tool_timeout)] if tool_timeout else []), *model_args,
+                    *(['-c', codex_bridge_timeout_argument(tool_timeout)] if tool_timeout else []),
+                    # #1296: the owner's confirmed servers and the hook that decides each of their calls.
+                    *owner_mcp_args, *model_args,
                     # Codex declares --image as a variadic FILE... option. Put
                     # the positional prompt before it so the prompt cannot be
                     # consumed as another image path (which leaves exec reading
@@ -1934,13 +1944,19 @@ class BoundedExecutionAdapter:
             relay = getattr(tools, 'browser_relay', None) if profile == BOUNDED_PROFILE else None
             # #1197: the owner's AI connections, only for Claude Code on the trusted-local
             # route and only with the service relay that decides each connector call.
-            ai_connections = (bool(getattr(tools, 'ai_connections', False)) and engine_id == 'claude-code'
+            ai_connections = (bool(getattr(tools, 'ai_connections', False)) and engine_id in owner_mcp.ENGINES
                               and profile == BOUNDED_PROFILE and relay is not None)
+            # #1296: the servers the owner confirmed for this engine; every call to them is decided by AgentOS.
+            confirmed = (list((getattr(tools, 'owner_mcp_servers', None) or {}).get(engine_id) or ())
+                         if ai_connections else [])
+            owner_servers = owner_mcp.claude_definitions(Path.home(), confirmed) if engine_id == 'claude-code' else {}
             search_off = str(getattr(tools, 'native_search_reason', '') or '') if not native_search else ''
             # Both supported CLIs receive this per-turn bridge configuration.
             # The engine gets no store handle; the bridge alone owns validated
             # access to the AgentOS tool facade.
-            config.write_text(json.dumps({'mcpServers': {'agentos': {
+            # Review P2 on #1296: owner server entries may carry keys, so the file is owner-only.
+            os.close(os.open(config, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+            config.write_text(json.dumps({'mcpServers': {**owner_servers, 'agentos': {
                 'command': sys.executable,
                 # The bridge never needs the CLI's own credential.
                 **({'env': {'CLAUDE_CODE_OAUTH_TOKEN': ''}} if engine_id == 'claude-code' else {}),
@@ -1957,11 +1973,21 @@ class BoundedExecutionAdapter:
                          # #774: the relay serves owner-state tools even when no browser is served.
                          *(['--relay-no-browser'] if relay and not getattr(tools, 'relay_browser', True) else []),
                          # #1197: the bridge answers Claude Code's permission prompts for connector tools.
-                         *(['--ai-connections'] if ai_connections else []),
+                         *(['--ai-connections'] if ai_connections and engine_id == 'claude-code' else []),
                          # #961: the exact skill revisions this Work may load (trusted-local only).
                          *[f'--skill={ref}' for ref in (skill_refs(tools.capabilities) if profile == BOUNDED_PROFILE else ())]],
             }}}, ensure_ascii=False), encoding='utf-8')
             env = self.environment(engine_id, binary, run_dir, ai_connections=ai_connections)
+            owner_args = ()
+            if engine_id == 'codex' and confirmed:
+                # #1296: the owner's Codex definitions, read at launch and never stored; values that
+                # may be secret travel only in the CLI's environment.  No server loads without the hook.
+                definitions = {name: owner_mcp.codex_definition(binary, name, env, runner=self.runner) for name in confirmed}
+                launch_args, server_env, _secret = owner_mcp.codex_launch(
+                    {name: value for name, value in definitions.items() if value})
+                if launch_args:
+                    env.update(server_env)
+                    owner_args = (*owner_mcp.codex_hook_arguments(relay), *launch_args)
             disabled = ()
             if profile == STRICT_PROFILE:
                 # #616: never launch an unqualified CLI under the strict
@@ -2005,7 +2031,7 @@ class BoundedExecutionAdapter:
             argv = self.command(engine_id, binary, prompt, config, instructions, profile=profile, disabled_features=disabled,
                                 model=model or None, native_search=native_search,
                                 tool_timeout=bridge_tool_timeout(offered, timeout), image_paths=image_paths,
-                                ai_connections=ai_connections)
+                                ai_connections=ai_connections and engine_id == 'claude-code', owner_mcp_args=owner_args)
             run_meta = {'argv': display_argv(argv, prompt, instructions), 'requested_model': model or None}
             launch['started'] = True
             try:

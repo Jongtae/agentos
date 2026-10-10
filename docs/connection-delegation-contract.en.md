@@ -93,6 +93,18 @@ Classifying an effect:
 
 Decision points must be proven before they are relied on. A compatibility test shows that the CLI actually stops at the decision point for an AI-side connector's write tool, and that AgentOS's refusal holds. Until that observation exists, the column "AI-side, no decision point" applies.
 
+Observed decision points (#1296):
+
+- **Claude Code** (2.1.280): `--permission-prompt-tool` answers every AI-side tool call that is not pre-approved: claude.ai connectors (#1197) and the MCP servers the owner confirmed for Works. Observed 2026-10-10: under `--setting-sources project` a user-scope server in `~/.claude.json` is not started, and the same launch without that flag starts it. Only the confirmed entries reach a Work, through `--mcp-config`.
+- **Names.** No owner server may be named `agentos` or start with `claude_ai`, so none can carry the bridge's or a claude.ai connector's tool name.
+- **Codex** (codex-cli 0.153.4, observed 2026-10-10 on real turns with a local test server):
+  - a session-flag `PreToolUse` hook receives the MCP tool name and its actual input;
+  - a `deny` holds: the server never received the call;
+  - empty output lets the call run; `allow` is unsupported and blocks the call;
+  - without `--dangerously-bypass-hook-trust` the hook is skipped and the call runs, so AgentOS passes that flag whenever it loads an owner server.
+- **Fail closed after the fact.** A call the worker's own stream shows completing without an AgentOS `allowed` decision is recorded, and the owner's servers are switched off for every engine until the owner confirms them again.
+- **Which servers.** Only servers the owner confirmed for an engine load into a Work (empty by default). Their definitions are read from the owner's CLI at launch and never stored by AgentOS. For Codex, values that may be secret travel only in the CLI's environment and are withheld from the model's shell.
+
 ## 5. Delegation
 
 The mandate fields adopt the research §06 list. A delegation states:
@@ -210,7 +222,7 @@ These are observation windows, not completion criteria. No site, provider or cat
 | Public skills with a repository-root licence | merged | #1220 |
 | AI-side connection first, read-only, audited (Google) | open | #1197 |
 | AI-side connections generalised to all connectors, MCP servers and plugins | gap | successor of #1197 |
-| Per-call decision point for AI-side tools | partial: Claude Code `--permission-prompt-tool` decides claude.ai connector tools against a reviewed read list (#1197); other MCP servers, plugins and Codex are not yet decided | #1296 |
+| Per-call decision point for AI-side tools | merged for Claude Code and Codex: claude.ai connectors and owner-confirmed MCP servers (§4 observed decision points); operations allowed still come from the reviewed read list | #1197, #1296; owner decisions per operation #1297 |
 | AgentOS connecting to an MCP server itself | gap | none |
 | Conversational secret entry (elicitation URL mode) | gap | none |
 | Money-capable connection marking | gap | none |

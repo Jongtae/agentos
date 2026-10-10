@@ -42,14 +42,18 @@ b { font-weight: 600; }
 .bar nav a:hover { color: var(--ink); }
 
 /* Hero: name and warmth first. Text on the left, the presence on the right. */
-main > .hero { position: relative; max-width: none; padding: 0; min-height: min(46rem, 88vh); display: grid; align-items: center; overflow: hidden; }
+main > .hero { position: relative; max-width: none; padding: 0; display: grid; align-items: center; overflow: hidden; }
 .hero-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 70% 40%; }
-.hero-copy { position: relative; width: 100%; max-width: 70rem; margin-inline: auto; padding: clamp(3rem, 8vw, 6rem) clamp(1.25rem, 4.5vw, 3.5rem); }
-.hero-copy > * { max-width: 30rem; }
-.wordmark { display: block; font-weight: 300; font-size: clamp(4.5rem, 12vw, 8.5rem); line-height: .95; letter-spacing: -.02em; margin-left: -.04em; }
+.hero-copy { position: relative; width: 100%; max-width: 70rem; margin-inline: auto; padding: clamp(2.25rem, 5vw, 3.75rem) clamp(1.25rem, 4.5vw, 3.5rem); }
+.hero-copy > * { max-width: 34rem; }
+.wordmark { display: block; font-weight: 300; font-size: clamp(3.5rem, 8vw, 6rem); line-height: .95; letter-spacing: -.02em; margin-left: -.04em; }
 .tagline { display: block; margin-top: 1.1rem; font-weight: 300; font-size: clamp(1.6rem, 3vw, 2.1rem); line-height: 1.25; }
 .ko-line { margin: 1.4rem 0 0; font-size: 1.125rem; }
-.lede { margin: 1.75rem 0 2.25rem; color: var(--muted); }
+.lede { margin: 1.25rem 0 1.5rem; color: var(--muted); }
+.quick { margin: 0 0 1.5rem; }
+.quick-label { margin: 0 0 .4rem; font-size: .8125rem; color: var(--muted); }
+.quick pre { margin: 0; padding: .8rem 1rem; background: var(--ink); color: var(--paper); border-radius: .75rem; overflow-x: auto; font-size: .75rem; line-height: 1.6; }
+.quick pre code { font-size: inherit; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1.75rem; margin: 0; }
 .button { display: inline-flex; align-items: center; min-height: 2.875rem; padding: .7rem 1.35rem; background: var(--ink); color: var(--paper); border-radius: 999px; text-decoration: none; font-size: .9375rem; }
 .button:hover { background: var(--night); }
@@ -92,7 +96,7 @@ h3 { font-size: 1.0625rem; font-weight: 600; letter-spacing: 0; }
 .steps { list-style: none; counter-reset: step; margin: 2.5rem 0 1.5rem; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
 .steps li { counter-increment: step; position: relative; background: var(--paper); border: 1px solid var(--line); border-radius: 1.25rem; padding: 1.4rem 1.6rem 1.5rem 4.25rem; }
 .steps li::before { content: counter(step); position: absolute; left: 1.5rem; top: 1.3rem; width: 1.75rem; height: 1.75rem; border-radius: 50%; background: var(--panel); display: grid; place-items: center; font-size: .875rem; }
-.steps p { margin: .5rem 0 0; color: var(--muted); font-size: .9375rem; max-width: 44rem; }
+.steps p { margin: .5rem 0 0; color: var(--muted); font-size: .9375rem; max-width: var(--measure); }
 .steps pre { margin: .9rem 0 0; padding: .9rem 1.1rem; background: var(--ink); color: var(--paper); border-radius: .75rem; overflow-x: auto; font-size: .8125rem; line-height: 1.6; }
 .steps pre code { font-size: inherit; }
 .note { font-size: .875rem; color: var(--muted); }
@@ -113,9 +117,9 @@ h3 { font-size: 1.0625rem; font-weight: 600; letter-spacing: 0; }
   body { font-size: .9375rem; }
   main > .hero { display: block; min-height: 0; }
   .hero-art { position: relative; display: block; }
-  .hero-art img { position: static; display: block; height: auto; aspect-ratio: 3 / 4; max-height: 78vh; }
+  .hero-art img { position: static; display: block; height: 15rem; object-fit: cover; object-position: 50% 20%; }
   .hero-art::after { content: ""; position: absolute; inset: auto 0 0; height: 35%; background: linear-gradient(to bottom, transparent, var(--mist)); }
-  .hero-copy { margin-top: -5rem; padding-top: 0; padding-bottom: 3rem; }
+  .hero-copy { margin-top: -2.5rem; padding-top: 0; padding-bottom: 2.5rem; }
   .swap { grid-template-columns: 1fr; }
   .swap > div, .swap > div + div { padding: 1.25rem 0 0; border-left: 0; }
   .steps li { padding: 1.25rem 1.25rem 1.4rem; }

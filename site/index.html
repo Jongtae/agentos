@@ -34,7 +34,8 @@
     <h1 id="hero-title"><span class="wordmark">Still</span><span class="tagline">Here with you.</span></h1>
     <p class="ko-line" lang="ko">조용히 곁에, 세심하게 함께.</p>
     <p class="lede">A personal AI that works through everyday things with you. Still is the first face of Personal AgentOS, an open-source assistant that lives on your own computer.</p>
-    <p class="actions"><a class="button" href="#install">Install in one line</a><a class="text-link" href="https://github.com/Jongtae/agentos">View on GitHub</a></p>
+    <div class="quick"><p class="quick-label">Install on Mac, Linux or Windows (WSL2)</p><pre><code>curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh</code></pre></div>
+    <p class="actions"><a class="button" href="#install">See the four steps</a><a class="text-link" href="https://github.com/Jongtae/agentos">View on GitHub</a></p>
   </div>
 </section>
 
@@ -108,28 +109,28 @@
 <section class="install" id="install" aria-labelledby="install-title">
   <div class="install-copy">
     <h2 id="install-title">Bring Still home tonight</h2>
-    <p>You need a Mac or a Linux machine and an AI subscription you already pay for: ChatGPT (through Codex) or Claude (through Claude Code). No API key, Homebrew, Python or Docker required.</p>
+    <p>You need a Mac, a Linux machine or Windows with WSL2, and an AI subscription you already pay for: ChatGPT (through Codex) or Claude (through Claude Code). No API key, Homebrew, Python or Docker required.</p>
   </div>
   <ol class="steps">
     <li>
       <h3>Install and start</h3>
       <pre><code>curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh</code></pre>
-      <p class="note">The URL pins the installer; <a href="https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh">read the script</a> before you run it. With Homebrew instead: <code>brew install jongtae/agentos/agentos</code>, then <code>agentos start</code>.</p>
+      <p class="note">The URL pins the installer; <a href="https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh">read the script</a> before you run it. With Homebrew instead: <code>brew install jongtae/agentos/agentos</code>, then <code>agentos start</code>. On Windows, run <code>wsl --install</code> in PowerShell, restart, open Ubuntu and run the command there.</p>
     </li>
     <li>
       <h3>Connect your AI</h3>
-      <p>Sign in to the official Codex CLI (<code>codex login</code>) or Claude Code with your subscription, then choose it on the page that opens at <code>127.0.0.1:8787</code>. AgentOS never asks for or stores that login. You can switch later; Still keeps what it knows.</p>
+      <p>For ChatGPT, sign in to the official Codex CLI (<code>codex login</code>); AgentOS never sees that login. For Claude, run <code>claude setup-token</code> and paste the token once; it stays in this computer’s credential store. Then choose it on the page that opens at <code>127.0.0.1:8787</code>. You can switch later; Still keeps what it knows.</p>
     </li>
     <li>
-      <h3>Meet Still on Telegram</h3>
-      <p>Add your own Telegram bot under Settings → External connections, or just chat in the browser. In @BotFather, <code>/setname</code> Still and <code>/setuserpic</code> with <a href="assets/still-avatar-default-1024.jpg" download>the default picture</a>. This changes the bot’s name and photo only; AgentOS’s own greeting does not change with it.</p>
+      <h3>Talk from your phone (optional)</h3>
+      <p>Create your own bot with @BotFather on Telegram (<code>/newbot</code>), paste its token under Settings → External connections, and open the pairing link. Or just chat in the browser.</p>
     </li>
     <li>
       <h3>Ask for something real</h3>
-      <p>“I need to finish a proposal this week. Help me break it into the next few steps.”</p>
+      <p>Say “Remember that I have a cat and live in a small studio.” Still tells you what it saved and how to undo it. Then ask “Find me a robot vacuum under $500 that would suit me.” The answer should use what you just told it.</p>
     </li>
   </ol>
-  <p class="note">Windows: run <code>wsl --install</code>, restart, open Ubuntu and run the first command there. Everything else is in the <a href="https://github.com/Jongtae/agentos/blob/main/docs/QUICKSTART.md">quick start guide</a>.</p>
+  <p class="note">Everything else is in the <a href="https://github.com/Jongtae/agentos/blob/main/docs/QUICKSTART.md">quick start guide</a>.</p>
 </section>
 
 <section class="github" aria-labelledby="github-title">

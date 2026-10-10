@@ -230,3 +230,26 @@ def claude_definitions(home, names):
         return {}
     return {name: dict(servers[name]) for name in names
             if valid_name(name) and name in servers and isinstance(servers[name], dict)}
+
+
+def available(home=None, codex_home=None):
+    """``{engine_id: [server name, ...]}`` the owner configured in each CLI (names only, read locally).
+
+    Claude Code: the user-scope ``mcpServers`` of ``~/.claude.json``.  Codex:
+    the ``mcp_servers`` tables of ``$CODEX_HOME/config.toml``.  Nothing else is read or kept.
+    """
+    import tomllib
+    home = Path(home or Path.home())
+    found = {'claude-code': [], 'codex': []}
+    try:
+        servers = json.loads((home / '.claude.json').read_text(encoding='utf-8')).get('mcpServers')
+        found['claude-code'] = sorted(name for name in (servers or {}) if valid_name(name))
+    except (OSError, ValueError, AttributeError):
+        pass
+    try:
+        profile = Path(codex_home or os.environ.get('CODEX_HOME') or home / '.codex')
+        servers = tomllib.loads((profile / 'config.toml').read_text(encoding='utf-8')).get('mcp_servers')
+        found['codex'] = sorted(name for name in (servers or {}) if valid_name(name))
+    except (OSError, ValueError, AttributeError):
+        pass
+    return {engine_id: names[:32] for engine_id, names in found.items()}

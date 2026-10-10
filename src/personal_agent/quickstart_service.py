@@ -75,6 +75,7 @@ from .conversation_handoff import (LOCAL_AUTHORITY_KIND, LOCAL_AUTHORITY_LABELS,
                                    local_authority_handoff, local_refusal_text, LOCAL_RESUME_TTL_SECONDS)
 from . import local_folder_picker
 from . import owner_mcp
+from . import trust_record
 # PRESENCE-TG-01 / #581: native Telegram presence (reaction, typing, draft, anchor).
 from .context_observations import ContextObservations, answerable_work, continuation_key, continuation_request
 from .current_context import CLOCK_KEYS, CurrentContext, KNOWN_SECRET_NAMES, redact_known_secrets, render as current_context_render
@@ -6960,6 +6961,23 @@ class AgentService:
     def ai_connections_enabled(self):
         return self.ai_connections_status()['enabled']
 
+    def owner_mcp_available(self):
+        """#1297: the MCP servers the owner configured in each CLI (names only)."""
+        return owner_mcp.available(codex_home=getattr(self.execution_adapter,'codex_home',None))
+
+    def apply_trust_setting(self, setting, value):
+        """#1297: apply one confirmed trust-record setting (``settings_orchestrator`` drafts only)."""
+        parts=value.split('|')
+        if setting=='servers':
+            return owner_mcp.set_confirmed(self.store,parts[0],[name for name in parts[1].split(',') if name])
+        if setting=='review':
+            return trust_record.set_operation(self.store,parts[0],parts[1],parts[2])
+        if setting=='money':
+            return trust_record.set_money(self.store,parts[0],parts[1]=='on')
+        if setting=='rung':
+            return trust_record.set_rung(self.store,parts[0],parts[1])
+        raise ValueError('검토된 설정을 확인하세요.')
+
     def set_ai_connections(self, body):
         """Switch the owner's AI connections on or off; never on a family instance."""
         enabled=(body or {}).get('enabled') if isinstance(body,dict) else None
@@ -6983,7 +7001,10 @@ class AgentService:
                 or (found[0]=='owner-mcp' and found[1] not in owner_mcp.all_confirmed(self.store))):
             return {'behavior':'deny','message':'AgentOS가 이 도구 사용을 허용하지 않았습니다. 실행하지 않았습니다.'}
         kind,service_name,operation=found
-        allow=operation in self.reviewed_connector_reads().get(service_name,frozenset())
+        # #1297: the owner's trust record decides; the seed list answers only what the owner never decided.
+        seed=self.reviewed_connector_reads().get(service_name,frozenset())
+        decided=trust_record.hand(self.store,service_name)['operations'].get(operation)
+        allow=trust_record.is_read(self.store,service_name,operation,seed)
         detail={'scope':'ai-connection','host_action':'connector_permission',
                 'evidence':{'service':service_name,'operation':operation,'kind':kind,'decision':'allow' if allow else 'deny'}}
         # A permission is not a read: the read is recorded only when the turn's own
@@ -6993,8 +7014,14 @@ class AgentService:
                        (job['id'],'connector_permission','allowed' if allow else 'denied',json.dumps(detail,ensure_ascii=False),time.time()))
         if allow:
             return {'behavior':'allow','updatedInput':arguments.get('input') if isinstance(arguments.get('input'),dict) else {}}
-        return {'behavior':'deny','message':(f'{service_name}의 {operation}은(는) AgentOS가 읽기 전용으로 검토한 동작이 아니라 막았습니다. '
-                                             '실행하지 않았습니다. 필요하면 소유자에게 직접 하도록 안내하세요.')}
+        if decided is not None:
+            return {'behavior':'deny','message':(f'{service_name}의 {operation}은(는) 소유자가 읽기가 아닌 동작({decided})으로 정해 두어 '
+                                                 '실행하지 않았습니다. 지금은 읽기 동작만 실행할 수 있어요.')}
+        # #1297: an operation the owner never decided is introduced to the owner, once (contract §6).
+        return {'behavior':'deny','message':(f'{service_name}의 {operation}은(는) 소유자가 아직 검토하지 않은 동작이라 실행하지 않았습니다. '
+                                             '소유자에게 이 동작이 무엇을 하는지(무엇을 읽거나 바꾸는지) 한두 문장으로 소개하고, 읽기만 한다면 '
+                                             f'settings_change로 ai_connections review "{service_name}|{operation}|read" 확인을 요청하세요. '
+                                             '무언가를 바꾸거나 보내는 동작이면 그렇게 말하고 소유자에게 직접 하도록 안내하세요.')}
 
     #: #1296: shown in the Work when a worker ran an AI-side call AgentOS never allowed.
     UNDECIDED_CALL_TEXT=('AI가 AgentOS의 확인 없이 연결된 서비스의 도구를 실행한 기록이 있어, '
@@ -7036,6 +7063,10 @@ class AgentService:
                                                                               'evidence':evidence,'error':self.UNDECIDED_CALL_TEXT},ensure_ascii=False),time.time()))
         if undecided:
             LOG.warning('undecided AI-side call observed job=%s count=%s',job_id,len(undecided))
+            # #1297: a failure lowers the hand's rung (contract §6: lowering is automatic and recorded).
+            for evidence in undecided[:5]:
+                try:trust_record.lower(self.store,evidence['service'],'undecided call observed')
+                except ValueError:pass
             for engine_id in owner_mcp.ENGINES:
                 if owner_mcp.confirmed(self.store,engine_id):owner_mcp.set_confirmed(self.store,engine_id,[])
         return undecided

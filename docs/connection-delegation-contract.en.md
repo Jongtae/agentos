@@ -222,11 +222,11 @@ These are observation windows, not completion criteria. No site, provider or cat
 | Public skills with a repository-root licence | merged | #1220 |
 | AI-side connection first, read-only, audited (Google) | open | #1197 |
 | AI-side connections generalised to all connectors, MCP servers and plugins | gap | successor of #1197 |
-| Per-call decision point for AI-side tools | merged for Claude Code and Codex: claude.ai connectors and owner-confirmed MCP servers (§4 observed decision points); operations allowed still come from the reviewed read list | #1197, #1296; owner decisions per operation #1297 |
+| Per-call decision point for AI-side tools | merged for Claude Code and Codex: claude.ai connectors and owner-confirmed MCP servers (§4 observed decision points); the owner's trust record decides each operation | #1197, #1296, #1297 |
 | AgentOS connecting to an MCP server itself | gap | none |
 | Conversational secret entry (elicitation URL mode) | gap | none |
-| Money-capable connection marking | gap | none |
-| Trust record and ladder | gap | none |
+| Money-capable connection marking | merged for AI-side connections (#1297); AgentOS-owned API slots follow in #1300 | #1297, #1300 |
+| Trust record and ladder | merged: per-connection operation classes, money-capable marking, rungs and history in owner state, changed by confirmed conversation drafts; the reviewed read list is only a seed for non-money connections | #1297 |
 | Owner-way slots beyond Memory facts | partial: map-directions preferred-service slot | #794 phase 3 for correction and forgetting |
 | Model-free change check before a watch's model call | gap | none |
 | Family A2A delegation | planned | #661 |

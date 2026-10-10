@@ -67,15 +67,17 @@ main > .hero { position: relative; max-width: none; padding: 0; display: grid; a
 
 /* Hero scene: plays over the artwork with no box, like the teaser film. */
 .stage { position: absolute; z-index: 1; right: clamp(1.25rem, 3vw, 3rem); bottom: 1.75rem; width: min(21rem, 26vw); }
-.thread { display: flex; flex-direction: column; gap: .45rem; }
-.thread p { margin: 0; max-width: 88%; padding: .5rem .85rem; border-radius: 1.05rem; font-size: .875rem; line-height: 1.42; }
-.thread .who { display: flex; align-items: center; gap: .4rem; font-size: .75rem; font-weight: 600; opacity: .75; margin-bottom: .1rem; }
-.thread .who i { font-style: normal; font-weight: 500; padding: 0 .45rem; border-radius: 999px; background: rgb(46 58 68 / .08); }
+.thread { display: flex; flex-direction: column; gap: .9rem; text-shadow: 0 0 14px rgb(243 238 233 / .95), 0 0 3px rgb(243 238 233 / .9); }
+.thread p { margin: 0; max-width: 92%; font-size: 1rem; line-height: 1.45; color: var(--ink); }
+.thread .who { display: flex; align-items: center; gap: .45rem; font-size: .75rem; font-weight: 600; letter-spacing: .02em; opacity: .7; margin-bottom: .15rem; }
+.thread .who i { font-style: normal; font-weight: 500; padding: 0 .45rem; border-radius: 999px; background: rgb(255 253 250 / .7); text-shadow: none; }
 .thread .who i.new { background: var(--rose); }
-.t-you { align-self: flex-end; background: rgb(232 199 198 / .84); border-bottom-right-radius: .3rem; }
-.t-still { align-self: flex-start; background: rgb(255 253 250 / .78); border-bottom-left-radius: .3rem; }
+.t-you { align-self: flex-end; text-align: right; }
+.t-you .who { justify-content: flex-end; }
+.t-still { align-self: flex-start; }
 .t-switch { align-self: stretch; max-width: none !important; padding: .2rem 0 !important; text-align: center; font-size: .75rem !important; color: var(--ink); }
-.t-switch span { display: inline-block; padding: .25rem .8rem; border-radius: 999px; background: rgb(255 253 250 / .6); }
+.t-switch span { display: inline-flex; align-items: center; gap: .6rem; }
+.t-switch span::before, .t-switch span::after { content: ""; width: 2.5rem; height: 1px; background: rgb(46 58 68 / .35); }
 
 @media (prefers-reduced-motion: no-preference) {
   .thread p { animation: 20s ease-in-out infinite both; }

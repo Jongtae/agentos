@@ -12,7 +12,8 @@ def test_static_site_has_required_bilingual_pages_and_navigation():
         assert 'lang="en"' in text
         assert 'lang="ko"' in text
         assert 'viewport' in text
-        assert 'assets/site.css' in text
+        # The homepage has its own stylesheet; the policy pages share site.css.
+        assert 'assets/home.css' in text if page == "index.html" else 'assets/site.css' in text
     home = (SITE / "index.html").read_text(encoding="utf-8")
     for page in PAGES[1:]:
         assert f'href="{page}"' in home

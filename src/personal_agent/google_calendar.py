@@ -61,6 +61,46 @@ class GoogleCalendarHTTPError(Exception):
         self.status = status
 
 
+#: #1273: at most this many attendees per event are read (Google's ``maxAttendees``).
+MAX_ATTENDEES = 50
+#: #1273: an event description is read up to this many characters, then marked truncated.
+MAX_DESCRIPTION_CHARS = 4000
+
+
+def _person(value) -> dict | None:
+    """One attendee or organizer as the AI reads it; a malformed entry is skipped, never the whole read."""
+    if not isinstance(value, dict):
+        return None
+    person = {}
+    for source, target in (("email", "email"), ("displayName", "name"), ("responseStatus", "response")):
+        text = value.get(source)
+        if isinstance(text, str) and text:
+            person[target] = text[:320]
+    for flag in ("organizer", "self", "optional"):
+        if value.get(flag) is True:
+            person[flag] = True
+    return person if person.get("email") or person.get("name") else None
+
+
+def _people_and_notes(item: dict) -> dict:
+    """Attendees, organizer and description of one event (#1273); absent fields stay absent."""
+    out = {}
+    attendees = item.get("attendees")
+    if isinstance(attendees, list):
+        people = [person for person in (_person(value) for value in attendees[:MAX_ATTENDEES]) if person]
+        if people:
+            out["attendees"] = people
+    organizer = _person(item.get("organizer"))
+    if organizer:
+        out["organizer"] = organizer
+    description = item.get("description")
+    if isinstance(description, str) and description.strip():
+        out["description"] = description[:MAX_DESCRIPTION_CHARS]
+        if len(description) > MAX_DESCRIPTION_CHARS:
+            out["description_truncated"] = True
+    return out
+
+
 def _event_body(payload: dict, *, partial: bool = False) -> dict:
     body = {}
     for key in ("summary", "location", "description"):
@@ -198,7 +238,11 @@ class GoogleCalendar:
                 "singleEvents": "true",
                 "orderBy": "startTime",
                 "maxResults": max_results,
-                "fields": "items(id,etag,summary,start,end,location,status)",
+                # #1273: who is invited and what the event says are part of reading it (same read scope).
+                "maxAttendees": MAX_ATTENDEES,
+                "fields": "items(id,etag,summary,start,end,location,status,description,"
+                          "organizer(email,displayName,self),"
+                          "attendees(email,displayName,responseStatus,organizer,self,optional))",
             }
         )
         response = self._call(
@@ -248,6 +292,7 @@ class GoogleCalendar:
                     "end": end,
                     "location": optional["location"],
                     "status": optional["status"],
+                    **_people_and_notes(item),
                 }
             )
         return events

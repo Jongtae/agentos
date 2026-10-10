@@ -1,16 +1,13 @@
-/* Policy pages: same ledger palette and type as the homepage (home.css). */
-@font-face { font-family: "Newsreader"; src: url("fonts/newsreader-latin-wght-normal.woff2") format("woff2"); font-weight: 200 800; font-display: swap; }
-:root { color-scheme: light dark; --paper: #e6ece3; --sheet: #f4f7f1; --ink: #17201b; --muted: #56645b; --rule: #bccab9; --stamp: #a52a17; font: 400 1.125rem/1.6 "Newsreader", Georgia, serif; }
-@media (prefers-color-scheme: dark) { :root { --paper: #111813; --sheet: #18211b; --ink: #e3eadf; --muted: #9aa99e; --rule: #2f3d33; --stamp: #e8705a; } }
-body { margin: 0; color: var(--ink); background: var(--paper); }
+/* Policy pages: same Still tokens as the homepage (home.css), system fonts only. */
+:root { color-scheme: light; --mist: #f6f4f2; --paper: #fffdfa; --ink: #2e3a44; --muted: #62666b; --line: #e2dcd7; --panel: #efe7e3; font: 400 1rem/1.7 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", "Segoe UI", Roboto, sans-serif; }
+body { margin: 0; color: var(--ink); background: var(--mist); }
 header, main, footer { max-width: 44rem; margin: auto; padding: 1.25rem; }
-header { display: flex; gap: 1rem; justify-content: space-between; align-items: baseline; border-bottom: 1px solid var(--rule); }
-nav { display: flex; gap: .8rem; flex-wrap: wrap; }
-a { color: inherit; text-underline-offset: .18em; }
-a:hover { color: var(--stamp); }
-main { background: var(--sheet); border: 1px solid var(--rule); margin-block: 2rem; padding: 1.5rem 2rem 2rem; }
-h1 { font-size: clamp(2rem, 6vw, 3rem); line-height: 1.1; font-weight: 500; }
-h2 { margin-top: 2rem; font-weight: 500; }
-.notice { border-left: 3px solid var(--stamp); padding: .6rem 1rem; background: var(--paper); }
-.language { border-top: 1px solid var(--rule); margin-top: 2rem; padding-top: 1rem; font-family: "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; word-break: keep-all; }
-footer { color: var(--muted); font-size: 1rem; }
+header { display: flex; gap: 1rem; justify-content: space-between; align-items: baseline; border-bottom: 1px solid var(--line); font-size: .9375rem; }
+nav { display: flex; gap: .9rem; flex-wrap: wrap; }
+a { color: inherit; text-underline-offset: .2em; }
+main { background: var(--paper); border: 1px solid var(--line); border-radius: 1.25rem; margin-block: 2rem; padding: 1.75rem 2rem 2rem; }
+h1 { font-size: clamp(2rem, 6vw, 2.75rem); line-height: 1.15; font-weight: 300; }
+h2 { margin-top: 2rem; font-size: 1.125rem; font-weight: 600; }
+.notice { border-radius: .75rem; padding: .8rem 1rem; background: var(--panel); }
+.language { border-top: 1px solid var(--line); margin-top: 2rem; padding-top: 1rem; word-break: keep-all; }
+footer { color: var(--muted); font-size: .875rem; }

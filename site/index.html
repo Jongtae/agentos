@@ -3,156 +3,149 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Personal AgentOS — the brain can be borrowed, the assistant stays yours</title>
-<meta name="description" content="An open-source personal agent you install on your own machine. Swap the AI underneath; keep its memory, open work, permissions and the record of what ran.">
-<meta property="og:title" content="Personal AgentOS">
-<meta property="og:description" content="The brain can be borrowed. The assistant should remain yours.">
+<title>Still · Personal AgentOS — here with you</title>
+<meta name="description" content="Still is the first face of Personal AgentOS: an open-source personal AI that lives on your own computer, works through everyday things with you, and stays the same when you change the AI behind it.">
+<meta property="og:title" content="Still · Personal AgentOS">
+<meta property="og:description" content="Here with you. An open-source personal AI on your own computer.">
 <meta property="og:image" content="https://jongtae.github.io/agentos/assets/social-preview.png">
-<meta name="color-scheme" content="light dark">
-<link rel="preload" href="assets/fonts/newsreader-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<meta name="theme-color" content="#f6f4f2">
+<link rel="alternate" hreflang="ko" href="ko.html">
 <link rel="stylesheet" href="assets/home.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<header class="masthead">
-  <a class="wordmark" href="./">Personal AgentOS</a>
+<header class="bar">
+  <a class="crumb" href="./">Personal AgentOS <span>/</span> Still</a>
   <nav aria-label="Site">
-    <a href="#start">Install</a>
-    <a href="https://github.com/Jongtae/agentos/blob/main/docs/product-status.en.md">Status</a>
+    <a href="#concept">Concept</a>
+    <a href="#install">Install</a>
     <a href="https://github.com/Jongtae/agentos">GitHub</a>
+    <a href="ko.html" hreflang="ko" lang="ko">한국어</a>
   </nav>
 </header>
 
 <main id="main">
 <section class="hero" aria-labelledby="hero-title">
-  <div class="thesis">
-    <h1 id="hero-title">The brain can be borrowed. The assistant should remain yours.</h1>
-    <p class="lede">Personal AgentOS is an open-source environment you install on your own machine. One personal agent keeps your memory, your unfinished work, the permissions you gave it and a record of what actually ran. The AI doing the work can change.</p>
-    <p class="actions"><a class="button" href="#start">Install on macOS or Linux</a> <a class="quiet" href="https://github.com/Jongtae/agentos">Read the source</a></p>
+  <picture class="hero-art">
+    <source media="(max-width: 720px)" srcset="assets/still-hero-mobile.jpg" width="1080" height="1440">
+    <img src="assets/still-hero-desktop.jpg" alt="" width="2400" height="1350" fetchpriority="high">
+  </picture>
+  <div class="hero-copy">
+    <h1 id="hero-title"><span class="wordmark">Still</span><span class="tagline">Here with you.</span></h1>
+    <p class="ko-line" lang="ko">조용히 곁에, 세심하게 함께.</p>
+    <p class="lede">A personal AI that works through everyday things with you. Still is the first face of Personal AgentOS, an open-source assistant that lives on your own computer.</p>
+    <p class="actions"><a class="button" href="#install">Install in one line</a><a class="text-link" href="https://github.com/Jongtae/agentos">View on GitHub</a></p>
   </div>
+</section>
 
-  <figure class="log" aria-labelledby="log-caption">
-    <ol class="transcript">
-      <li class="note"><time datetime="2026-10-08T22:01">10:01 pm</time><p>Default AI changed to <b>Claude Code</b>. Work goes to Anthropic (Claude Code subscription).</p></li>
-      <li class="me"><time datetime="2026-10-08T22:01" aria-label="10:01 pm"></time><p>Did I end up adding the Spam yesterday, or taking it out?</p></li>
-      <li class="pa"><time datetime="2026-10-08T22:01" aria-label="10:01 pm"></time><p>I tried to check the cart directly, but this browser isn’t signed in to the store, so I can’t see what’s in it. I’ve asked for a sign-in window; once you sign in I’ll pick this up.</p></li>
-      <li class="pa"><time datetime="2026-10-08T22:06">10:06 pm</time><p>I checked the cart: one CJ Spam Classic 200&nbsp;g is in it. You didn’t take it out. Some steps I couldn’t check.</p></li>
-      <li class="seam"><time datetime="2026-10-08T22:07">10:07 pm</time><p><code>/ai codex</code> <span class="change">Claude Code → Codex</span></p><p class="mark">The engine changed here. The memory did not.</p></li>
-      <li class="me"><time datetime="2026-10-08T22:07" aria-label="10:07 pm"></time><p>Take the Spam out.</p></li>
-      <li class="pa"><time datetime="2026-10-08T22:08">10:08 pm</time><p>Removed one Spam Classic 200&nbsp;g from the cart. I checked again: the other 22 items are still there.</p></li>
+<section class="manner" aria-labelledby="manner-title">
+  <h2 id="manner-title">Thoughtful, warm, quiet but not passive.</h2>
+  <ul class="three">
+    <li>
+      <h3>Warmth comes from context.</h3>
+      <p>Still uses the preferences and situation you actually told it. It doesn’t perform feelings or praise you for no reason.</p>
+    </li>
+    <li>
+      <h3>Honesty shows in the result.</h3>
+      <p>It says done, checked or remembered only when that was verified, and it names what it doesn’t know or what failed.</p>
+    </li>
+    <li>
+      <h3>Usefulness is the next step.</h3>
+      <p>Instead of repeating status lines, it tells you what moved and what comes next. Quiet is not the same as passive.</p>
+    </li>
+  </ul>
+</section>
+
+<section class="talk" aria-labelledby="talk-title">
+  <div class="talk-copy">
+    <h2 id="talk-title">Say less. Still remembers what you said.</h2>
+    <p>You don’t write a long prompt with every detail. Still brings in what you have already told it, does the tedious part, and stops where your decision matters.</p>
+  </div>
+  <figure class="chat" aria-labelledby="chat-caption">
+    <ol>
+      <li class="from-still">Hi, I’m Still. What would you like a hand with today?</li>
+      <li class="from-you">A café to work from this afternoon.</li>
+      <li class="from-still">I’ll look at the mood, and also whether you can sit and work for a few hours. You said that matters to you. Here are three nearby.</li>
+      <li class="from-you">Out of coffee, by the way.</li>
+      <li class="from-still">Your usual beans are in the cart. Nothing is paid until you say so.</li>
     </ol>
-    <figcaption id="log-caption">A real session on Telegram, 8 October 2026, translated from Korean and shortened. <a href="https://github.com/Jongtae/agentos/blob/main/docs/assets/readme/ai-switch/ai-switch-conversation.png">See the original screenshots</a>.</figcaption>
+    <figcaption id="chat-caption">An example conversation, not a recording. It shows the intended manner; it is not a claim that every step works today.</figcaption>
   </figure>
 </section>
 
-<section class="ledger" aria-labelledby="ledger-title">
-  <h2 id="ledger-title">What can change, and what stays with you</h2>
-  <div class="columns">
-    <div class="changes">
-      <h3>Can change</h3>
+<section class="concept" id="concept" aria-labelledby="concept-title">
+  <div class="concept-copy">
+    <h2 id="concept-title">The brain can be borrowed. Still stays yours.</h2>
+    <p>Tony Stark owned the technology behind J.A.R.V.I.S. Most of us will borrow our assistant’s brain from a provider whose models, prices and rules keep changing. Personal AgentOS keeps the assistant on your side, on your machine, and lets the AI underneath be replaced.</p>
+  </div>
+  <div class="swap">
+    <div>
+      <h3>Changes when you want</h3>
       <ul>
         <li>The model and its provider</li>
-        <li>The CLI agent or API doing the work</li>
+        <li>Codex, Claude Code, an API key or a local model</li>
         <li>Tools and connectors</li>
       </ul>
     </div>
     <div class="stays">
-      <h3>Stays with you</h3>
+      <h3>Stays with Still</h3>
       <ul>
-        <li>Memory and context about you</li>
-        <li>Open work and its next step</li>
-        <li>Permissions and approvals</li>
-        <li>The record of what actually ran</li>
+        <li>What it knows about you</li>
+        <li>Unfinished work and its next step</li>
+        <li>The permissions you gave it</li>
+        <li>A record of what actually ran</li>
       </ul>
     </div>
   </div>
-  <p class="coda">When a better AI appears, you switch the worker, not the agent.</p>
-</section>
-
-<section class="engines" aria-labelledby="engines-title">
-  <h2 id="engines-title">Bring the AI you already pay for</h2>
-  <div class="flow" role="img" aria-label="Diagram: Telegram, the local browser page and the folders you connect lead into AgentOS on your machine, which holds memory, open work, permissions and the record of what ran. AgentOS hands each request to one swappable AI: Codex, Claude Code, an OpenAI or Anthropic API key, an OpenAI-compatible endpoint or a local Ollama model.">
-    <div class="machine">
-      <ul class="inputs">
-        <li>Telegram</li>
-        <li>Local browser page</li>
-        <li>Folders you connect</li>
-      </ul>
-      <div class="core">
-        <p class="core-name">Personal AgentOS</p>
-        <ul><li>memory</li><li>open work</li><li>permissions</li><li>record of what ran</li></ul>
-      </div>
-      <p class="bracket">On your Mac or Linux machine</p>
-    </div>
-    <div class="workers">
-      <p class="workers-name">One AI per request, swappable</p>
-      <ul>
-        <li>Codex subscription</li>
-        <li>Claude Code subscription</li>
-        <li>OpenAI or Anthropic API key</li>
-        <li>OpenAI-compatible endpoint</li>
-        <li>Local Ollama model</li>
-      </ul>
-    </div>
-  </div>
-  <p class="aside">For each request a judgment model picks the worker, writes the brief, checks the result and hands the work back when it falls short. Local-first is not local-only: with a hosted model, the context used for a request goes to that provider.</p>
-</section>
-
-<section class="where" aria-labelledby="where-title">
-  <div class="where-text">
-    <h2 id="where-title">Where you already talk</h2>
-    <p>Message it on Telegram from your phone, or open the local page in your browser on macOS or Linux. Windows works through WSL2, with current limitations.</p>
-    <p>It plans the route to a dinner, adds one small item to a cart and stops before payment, and tells you which step it could not check.</p>
-  </div>
-  <figure class="demo">
-    <img src="assets/demo.gif" width="240" height="438" loading="lazy" alt="Demo: Korean Telegram conversations with the agent. It plans the route and a restaurant for a dinner meeting, adds one small item to a shopping cart and stops before payment, and says which discount step it could not check. Personal details are blurred.">
-    <figcaption>Recorded on Telegram with English subtitles. Waiting time cut, personal details blurred.</figcaption>
-  </figure>
-</section>
-
-<section class="limits" aria-labelledby="limits-title">
-  <h2 id="limits-title">Boundaries it keeps</h2>
-  <ul>
-    <li><b>Only what you connect.</b> Access starts with the folders, accounts and tools you connect. A connected folder is read-only unless you say otherwise.</li>
-    <li><b>Payment needs you, every time.</b> Adding to a cart and paying are different actions. Each payment waits for your approval.</li>
-    <li><b>Secrets stay out.</b> Passwords and tokens never go into a model prompt, a log or the evidence record.</li>
-    <li><b>Told, not hidden.</b> When the AI saves something to memory it says so and offers an exact undo. Each task records which of your information it used and where it went.</li>
+  <p class="proof">From a real session: the owner switched from Claude Code to Codex in the middle of a shopping task, and Codex finished the next request in the same cart without being told anything again. <a href="https://github.com/Jongtae/agentos/blob/main/docs/assets/readme/ai-switch/ai-switch-conversation.png">See the screenshots</a></p>
+  <ul class="limits" aria-label="Boundaries">
+    <li><b>Only what you connect.</b> Folders, accounts and tools you choose; a connected folder is read-only unless you say otherwise.</li>
+    <li><b>Payment waits for you.</b> Adding to a cart and paying are different actions, and every payment needs your approval.</li>
+    <li><b>Secrets stay out.</b> Passwords and tokens never go into a model prompt, a log or the record of what ran.</li>
   </ul>
 </section>
 
-<section class="start" id="start" aria-labelledby="start-title">
-  <h2 id="start-title">Start</h2>
-  <p>On macOS or Linux, one command installs and starts AgentOS. No Homebrew, Python or Docker needed.</p>
-  <pre><code>curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh</code></pre>
-  <p class="small">The URL pins the installer itself. <a href="https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh">Read the pinned script</a> before you run it.</p>
-  <p>Or with Homebrew:</p>
-  <pre><code>brew install jongtae/agentos/agentos
-agentos start</code></pre>
+<section class="install" id="install" aria-labelledby="install-title">
+  <div class="install-copy">
+    <h2 id="install-title">Bring Still home tonight</h2>
+    <p>You need a Mac or a Linux machine and an AI you already use: a Codex or Claude Code subscription, an OpenAI or Anthropic API key, or a local Ollama model. No Homebrew, Python or Docker required.</p>
+  </div>
   <ol class="steps">
-    <li>AgentOS opens at <code>127.0.0.1:8787</code> in your browser.</li>
-    <li>Connect your AI: a subscription, an API key or a local model.</li>
-    <li>Optionally pair your own Telegram bot.</li>
-    <li>Ask: “I need to finish a proposal this week. Help me break it into the next few steps.”</li>
+    <li>
+      <h3>Install and start</h3>
+      <pre><code>curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh</code></pre>
+      <p class="note">The URL pins the installer; <a href="https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh">read the script</a> before you run it. With Homebrew instead: <code>brew install jongtae/agentos/agentos</code>, then <code>agentos start</code>.</p>
+    </li>
+    <li>
+      <h3>Connect your AI</h3>
+      <p>AgentOS opens at <code>127.0.0.1:8787</code>. Pick the subscription, key or local model Still should think with. You can switch later; Still keeps what it knows.</p>
+    </li>
+    <li>
+      <h3>Meet Still on Telegram</h3>
+      <p>Add your own Telegram bot under Settings → External connections, or just chat in the browser. In @BotFather, <code>/setname</code> Still and <code>/setuserpic</code> with <a href="assets/still-avatar-default-1024.jpg" download>the default picture</a>. This changes the bot’s name and photo only; AgentOS’s own greeting does not change with it.</p>
+    </li>
+    <li>
+      <h3>Ask for something real</h3>
+      <p>“I need to finish a proposal this week. Help me break it into the next few steps.”</p>
+    </li>
   </ol>
-  <p class="small">Windows: run <code>wsl --install</code>, restart, open Ubuntu and run the first command there. Details in the <a href="https://github.com/Jongtae/agentos/blob/main/docs/QUICKSTART.md">quick start guide</a>.</p>
+  <p class="note">Windows: run <code>wsl --install</code>, restart, open Ubuntu and run the first command there. Everything else is in the <a href="https://github.com/Jongtae/agentos/blob/main/docs/QUICKSTART.md">quick start guide</a>.</p>
 </section>
 
-<section class="status" aria-labelledby="status-title">
-  <h2 id="status-title">Where it stands</h2>
-  <p class="stamp" aria-hidden="true">v1.3.0<small>10 Oct 2026</small></p>
-  <p>Both installers install <b>v1.3.0</b> (10 October 2026). The demo and the session above come from real use; they are not release-wide end-to-end validation. <a href="https://github.com/Jongtae/agentos/blob/main/docs/product-status.en.md">Product status</a> separates what ships, what is tested and what is still direction, and <a href="https://github.com/Jongtae/agentos/issues/758">known browser limitations</a> are listed in the open.</p>
-  <p>Tried it? <a href="https://github.com/Jongtae/agentos/issues/new?template=feedback.yml">Tell us what worked and what didn’t.</a></p>
+<section class="github" aria-labelledby="github-title">
+  <h2 id="github-title">Open source, built in the open.</h2>
+  <p>Personal AgentOS is AGPL-3.0 and developed on GitHub. Both installers install <b>v1.3.0</b> (10 October 2026). <a href="https://github.com/Jongtae/agentos/blob/main/docs/product-status.en.md">Product status</a> separates what ships, what is tested and what is still direction.</p>
+  <p class="actions"><a class="button" href="https://github.com/Jongtae/agentos">Star it on GitHub</a><a class="text-link" href="https://github.com/Jongtae/agentos/issues/new?template=feedback.yml">Tell us what worked</a></p>
 </section>
 
-<section class="ko" lang="ko" aria-labelledby="ko-title">
+<section class="ko-summary" lang="ko" aria-labelledby="ko-title">
   <h2 id="ko-title">한국어</h2>
-  <p>Personal AgentOS는 내 컴퓨터에 설치하는 오픈소스 개인 에이전트 환경입니다. 기억, 하던 일, 맡긴 권한, 실제로 실행된 기록은 내 쪽에 남고, 일을 하는 AI는 바꿀 수 있습니다. Codex·Claude Code 구독, API 키, 로컬 모델 중 하나를 연결해 Telegram이나 브라우저에서 대화합니다. 결제는 매번 승인이 필요하고, 비밀번호와 토큰은 모델 프롬프트·로그·기록에 들어가지 않습니다.</p>
-  <p><a href="https://github.com/Jongtae/agentos/blob/main/docs/i18n/README.ko.md">한국어 README 읽기</a></p>
+  <p>Still은 Personal AgentOS의 첫 모습입니다. 내 컴퓨터에서 사는 오픈소스 개인 AI로, 뒤에서 생각하는 AI를 바꿔도 같은 비서로 남습니다. <a href="ko.html">한국어 페이지로 보기</a></p>
 </section>
 </main>
 
-<footer class="colophon">
-  <p>Personal AgentOS is licensed under <a href="https://github.com/Jongtae/agentos/blob/main/LICENSE">AGPL-3.0-only</a>. This site is information only. It has no login and no analytics, and it is not an OAuth callback, token broker or Drive proxy.</p>
+<footer class="foot">
+  <p>Personal AgentOS is licensed under <a href="https://github.com/Jongtae/agentos/blob/main/LICENSE">AGPL-3.0-only</a>. Still’s image is generated artwork, not a real person. This site is information only. It has no login and no analytics, and it is not an OAuth callback, token broker or Drive proxy.</p>
   <nav aria-label="Footer"><a href="https://github.com/Jongtae/agentos">GitHub</a><a href="install.html">Connections</a><a href="privacy.html">Privacy</a><a href="terms.html">Terms</a></nav>
 </footer>
 </body>

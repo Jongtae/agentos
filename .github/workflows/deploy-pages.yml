@@ -17,8 +17,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v6
-      # The demo GIF lives once, with the README assets; copy it in rather than committing a duplicate.
-      - run: cp docs/assets/readme/demo/demo-v2.en.gif site/assets/demo.gif
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

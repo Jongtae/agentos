@@ -163,6 +163,19 @@ class EarlyPlan(unittest.TestCase):
         self.orchestration(asked)[0].first(early=broken)
         self.assertEqual(asked, ['요청'])
 
+    def test_a_miss_names_the_inputs_that_changed(self):
+        """#1293: an unused early plan says which input moved (names only), never a value."""
+        asked = []
+        early = self.orchestration(asked, request='처음 메시지')[0].early_plan()
+        orchestration, events = self.orchestration(asked, request='다시 쓴 메시지')
+        orchestration.first(early=self.future(early))
+        self.assertEqual(events[0][1]['early_missed'], ['owner_request'])
+        self.assertNotIn('다시 쓴', json.dumps(events[0][1]['early_missed'], ensure_ascii=False))
+        same = self.orchestration(asked)[0].early_plan()
+        orchestration, events = self.orchestration(asked)
+        orchestration.first(early=self.future(same))
+        self.assertNotIn('early_missed', events[0][1])
+
     def test_the_budget_is_checked_where_the_plan_was_asked_before(self):
         asked = []
         early = self.orchestration(asked)[0].early_plan()
@@ -1403,6 +1416,54 @@ class RetryReadIsNotAnEffect(Harness):
         self.assertIn('- browser_click', note)
         self.assertNotIn('browser_open', note)
         self.assertIsNone(self.service.retry_effect_note(self.failed_work(('browser_open', 'browser_open', 'navigate'))))
+
+
+class PlanAsksLocation(unittest.TestCase):
+    """#1293: the first plan may ask the owner's position only when the Work can ask it."""
+
+    def orchestration(self, answer, can_ask_location):
+        asked = []
+
+        def structured(context, question, schema):
+            asked.append((question, schema))
+            return decided(answer)
+        events = []
+        orchestration = Orchestration(ConversationJudgments(FixtureDecisionEngine(structured=structured)),
+                                      OrchestrationUnit.catalogue(self), request='갈 만한 곳 찾아줘',
+                                      record=lambda status, detail: events.append((status, detail)),
+                                      can_ask_location=can_ask_location)
+        return orchestration, asked, events
+
+    def test_offered_only_to_a_work_that_can_ask_and_carried_on_the_first_attempt(self):
+        answer = {**plan('b', ''), 'ask_location': '  지금 어디 계세요?\n가까운 곳으로 볼게요. ',
+                  'location_button': '현재 위치 보내기'}
+        orchestration, asked, events = self.orchestration(answer, True)
+        attempt = orchestration.first()
+        question, schema = asked[0]
+        self.assertIn('ask_location', question)
+        self.assertEqual(schema['required'][-2:], ['ask_location', 'location_button'])
+        self.assertEqual((attempt.ask_location, attempt.location_button),
+                         ('지금 어디 계세요? 가까운 곳으로 볼게요.', '현재 위치 보내기'))
+        self.assertTrue(events[0][1]['ask_location'])
+        # A re-plan never asks: its question and schema do not offer it.
+        self.assertFalse(orchestration.can_ask_location)
+        self.assertNotIn('ask_location', orchestration._schema(orchestration.catalogue.available())['properties'])
+
+        orchestration, asked, events = self.orchestration(answer, False)
+        attempt = orchestration.first()
+        question, schema = asked[0]
+        self.assertNotIn('ask_location', question)
+        self.assertNotIn('ask_location', schema['properties'])
+        self.assertEqual((attempt.ask_location, attempt.location_button), ('', ''))
+        self.assertNotIn('ask_location', events[0][1])
+
+    def test_an_empty_question_drops_the_label_and_a_non_string_is_refused(self):
+        orchestration, _asked, _events = self.orchestration({**plan('b', ''), 'ask_location': '',
+                                                             'location_button': 'Share'}, True)
+        self.assertEqual((orchestration.first().location_button), '')
+        orchestration, _asked, _events = self.orchestration({**plan('b', ''), 'ask_location': True,
+                                                             'location_button': ''}, True)
+        self.assertEqual(orchestration.first().fallback, 'plan_invalid')
 
 
 class OrchestrationUnit(unittest.TestCase):

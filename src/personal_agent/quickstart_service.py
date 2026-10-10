@@ -2830,6 +2830,42 @@ class AgentService:
             return True,'이전 요청을 취소했습니다. 위치를 보내도 이어서 처리하지 않습니다.'
         return False,'이전 요청은 이미 실행 중이거나 끝난 상태라 여기서 취소하지 않았습니다.'
 
+    def plan_asked_location(self, job, attempt, claimed_at):
+        """Ask for the owner's current position the plan judged missing, and end this Work (#1293).
+
+        The same ``ask_location`` the worker has (#774), sent before any worker
+        starts: the owner's answer queues the continuation that runs the request
+        with the position (``continue_located_work``), so a worker run now could
+        only ask the same question.  The question is this Work's reply, already
+        in the chat, so nothing more is delivered.  False when it could not be
+        asked; the planned worker then runs as before and keeps the tool.
+        """
+        ask=self.location_requester(job)
+        if ask is None:
+            return False
+        try:
+            ask(attempt.ask_location,attempt.location_button or None)
+        except ToolError as exc:
+            LOG.info('plan location request not sent job=%s code=%s',job['id'],getattr(exc,'code',None))
+            return False
+        question=self._redact_known_secrets(attempt.ask_location)
+        with self.store.db() as db:
+            db.execute('INSERT INTO tool_events(job_id,tool,status,detail,created) VALUES (?,?,?,?,?)',
+                       (job['id'],'ask_location','succeeded',
+                        json.dumps({'scope':'orchestrator','evidence':{'requested':True,'channel':'telegram'}}),time.time()))
+            db.execute('INSERT INTO messages(role,content,channel,created,workspace_id,job_id) VALUES (?,?,?,?,?,?)',
+                       ('assistant',question,job['channel'],time.time(),job.get('workspace_id'),job['id']))
+            db.execute("UPDATE jobs SET status='succeeded',response=?,error=NULL,provider='builtin',model='orchestration',"
+                       "delivery='none' WHERE id=?",(question,job['id']))
+            self.record_stage(job['id'],'finished',claimed_at,db=db,
+                              total_ms=int((time.time()-(job.get('created') or claimed_at))*1000))
+        self.update_task_card(job,'succeeded')
+        # The owner's answer is awaited: 👀 is cleared as for any reply awaiting the owner (#835).
+        with self.lock:
+            self._present_outcome(self.store.job(job['id']) or job,delivered=True,blocked=False,awaiting_owner=True)
+            self.presence.pop(job['id'],None)
+        return True
+
     def complete_continuity_turn(self, job, response):
         # AgentOS-authored continuity text read from no private store (#605).
         self.record_work_sources(job['id'],{OWNER_CONVERSATION})
@@ -4432,7 +4468,7 @@ class AgentService:
             LOG.info('continued exchange unavailable job=%s',job.get('id'))
             return ''
 
-    def work_orchestration(self, job, request, rows, sections, budget, document_jobs=()):
+    def work_orchestration(self, job, request, rows, sections, budget, document_jobs=(), can_ask_location=False):
         """The ``Orchestration`` of one Work, or None when no default Main AI exists.
 
         The catalogue is read from stored configuration only; a failure to
@@ -4456,7 +4492,8 @@ class AgentService:
         return Orchestration(self.decision_judge,catalogue,request=request,conversation=conversation,
                              continues=self.continued_exchange(job),
                              sections={**sections,'history':len(earlier)},budget=budget,record=event,state=state,
-                             work_id=job['id'],qualifying=self.decision_routes.qualifying)
+                             work_id=job['id'],qualifying=self.decision_routes.qualifying,
+                             can_ask_location=can_ask_location)
 
     def early_work_plan(self, job, prompt):
         """#1261: the Work's first plan call, asked while routing runs, over the inputs the
@@ -4468,7 +4505,8 @@ class AgentService:
         sections={'profile':self.owner_profile_snapshot(),'current_context':self.current_context_text(job),
                   'prepared':self.prepared_text(job)}
         orchestration=self.work_orchestration(job,prompt,list(stored),sections,
-                                              WorkBudget(stop=lambda:self.work_stopped(job['id'])),document_jobs=document_jobs)
+                                              WorkBudget(stop=lambda:self.work_stopped(job['id'])),document_jobs=document_jobs,
+                                              can_ask_location=self.location_requester(job) is not None)
         return orchestration.early_plan() if orchestration else None
 
     def cli_shortfall(self, job_id, since, request, evaluation):
@@ -9418,10 +9456,15 @@ class AgentService:
                     base_history,base_rows,base_config,base_key=history,history_rows,config,key
                     # #826: material spliced into this turn (documents, Drive, the context inbox,
                     # notes) no longer pins the worker; the plan may choose any available worker.
-                    orchestration=self.work_orchestration(job,prompt,base_rows,section_values,work_budget,document_jobs=document_jobs)
+                    # #1293: the first plan may ask for the owner's position itself; a location
+                    # continuation already carries one and never asks again.
+                    orchestration=self.work_orchestration(job,prompt,base_rows,section_values,work_budget,document_jobs=document_jobs,
+                                                          can_ask_location=not continued and self.location_requester(job) is not None)
                     early_plan,self._early_plan=getattr(self,'_early_plan',None),None
                     attempt=orchestration.first(early=early_plan) if orchestration else None
                     if not orchestration:self.settle_early_judgment(early_plan)
+                    if attempt is not None and attempt.ask_location and self.plan_asked_location(job,attempt,claimed_at):
+                        return True
                     while True:
                         config,key,subscription,attempt_test=self.attempt_route(orchestration,attempt,base_config,base_key,route_snapshot)
                         brief=attempt.brief(adjusted=attempt.number>1) if attempt is not None else None

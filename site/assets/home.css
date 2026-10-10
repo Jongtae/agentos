@@ -43,18 +43,18 @@ b { font-weight: 600; }
 .bar nav a:hover { color: var(--ink); }
 
 /* Hero: name and warmth first. Text on the left, the presence on the right. */
-main > .hero { position: relative; max-width: none; padding: 0; display: grid; align-items: center; overflow: hidden; min-height: min(90svh, 54rem); background: var(--mist); }
+main > .hero { position: relative; max-width: none; padding: 0; display: grid; align-items: center; overflow: hidden; min-height: 0; background: var(--mist); }
 
-.hero-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 72% 35%; }
-.hero-copy { position: relative; width: 100%; padding: 7.5rem clamp(1.25rem, 7vw, 7.5rem) 4rem; }
+.hero-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 68% 22%; }
+.hero-copy { position: relative; width: 100%; padding: 8rem clamp(1.25rem, 7vw, 7.5rem) 3.25rem; }
 .hero-copy > * { max-width: 40rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .lockup { display: flex; flex-direction: column; align-items: flex-start; gap: clamp(1rem, 1.6vw, 1.6rem); margin: 0; color: var(--ink); }
 .lockup svg { display: block; height: auto; }
-.wm-still { width: clamp(11rem, 15vw, 15.5rem); }
-.wm-here { width: clamp(15rem, 21.5vw, 22rem); }
-.ko-line { margin: 2.25rem 0 0; font-size: clamp(1.25rem, 1.8vw, 1.5rem); font-weight: 400; }
-.lede { margin: 1.5rem 0 2rem; color: var(--ink); opacity: .85; font-size: 1.0625rem; }
+.wm-still { width: clamp(9.5rem, 12.5vw, 13rem); }
+.wm-here { width: clamp(13rem, 18vw, 18.5rem); }
+.ko-line { margin: 1.6rem 0 0; font-size: clamp(1.1875rem, 1.6vw, 1.375rem); font-weight: 400; }
+.lede { margin: 1rem 0 1.5rem; color: var(--ink); opacity: .85; font-size: 1rem; }
 .quick-line { margin: 0 0 1rem; font-size: .9375rem; color: var(--ink); opacity: .8; }
 .quick-label { margin: 0 0 .6rem; font-size: .9375rem; color: var(--ink); opacity: .85; }
 .quick pre { margin: 0; padding: .85rem 1.15rem; background: var(--ink); color: var(--paper); border-radius: .7rem; font: 400 .9375rem/1.6 var(--sans); letter-spacing: .01em; white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
@@ -66,9 +66,9 @@ main > .hero { position: relative; max-width: none; padding: 0; display: grid; a
 .arrow { font-size: 1.1em; line-height: 1; }
 
 /* Hero scene: plays over the artwork with no box, like the teaser film. */
-.stage { position: relative; width: 100%; max-width: 30rem; justify-self: end; }
-.thread { display: flex; flex-direction: column; gap: .55rem; }
-.thread p { margin: 0; max-width: 86%; padding: .6rem .9rem; border-radius: 1.1rem; font-size: .9375rem; line-height: 1.45; }
+.stage { position: absolute; z-index: 1; right: clamp(1.25rem, 3vw, 3rem); bottom: 1.75rem; width: min(21rem, 26vw); }
+.thread { display: flex; flex-direction: column; gap: .45rem; }
+.thread p { margin: 0; max-width: 88%; padding: .5rem .85rem; border-radius: 1.05rem; font-size: .875rem; line-height: 1.42; }
 .thread .who { display: flex; align-items: center; gap: .4rem; font-size: .75rem; font-weight: 600; opacity: .75; margin-bottom: .1rem; }
 .thread .who i { font-style: normal; font-weight: 500; padding: 0 .45rem; border-radius: 999px; background: rgb(46 58 68 / .08); }
 .thread .who i.new { background: var(--rose); }
@@ -79,11 +79,11 @@ main > .hero { position: relative; max-width: none; padding: 0; display: grid; a
 
 @media (prefers-reduced-motion: no-preference) {
   .thread p { animation: 20s ease-in-out infinite both; }
-  .t1 { animation-name: say-1; }
-  .t2 { animation-name: say-2; }
-  .t3 { animation-name: say-3; }
-  .t4 { animation-name: say-4; }
-  .t5 { animation-name: say-5; }
+  .thread .t1 { animation-name: say-1; }
+  .thread .t2 { animation-name: say-2; }
+  .thread .t3 { animation-name: say-3; }
+  .thread .t4 { animation-name: say-4; }
+  .thread .t5 { animation-name: say-5; }
 }
 @keyframes say-1 { 0%, 3% { opacity: 0; transform: translateY(8px); } 7%, 90% { opacity: 1; transform: none; } 96%, 100% { opacity: 0; } }
 @keyframes say-2 { 0%, 13% { opacity: 0; filter: blur(6px); transform: translateY(8px); } 19%, 90% { opacity: 1; filter: blur(0); transform: none; } 96%, 100% { opacity: 0; } }
@@ -151,8 +151,10 @@ h3 { font-size: 1.0625rem; font-weight: 600; letter-spacing: 0; }
 .foot p { margin: 0; max-width: 28rem; }
 .foot nav { display: flex; gap: 1.25rem; }
 
+@media (max-width: 1000px) {
+  .stage { position: relative; right: auto; bottom: auto; width: auto; max-width: 26rem; margin: 0 clamp(1.25rem, 7vw, 7.5rem) 3rem; }
+}
 @media (max-width: 900px) {
-  .stage { justify-self: start; }
   .three, .limits { grid-template-columns: 1fr; }
   .talk { grid-template-columns: 1fr; }
 }

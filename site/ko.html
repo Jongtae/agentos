@@ -11,7 +11,7 @@
 <meta name="theme-color" content="#f6f4f2">
 <link rel="alternate" hreflang="en" href="./">
 <link rel="preload" href="assets/fonts/figtree-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="assets/home.css?v=m4">
+<link rel="stylesheet" href="assets/home.css?v=m8">
 </head>
 <body>
 <a class="skip" href="#main">본문으로 건너뛰기</a>
@@ -158,11 +158,13 @@ c100 -43 182 -106 232 -178 35 -50 106 -236 106 -276 0 -46 -2 -46 -539 -42
     <div class="quick"><p class="quick-label">Mac, Linux, Windows(WSL2)에서 설치</p><pre><code>curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh</code></pre></div>
     <p class="actions"><a class="button" href="#install">설치 4단계 보기<span class="arrow" aria-hidden="true">→</span></a><a class="text-link" href="https://github.com/Jongtae/agentos">GitHub에서 보기</a></p>
   </div>
-  <div class="stage" role="img" aria-label="뒤에서 생각하는 AI가 Claude Code에서 Codex로 바뀌어도 Still은 기억하는 것을 그대로 지닙니다. 커피는 오트밀크, 우유는 안 됨. 세 시간 넘는 비행은 통로석. 3월, 어머니께는 백합. 그리고 “커피 떨어졌어.”라고 하면 “늘 드시던 원두를 장바구니에 담았어요. 결제는 말씀하실 때까지 하지 않아요.”라고 답합니다.">
-    <p class="stage-engine" aria-hidden="true">생각하는 AI <span class="se-swap"><b class="se-a">Claude Code</b><b class="se-b">Codex</b></span></p>
-    <div class="stage-scenes" aria-hidden="true">
-      <div class="stage-mem"><p class="sm-label">Still이 기억하는 것</p><ul><li class="sm-1">커피는 오트밀크, 우유는 안 돼요.</li><li class="sm-2">세 시간 넘는 비행은 통로석.</li><li class="sm-3">3월, 어머니께는 백합.</li></ul></div>
-      <div class="stage-chat"><p class="sc-you"><span class="who">나</span>커피 떨어졌어.</p><p class="sc-still"><span class="who">Still</span>늘 드시던 원두를 장바구니에 담았어요. 결제는 말씀하실 때까지 하지 않아요.</p></div>
+  <div class="stage" role="img" aria-label="AI가 바뀌어도 이어지는 대화. 나: “지난번 원두 정말 좋았어. 기억해 둬.” Claude Code로 생각하는 Still: “기억했어요: 에티오피아 구지, 500g 홀빈. 언제든 되돌릴 수 있어요.” AI가 Claude Code에서 Codex로 바뀝니다. 나: “커피 떨어졌어.” Codex로 생각하는 Still: “지난번 그 에티오피아 구지 500g을 장바구니에 담았어요. 결제는 말씀하실 때까지 하지 않아요.”">
+    <div class="thread" aria-hidden="true">
+      <p class="t-you t1"><span class="who">나</span>지난번 원두 정말 좋았어. 기억해 둬.</p>
+      <p class="t-still t2"><span class="who">Still <i>Claude Code</i></span>기억했어요: 에티오피아 구지, 500g 홀빈. 언제든 되돌릴 수 있어요.</p>
+      <p class="t-switch t3"><span>AI 변경: Claude Code → Codex</span></p>
+      <p class="t-you t4"><span class="who">나</span>커피 떨어졌어.</p>
+      <p class="t-still t5"><span class="who">Still <i class="new">Codex</i></span>지난번 그 에티오피아 구지 500g을 장바구니에 담았어요. 결제는 말씀하실 때까지 하지 않아요.</p>
     </div>
   </div>
 </section>

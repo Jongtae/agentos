@@ -84,7 +84,7 @@ agentos start
 1. AgentOS opens at [http://127.0.0.1:8787](http://127.0.0.1:8787/) in your browser. The screens are in English by default; switch to Korean, Simplified Chinese or Japanese at the bottom left. Some fixed Telegram status/progress lines and certain connection validation errors are still Korean.
 2. Connect your AI subscription: ChatGPT through Codex (`codex login`) or Claude through Claude Code (`claude setup-token`). [Other connections](docs/QUICKSTART.md#other-model-connections).
 3. Pair Telegram: create a bot with @BotFather, add its token in **Settings → External connections**, and open the pairing link.
-4. Talk as usual: **“Cat hair everywhere; cleaning my small studio is a pain.”** Later just ask **“Find me a robot vacuum under $500.”** Still remembers the cat and the studio on its own.
+4. Ask for what you need: **“My cat has been off her food lately. What should I try?”** Days later just ask **“Find me a robot vacuum under $500.”** Still remembers the cat on its own.
 
 **Release status:** both installers install **v1.3.0** (2026-10-10), built from the tagged main commit. The demo and the everyday-use image come from real sessions and are not release-specific end-to-end validation; the architecture figure is product direction. The [release manifest](docs/release-manifest.json) records what each release covers, and [product status](docs/product-status.en.md) separates shipped behavior, test evidence and direction.
 

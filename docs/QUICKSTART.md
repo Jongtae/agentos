@@ -57,7 +57,7 @@ Things that differ from macOS:
 
 ## First task
 
-After connecting and testing your model, [pair your Telegram bot](#telegram), then talk in that Telegram chat as you normally would: “Cat hair everywhere; cleaning my small studio is a pain.” Without being asked, it keeps what matters and tells you what it kept, with an undo. Later, just ask: “Find me a robot vacuum under $500.” The answer should account for the cat and the studio without your repeating them. The browser is where you configure connections and inspect task records. For a model-free check after pairing, `/note Review the launch on Friday` followed by `/notes` saves and lists a note.
+After connecting and testing your model, [pair your Telegram bot](#telegram), then ask in that Telegram chat for something you actually need: “My cat has been off her food lately. What should I try?” While answering, it notes on its own that you have a cat and tells you so, with an undo. Days later, just ask: “Find me a robot vacuum under $500.” The answer should account for cat hair without your mentioning the cat again. The browser is where you configure connections and inspect task records. For a model-free check after pairing, `/note Review the launch on Friday` followed by `/notes` saves and lists a note.
 
 ## Recommended owner dogfood task
 

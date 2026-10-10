@@ -17,6 +17,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v6
+      # Copy the README's pinned installer and the newest published version into the site.
+      - run: python3 scripts/stamp_site_release.py site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

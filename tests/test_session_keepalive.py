@@ -1,6 +1,8 @@
 """SESSION-KEEP-01 (#990): a login window writes the jar only when cookies changed, and a site the
 owner signed in to through AgentOS is kept signed in by loading one of its pages, where it is held."""
 
+import base64
+import json
 import tempfile
 import threading
 import time
@@ -10,7 +12,8 @@ from pathlib import Path
 from personal_agent import browser_session as bs
 from personal_agent import family_share
 from personal_agent.agent_runtime import ToolError
-from personal_agent.browser_jar import JAR_NAME, CookieJar, MemoryKey
+from personal_agent.browser_jar import (JAR_NAME, CookieJar, MemoryKey, effective_expiry, latest_token_expiry,
+                                        token_expiry)
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import BROWSER_OWNER_SIGNINS_KEY, AgentService
 from personal_agent.quickstart_store import QuickStore
@@ -40,6 +43,40 @@ class ExportDriver:
         self.closed = True
 
 
+def jwt(claims):
+    """A compact JWT with ``claims`` (unsigned: only ``exp`` is ever read)."""
+    part = lambda value: base64.urlsafe_b64encode(json.dumps(value).encode()).rstrip(b'=').decode()
+    return part({'alg': 'HS256', 'typ': 'JWT'}) + '.' + part(claims) + '.sig'
+
+
+class TokenExpiryTests(unittest.TestCase):
+    """#1269: a session held in token cookies without a cookie expiry is scheduled by the token's own ``exp``."""
+
+    def test_only_a_compact_token_with_a_numeric_exp_has_an_expiry(self):
+        self.assertEqual(token_expiry(jwt({'exp': NOW + 7200, 'sub': 'x'})), NOW + 7200)
+        for value in ('plain', 'a.b', 'a.b.c', jwt({'sub': 'x'}), jwt({'exp': 'soon'}), jwt({'exp': True}),
+                      jwt({'exp': -1}), jwt(['exp']), None, '', 'x.' + 'A' * 9000 + '.y'):
+            self.assertIsNone(token_expiry(value), value)
+
+    def test_the_effective_expiry_is_the_earlier_of_cookie_and_token(self):
+        self.assertEqual(effective_expiry(cookie('.shop.test', value=jwt({'exp': NOW + 60}))), NOW + 60)
+        self.assertEqual(effective_expiry(cookie('.shop.test', value=jwt({'exp': NOW + 600}), expires=NOW + 60)), NOW + 60)
+        self.assertEqual(effective_expiry(cookie('.shop.test', expires=NOW + 60)), NOW + 60)
+        self.assertIsNone(effective_expiry(cookie('.shop.test')))
+        self.assertEqual(latest_token_expiry([cookie('.a', 'a', jwt({'exp': NOW + 1})), cookie('.a', 'r', jwt({'exp': NOW + 9})),
+                                              cookie('.a')]), NOW + 9)
+        self.assertIsNone(latest_token_expiry([cookie('.a')]))
+
+    def test_the_marks_carry_the_effective_expiry_and_never_the_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            jar = CookieJar(Path(tmp) / JAR_NAME, MemoryKey(), lambda: NOW)
+            value = jwt({'exp': NOW + 7200})
+            jar.save_export({'shop.test': [cookie('.shop.test', 'refresh', value)]})
+            marks, _now = jar.site_cookie_marks('shop.test')
+            self.assertEqual([(mark[1], mark[3]) for mark in marks], [(None, NOW + 7200)])
+            self.assertNotIn(value, json.dumps(marks))
+
+
 class CountingJar(CookieJar):
     def __init__(self, path):
         super().__init__(path, MemoryKey(), lambda: NOW)
@@ -58,6 +95,14 @@ class DueTimeTests(unittest.TestCase):
     def test_a_cookie_expiring_sooner_brings_the_refresh_ahead_of_it(self):
         expires = NOW + 2 * 3600
         self.assertEqual(bs.keepalive_due_at([expires, None], NOW - 3600, NOW), expires - bs.KEEPALIVE_LEAD_SECONDS)
+
+    def test_the_earlier_time_arrives_while_the_cookie_still_lives(self):
+        """#1269: measured from ``now``, a cookie left the list exactly when its refresh became due."""
+        expires = NOW + 2 * 3600
+        for now in (expires - bs.KEEPALIVE_LEAD_SECONDS, expires - 60):
+            self.assertLessEqual(bs.keepalive_due_at([expires], NOW, now), now)
+        self.assertEqual(bs.keepalive_due_at([expires], NOW, expires + 1), NOW + bs.KEEPALIVE_SECONDS,
+                         'an expired cookie sets no earlier time')
 
     def test_short_lived_cookies_never_refresh_more_often_than_the_minimum_gap(self):
         self.assertEqual(bs.keepalive_due_at([NOW + 900], NOW, NOW), NOW + bs.KEEPALIVE_MIN_GAP_SECONDS)
@@ -128,7 +173,8 @@ class ProfileTests(unittest.TestCase):
         self.jar.save_export({'shop.test': [cookie('.shop.test', 'FSID', 'old')], 'news.test': [cookie('.news.test')]})
         writes = self.jar.writes
         build, _ = HttpRefreshTests().opener(set_cookie='FSID=new; Domain=.shop.test; Path=/')
-        self.assertEqual(self.profile.refresh_session_http('https://www.shop.test/', opener=build), {'state': 'refreshed'})
+        # #1269: no token cookie tells whether the session lives: the site answered, nothing more.
+        self.assertEqual(self.profile.refresh_session_http('https://www.shop.test/', opener=build), {'state': 'answered'})
         self.assertEqual(self.drivers, [], 'no browser was started')
         self.assertEqual(self.jar.writes, writes + 1)
         self.assertEqual([row['value'] for row in self.jar.site_rows('shop.test')], ['new'])
@@ -136,6 +182,17 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(self.touched[-1], {'shop.test'})
         self.assertTrue(self.profile._lock.acquire(blocking=False))
         self.profile._lock.release()
+
+    def test_a_refresh_is_refreshed_only_when_the_token_expiry_moved_later(self):
+        """#1269 (live 2026-10-10): a page script renews the token; a plain GET left it, yet was logged refreshed."""
+        old = jwt({'exp': NOW + 3600})
+        self.jar.save_export({'shop.test': [cookie('.shop.test', 'refresh', old), cookie('.shop.test', 'FSID', 'a')]})
+        build, _ = HttpRefreshTests().opener(set_cookie='FSID=b; Domain=.shop.test; Path=/')
+        self.assertEqual(self.profile.refresh_session_http('https://www.shop.test/', opener=build), {'state': 'unchanged'})
+        self.assertEqual(sorted(row['value'] for row in self.jar.site_rows('shop.test')), sorted([old, 'b']),
+                         'what the site answered is still kept')
+        build, _ = HttpRefreshTests().opener(set_cookie=f"refresh={jwt({'exp': NOW + 7200})}; Domain=.shop.test; Path=/")
+        self.assertEqual(self.profile.refresh_session_http('https://www.shop.test/', opener=build), {'state': 'refreshed'})
 
     def test_a_work_waits_for_a_running_keepalive_instead_of_failing(self):
         self.profile._acquire(bs.KEEPALIVE_HOLDER)
@@ -252,6 +309,22 @@ class ServiceTests(unittest.TestCase):
         self.profile.refresh_session_http = lambda url: self.refreshes.append(url) or {'state': 'refreshed'}
         self.assertEqual(self.service.keep_sessions_alive(now=NOW + 4 * 3600), 'shop.test', 'a new sign-in lifts the pause')
         self.assertEqual(len(self.refreshes), 2)
+
+    def test_a_refresh_that_could_not_extend_the_session_pauses_the_site_until_the_next_sign_in(self):
+        """#1269: repeating a request that cannot extend a session only adds automated traffic (#1041)."""
+        self.profile.refresh_session_http = lambda url: self.refreshes.append(url) or {'state': 'unchanged'}
+        self.assertEqual(self.service.keep_sessions_alive(now=NOW), 'shop.test')
+        self.assertEqual(self.store.config(self.service.KEEPALIVE_PAUSED_KEY, {}), {'shop.test': NOW})
+        self.store.put(self.service.KEEPALIVE_KEY, {'shop.test': NOW - 4 * 3600})
+        self.assertIsNone(self.service.keep_sessions_alive(now=NOW + 60), 'paused')
+        self.assertEqual(len(self.refreshes), 1)
+
+    def test_a_token_expiring_before_the_interval_brings_the_refresh_ahead_of_it(self):
+        """#1269: a session cookie without a cookie expiry whose token lapses in 2 h is refreshed before 3 h."""
+        self.jar.save_export({'shop.test': [cookie('.shop.test', 'refresh', jwt({'exp': NOW + 300}))]})
+        self.store.put(BROWSER_OWNER_SIGNINS_KEY, {'shop.test': {'at': NOW - 6900, 'marks': ['m'], 'host': 'www.shop.test'}})
+        self.assertEqual(self.service.keep_sessions_alive(now=NOW), 'shop.test', 'due 10 min before the token lapses')
+        self.assertEqual(self.refreshes, ['https://www.shop.test/'])
 
     def test_the_work_loop_starts_a_check_only_while_idle_and_at_most_once_a_minute(self):
         self.service.SESSION_KEEPALIVE = True

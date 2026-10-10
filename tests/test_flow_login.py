@@ -45,6 +45,7 @@ from personal_agent.conversation_projection import TELEGRAM_RESULT_PREVIEW_CHARS
 from personal_agent.providers import ModelAdapter
 from personal_agent.quickstart_service import (AgentService, BROWSER_LOGIN_CLOSE_SECONDS, BROWSER_LOGIN_MOVED_LINE,
                                                BROWSER_LOGIN_NO_SESSION_LINE, BROWSER_LOGIN_OFFERED_TEXT, BROWSER_LOGIN_OTHER_PENDING_TEXT,
+                                               BROWSER_LOGIN_PAGE_OFFERED_TEXT,
                                                BROWSER_LOGIN_PHONE_LABEL, BROWSER_LOGIN_RESULT_TEXT, BROWSER_LOGIN_SECONDS,
                                                BROWSER_LOGIN_SKIP_LABEL, BROWSER_OWNER_SIGNINS_KEY)
 from personal_agent.quickstart_store import QuickStore
@@ -442,6 +443,20 @@ class LoginHarness(unittest.TestCase):
                                                          (job_id,))]
 
 
+class AccountProviderTextTests(unittest.TestCase):
+    """#1269: the model may continue with an account it is already signed in to; the text stays generic (C16)."""
+
+    def test_the_sign_in_texts_offer_another_account_and_name_no_site_or_provider(self):
+        from personal_agent.agent_runtime import BROWSER_SIGN_IN_DESCRIPTION, BROWSER_SIGN_IN_NOTE
+        for text in (BROWSER_SIGN_IN_NOTE, BROWSER_SIGN_IN_DESCRIPTION, BROWSER_LOGIN_PAGE_OFFERED_TEXT):
+            lowered = text.lower()
+            for name in ('kakao', 'naver', 'google', 'apple', 'facebook', '카카오', '네이버', '구글', 'kyobo', '교보'):
+                self.assertNotIn(name, lowered)
+            self.assertTrue('password' in lowered or '비밀번호' in text)
+        self.assertIn('another account', BROWSER_SIGN_IN_NOTE)
+        self.assertIn('다른 계정', BROWSER_LOGIN_PAGE_OFFERED_TEXT)
+
+
 class InFlowLogin(LoginHarness):
     def test_a_second_login_page_while_the_login_is_pending_reads_the_same_in_flow_text(self):
         """#1006 (live 2026-10-04): a second sign-in request in one Work before its login was shown got the
@@ -451,7 +466,7 @@ class InFlowLogin(LoginHarness):
         nonce = self.service._browser_login(job['id'])['nonce']
         for state in ('requested', 'opening', 'offered', 'closing'):
             self.service._put_browser_login(job['id'], {**self.service._browser_login(job['id']), 'state': state})
-            self.assertEqual(self.service._request_browser_login(job, ORIGIN + '/cart'), BROWSER_LOGIN_OFFERED_TEXT, state)
+            self.assertEqual(self.service._request_browser_login(job, ORIGIN + '/cart'), BROWSER_LOGIN_PAGE_OFFERED_TEXT, state)
             self.assertEqual(self.service._browser_login(job['id'])['nonce'], nonce, 'the same login, not a new one')
         other = self.service._request_browser_login(job, 'https://other.test/cart')
         self.assertEqual(other, BROWSER_LOGIN_OTHER_PENDING_TEXT, 'another site is not promised the pending login')
@@ -464,7 +479,7 @@ class InFlowLogin(LoginHarness):
         job_id, prompt, buttons, notification = self.login_work()
         job = self.store.job(job_id)
         self.assertIn(job['status'], ('failed', 'partial'), 'a run that reached a login page did not finish')
-        self.assertEqual(self.failed_errors(job_id), [BROWSER_LOGIN_OFFERED_TEXT], 'the model was told the owner will be asked')
+        self.assertEqual(self.failed_errors(job_id), [BROWSER_LOGIN_PAGE_OFFERED_TEXT], 'the model was told the owner will be asked')
         # The Work's session closed first; the login window is a second driver, shown at the login page.
         self.assertTrue(self.drivers[0].closed)
         self.assertEqual(self.driver_log[-1], ('goto', ORIGIN + '/login', bs.ACTION_TIMEOUT_SECONDS))
@@ -710,7 +725,7 @@ class InFlowLogin(LoginHarness):
             db.execute("UPDATE jobs SET status='queued' WHERE id=?", (job_id,))
         self.scripts = self.login_script()
         self.assertTrue(self.service.run_one())
-        self.assertEqual(self.failed_errors(job_id)[-1], BROWSER_LOGIN_OFFERED_TEXT)
+        self.assertEqual(self.failed_errors(job_id)[-1], BROWSER_LOGIN_PAGE_OFFERED_TEXT)
         self.shown(job_id)
         self.assertTrue(wait_until(self.service.deliver_notification), "the prompt is armed on the window thread (#716)")
         fresh = self.store.notification(old['id'])
@@ -1329,7 +1344,10 @@ class LoginThroughTheCliBridge(_BridgeHarness):
                             text='계정 페이지 확인해줘', telegram=True)
         self.addCleanup(lambda: [setattr(driver, 'closed', True) for driver in self.drivers])
         result = _value(replies[2])
-        self.assertEqual((result['state'], result['next_step']), ('login_required', BROWSER_LOGIN_OFFERED_TEXT))
+        self.assertEqual((result['state'], result['next_step']), ('login_required', BROWSER_LOGIN_PAGE_OFFERED_TEXT))
+        # #1269: the sign-in page's mediated view comes along, so another account's button is visible.
+        self.assertTrue(result['elements'])
+        self.assertNotIn('_elements', result)
         job = self.store.job(self.job)
         self.assertEqual(job['status'], 'partial', 'a zero exit with a login page is not a finished request')
         self.assertIn('로그인이 필요합니다', job['owner_cause'])
@@ -1474,7 +1492,7 @@ class RealWorkerInFlowLogin(_BridgeHarness):
                                 text='회원 페이지 내용 확인해줘', telegram=True)
             first = _value(replies[2])
             self.assertEqual(first['state'], 'login_required')
-            self.assertEqual(first['next_step'], BROWSER_LOGIN_OFFERED_TEXT)
+            self.assertEqual(first['next_step'], BROWSER_LOGIN_PAGE_OFFERED_TEXT)
             self.assertEqual(self.store.job(self.job)['status'], 'partial', 'the CLI turn ended; its request did not')
             status = self.profile.status()
             self.assertTrue(status['login_window_open'], 'the real window is shown on this Mac')

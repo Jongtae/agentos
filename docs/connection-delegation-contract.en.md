@@ -210,7 +210,7 @@ These are observation windows, not completion criteria. No site, provider or cat
 | Public skills with a repository-root licence | merged | #1220 |
 | AI-side connection first, read-only, audited (Google) | open | #1197 |
 | AI-side connections generalised to all connectors, MCP servers and plugins | gap | successor of #1197 |
-| Per-call decision point for AI-side tools | gap: Claude Code flag observed in help, not used or tested | compatibility test needed (§4) |
+| Per-call decision point for AI-side tools | partial: Claude Code `--permission-prompt-tool` decides claude.ai connector tools against a reviewed read list (#1197); other MCP servers, plugins and Codex are not yet decided | #1296 |
 | AgentOS connecting to an MCP server itself | gap | none |
 | Conversational secret entry (elicitation URL mode) | gap | none |
 | Money-capable connection marking | gap | none |

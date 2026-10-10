@@ -59,6 +59,41 @@ main > .hero { position: relative; max-width: none; padding: 0; display: grid; a
 .button:hover { background: var(--night); }
 .text-link { padding-block: .6rem; font-size: .9375rem; }
 
+/* Hero card: a 16-second CSS loop. The AI underneath changes; what Still remembers does not. */
+.pulse { position: absolute; z-index: 1; right: max(1.5rem, calc((100vw - 70rem) / 2 - 1rem)); bottom: 2rem; width: 21.5rem; padding: 1.35rem 1.5rem 1.5rem; background: rgb(255 253 250 / .88); border: 1px solid var(--line); border-radius: 1.5rem; box-shadow: 0 30px 60px -36px rgb(46 58 68 / .45); }
+.pulse-top { display: flex; justify-content: space-between; align-items: center; gap: 1rem; font-size: .875rem; }
+.pulse-name { font-weight: 600; }
+.pulse-engine { display: inline-flex; align-items: center; gap: .4rem; color: var(--muted); }
+.pe-swap { position: relative; display: inline-grid; }
+.pe-swap b { grid-area: 1 / 1; padding: .2rem .65rem; border-radius: 999px; font-weight: 500; color: var(--ink); text-align: center; }
+.pe-a { background: var(--panel); }
+.pe-b { background: var(--rose); }
+.pulse-label { margin: 1.1rem 0 .4rem; font-size: .8125rem; color: var(--muted); }
+.pulse-mem { list-style: none; margin: 0; padding: .35rem 0 .2rem; border-top: 2px solid var(--sage); }
+.pulse-mem li { padding-block: .3rem; font-size: 1rem; }
+.pulse-chat { display: grid; gap: .5rem; margin-top: 1rem; }
+.pulse-chat p { margin: 0; padding: .55rem .85rem; border-radius: 1rem; font-size: .9375rem; line-height: 1.45; }
+.pc-you { justify-self: end; background: var(--rose); border-bottom-right-radius: .3rem; }
+.pc-still { justify-self: start; max-width: 92%; background: var(--mist); border-bottom-left-radius: .3rem; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .pm-1, .pm-2, .pm-3, .pe-a, .pe-b, .pc-you, .pc-still { animation: 16s ease-in-out infinite both; }
+  .pm-1 { animation-name: hold-1; }
+  .pm-2 { animation-name: hold-2; }
+  .pm-3 { animation-name: hold-3; }
+  .pe-a { animation-name: engine-a; }
+  .pe-b { animation-name: engine-b; }
+  .pc-you { animation-name: say-1; }
+  .pc-still { animation-name: say-2; }
+}
+@keyframes hold-1 { 0%, 3% { opacity: 0; filter: blur(8px); } 9%, 88% { opacity: 1; filter: blur(0); } 95%, 100% { opacity: 0; filter: blur(6px); } }
+@keyframes hold-2 { 0%, 10% { opacity: 0; filter: blur(8px); } 16%, 88% { opacity: 1; filter: blur(0); } 95%, 100% { opacity: 0; filter: blur(6px); } }
+@keyframes hold-3 { 0%, 17% { opacity: 0; filter: blur(8px); } 23%, 88% { opacity: 1; filter: blur(0); } 95%, 100% { opacity: 0; filter: blur(6px); } }
+@keyframes engine-a { 0%, 36% { opacity: 1; filter: blur(0); } 41%, 96% { opacity: 0; filter: blur(6px); } 100% { opacity: 1; filter: blur(0); } }
+@keyframes engine-b { 0%, 38% { opacity: 0; filter: blur(6px); } 44%, 92% { opacity: 1; filter: blur(0); } 97%, 100% { opacity: 0; filter: blur(6px); } }
+@keyframes say-1 { 0%, 54% { opacity: 0; transform: translateY(8px); } 58%, 88% { opacity: 1; transform: none; } 95%, 100% { opacity: 0; } }
+@keyframes say-2 { 0%, 62% { opacity: 0; filter: blur(8px); } 68%, 88% { opacity: 1; filter: blur(0); } 95%, 100% { opacity: 0; filter: blur(6px); } }
+
 main > section:not(.hero) { padding-block: clamp(3.5rem, 8vw, 6rem); border-top: 1px solid var(--line); }
 h2 { font-weight: 300; font-size: clamp(1.75rem, 3.3vw, 2.5rem); line-height: 1.22; max-width: 22ch; }
 h3 { font-size: 1.0625rem; font-weight: 600; letter-spacing: 0; }
@@ -118,6 +153,9 @@ h3 { font-size: 1.0625rem; font-weight: 600; letter-spacing: 0; }
 .foot p { margin: 0; max-width: 32rem; }
 .foot nav { display: flex; gap: 1.25rem; }
 
+@media (max-width: 1100px) {
+  .pulse { display: none; }
+}
 @media (max-width: 900px) {
   .three, .limits { grid-template-columns: 1fr; }
   .talk { grid-template-columns: 1fr; }

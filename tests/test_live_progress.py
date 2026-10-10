@@ -130,8 +130,8 @@ class StepLineTests(unittest.TestCase):
 
     def test_model_status_wins_and_generic_lines_are_keyed_on_kind_and_target(self):
         self.assertEqual(step_line({'action': 'web_search', 'status': '환율을 찾고 있어요', 'query': 'q'}), '환율을 찾고 있어요')
-        self.assertEqual(step_line({'action': 'web_search', 'query': '오늘 환율'}), "'오늘 환율' 찾아보고 있어요")
-        self.assertEqual(step_line({'action': 'web_search'}), '찾아보고 있어요')
+        self.assertEqual(step_line({'action': 'web_search', 'query': '오늘 환율'}), "웹에서 '오늘 환율' 찾아보고 있어요")
+        self.assertEqual(step_line({'action': 'web_search'}), '웹에서 찾아보고 있어요')
         self.assertEqual(step_line({'action': 'browser_open', 'host': 'shop.example'}), 'shop.example 열어 보고 있어요')
         self.assertEqual(step_line({'action': 'browser_type'}, last_host='shop.example'), 'shop.example에 입력하고 있어요')
         self.assertEqual(step_line({'action': 'weather'}), '날씨 보고 있어요')
@@ -142,19 +142,19 @@ class StepLineTests(unittest.TestCase):
         self.assertEqual(step_line({'action': 'browser_open', 'status': "'예약 - [가림]' 여는 중", 'host': 'shop.example'}),
                          'shop.example 열어 보고 있어요')
         self.assertEqual(step_line({'action': 'web_search', 'status': '[가림: 12자] 찾는 중', 'query': '[가림] 후기'}),
-                         '찾아보고 있어요')
+                         '웹에서 찾아보고 있어요')
         self.assertEqual(step_line({'action': 'read_file', 'status': '[경로 가림] 읽는 중'}), '파일 읽어 보고 있어요')
-        self.assertEqual(step_line({'action': 'web_search', 'status': '[redacted] 넣는 중'}), '찾아보고 있어요')
+        self.assertEqual(step_line({'action': 'web_search', 'status': '[redacted] 넣는 중'}), '웹에서 찾아보고 있어요')
         # Display-time redaction that masks, or fails, moves on the same way.
         clean = lambda text: text.replace('4719', '[가림]')
         self.assertEqual(step_line({'action': 'web_search', 'status': '4719 찾는 중', 'query': '4719'}, clean=clean),
-                         '찾아보고 있어요')
+                         '웹에서 찾아보고 있어요')
 
         def broken(text):
             raise ValueError
         self.assertEqual(step_line({'action': 'web_search', 'status': '찾는 중'}, clean=broken), NO_STEP_LINE)
         events = [running('web_search', {'action': 'web_search', 'status': '[가림] 찾는 중'}, 'c1')]
-        self.assertEqual(draft_step(events), ('찾아보고 있어요', False))
+        self.assertEqual(draft_step(events), ('웹에서 찾아보고 있어요', False))
 
     def test_a_step_is_shown_only_while_its_call_runs(self):
         events = [running('web_search', {'action': 'web_search', 'status': '찾는 중'}, 'c1')]
@@ -193,7 +193,7 @@ class StepLineTests(unittest.TestCase):
     def test_a_newer_live_cli_step_overrides_and_its_completion_closes_it(self):
         events = [running('list_notes', {'action': 'list_notes'}, created=1.0), finished('list_notes', created=2.0)]
         live = {'at': 3.0, 'running': True, 'id': 'ws1', 'step': {'action': 'web_search', 'query': '환율'}}
-        self.assertEqual(draft_step(events, live), ("'환율' 찾아보고 있어요", False))
+        self.assertEqual(draft_step(events, live), ("웹에서 '환율' 찾아보고 있어요", False))
         self.assertEqual(draft_step(events, {**live, 'running': False}), (NO_STEP_LINE, False))
         # An older live step does not hide a newer bridge call in flight.
         events.append(running('weather', {'action': 'weather'}, created=4.0))
@@ -210,7 +210,7 @@ class OrchestratedAttemptLineTests(unittest.TestCase):
         events = [self.planned(1, '1번째 시도: Codex · 기본 모델 — 현재 위치가 없어 추가 확인이 필요', 1.0)]
         self.assertEqual(draft_step(events), (NO_STEP_LINE, False), 'the first attempt announces nothing')
         events += [running('web_search', {'action': 'web_search', 'query': '환율'}, 'c1', created=2.0)]
-        self.assertEqual(draft_step(events), ("'환율' 찾아보고 있어요", False))
+        self.assertEqual(draft_step(events), ("웹에서 '환율' 찾아보고 있어요", False))
         events += [finished('web_search', 'c1', created=3.0),
                    {'tool': 'orchestrator', 'status': 'evaluated', 'created': 4.0, 'trace': {'text': '목표 미달'}}]
         self.assertEqual(draft_step(events), (NO_STEP_LINE, False), 'an evaluation is not a step')
@@ -622,7 +622,7 @@ class CliRouteDraftTests(_TelegramCase):
         self.assertEqual(len(during), 1)
         [line] = during[0]
         # #881: the redacted query carries a mark, so the plain search line is shown instead.
-        self.assertTrue(line.startswith('찾아보고 있어요 '), line)
+        self.assertTrue(line.startswith('웹에서 찾아보고 있어요 '), line)
         self.assertNotIn(SECRET, line, 'the query is redacted like the recorded event')
         self.assertNotIn('[redacted]', line)
         self.assertNotIn(job_id, self.service.live_steps, 'the live step ends with the run')

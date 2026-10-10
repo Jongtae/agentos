@@ -236,8 +236,8 @@ RETRY_STEP_TEXT = '다른 방법으로도 알아보고 있어요'
 #: target placeholder is ``{host}`` or ``{query}``.
 #: #1280: soft everyday wording (해요체), not tool labels; still keyed only on the tool kind.
 FALLBACK_STEP_LINES = {
-    'web_search': ("'{query}' 찾아보고 있어요", '찾아보고 있어요'),
-    'bounded_public_research': ("'{query}' 찾아보고 있어요", '찾아보고 있어요'),
+    'web_search': ("웹에서 '{query}' 찾아보고 있어요", '웹에서 찾아보고 있어요'),
+    'bounded_public_research': ("웹에서 '{query}' 찾아보고 있어요", '웹에서 찾아보고 있어요'),
     'public_page_read': ('{host} 열어 보고 있어요', '페이지 열어 보고 있어요'),
     'browser_open': ('{host} 열어 보고 있어요', '페이지 열어 보고 있어요'),
     'browser_read': ('{host} 읽어 보고 있어요', '페이지 읽어 보고 있어요'),

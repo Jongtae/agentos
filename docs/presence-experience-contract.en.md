@@ -291,3 +291,7 @@ This contract does not:
 ## Review rule
 
 Any owner-facing conversation, recovery, model-route, contextual setup, Settings or capability-handoff change should explicitly state how it preserves this contract or why a bounded exception is necessary. A visually smoother UI or friendlier sentence is insufficient if continuity, truthfulness, authority or inspectability regresses.
+
+## Cross-role, collaborative Presence refinement (2026-10-10)
+
+The continuous owner-facing relationship is **not restricted to secretary tasks**. [Professional Roles and Communication Contract](professional-roles-and-communication-contract.en.md) defines the cross-role operating semantics. Separate transient ambient feedback, evidence-grounded semantic communication and collaborative intervention. The owner must be able to correct, question or stop in-flight Work where the runtime permits; if it cannot be applied, disclose that honestly. A tool-name fallback, source counter or streamed text alone does not satisfy Presence. Role-specific reporting changes what is relevant, not who is speaking. Existing Memory, authority, payment, unknown-effect and delivery-selection rules remain controlling.

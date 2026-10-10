@@ -57,6 +57,7 @@ main > section.hero + section { border-top: 0; }
 .wm-here { width: clamp(13rem, 18vw, 18.5rem); }
 .ko-line { margin: 1.6rem 0 0; font-size: clamp(1.1875rem, 1.6vw, 1.375rem); font-weight: 400; }
 .lede { margin: 1rem 0 1.5rem; color: var(--ink); opacity: .85; font-size: 1rem; }
+.lockup + .lede { margin-top: 2rem; }
 .quick-line { margin: 0 0 1rem; font-size: .9375rem; color: var(--ink); opacity: .8; }
 .quick-label { margin: 0 0 .6rem; font-size: .9375rem; color: var(--ink); opacity: .85; }
 .quick pre { margin: 0; padding: .85rem 1.15rem; background: var(--ink); color: var(--paper); border-radius: .7rem; font: 400 .9375rem/1.6 var(--sans); letter-spacing: .01em; white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }

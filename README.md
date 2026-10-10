@@ -40,7 +40,7 @@ Personal AgentOS explores an answer: *no*. It is an open-source environment you 
 
 **Highlights**
 
-- **Bring your own AI.** A local Ollama model, an OpenAI-compatible or Anthropic API, or a Codex or Claude Code subscription does the work.
+- **Bring the AI you already subscribe to.** Your ChatGPT plan through Codex, or your Claude plan through Claude Code, does the work. Other connections are listed in [QUICKSTART](docs/QUICKSTART.md#other-model-connections).
 - **One PA across conversations.** Memory, saved results and open-work state persist across conversations and restarts. Interrupted execution is reported rather than silently replayed.
 - **Your boundaries.** Access begins with the folders, accounts and tools you connect. Supported payment flows require per-action approval; [current browser limitations](https://github.com/Jongtae/agentos/issues/758) are documented. [Secrets](.github/SECURITY.md) are excluded from model prompts, logs and Evidence.
 - **Told, not hidden.** When your AI saves something to memory it says so and offers an exact undo. Each task records which of your information it used and where it went.
@@ -64,13 +64,15 @@ These are guiding principles, not a claim that every scenario already works. The
 
 ## Quick start
 
-On macOS or Linux, one command installs and starts AgentOS. You do not need Homebrew, Python or Docker:
+On macOS, Linux or Windows (through WSL2), one command installs and starts AgentOS. You do not need Homebrew, Python or Docker:
 
 ```sh
 curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh
 ```
 
 The URL pins the installer itself. [Inspect the pinned script](https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh) before running it; the script verifies the published AgentOS archive and the uv installer it downloads.
+
+On Windows, run `wsl --install` in PowerShell, restart, open Ubuntu and run the first command there. Windows details, what the installer does, running from source and every setting are in [QUICKSTART](docs/QUICKSTART.md). Keep `agentos start` running while you talk.
 
 If you use [Homebrew](https://brew.sh) on macOS:
 
@@ -80,11 +82,9 @@ agentos start
 ```
 
 1. AgentOS opens at [http://127.0.0.1:8787](http://127.0.0.1:8787/) in your browser. The screens are in English by default; switch to Korean, Simplified Chinese or Japanese at the bottom left. Some fixed Telegram status/progress lines and certain connection validation errors are still Korean.
-2. Connect your AI: a tool-capable Ollama model, an OpenAI, OpenAI-compatible or Anthropic API key, or a Codex or Claude Code subscription.
+2. Connect your AI subscription: ChatGPT through Codex (`codex login`) or Claude through Claude Code (`claude setup-token`). [Other connections](docs/QUICKSTART.md#other-model-connections).
 3. Optional: in **Settings → External connections**, add your own Telegram bot token and open the pairing link.
-4. Ask: **“I need to finish a proposal this week. Help me break it into the next few steps.”**
-
-On Windows, run `wsl --install` in PowerShell, restart, open Ubuntu and run the first command there. Windows details, what the installer does, running from source and every setting are in [QUICKSTART](docs/QUICKSTART.md). Keep `agentos start` running while you talk.
+4. Say **“Remember that I have a cat and live in a small studio.”** Then ask **“Find me a robot vacuum under $500 that would suit me.”**
 
 **Release status:** both installers install **v1.3.0** (2026-10-10), built from the tagged main commit. The demo and the everyday-use image come from real sessions and are not release-specific end-to-end validation; the architecture figure is product direction. The [release manifest](docs/release-manifest.json) records what each release covers, and [product status](docs/product-status.en.md) separates shipped behavior, test evidence and direction.
 
@@ -101,7 +101,7 @@ On Windows, run `wsl --install` in PowerShell, restart, open Ubuntu and run the 
 
 When a better AI appears, you switch the worker, not the agent. [Whose agent?](docs/whitepapers/whose-agent.ko.md) (Korean whitepaper) takes the question further.
 
-Local-first is not local-only: you can use a local or hosted model. With a hosted model, the context used for a request is sent to that provider.
+Local-first is not local-only: your subscription AI runs at OpenAI or Anthropic, so the context used for a request is sent to that provider.
 
 <!-- readme-section:presence -->
 

@@ -29,4 +29,4 @@ body:
     id: setup
     attributes:
       label: Your setup (optional)
-      description: For example "macOS 15, Homebrew v1.3.0, Ollama qwen3" or "Linux, source, Claude Code subscription".
+      description: For example "macOS 15, Homebrew v1.3.0, Codex subscription" or "Linux, source, Claude Code subscription".

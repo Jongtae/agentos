@@ -20,7 +20,7 @@ labels: bug
 - Installed with: Homebrew / source checkout
 - Version or commit (`brew list --versions agentos`, or `git rev-parse --short HEAD` in a checkout):
 - OS and version:
-- Model route (for example Codex, Claude Code, Ollama, an API provider):
+- Model route (for example Codex or Claude Code; or another connection):
 - Channel: web / Telegram
 
 ## Logs or screenshots

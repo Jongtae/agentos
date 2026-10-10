@@ -647,6 +647,23 @@ class ThirdPartyWrites(unittest.TestCase):
         self.assertEqual((shown['remembered'], shown['content'], shown['replaced_previous']), (True, VALUE, False))
         self.assertNotIn('id', shown)
 
+    def test_on_a_telegram_work_the_worker_is_told_agentos_announces_the_save(self):
+        """#1310 (owner 2026-10-10): the reply does not repeat what AgentOS's own notice tells."""
+        from personal_agent.agent_runtime import SAVED_NOTICE_HINT
+        web = worker_result('save_memory', self.caps().execute('save_memory', {'memory_key': KEY, 'content': VALUE}))
+        self.assertNotIn(SAVED_NOTICE_HINT, web['next'], 'no notice is sent for a web Work')
+        telegram = self.store.enqueue('난 판교에서 일해', 'tg-1', 'telegram:g1', 4242)
+        caps = Capabilities(self.store, None, {}, '', telegram, lambda *a, **k: None)
+        result = caps.execute('save_memory', {'memory_key': KEY, 'content': VALUE + ' 본사'})
+        shown = worker_result('save_memory', result)
+        self.assertTrue(shown['remembered'])
+        self.assertIn(SAVED_NOTICE_HINT, shown['next'])
+        delegated = Capabilities(self.store, None, {}, '', telegram, lambda *a, **k: None, delegated=True,
+                                 allowed_tools=['save_memory'])
+        held = delegated.execute('save_memory', {'memory_key': KEY, 'content': VALUE + ' 분당'})
+        self.assertNotIn(SAVED_NOTICE_HINT, json.dumps(worker_result('save_memory', held), ensure_ascii=False),
+                         'a third-party candidate is asked about, not announced')
+
     def test_the_request_sentence_is_still_never_a_value(self):
         """#846 stays: the owner's own request sentence is the task, not a fact."""
         result = self.caps().execute('save_memory', {'memory_key': KEY, 'content': '난 판교에서 일해'})
@@ -658,6 +675,7 @@ class Guidance(unittest.TestCase):
     def test_the_worker_is_told_it_is_remembered_at_once(self):
         [save_memory] = [tool['function'] for tool in DEFINITIONS if tool['function']['name'] == 'save_memory']
         self.assertIn('remembered at once and the owner is told afterwards with an undo', save_memory['description'])
+        self.assertIn('when the result has owner_notice, AgentOS sends that message itself', save_memory['description'])
         self.assertNotIn('asked with one tap', save_memory['description'])
         self.assertNotIn('candidate', save_memory['description'])
         self.assertIn('may be saved the same way, as what you inferred', save_memory['description'])

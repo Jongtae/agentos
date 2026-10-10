@@ -109,14 +109,15 @@ Windows에서는 PowerShell에서 `wsl --install`을 실행하고 재시작한 �
 
 <picture>
   <source media="(max-width: 600px)" srcset="../../docs/assets/readme/presence-overview.ko.narrow.svg">
-  <img src="../../docs/assets/readme/presence-overview.ko.svg" alt="개념 그림: NVIDIA 질문에 답하는 어시스턴트, Amazon 장바구니라는 명시적 요청을 처리하는 실행형 에이전트, 미팅의 남은 결정을 이어가는 PA. AgentOS는 허용된 일정·제안서·메모의 출처를 연결하고, 미결정 일을 남기며, 메일 초안과 실제 발송을 권한·결과로 구분합니다. AI와 도구는 교체 가능합니다. 관찰 실행이나 배포 기능이 아닌 제품 방향 예시입니다.">
+  <img src="../../docs/assets/readme/presence-overview.ko.svg" alt="개념 그림: 나와의 관계(목적·기억·선호·약속·권한)가 Assistant·Finance·Research 전문 관점으로 이어지고, 도메인·역할·위임 범위·권한이 Decision Model로 들어갑니다. Unified Presence는 하나의 관계를 지키며, 작업 중 나의 개입을 판단에 되돌립니다. 배포 기능이 아닌 제품 방향 예시입니다.">
 </picture>
 
-- **PA**는 내가 대화하는 에이전트이고, **AgentOS**는 그 PA의 맥락·남은 일·권한·근거를 지키는 환경입니다.
-- **판단 계층**이 요청마다 AI와 도구를 고르고, 지시를 쓰고, 결과를 확인해 부족하면 다시 맡깁니다.
-- **온톨로지**는 출처가 있는 대상(미팅, 계좌 잔액 등)을 그 주변의 일·역할·권한과 연결합니다. 초안을 발송으로, 초대를 수락으로 여기지 않습니다.
+- **나와의 관계**는 목적·기억·선호·약속·권한을 내가 통제하는 곳에 둡니다.
+- **전문 관점**은 같은 상황을 관련 도메인과 역할로 읽습니다. 위임 범위는 목표와 한계를 정하고, 실제 권한은 따로 지킵니다.
+- **Decision Model**은 생각할지, 실행할지, 맡길지, 물을지, 알릴지, 이어서 챙길지를 판단합니다. 도구를 고르는 데서 끝나지 않습니다.
+- **Unified Presence**는 역할이 아닙니다. 모든 역할을 가로질러 하나의 관계를 지켜, 의미 있는 소식은 나에게 닿고 내가 바로잡은 말은 진행 중인 일에 반영됩니다(실행 환경이 지원하는 범위에서).
 
-그림은 설계 방향이며 관찰된 실행이 아닙니다. 자세히: [아키텍처와 온톨로지](../../docs/personal-agentos-architecture.en.md) · [Presence](../../docs/presence-experience-contract.en.md)
+역할은 자격이나 실행 권한이 아니며, 여러 역할이 함께 일하는 모습은 배포된 기능이 아니라 제품 방향입니다([계약](../../docs/professional-roles-and-communication-contract.en.md)). 그림은 설계 방향이며 관찰된 실행이 아닙니다. 자세히: [아키텍처와 온톨로지](../../docs/personal-agentos-architecture.en.md) · [Presence](../../docs/presence-experience-contract.en.md)
 
 <!-- readme-section:ai-switch -->
 

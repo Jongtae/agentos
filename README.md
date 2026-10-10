@@ -109,14 +109,15 @@ Local-first is not local-only: you can use a local or hosted model. With a hoste
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.en.narrow.svg">
-  <img src="docs/assets/readme/presence-overview.en.svg" alt="Concept figure: an Assistant answers a question about NVIDIA, a task agent handles an explicit Amazon cart request, and a PA carries an open meeting decision forward. AgentOS links allowed calendar, proposal and note sources; keeps unfinished work; and distinguishes an email draft from a confirmed send through authority and evidence. AI and tools can change. Illustrative product direction, not an observed run or shipped integration.">
+  <img src="docs/assets/readme/presence-overview.en.svg" alt="Concept diagram: the owner relationship (goals, memory, preferences, commitments, authority) informs Assistant, Finance and Research professional lenses; domain, role, mandate and authority feed the Decision Model; Unified Presence keeps one relationship, and your interventions during the work feed back into decisions. Illustrative product direction, not shipped implementation.">
 </picture>
 
-- **The PA** is the agent you talk to. **AgentOS** is the environment that keeps its context, open work, authority and evidence.
-- A **judgment layer** chooses the AI and tool for each request, writes the brief, checks the result and hands the work back when it falls short.
-- An **ontology** links one sourced thing, such as a meeting or an account balance, to the work, roles and permissions around it. A draft is never taken for a send, or an invitation for an acceptance.
+- **Owner relationship** holds your goals, memory, preferences, commitments and authority under your control.
+- **Professional lenses** read the same situation through the relevant domain and role. A mandate sets goals and limits; enforced authority stays separate.
+- **The Decision Model** judges whether to reason, act, delegate, ask, report or follow up; it does more than route tools.
+- **Unified Presence** is not a role: it keeps one relationship across all of them, so meaningful updates reach you and your corrections change the work in progress, as far as the runtime supports.
 
-The figure shows the intended design, not an observed run. Details: [architecture and ontology](docs/personal-agentos-architecture.en.md) · [Presence](docs/presence-experience-contract.en.md).
+A role is not a licence or a permission to act, and several roles working together is product direction, not shipped behavior ([contract](docs/professional-roles-and-communication-contract.en.md)). The figure shows the intended design, not an observed run. Details: [architecture and ontology](docs/personal-agentos-architecture.en.md) · [Presence](docs/presence-experience-contract.en.md).
 
 <!-- readme-section:ai-switch -->
 

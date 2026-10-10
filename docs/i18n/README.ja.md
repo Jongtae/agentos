@@ -109,14 +109,15 @@ Windows では PowerShell で `wsl --install` を実行して再起動し、Ubun
 
 <picture>
   <source media="(max-width: 600px)" srcset="../../docs/assets/readme/presence-overview.ja.narrow.svg">
-  <img src="../../docs/assets/readme/presence-overview.ja.svg" alt="概念図：NVIDIA についての質問に答えるアシスタント、Amazon のカート操作という明示的な依頼を処理する実行型エージェント、会議の未決事項を引き継ぐ PA。AgentOS は許可された予定・提案書・メモの出典を結び、残る仕事を保ち、下書きと実際の送信を権限と結果で区別します。AI とツールは交換できます。観測済みの動作や提供済みの連携ではなく、製品の方向性です。">
+  <img src="../../docs/assets/readme/presence-overview.ja.svg" alt="概念図：あなたとの関係（目的・記憶・好み・約束・権限）が Assistant・Finance・Research の専門的視点につながり、ドメイン・役割・委任範囲・権限が Decision Model に入ります。Unified Presence は一つの関係を保ち、作業中のあなたの介入を判断に戻します。提供済みの機能ではなく、製品の方向性の例です。">
 </picture>
 
-- **PA** は自分が話すエージェント、**AgentOS** はその文脈・残る仕事・権限・根拠を保つ環境です。
-- **判断層** がリクエストごとに AI とツールを選び、指示を書き、結果を確かめ、足りなければ任せ直します。
-- **オントロジー** は出典のある対象（会議や口座残高など）を、その周りの仕事・役割・権限と結び付けます。下書きを送信と、招待を承諾と取り違えません。
+- **あなたとの関係** は、目的・記憶・好み・約束・権限をあなたの管理下に置きます。
+- **専門的視点** は、同じ状況を関連するドメインと役割で読み解きます。委任範囲は目標と制約を定め、実際の権限は別に守られます。
+- **Decision Model** は、考えるか、実行するか、任せるか、尋ねるか、知らせるか、引き続き見守るかを判断します。ツールを選ぶだけではありません。
+- **Unified Presence** は役割ではありません。すべての役割をまたいで一つの関係を保ち、意味のある知らせはあなたに届き、あなたの訂正は進行中の仕事に反映されます（実行環境が対応する範囲で）。
 
-図は設計の方向性であり、観測された実行ではありません。詳しくは [アーキテクチャとオントロジー](../../docs/personal-agentos-architecture.en.md) · [Presence](../../docs/presence-experience-contract.en.md)。
+役割は資格や実行権限ではなく、複数の役割が協働する姿は提供済みの機能ではなく製品の方向性です（[契約](../../docs/professional-roles-and-communication-contract.en.md)）。図は設計の方向性であり、観測された実行ではありません。詳しくは [アーキテクチャとオントロジー](../../docs/personal-agentos-architecture.en.md) · [Presence](../../docs/presence-experience-contract.en.md)。
 
 <!-- readme-section:ai-switch -->
 

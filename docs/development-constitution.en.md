@@ -164,3 +164,7 @@ A material change to these constitutional principles requires:
 - independent review when the change meets the Independent review escalation criteria above;
 - repository-required CI;
 - explicit owner approval before merge when the change expands durable authority or weakens an existing safety invariant.
+
+## Cross-role specification review rule (2026-10-10)
+
+For changes to ontology, professional behavior, decision-making or Presence, reviewers MUST consult [Professional Roles and Communication Contract](professional-roles-and-communication-contract.en.md). Require explicit separation of domain facts, role lens, mandate and enforced authority; evidence-grounded reporting; mid-work correction semantics; and negative tests for stale plans, unauthorized effects and false follow-up promises. This is a specification/review refinement under existing C1–C16, **not** a new authorization source or an activation of a paused goal.

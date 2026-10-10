@@ -116,7 +116,7 @@ class TypingBubbleReadModelTests(unittest.TestCase):
                             json.dumps({'step': {'action': 'web_search', 'query': '경주 휴게소'}}, ensure_ascii=False),
                             time.time()))
             task = next(t for t in service.task_progress()['tasks'] if t['id'] == job_id)
-            self.assertEqual(task['step_line'], "'경주 휴게소' 찾아보고 있어요")
+            self.assertEqual(task['step_line'], "웹에서 '경주 휴게소' 찾아보고 있어요")
             self.assertNotIn(task['step_line'], ('running', 'queued', '진행 중'))
 
     def test_a_pending_browser_approval_is_an_owner_wait_not_typing(self):
@@ -150,7 +150,7 @@ class TypingBubbleReadModelTests(unittest.TestCase):
             for row in rows:
                 for value in row:
                     self.assertNotIn('typing', str(value or ''))
-                    self.assertNotIn('찾아보고 있어요', str(value or ''))
+                    self.assertNotIn('웹에서 찾아보고 있어요', str(value or ''))
 
 
 if __name__ == '__main__':

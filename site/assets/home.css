@@ -77,6 +77,9 @@ main > section.hero + section { border-top: 0; }
 .thread .who i { font-style: normal; font-weight: 500; padding: 0 .45rem; border-radius: 999px; background: rgb(255 253 250 / .75); }
 .thread .who i.new { background: var(--rose); }
 .t-you { align-self: flex-end; text-align: right; }
+.thread-static { max-width: 32rem; gap: 1.4rem; justify-self: end; width: 100%; }
+.thread-static::before { display: none; }
+.thread-static p { font-size: 1.0625rem; }
 .t-you .who { justify-content: flex-end; }
 .t-still { align-self: flex-start; }
 .t-switch { align-self: stretch; max-width: none !important; padding: .2rem 0 !important; text-align: center; font-size: .75rem !important; color: var(--ink); }
@@ -110,12 +113,6 @@ h3 { font-size: 1.0625rem; font-weight: 600; letter-spacing: 0; }
 /* Say less: copy beside an example conversation */
 .talk { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2.5rem clamp(2rem, 6vw, 5rem); align-items: start; }
 .talk-copy p, .concept-copy p, .install-copy p, .github p { max-width: var(--measure); color: var(--muted); margin: 1.25rem 0 0; }
-.chat { margin: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 1.5rem; padding: 1.5rem; }
-.chat ol { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
-.chat li { max-width: 85%; padding: .7rem 1rem; border-radius: 1.1rem; font-size: .9375rem; line-height: 1.55; }
-.from-still { background: var(--mist); border-bottom-left-radius: .35rem; justify-self: start; }
-.from-you { background: var(--rose); border-bottom-right-radius: .35rem; justify-self: end; }
-.chat figcaption { margin-top: 1rem; font-size: .8125rem; color: var(--muted); }
 
 /* Concept */
 .swap { display: grid; grid-template-columns: 1fr 1fr; margin-top: 2.5rem; border-top: 1px solid var(--ink); }

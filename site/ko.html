@@ -11,7 +11,7 @@
 <meta name="theme-color" content="#f6f4f2">
 <link rel="alternate" hreflang="en" href="./">
 <link rel="preload" href="assets/fonts/figtree-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="assets/home.css?v=g11">
+<link rel="stylesheet" href="assets/home.css?v=g12">
 </head>
 <body>
 <a class="skip" href="#main">본문으로 건너뛰기</a>
@@ -192,13 +192,11 @@ c100 -43 182 -106 232 -178 35 -50 106 -236 106 -276 0 -46 -2 -46 -539 -42
     <h2 id="talk-title">길게 말하지 않아도, 이미 말한 것을 기억합니다.</h2>
     <p>브랜드, 크기, 가게까지 적은 긴 프롬프트가 필요 없습니다. Still은 이미 들은 것을 가져와 귀찮은 부분을 처리하고, 내 결정이 필요한 곳에서 멈춥니다.</p>
   </div>
-  <figure class="chat" aria-label="Still과의 대화">
-    <ol>
-      <li class="from-still">안녕하세요, Still이에요. 오늘 필요한 일부터 이야기해 주세요.</li>
-      <li class="from-you">오후에 일하기 좋은 카페 찾아줘.</li>
-      <li class="from-still">분위기도 보되, 오래 앉아 일하기 편한지도 같이 볼게요. 그게 중요하다고 하셨죠. 근처 세 곳이에요.</li>
-    </ol>
-  </figure>
+  <div class="thread thread-static" role="group" aria-label="Still과의 대화">
+    <p class="t-still"><span class="who">Still</span>안녕하세요, Still이에요. 오늘 필요한 일부터 이야기해 주세요.</p>
+    <p class="t-you"><span class="who">나</span>오후에 일하기 좋은 카페 찾아줘.</p>
+    <p class="t-still"><span class="who">Still</span>분위기도 보되, 오래 앉아 일하기 편한지도 같이 볼게요. 그게 중요하다고 하셨죠. 근처 세 곳이에요.</p>
+  </div>
 </section>
 
 <section class="concept" id="concept" aria-labelledby="concept-title">

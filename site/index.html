@@ -11,7 +11,7 @@
 <meta name="theme-color" content="#f6f4f2">
 <link rel="alternate" hreflang="ko" href="ko.html">
 <link rel="preload" href="assets/fonts/figtree-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="assets/home.css?v=g11">
+<link rel="stylesheet" href="assets/home.css?v=g12">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -191,13 +191,11 @@ c100 -43 182 -106 232 -178 35 -50 106 -236 106 -276 0 -46 -2 -46 -539 -42
     <h2 id="talk-title">Say less. Still remembers what you said.</h2>
     <p>You don’t write a long prompt with every detail. Still brings in what you have already told it, does the tedious part, and stops where your decision matters.</p>
   </div>
-  <figure class="chat" aria-label="A conversation with Still">
-    <ol>
-      <li class="from-still">Hi, I’m Still. What would you like a hand with today?</li>
-      <li class="from-you">A café to work from this afternoon.</li>
-      <li class="from-still">I’ll look at the mood, and also whether you can sit and work for a few hours. You said that matters to you. Here are three nearby.</li>
-    </ol>
-  </figure>
+  <div class="thread thread-static" role="group" aria-label="A conversation with Still">
+    <p class="t-still"><span class="who">Still</span>Hi, I’m Still. What would you like a hand with today?</p>
+    <p class="t-you"><span class="who">You</span>A café to work from this afternoon.</p>
+    <p class="t-still"><span class="who">Still</span>I’ll look at the mood, and also whether you can sit and work for a few hours. You said that matters to you. Here are three nearby.</p>
+  </div>
 </section>
 
 <section class="concept" id="concept" aria-labelledby="concept-title">

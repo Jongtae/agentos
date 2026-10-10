@@ -1566,8 +1566,9 @@ def recovered(trail):
  """Whether a Work with failed attempts recovered to a fully satisfied result.
 
  ``trail`` is the ordered ``(host_action, state)`` of every validated
- attempt; state is ``succeeded``, ``failed``, ``exhausted``, ``withheld`` or
- ``incomplete``.  True only when every failure was an effect-free read, a
+ attempt; state is ``succeeded``, ``failed``, ``missed`` (#1276, a browser
+ step declared read/navigate that AgentOS did not run), ``exhausted``,
+ ``withheld`` or ``incomplete``.  True only when every failure was an effect-free read, a
  read succeeded after the last failure, and nothing was withheld, left
  incomplete or cut off by the budget (owner Q2 + refinement 3).  Failed
  attempts stay in the durable tool events either way.
@@ -1576,6 +1577,7 @@ def recovered(trail):
  if not failures:return False
  if any(state in ('withheld','incomplete','exhausted') for _action,state in trail):return False
  if any(state=='failed' and action not in EFFECT_FREE_READS for action,state in trail):return False
+ # #1276: a ``missed`` browser step ran nothing; it recovers like a failed read.
  return any(state=='succeeded' and action in EFFECT_FREE_READS for action,state in trail[failures[-1]+1:])
 
 #: #818: trail states that did what the call is for.  ``proposed`` is a
@@ -1638,6 +1640,23 @@ def worker_result(action, result):
           'replaced_previous':bool(result.get('supersedes')),'next':MEMORY_SAVED_WORKER_NOTE}
  return result
 
+#: #1276: the browser failures that mean the target could not be acted on (changed, covered or gone).
+UNRUN_TARGET_CODES=frozenset({'target_unavailable','target_not_found'})
+
+def unrun_page_step(action, detail):
+ """Whether a failed call was a browser step declared ``read``/``navigate`` that AgentOS refused before running (#1276).
+
+ Only a target AgentOS could not act on (``UNRUN_TARGET_CODES``) with
+ ``effect: none``: nothing was pressed, typed or sent, so like an
+ effect-free read that missed it changed nothing.  A ``mutate`` or
+ ``payment`` declaration, any other effect, and every other code - an
+ approval or a guard refusal above all (#752 review P1) - stay a failed
+ state change.
+ """
+ value=detail.get('declared_effect') if isinstance(detail,dict) else None
+ return (action in BROWSER_ACTIONS and isinstance(value,str) and value in PAGE_LOAD_EFFECTS
+         and detail.get('effect')=='none' and detail.get('code') in UNRUN_TARGET_CODES)
+
 def event_trail(rows, tools=None):
  """``(trail, refusals)`` of the attempts in a Work's durable tool events."""
  trail=[];refusals=[]
@@ -1650,7 +1669,7 @@ def event_trail(rows, tools=None):
   if status=='failed':
    reason=data.get('error') if isinstance(data.get('error'),str) else None
    refusals.append((tool,reason))
-   trail.append((action,'exhausted' if data.get('code') in BUDGET_CODES else 'failed'));continue
+   trail.append((action,'exhausted' if data.get('code') in BUDGET_CODES else 'missed' if unrun_page_step(action,data) else 'failed'));continue
   evidence=data.get('evidence') if isinstance(data.get('evidence'),dict) else {}
   if memory_proposal(action,evidence):trail.append((action,'proposed'))
   elif evidence.get('refused_because') or (action in CALENDAR_DRAFT_TOOLS and evidence.get('requires_owner_approval') and not evidence.get('applied')) \

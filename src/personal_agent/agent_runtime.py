@@ -224,14 +224,20 @@ BROWSER_SESSION_NOTE=(' The owner cannot see this browser session: whatever it h
 #: #953 (BROWSE-09, live 2026-10-01): a worker on a site's main page, shown signed out, never reached a
 #: sign-in form and told the owner to sign in in a browser instead.  The model now asks for the sign-in
 #: directly (``browser_sign_in``); AgentOS runs the same in-flow login.
+#: #1269 (SESSION-KEEP-05): a site's own session can lapse within hours while the account the owner signs in
+#: to it with stays signed in for days; continuing with that account signs in again without a password.
 BROWSER_SIGN_IN_NOTE=(' Whenever a page you open or reach shows a sign-in form, AgentOS asks the owner to sign in (on this Mac, '
                       'and from their phone where that is set up) and continues the request once they have. When the owner\'s own account is needed '
-                      'and a page shows you are signed out or asks you to sign in, call browser_sign_in with the site\'s '
-                      'address instead of looking for its sign-in page or telling the owner to sign in somewhere. Never type '
+                      'and a page shows you are signed out or asks you to sign in, first open the site\'s sign-in page when it '
+                      'is one step away: if it offers to continue with another account (an account provider\'s button), press '
+                      'it - where the owner is still signed in to that account, it signs in without a password, and you carry '
+                      'on with the request. If no such option is offered, or a password or a verification is asked, call '
+                      'browser_sign_in with the site\'s address instead of telling the owner to sign in somewhere. Never type '
                       'a password yourself.')
 #: #953: the model-facing text of ``browser_sign_in`` (generic: no site, provider or category is named).
 BROWSER_SIGN_IN_DESCRIPTION=('When the request needs the owner\'s own account on a site and you are not signed in there (a page shows '
-                             'you are signed out or asks you to sign in), call this with the site\'s address (its home page or '
+                             'you are signed out or asks you to sign in), and its sign-in page offers no way to continue with an '
+                             'account the owner is already signed in to, call this with the site\'s address (its home page or '
                              'the page you need) instead of telling the person to sign in somewhere: AgentOS asks them to sign '
                              'in (on this Mac, and from their phone where that is set up) and continues the request '
                              'afterwards, so end your turn after calling it and say the sign-in was requested, unless the '
@@ -2326,7 +2332,8 @@ class Capabilities:
     if self.browser_unavailable:raise ToolError(self.browser_unavailable,UNAVAILABLE_CODE)
     raise ToolError(UNAVAILABLE_TEXT,'needs_setup',requires='browser-profile')
    result=self.browser_session().run(name,args)
-   if result.get('state')=='login_required':return result
+   # #1269: a sign-in page's mediated view is a page read like any other.
+   if result.get('state')=='login_required' and 'text' not in result:return result
    return self._from_private('owner-browser-session',result)
   if name in API_ACTIONS:
    # #1216: the slot's secret, host binding, effect approval and provenance live in `api_requests`.

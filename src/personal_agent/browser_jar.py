@@ -29,6 +29,8 @@ or the key; ``sites()`` returns names, counts and times only.  The jar is not
 part of the portable export or the backup (they copy the database and plugin
 manifests only) and a restored runtime starts without sessions.
 """
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -46,6 +48,44 @@ SECURITY = '/usr/bin/security'
 SECURITY_TIMEOUT_SECONDS = 15
 #: ``security`` exits 44 when the item does not exist.
 NOT_FOUND = 44
+
+
+#: #1269: a cookie value longer than this is not read as a token.
+TOKEN_VALUE_LIMIT = 8192
+
+
+def token_expiry(value):
+    """The ``exp`` of a cookie value that is a JWT (RFC 7519 compact form), or None (#1269).
+
+    Only the payload's numeric ``exp`` claim is read; the signature is not
+    checked because nothing but a refresh time is taken from it, and no other
+    claim is kept.  A value that is not three base64url segments with a JSON
+    object payload is not a token.
+    """
+    value = str(value or '')
+    if len(value) > TOKEN_VALUE_LIMIT or value.count('.') != 2:
+        return None
+    payload = value.split('.')[1]
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))
+    except (binascii.Error, ValueError, UnicodeDecodeError):
+        return None
+    exp = claims.get('exp') if isinstance(claims, dict) else None
+    return float(exp) if isinstance(exp, (int, float)) and not isinstance(exp, bool) and exp > 0 else None
+
+
+def effective_expiry(row):
+    """A stored cookie row's expiry for keep-alive (#1269): the earlier of its cookie expiry and its token ``exp``."""
+    expires = row.get('expires') if isinstance(row.get('expires'), (int, float)) else None
+    token = token_expiry(row.get('value'))
+    return min(value for value in (expires, token) if value is not None) if expires is not None or token is not None else None
+
+
+def latest_token_expiry(rows):
+    """The latest ``token_expiry`` among cookie ``rows``, or None when none carries one (#1269)."""
+    values = [token_expiry(row.get('value')) for row in rows or () if isinstance(row, dict)]
+    values = [value for value in values if value is not None]
+    return max(values) if values else None
 
 
 class JarError(Exception):
@@ -294,11 +334,12 @@ class CookieJar:
     def site_cookie_marks(self, host):
         """``(marks, now)`` for the stored sign-in cookies of the site(s) ``host`` belongs to (#709).
 
-        ``marks`` is one ``(digest, expires, identity)`` per stored cookie: the
+        ``marks`` is one ``(digest, expires, identity, effective)`` per stored cookie: the
         digest covers the cookie's site, name, domain, path and value (never
         its expiry); ``identity`` covers the same but the value, so a cookie
         whose value rotated keeps its identity and only a new cookie has a new
-        one (#765).  Neither returns a value.  ``now`` is this jar's clock, the
+        one (#765).  ``effective`` (#1269) is ``effective_expiry``: a token value's
+        own ``exp`` counts, for keep-alive scheduling only.  None returns a value.  ``now`` is this jar's clock, the
         same clock ``import_rows`` uses to drop expired rows, so two readings
         are compared over exactly the unexpired cookies (``unexpired``) a
         worker was given and could keep.  Raises ``JarError`` when the jar
@@ -317,7 +358,8 @@ class CookieJar:
                     continue
                 identity = [site, str(row.get('name')), str(row.get('domain')), str(row.get('path'))]
                 expires = row.get('expires') if isinstance(row.get('expires'), (int, float)) else None
-                marks.append((_digest(identity + [str(row.get('value'))]), expires, _digest(identity)))
+                marks.append((_digest(identity + [str(row.get('value'))]), expires, _digest(identity),
+                              effective_expiry(row)))
         return marks, now
 
     def cached_sites(self):

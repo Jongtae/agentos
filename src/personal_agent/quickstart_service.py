@@ -339,6 +339,14 @@ BROWSER_LOGIN_CLOSE_SECONDS=60
 BROWSER_LOGIN_OFFERED_TEXT=('이 페이지는 로그인이 필요합니다. 이 실행이 끝나면 AgentOS가 이 Mac에 로그인 창을 열고 소유자에게 '
                             '로그인을 요청합니다. 소유자가 로그인하고 창을 닫으면 이 요청을 한 번 이어서 처리합니다. '
                             '비밀번호는 입력하지 말고, 지금까지 확인한 내용으로 이번 답을 마치세요.')
+#: #1269 (SESSION-KEEP-05): a sign-in page the worker reached (not one it asked for with
+#: ``browser_sign_in``): before ending, it may continue with an account the owner is already signed in to.
+BROWSER_LOGIN_PAGE_OFFERED_TEXT=('이 페이지는 로그인이 필요합니다. 이 페이지에 소유자가 이미 쓰는 다른 계정으로 계속하는 선택지(계정 '
+                                 '제공자의 로그인 버튼)가 있으면 눌러 보세요. 그 계정에 로그인되어 있으면 비밀번호 없이 로그인되고, '
+                                 '그대로 요청을 이어서 처리하면 됩니다. 그런 선택지가 없거나 비밀번호·추가 인증을 요구하면 입력하지 '
+                                 '말고, 지금까지 확인한 내용으로 이번 답을 마치세요. 그러면 이 실행이 끝난 뒤 AgentOS가 이 Mac에 '
+                                 '로그인 창을 열고 소유자에게 로그인을 요청하며, 소유자가 로그인하고 창을 닫으면 이 요청을 한 번 '
+                                 '이어서 처리합니다.')
 #: #1006: a second site's login page while this Work's login for another site is still pending.
 BROWSER_LOGIN_OTHER_PENDING_TEXT=('이 페이지는 로그인이 필요합니다. 이 요청은 이미 다른 사이트의 로그인을 기다리고 있어 이 사이트의 로그인은 '
                                   '지금 요청되지 않습니다. 비밀번호는 입력하지 말고, 지금까지 확인한 내용으로 답을 마치면서 이 사이트에도 '
@@ -6441,11 +6449,12 @@ class AgentService:
                 # same in-flow text, never the Settings pointer.  Another site waits for its own request.
                 if existing.get('state') not in BROWSER_LOGIN_PENDING_STATES:return None
                 same=registrable_domain(existing.get('host'))==registrable_domain(host)
-                return BROWSER_LOGIN_OFFERED_TEXT if same else BROWSER_LOGIN_OTHER_PENDING_TEXT
+                return (BROWSER_LOGIN_OFFERED_TEXT if explicit else BROWSER_LOGIN_PAGE_OFFERED_TEXT) if same \
+                    else BROWSER_LOGIN_OTHER_PENDING_TEXT
             self._put_browser_login(job['id'],{'work_id':job['id'],'url':target,'host':host,
                                                'state':'requested','requested_at':time.time(),
                                                'nonce':secrets.token_hex(16),'explicit':bool(explicit)})
-        return BROWSER_LOGIN_OFFERED_TEXT
+        return BROWSER_LOGIN_OFFERED_TEXT if explicit else BROWSER_LOGIN_PAGE_OFFERED_TEXT
 
     def offer_browser_login(self, job):
         """After a Work's run: show the login window it asked for and ask the owner (#709).
@@ -6589,7 +6598,11 @@ class AgentService:
         push).  Due about every ``KEEPALIVE_SECONDS``, jittered
         (``keepalive_interval``), or earlier for a stored cookie's expiry.
         One HTTP request, never the browser; a refusal pauses the site until
-        the owner's next sign-in to it.  No model call; the log names the site
+        the owner's next sign-in to it, and so does (#1269) an answer that left
+        the site's token cookies' expiry where it was (``unchanged``): the
+        request cannot extend that session, and repeating it only adds
+        automated traffic.  A token cookie's own ``exp`` counts as its expiry
+        for the due time.  No model call; the log names the site
         and the outcome only.  Started off the work loop by
         ``start_session_keepalive`` while no Work is queued or running.
         """
@@ -6613,18 +6626,20 @@ class AgentService:
             if not read or not read[0]:continue   # unreadable, or no stored session left
             marks,jar_now=read
             last=max(float(record.get('at') or 0),float(refreshed.get(site) or 0))
-            if keepalive_due_at([mark[1] for mark in marks],last,jar_now,keepalive_interval(site,last))>jar_now:continue
+            expiries=[mark[3] if len(mark)>3 else mark[1] for mark in marks]
+            if keepalive_due_at(expiries,last,jar_now,keepalive_interval(site,last))>jar_now:continue
             # #1015/#1041: one HTTP request with the stored cookies, never the browser.  A site that
             # refuses it is paused: pushing past a bot check puts the owner's account at risk.
             result=self.browser_profile.refresh_session_http(f'https://{host}/')
             if result.get('state')=='busy':return None   # tried again at the next check
-            if result.get('state')=='blocked':
+            stop=result.get('state') in ('blocked','unchanged')
+            if stop:
                 paused[site]=now
                 self.store.put(self.KEEPALIVE_PAUSED_KEY,paused)
             refreshed[site]=now
             self.store.put(self.KEEPALIVE_KEY,refreshed)
             LOG.info('session keep-alive site=%s state=%s%s',site,result.get('state'),
-                     ' (paused until the next sign-in)' if result.get('state')=='blocked' else '')
+                     ' (paused until the next sign-in)' if stop else '')
             return site
         return None
 

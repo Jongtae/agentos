@@ -1101,8 +1101,11 @@ class LoginAndBudgetTests(unittest.TestCase):
         self.assertEqual(result['state'], 'login_required')
         self.assertTrue(result['needs_setup'])
         self.assertEqual(result['requires'], 'browser-login')
-        self.assertNotIn('text', result)
-        self.assertNotIn('elements', result)
+        # #1269: the sign-in page's mediated view comes along (another account's button may be on it);
+        # it is the same mediation as any page, so a guarded value never is in it.
+        self.assertIn('text', result)
+        self.assertIn('로그인', [row['name'] for row in result['elements']])
+        self.assertNotIn('_elements', result)
         self.assertEqual(withheld_effect('browser_open', result).advanced, False)
         self.assertIsNone(withheld_effect('browser_open', {'state': 'page', 'text': 'x'}))
 
@@ -1351,7 +1354,8 @@ class LoopTests(unittest.TestCase):
         self.assertEqual(result.outcome, 'failed')
         failed = [json.loads(d) for t, s, d in self.events if s == 'failed' and t == 'browser_open']
         self.assertEqual(failed[0]['error'], bs.LOGIN_REQUIRED_TEXT)
-        self.assertNotIn('owner-browser-session', caps.private_provenance)
+        # #1269: the sign-in page was read from the session, so the Work's context names that source.
+        self.assertIn('owner-browser-session', caps.private_provenance)
 
     def test_a_sign_in_request_keeps_the_turn_from_claiming_success_and_leaves_no_private_source(self):
         """#953: the loop treats the direct sign-in request as it treats a login page."""

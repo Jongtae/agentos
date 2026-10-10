@@ -68,7 +68,8 @@ from urllib.parse import urlsplit, urlunsplit
 
 from .agent_runtime import BROWSER_ACTIONS, ToolError, lookup_norm, lookup_text_violations, lookup_words
 from .bounded_execution import SECRET_PATTERN
-from .browser_jar import JAR_NAME, SERVICE as JAR_SERVICE, CookieJar, JarError, KeychainKey, store_account
+from .browser_jar import (JAR_NAME, SERVICE as JAR_SERVICE, CookieJar, JarError, KeychainKey, latest_token_expiry,
+                          store_account)
 from .browser_worker import PAYMENT_TOKENS, SECRET_TOKENS, destination_refusal
 
 #: The model's declared effect class of one action.
@@ -882,8 +883,11 @@ class BrowserSession:
         snapshot = self._snapshot(requested_url)
         if snapshot['login_required']:
             # Generic (`login_form_present`): the profile holds no session for
-            # this page.  Nothing else of the page is returned.
-            return {'state': 'login_required', 'url': snapshot['url'], 'title': snapshot['title'],
+            # this page.  #1269: the mediated page comes with the login request
+            # (guarded values are never in it), so the owner's AI can continue
+            # with an account the owner is already signed in to where the page
+            # offers one; it never types a password.
+            return {**public_view(snapshot), 'state': 'login_required',
                     'needs_setup': True, 'requires': 'browser-login',
                     'next_step': self._offer_login(snapshot['url']) or LOGIN_REQUIRED_TEXT}
         return {'state': 'page', **public_view(snapshot)}
@@ -1344,16 +1348,21 @@ def keepalive_interval(site, last):
 def keepalive_due_at(expiries, last, now, interval=KEEPALIVE_SECONDS):
     """When a signed-in site's session should next be refreshed (#990), from its cookies' expiries.
 
-    ``last`` is the later of the sign-in and the last refresh.  A cookie
-    already within ``KEEPALIVE_LEAD_SECONDS`` of expiring (or session-only,
-    ``None``) sets no earlier time.  ``interval`` (#1041) is this refresh's
-    jittered cadence (``keepalive_interval``).  Pure.
+    ``last`` is the later of the sign-in and the last refresh.  A cookie that
+    lived no longer than ``KEEPALIVE_LEAD_SECONDS`` past ``last`` (a token
+    re-issued every few minutes anyway), one already expired, or a
+    session-only one (``None``) sets no earlier time.  #1269: measured from
+    ``last``, not ``now``, so the earlier time can arrive: measured from
+    ``now`` a cookie left the list exactly when its refresh became due.
+    ``interval`` (#1041) is this refresh's jittered cadence
+    (``keepalive_interval``).  Pure.
     """
     last = float(last or 0)
     interval = float(interval or KEEPALIVE_SECONDS)
     due = last + interval
     ahead = [float(expires) - KEEPALIVE_LEAD_SECONDS for expires in expiries or ()
-             if isinstance(expires, (int, float)) and float(expires) - now > KEEPALIVE_LEAD_SECONDS]
+             if isinstance(expires, (int, float)) and float(expires) - last > KEEPALIVE_LEAD_SECONDS
+             and float(expires) > now]
     if ahead:
         due = min(due, min(ahead))
     return max(due, last + min(KEEPALIVE_MIN_GAP_SECONDS, interval))
@@ -2161,8 +2170,14 @@ class BrowserProfile:
         Under the profile lock (no worker holds older cookies meanwhile), the
         site's stored rows go out with one GET (``http_refresh``); what the
         site answered replaces that site's rows only, and ``on_saved`` pushes
-        it like any save.  Returns ``{'state': refreshed | blocked | failed |
-        busy}``; ``blocked`` means the site refused a non-browser request.
+        it like any save.  Returns ``{'state': refreshed | unchanged | answered
+        | blocked | failed | busy}``; ``blocked`` means the site refused a
+        non-browser request.  #1269: what the answer did to the session is
+        stated as observed, from the site's token cookies (``latest_token_expiry``):
+        ``refreshed`` only when their latest ``exp`` moved later, ``unchanged``
+        when the site holds such tokens and none moved (the request cannot
+        extend that session), ``answered`` when it holds none (the site answered;
+        whether the session lives is not known).
         """
         parts = urlsplit(str(url or ''))
         site = registrable_domain(parts.hostname or '')
@@ -2184,7 +2199,12 @@ class BrowserProfile:
                 self._save_mark = None
                 self.jar.save_export({site: after}, [parts.hostname], imported={site})
             self._saved({site})
-            return {'state': 'refreshed'}
+            before_exp, after_exp = latest_token_expiry(rows), latest_token_expiry(after)
+            if before_exp is None and after_exp is None:
+                return {'state': 'answered'}
+            if after_exp is not None and (before_exp is None or after_exp > before_exp):
+                return {'state': 'refreshed'}
+            return {'state': 'unchanged'}
         except Exception as exc:
             return {'state': 'failed', 'error': type(exc).__name__}
         finally:

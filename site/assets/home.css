@@ -2,7 +2,7 @@
    The Still lockup is traced from the owner's mockup (inline SVG); Figtree (SIL OFL, fonts/) for Latin UI text; Korean uses the system Gothic. Rose and Sage are never used for small text. */
 @font-face { font-family: "Figtree"; src: url("fonts/figtree-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 :root {
-  --mist: #f6f4f2;
+  --mist: #f3eee9; /* guide: Cream */
   --paper: #fffdfa;
   --ink: #2e3a44;
   --muted: #62666b;
@@ -43,19 +43,19 @@ b { font-weight: 600; }
 .bar nav a:hover { color: var(--ink); }
 
 /* Hero: name and warmth first. Text on the left, the presence on the right. */
-main > .hero { position: relative; max-width: none; padding: 8.75rem clamp(1.25rem, 7vw, 7.5rem) 3.5rem; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: 2rem clamp(2rem, 5vw, 5rem); align-items: center; overflow: hidden; background: var(--mist); }
-.hero-art { position: absolute; inset: 0 0 0 auto; width: 46%; pointer-events: none; }
-.hero-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 66% 26%; opacity: .5; -webkit-mask-image: radial-gradient(ellipse 80% 85% at 62% 42%, #000 35%, transparent 78%); mask-image: radial-gradient(ellipse 80% 85% at 62% 42%, #000 35%, transparent 78%); }
-.hero-copy { position: relative; width: 100%; }
-.hero-copy > * { max-width: 38rem; }
+main > .hero { position: relative; max-width: none; padding: 0; display: grid; align-items: center; overflow: hidden; min-height: min(90svh, 54rem); background: var(--mist); }
+
+.hero-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 72% 35%; }
+.hero-copy { position: relative; width: 100%; padding: 7.5rem clamp(1.25rem, 7vw, 7.5rem) 4rem; }
+.hero-copy > * { max-width: 40rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.lockup { display: flex; flex-direction: column; align-items: flex-start; gap: clamp(.75rem, 1.2vw, 1.1rem); margin: 0; color: var(--ink); }
+.lockup { display: flex; flex-direction: column; align-items: flex-start; gap: clamp(1rem, 1.6vw, 1.6rem); margin: 0; color: var(--ink); }
 .lockup svg { display: block; height: auto; }
-.wm-still { width: clamp(8.5rem, 11vw, 11.5rem); }
-.wm-here { width: clamp(12rem, 15.5vw, 16.5rem); }
-.ko-line { margin: 1.5rem 0 0; font-size: clamp(1.125rem, 1.5vw, 1.3125rem); font-weight: 400; }
-.lede { margin: .9rem 0 1.5rem; color: var(--ink); opacity: .85; font-size: 1rem; }
-.quick { margin: 0 0 1.5rem; }
+.wm-still { width: clamp(11rem, 15vw, 15.5rem); }
+.wm-here { width: clamp(15rem, 21.5vw, 22rem); }
+.ko-line { margin: 2.25rem 0 0; font-size: clamp(1.25rem, 1.8vw, 1.5rem); font-weight: 400; }
+.lede { margin: 1.5rem 0 2rem; color: var(--ink); opacity: .85; font-size: 1.0625rem; }
+.quick-line { margin: 0 0 1rem; font-size: .9375rem; color: var(--ink); opacity: .8; }
 .quick-label { margin: 0 0 .6rem; font-size: .9375rem; color: var(--ink); opacity: .85; }
 .quick pre { margin: 0; padding: .85rem 1.15rem; background: var(--ink); color: var(--paper); border-radius: .7rem; font: 400 .9375rem/1.6 var(--sans); letter-spacing: .01em; white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
 .quick pre code { font: inherit; }
@@ -66,7 +66,7 @@ main > .hero { position: relative; max-width: none; padding: 8.75rem clamp(1.25r
 .arrow { font-size: 1.1em; line-height: 1; }
 
 /* Hero scene: plays over the artwork with no box, like the teaser film. */
-.stage { position: relative; z-index: 1; justify-self: end; width: 100%; max-width: 25rem; }
+.stage { position: relative; width: 100%; max-width: 30rem; justify-self: end; }
 .thread { display: flex; flex-direction: column; gap: .55rem; }
 .thread p { margin: 0; max-width: 86%; padding: .6rem .9rem; border-radius: 1.1rem; font-size: .9375rem; line-height: 1.45; }
 .thread .who { display: flex; align-items: center; gap: .4rem; font-size: .75rem; font-weight: 600; opacity: .75; margin-bottom: .1rem; }
@@ -152,15 +152,18 @@ h3 { font-size: 1.0625rem; font-weight: 600; letter-spacing: 0; }
 .foot nav { display: flex; gap: 1.25rem; }
 
 @media (max-width: 900px) {
-  main > .hero { grid-template-columns: 1fr; padding-top: 6rem; }
   .stage { justify-self: start; }
-  .hero-art { display: none; }
   .three, .limits { grid-template-columns: 1fr; }
   .talk { grid-template-columns: 1fr; }
 }
 @media (max-width: 720px) {
   body { font-size: .9375rem; }
   .bar { position: relative; background: var(--mist); }
+  main > .hero { display: block; min-height: 0; }
+  .hero-art { position: relative; display: block; }
+  .hero-art img { position: static; display: block; width: 100%; height: 20rem; object-fit: cover; object-position: 62% 25%; }
+  .hero-art::after { content: ""; position: absolute; inset: auto 0 0; height: 40%; background: linear-gradient(to bottom, transparent, var(--mist)); }
+  .hero-copy { margin-top: -2.5rem; padding-top: 0; padding-bottom: 2.5rem; }
   .swap { grid-template-columns: 1fr; }
   .swap > div, .swap > div + div { padding: 1.25rem 0 0; border-left: 0; }
   .steps li { padding: 1.25rem 1.25rem 1.4rem; }

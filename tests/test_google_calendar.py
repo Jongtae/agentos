@@ -55,7 +55,9 @@ class GoogleCalendarTests(unittest.TestCase):
         self.assertEqual(query["orderBy"], ["startTime"])
         self.assertEqual(headers["Authorization"], "Bearer access-secret")
         self.assertNotIn("access-secret", url)
-        self.assertNotIn("description", result[0])
+        # #1273 (after #826): the owner's AI reads what the event says and who is invited, so a
+        # follow-up about it needs no web sign-in; the description is bounded (MAX_DESCRIPTION_CHARS).
+        self.assertEqual(result[0]["description"], "not copied into query result")
 
     def test_exact_post_uses_stable_event_id_and_suppresses_invites(self):
         payload = {
@@ -144,6 +146,42 @@ class GoogleCalendarTests(unittest.TestCase):
                 with self.assertRaises(GoogleCalendarError) as error:
                     calendar.query("2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z", "UTC", 10)
                 self.assertEqual((error.exception.reason, error.exception.effect), (reason, "none"))
+
+    def test_query_reads_attendees_organizer_and_description(self):
+        """#1273: the follow-up "who is the lunch with" is answerable from the read itself."""
+        seen = []
+        response = {"items": [{
+            "id": "lunch", "summary": "점심", "etag": '"e"',
+            "start": {"dateTime": "2026-10-12T12:30:00+09:00"}, "end": {"dateTime": "2026-10-12T13:30:00+09:00"},
+            "description": "x" * 4100,
+            "organizer": {"email": "me@example.com", "self": True},
+            "attendees": [
+                {"email": "me@example.com", "self": True, "organizer": True, "responseStatus": "accepted"},
+                {"email": "kim@example.com", "displayName": "김", "responseStatus": "needsAction", "optional": True},
+                "not-a-person", {"responseStatus": "declined"},
+            ],
+        }]}
+
+        def transport(method, url, body, headers):
+            seen.append(url)
+            return response if "/events?" in url else {"items": []}
+        [event] = GoogleCalendar(transport).query("2026-10-12T00:00:00+09:00", "2026-10-13T00:00:00+09:00", "Asia/Seoul", 10)
+        self.assertEqual(event["attendees"], [
+            {"email": "me@example.com", "response": "accepted", "organizer": True, "self": True},
+            {"email": "kim@example.com", "name": "김", "response": "needsAction", "optional": True}])
+        self.assertEqual(event["organizer"], {"email": "me@example.com", "self": True})
+        self.assertEqual(len(event["description"]), 4000)
+        self.assertTrue(event["description_truncated"])
+        query = next(url for url in seen if "/events?" in url)
+        self.assertIn("attendees", query)
+        self.assertIn("maxAttendees=50", query)
+
+    def test_an_event_without_people_or_notes_reads_as_before(self):
+        response = {"items": [{"id": "e1", "summary": "Office", "start": {"date": "2026-10-12"}, "end": {"date": "2026-10-13"}}]}
+        [event] = GoogleCalendar(lambda method, url, *_: response if "/events?" in url else {"items": []}).query(
+            "2026-10-12T00:00:00+09:00", "2026-10-13T00:00:00+09:00", "Asia/Seoul", 10)
+        for key in ("attendees", "organizer", "description", "description_truncated"):
+            self.assertNotIn(key, event)
 
     def test_query_rejects_over_limit_and_unbounded_provider_fields(self):
         event={

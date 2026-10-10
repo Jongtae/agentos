@@ -65,3 +65,7 @@ The deployed runtime must use automated startup and health checks, fail closed o
 ## Non-goals
 
 This policy does not claim that mocks prove vendor availability, account entitlement, network reachability, or real-world provider behavior. It also does not allow undocumented external calls, arbitrary runtime installation, or bypassing approval and local-first data boundaries.
+
+## AI-native community participation (GOV-CONTRIB-01)
+
+The public [Contributing Guide](../CONTRIBUTING.md), [Governance](../GOVERNANCE.md) and [AI Review Contract](governance/ai-contribution-review.en.md) describe role-specific AI assistance and contributor accountability. They do not replace this document's CI, risk-based review or exact-head verification. Independent review depends on the human authorship relationship, not on running a second model. The [Release Policy](governance/release-policy.en.md) adds version/readiness/authorization decisions; merge and release remain separate. No mandatory paid model or AI resource profile is imposed.

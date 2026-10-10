@@ -42,3 +42,9 @@ Finished one-off implementation records belong under [archive/history/](archive/
 ## Editing rule
 
 Prefer changing one canonical source and linking to it over copying current state into several documents. If a document needs a point-in-time snapshot, label it explicitly as historical or dated evidence. A documentation cleanup must not silently change runtime policy, owner authority, delivery selection or the meaning of prior evidence.
+
+## Community contributions, AI review and releases
+
+- [Contributing](../CONTRIBUTING.md) and [Governance](../GOVERNANCE.md) are public entry points for humans and their AI tools; [Code of Conduct](../CODE_OF_CONDUCT.md) applies to both.
+- [AI Contribution and Review Contract](governance/ai-contribution-review.en.md) defines per-task roles, human accountability, independence, findings and decision briefs. It does not override the Development Constitution.
+- [Release Policy](governance/release-policy.en.md) governs version selection, readiness and publication authority; [Release Procedure](release.en.md) remains the operational tag/archive/Homebrew sequence.

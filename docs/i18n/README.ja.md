@@ -40,7 +40,7 @@ Personal AgentOS は、その必要はないという可能性を探ります。
 
 **主な特長**
 
-- **好きな AI を接続。** ローカルの Ollama モデル、OpenAI 互換・Anthropic API、Codex や Claude Code のサブスクリプションが実際の仕事をします。
+- **契約中の AI をそのまま。** ChatGPT のプランは Codex で、Claude のプランは Claude Code で接続し、実際の仕事を任せます。そのほかの接続方法は [QUICKSTART](../../docs/QUICKSTART.md#other-model-connections) にあります。
 - **会話が変わっても同じ PA。** 記憶、保存した結果、未完の仕事の状態は次の会話や再起動後も残ります。中断された実行は黙って再実行せず、中断として報告します。
 - **境界は自分で決める。** アクセスは自分が接続したフォルダー・アカウント・ツールから始まります。対応している支払いフローは行動ごとの承認を求め、[現在のブラウザー上の制限](https://github.com/Jongtae/agentos/issues/758)も公開しています。[秘密情報](../../.github/SECURITY.md)はモデルのプロンプト・ログ・Evidenceに入りません。
 - **隠さずに知らせる。** AI が何かを記憶するとそれを知らせ、正確に取り消せるようにします。任せた仕事ごとに、どの情報を使いどこへ送ったかを記録します。
@@ -64,13 +64,15 @@ Personal AgentOS は、その必要はないという可能性を探ります。
 
 ## クイックスタート
 
-macOS と Linux では、コマンド一つでインストールしてそのまま起動します。Homebrew、Python、Docker は不要です。
+macOS、Linux、Windows（WSL2）で、コマンド一つでインストールしてそのまま起動します。Homebrew、Python、Docker は不要です。
 
 ```sh
 curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh
 ```
 
 この URL はインストーラー自体も特定のコミットに固定します。実行前に[固定されたスクリプトを確認](https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh)でき、スクリプトは公開済み AgentOS アーカイブと、ダウンロードする uv インストーラーのチェックサムを検証します。
+
+Windows では PowerShell で `wsl --install` を実行して再起動し、Ubuntu を開いて最初のコマンドを実行してください。Windows の手順、インストーラーの動作、ソースからの実行、すべての設定は [QUICKSTART](../../docs/QUICKSTART.md) にあります。会話中は `agentos start` を起動したままにしてください。
 
 macOS で [Homebrew](https://brew.sh) を使っている場合：
 
@@ -80,11 +82,9 @@ agentos start
 ```
 
 1. ブラウザで [http://127.0.0.1:8787](http://127.0.0.1:8787/) が開きます。画面は英語が既定で、左下で日本語、韓国語、簡体字中国語に切り替えられます。Telegram の一部の定型ステータス・進捗表示と、接続時の一部の検証エラーはまだ韓国語です。
-2. AI を接続します。ツール呼び出しに対応した Ollama モデル、OpenAI・OpenAI 互換・Anthropic の API キー、または Codex や Claude Code のサブスクリプションを使えます。
+2. 契約中の AI を接続します。ChatGPT は Codex（`codex login`）、Claude は Claude Code（`claude setup-token`）で。[そのほかの接続](../../docs/QUICKSTART.md#other-model-connections)
 3. 任意：**設定 → 外部接続**で自分の Telegram ボットのトークンを入力し、ペアリングリンクを開きます。
-4. こう話しかけてみてください。**「今週中に提案書を仕上げたい。次にやることをいくつかのステップに分けて。」**
-
-Windows では PowerShell で `wsl --install` を実行して再起動し、Ubuntu を開いて最初のコマンドを実行してください。Windows の手順、インストーラーの動作、ソースからの実行、すべての設定は [QUICKSTART](../../docs/QUICKSTART.md) にあります。会話中は `agentos start` を起動したままにしてください。
+4. **「覚えておいて。猫を飼っていて、小さなワンルームに住んでいる。」** と伝えてから、**「5万円以下のロボット掃除機で、私に合うものを選んで。」** と聞いてみてください。
 
 **リリース状況：** どちらのインストール方法でも、タグを付けた main コミットの **v1.3.0**（2026-10-10）が入ります。デモと日常利用の画面は実際の利用セッションにもとづくもので、この版の一連の動作を検証したものではありません。構成図は製品の方向性を示す例です。[release manifest](../../docs/release-manifest.json) は各リリースの範囲を記録し、[製品の状況](../../docs/product-status.en.md) は提供中の機能・テストの根拠・方向性を区別しています。
 
@@ -101,7 +101,7 @@ Windows では PowerShell で `wsl --install` を実行して再起動し、Ubun
 
 より良い AI が現れたら、替えるのはエージェントではなく働く AI です。[誰のエージェントか](../../docs/whitepapers/whose-agent.ko.md)（韓国語の白書）がこの問いをさらに掘り下げます。
 
-ローカルファースト（local-first）はローカル限定（local-only）ではありません。ローカルモデルと外部モデルを選べ、外部モデルを使う場合はリクエストに使う文脈がその提供元へ送られます。
+ローカルファースト（local-first）はローカル限定（local-only）ではありません。サブスクリプションの AI は OpenAI や Anthropic 側で動くため、リクエストに使う文脈はその提供元へ送られます。
 
 <!-- readme-section:presence -->
 

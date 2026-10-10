@@ -40,7 +40,7 @@ Personal AgentOS는 *그럴 필요가 없다*는 가능성을 탐구합니다. �
 
 **주요 기능**
 
-- **원하는 AI를 연결.** 로컬 Ollama 모델, OpenAI 호환·Anthropic API, Codex나 Claude Code 구독이 실제 일을 합니다.
+- **이미 구독 중인 AI로.** ChatGPT 구독은 Codex로, Claude 구독은 Claude Code로 연결해 실제 일을 맡깁니다. 그 밖의 연결 방법은 [QUICKSTART](../../docs/QUICKSTART.md#other-model-connections)에 있습니다.
 - **대화가 바뀌어도 같은 PA.** 기억, 저장한 결과와 열린 일의 상태는 다음 대화와 재시작 뒤에도 남습니다. 중단된 실행은 몰래 다시 돌리지 않고 중단으로 보고합니다.
 - **경계는 내가 정합니다.** 내가 연결한 폴더·계정·도구에서 접근이 시작됩니다. 지원되는 결제 흐름은 행동마다 승인을 요구하며, [현재 브라우저 한계](https://github.com/Jongtae/agentos/issues/758)는 공개합니다. [비밀값](../../.github/SECURITY.md)은 모델 프롬프트·로그·Evidence에 넣지 않습니다.
 - **숨기지 않고 알립니다.** AI가 무언가를 기억하면 그 사실을 알리고 정확히 되돌릴 수 있게 합니다. 맡긴 일마다 내 정보 중 무엇을 썼고 어디로 보냈는지 기록합니다.
@@ -64,13 +64,15 @@ Personal AgentOS는 *그럴 필요가 없다*는 가능성을 탐구합니다. �
 
 ## 빠른 시작
 
-macOS나 Linux에서는 명령 하나로 설치하고 바로 시작합니다. Homebrew, Python, Docker가 없어도 됩니다.
+macOS, Linux, Windows(WSL2)에서 명령 하나로 설치하고 바로 시작합니다. Homebrew, Python, Docker가 없어도 됩니다.
 
 ```sh
 curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh
 ```
 
 URL은 설치 스크립트 자체도 특정 커밋에 고정합니다. 실행 전에 [고정된 스크립트 내용을 확인](https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh)할 수 있고, 스크립트는 공개 AgentOS 아카이브와 내려받는 uv 설치 프로그램의 체크섬을 검증합니다.
+
+Windows에서는 PowerShell에서 `wsl --install`을 실행하고 재시작한 뒤, Ubuntu를 열어 첫 번째 명령을 실행하세요. Windows 안내, 설치 스크립트가 하는 일, 소스 실행, 모든 설정은 [QUICKSTART](../../docs/QUICKSTART.md)에 있습니다. 대화하는 동안 `agentos start`를 켜 두세요.
 
 macOS에서 [Homebrew](https://brew.sh)를 쓴다면:
 
@@ -80,11 +82,9 @@ agentos start
 ```
 
 1. 브라우저에서 [http://127.0.0.1:8787](http://127.0.0.1:8787/)이 열립니다. 화면은 영어가 기본이며 왼쪽 아래에서 한국어, 중국어 간체, 일본어로 바꿀 수 있습니다. 일부 고정 Telegram 상태·진행 표시와 연결 검증 오류는 아직 한국어입니다.
-2. AI를 연결합니다. 도구 호출을 지원하는 Ollama 모델, OpenAI·OpenAI 호환·Anthropic API 키, 또는 Codex나 Claude Code 구독을 쓸 수 있습니다.
+2. 구독 중인 AI를 연결합니다. ChatGPT는 Codex(`codex login`)로, Claude는 Claude Code(`claude setup-token`)로. [그 밖의 연결](../../docs/QUICKSTART.md#other-model-connections)
 3. 선택: **설정 → 외부 연결**에서 내 Telegram 봇 토큰을 넣고 페어링 링크를 엽니다.
-4. 이렇게 말해 보세요. **“이번 주에 제안서를 끝내야 해. 다음 할 일 몇 단계로 나눠 줘.”**
-
-Windows에서는 PowerShell에서 `wsl --install`을 실행하고 재시작한 뒤, Ubuntu를 열어 첫 번째 명령을 실행하세요. Windows 안내, 설치 스크립트가 하는 일, 소스 실행, 모든 설정은 [QUICKSTART](../../docs/QUICKSTART.md)에 있습니다. 대화하는 동안 `agentos start`를 켜 두세요.
+4. **“기억해 줘. 나는 고양이를 키우고 작은 원룸에 살아.”** 라고 말한 뒤 **“50만 원 이하 로봇청소기 중에 나한테 맞는 걸 골라 줘.”** 라고 물어보세요.
 
 **배포 상태:** 두 설치 방법 모두 태그가 붙은 main 커밋의 **v1.3.0**(2026-10-10)을 설치합니다. 데모와 일상 사용 화면은 실제 사용 세션을 바탕으로 한 것으로 이 배포본의 종단 간 검증은 아니며, 구조 그림은 제품 방향 예시입니다. [release manifest](../../docs/release-manifest.json)는 배포본마다 포함 범위를 기록하고, [현재 상태](../../docs/product-status.ko.md)는 제공 기능과 테스트 근거와 방향을 구분합니다.
 
@@ -101,7 +101,7 @@ Windows에서는 PowerShell에서 `wsl --install`을 실행하고 재시작한 �
 
 더 좋은 AI가 나오면 에이전트가 아니라 일하는 AI만 바꿉니다. [누구의 에이전트인가?](../../docs/whitepapers/whose-agent.ko.md) 백서가 이 질문을 더 깊게 다룹니다.
 
-로컬 우선(local-first)은 로컬 전용(local-only)이 아닙니다. 로컬 모델과 외부 모델을 선택할 수 있고, 외부 모델을 쓰면 요청에 사용되는 맥락은 그 제공자로 전송됩니다.
+로컬 우선(local-first)은 로컬 전용(local-only)이 아닙니다. 구독 AI는 OpenAI나 Anthropic에서 동작하므로, 요청에 사용되는 맥락은 그 제공자로 전송됩니다.
 
 <!-- readme-section:presence -->
 

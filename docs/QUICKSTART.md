@@ -29,9 +29,16 @@ agentos start
 
 The browser opens at `http://127.0.0.1:8787`. Click **바로 시작하기** (Start now). There is no setup code to enter. A login password is optional for local use; expand **비밀번호 설정** to set one (12+ characters). Without a password, anyone using this computer can access the agent through its local address.
 
-For a ChatGPT/Codex subscription, install and log in to the official Codex CLI first (`codex login`), then select **Codex 로그인 완료 · 선택** in AgentOS (**전환** when switching from another subscription engine). AgentOS records only your confirmation; it does not request, read, or store the Codex login. A connected subscription engine receives only the bounded AgentOS tools, not your local files, credentials, or arbitrary shell access. Alternatively, choose a model provider, endpoint and model name, then test the settings and apply the successful configuration. API keys stay in a private local file. Cloud requests send conversation content to your selected provider.
+Connect the AI subscription you already have:
 
-Supported connections: Ollama (an already running local model server), OpenAI-compatible Chat Completions endpoints, and Anthropic Messages. Bring your own model access; no paid model subscription is included.
+- **ChatGPT plan → Codex.** Install the official Codex CLI and log in (`codex login`), then select **Codex 로그인 완료 · 선택** in AgentOS (**전환** when switching from another subscription engine). AgentOS records only your confirmation; it does not request, read, or store the Codex login.
+- **Claude plan → Claude Code.** Install Claude Code, run `claude setup-token`, and paste the token into the Claude Code token field once. AgentOS keeps it in this computer's private credential store and passes it only to Claude Code.
+
+A connected subscription engine receives only the bounded AgentOS tools, not your local files, credentials, or arbitrary shell access. Requests send conversation content to OpenAI or Anthropic. No paid subscription is included with AgentOS.
+
+### Other model connections
+
+AgentOS can also use a direct model connection: Ollama (an already running local model server), OpenAI-compatible Chat Completions endpoints, or OpenAI and Anthropic API keys. Choose a provider, endpoint and model name, test the settings, and apply the successful configuration. API keys stay in a private local file. Results depend heavily on how well the chosen model uses tools, so start with a subscription if you can.
 
 ## Windows (WSL2)
 
@@ -50,7 +57,7 @@ Things that differ from macOS:
 
 ## First task
 
-After connecting and testing your model, [pair your Telegram bot](#telegram), then ask in that Telegram chat: “Help me think through what to focus on this week.” The browser is where you configure connections and inspect task records. For a model-free check after pairing, `/note Review the launch on Friday` followed by `/notes` saves and lists a note.
+After connecting and testing your model, [pair your Telegram bot](#telegram), then say in that Telegram chat: “Remember that I have a cat and live in a small studio.” It tells you what it saved and how to undo it. Then ask: “Find me a robot vacuum under $500 that would suit me.” The answer should use what you just told it without your repeating it. The browser is where you configure connections and inspect task records. For a model-free check after pairing, `/note Review the launch on Friday` followed by `/notes` saves and lists a note.
 
 ## Recommended owner dogfood task
 

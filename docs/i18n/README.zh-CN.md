@@ -40,7 +40,7 @@ Personal AgentOS 探索的答案是：*不必*。在一个由你安装和掌控�
 
 **主要特点**
 
-- **接入你选择的 AI。** 本地 Ollama 模型、OpenAI 兼容或 Anthropic API，或 Codex、Claude Code 订阅来完成实际工作。
+- **用你已订阅的 AI。** ChatGPT 订阅通过 Codex、Claude 订阅通过 Claude Code 接入，完成实际工作。其他接入方式见 [QUICKSTART](../../docs/QUICKSTART.md#other-model-connections)。
 - **换了对话，还是同一个 PA。** 记忆、已保存的结果和未完工作的状态会跨对话、跨重启保留。中断的执行会如实报告，不会悄悄重放。
 - **边界由你决定。** 访问从你连接的文件夹、账户和工具开始。支持的付款流程会要求逐次批准；[当前浏览器限制](https://github.com/Jongtae/agentos/issues/758)已公开说明。[密钥](../../.github/SECURITY.md)不会进入模型提示词、日志或 Evidence。
 - **告诉你，而不是瞒着你。** AI 记住某件事时会告诉你，并提供精确的撤销。每项委托工作都会记录用了你的哪些信息、发送到了哪里。
@@ -64,13 +64,15 @@ Personal AgentOS 探索的答案是：*不必*。在一个由你安装和掌控�
 
 ## 快速开始
 
-在 macOS 或 Linux 上，一条命令即可安装并启动，无需 Homebrew、Python 或 Docker：
+在 macOS、Linux 或 Windows（WSL2）上，一条命令即可安装并启动，无需 Homebrew、Python 或 Docker：
 
 ```sh
 curl -LsSf https://raw.githubusercontent.com/Jongtae/agentos/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh | sh
 ```
 
 该 URL 也把安装脚本本身固定到一个明确提交。运行前可以[检查固定版本的脚本](https://github.com/Jongtae/agentos/blob/94776134546ed400ab1573d171c0bca2975a5f22/scripts/install.sh)；脚本会校验公开的 AgentOS 归档和它下载的 uv 安装程序。
+
+在 Windows 上，请在 PowerShell 中运行 `wsl --install` 并重启，然后打开 Ubuntu 运行第一条命令。Windows 说明、安装脚本做了什么、从源码运行以及所有设置，请见 [QUICKSTART](../../docs/QUICKSTART.md)。对话期间请保持 `agentos start` 运行。
 
 如果你在 macOS 上使用 [Homebrew](https://brew.sh)：
 
@@ -80,11 +82,9 @@ agentos start
 ```
 
 1. 浏览器会打开 [http://127.0.0.1:8787](http://127.0.0.1:8787/)。界面默认为英语，可在左下角切换为简体中文、韩语或日语。部分固定的 Telegram 状态/进度提示以及部分连接验证错误目前仍为韩语。
-2. 连接你的 AI：支持工具调用的 Ollama 模型，OpenAI、OpenAI 兼容或 Anthropic 的 API 密钥，或 Codex、Claude Code 订阅。
+2. 连接你订阅的 AI：ChatGPT 通过 Codex（`codex login`），Claude 通过 Claude Code（`claude setup-token`）。[其他接入方式](../../docs/QUICKSTART.md#other-model-connections)
 3. 可选：在 **设置 → 外部连接**中填入你自己的 Telegram 机器人令牌，然后打开配对链接。
-4. 试着说：**“这周要完成一份提案，帮我把接下来的事拆成几步。”**
-
-在 Windows 上，请在 PowerShell 中运行 `wsl --install` 并重启，然后打开 Ubuntu 运行第一条命令。Windows 说明、安装脚本做了什么、从源码运行以及所有设置，请见 [QUICKSTART](../../docs/QUICKSTART.md)。对话期间请保持 `agentos start` 运行。
+4. 先说 **“记住：我养了一只猫，住在一间小公寓里。”** 再问 **“帮我挑一台 3000 元以内适合我的扫地机器人。”**
 
 **发布状态：** 两种安装方式安装的都是从已打标签的 main 提交构建的 **v1.3.0**（2026-10-10）。演示和日常使用画面来自真实使用会话，并非该发行版本的端到端验证；架构图属于产品方向。[release manifest](../../docs/release-manifest.json) 记录每个版本的覆盖范围，[产品状态](../../docs/product-status.en.md) 区分已提供的功能、测试依据和发展方向。
 
@@ -101,7 +101,7 @@ agentos start
 
 出现更好的 AI 时，你更换的是干活的 AI，而不是智能体本身。[《谁的智能体？》](../../docs/whitepapers/whose-agent.ko.md)（韩语白皮书）对这个问题有更深入的探讨。
 
-本地优先（local-first）不等于只在本地（local-only）：你可以选择本地模型或托管模型；使用托管模型时，请求所用的上下文会发送给该提供方。
+本地优先（local-first）不等于只在本地（local-only）：订阅的 AI 运行在 OpenAI 或 Anthropic，因此请求所用的上下文会发送给该提供方。
 
 <!-- readme-section:presence -->
 

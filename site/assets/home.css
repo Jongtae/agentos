@@ -148,7 +148,9 @@ h3 { font-size: 1.0625rem; font-weight: 600; letter-spacing: 0; }
 .steps pre:first-of-type { user-select: all; }
 .note { font-size: .875rem; color: var(--muted); }
 
+.github h2 { max-width: none; }
 .github .actions { margin-top: 2rem; }
+.github .note { margin-top: 1.25rem; }
 .ko-summary h2 { font-size: 1.25rem; font-weight: 600; }
 .ko-summary p { color: var(--muted); max-width: 40rem; margin: .75rem 0 0; }
 

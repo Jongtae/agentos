@@ -109,12 +109,13 @@ Local-first is not local-only: you can use a local or hosted model. With a hoste
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.en.narrow.svg">
-  <img src="docs/assets/readme/presence-overview.en.svg" alt="Concept figure: an Assistant answers a question about NVIDIA, a task agent handles an explicit Amazon cart request, and a PA carries an open meeting decision forward. AgentOS links allowed calendar, proposal and note sources; keeps unfinished work; and distinguishes an email draft from a confirmed send through authority and evidence. AI and tools can change. Illustrative product direction, not an observed run or shipped integration.">
+  <img src="docs/assets/readme/presence-overview.en.svg" alt="Concept diagram: Owner Relationship informs Assistant, Finance and Research professional lenses, with Domain, Role, Mandate and Authority considered by the Decision Model. Unified Presence maintains one relationship, contextual communication and owner intervention that feeds back into decisions. Illustrative product direction, not shipped implementation.">
 </picture>
 
-- **The PA** is the agent you talk to. **AgentOS** is the environment that keeps its context, open work, authority and evidence.
-- A **judgment layer** chooses the AI and tool for each request, writes the brief, checks the result and hands the work back when it falls short.
-- An **ontology** links one sourced thing, such as a meeting or an account balance, to the work, roles and permissions around it. A draft is never taken for a send, or an invitation for an acceptance.
+- **Owner Relationship** holds goals, memory, preferences, commitments and authority under owner control.
+- **Professional lenses** interpret the same reality through relevant domains and roles. Mandates specify goals and constraints; enforced authority remains separate.
+- **The Decision Model** judges whether to reason, act, delegate, ask, report or follow up; it does not merely route tools.
+- **Unified Presence** maintains one speaking relationship and allows meaningful updates and owner corrections to influence ongoing decisions, subject to actual runtime support.
 
 The figure shows the intended design, not an observed run. Details: [architecture and ontology](docs/personal-agentos-architecture.en.md) · [Presence](docs/presence-experience-contract.en.md).
 

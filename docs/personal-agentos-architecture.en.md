@@ -243,3 +243,7 @@ Historical D-MP2-02 remains read-only recommendation authority. Optional Drive a
 14. Progress/receipts reflect observed state; hidden reasoning and raw secrets are not telemetry requirements.
 
 The detailed v0.1 schemas remain normative for their version. Acceptance refinements here require separately authorized implementation; they do not silently migrate legacy records or broaden runtime authority.
+
+## Professional lenses across the owner-centered architecture (design direction)
+
+The persistent owner-facing agent is not restricted to secretary work. Compose role-independent world facts, relevant domain concepts, one or more professional role lenses, owner context and a scoped mandate before Decision Model planning. Keep **role/ontology (meaning)**, **mandate (objectives and constraints)** and **Grant/approval (enforced authority)** separate. Skills and workers implement bounded actions; Presence mediates meaningful updates and in-flight owner correction. Do not add a monolithic ontology store or domain-specific kernel routes without demonstrated need. See [Professional Roles and Communication Contract](professional-roles-and-communication-contract.en.md). This section is direction, not shipped evidence.

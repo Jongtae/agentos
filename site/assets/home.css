@@ -67,10 +67,11 @@ main > .hero { position: relative; max-width: none; padding: 0; display: grid; a
 
 /* Hero scene: plays over the artwork with no box, like the teaser film. */
 .stage { position: absolute; z-index: 1; right: clamp(1.25rem, 3vw, 3rem); bottom: 1.75rem; width: min(21rem, 26vw); }
-.thread { display: flex; flex-direction: column; gap: .9rem; text-shadow: 0 0 14px rgb(243 238 233 / .95), 0 0 3px rgb(243 238 233 / .9); }
+.thread { position: relative; display: flex; flex-direction: column; gap: .9rem; }
+.thread::before { content: ""; position: absolute; z-index: -1; inset: -3.5rem -3rem -3rem -4rem; background: radial-gradient(closest-side, rgb(243 238 233 / .82), rgb(243 238 233 / .55) 60%, rgb(243 238 233 / 0)); }
 .thread p { margin: 0; max-width: 92%; font-size: 1rem; line-height: 1.45; color: var(--ink); }
 .thread .who { display: flex; align-items: center; gap: .45rem; font-size: .75rem; font-weight: 600; letter-spacing: .02em; opacity: .7; margin-bottom: .15rem; }
-.thread .who i { font-style: normal; font-weight: 500; padding: 0 .45rem; border-radius: 999px; background: rgb(255 253 250 / .7); text-shadow: none; }
+.thread .who i { font-style: normal; font-weight: 500; padding: 0 .45rem; border-radius: 999px; background: rgb(255 253 250 / .75); }
 .thread .who i.new { background: var(--rose); }
 .t-you { align-self: flex-end; text-align: right; }
 .t-you .who { justify-content: flex-end; }
@@ -88,10 +89,10 @@ main > .hero { position: relative; max-width: none; padding: 0; display: grid; a
   .thread .t5 { animation-name: say-5; }
 }
 @keyframes say-1 { 0%, 3% { opacity: 0; transform: translateY(8px); } 7%, 90% { opacity: 1; transform: none; } 96%, 100% { opacity: 0; } }
-@keyframes say-2 { 0%, 13% { opacity: 0; filter: blur(6px); transform: translateY(8px); } 19%, 90% { opacity: 1; filter: blur(0); transform: none; } 96%, 100% { opacity: 0; } }
+@keyframes say-2 { 0%, 13% { opacity: 0; transform: translateY(8px); } 19%, 90% { opacity: 1; transform: none; } 96%, 100% { opacity: 0; } }
 @keyframes say-3 { 0%, 31% { opacity: 0; } 36%, 90% { opacity: 1; } 96%, 100% { opacity: 0; } }
 @keyframes say-4 { 0%, 45% { opacity: 0; transform: translateY(8px); } 49%, 90% { opacity: 1; transform: none; } 96%, 100% { opacity: 0; } }
-@keyframes say-5 { 0%, 56% { opacity: 0; filter: blur(6px); transform: translateY(8px); } 63%, 90% { opacity: 1; filter: blur(0); transform: none; } 96%, 100% { opacity: 0; } }
+@keyframes say-5 { 0%, 56% { opacity: 0; transform: translateY(8px); } 63%, 90% { opacity: 1; transform: none; } 96%, 100% { opacity: 0; } }
 
 main > section:not(.hero) { padding-block: clamp(3.5rem, 8vw, 6rem); border-top: 1px solid var(--line); }
 h2 { font-weight: 300; font-size: clamp(1.75rem, 3.3vw, 2.5rem); line-height: 1.22; max-width: 22ch; }

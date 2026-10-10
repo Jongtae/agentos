@@ -25,7 +25,8 @@ from personal_agent.cli_browser_relay import RELAYED_LOCATION_REQUEST
 from personal_agent.conversation_handoff import FOLLOWUP_CANCEL
 from personal_agent.context_observations import LOCATION_REQUEST_TTL_SECONDS, continuation_key, continuation_request
 from personal_agent.manifests import HOST_ACTIONS, WRITE_ACTIONS
-from personal_agent.quickstart_service import CONTINUATION_EFFECT_NOTE_HEAD, LOCATION_NOT_CONTINUED_TEXT, RETRY_EFFECT_TOOLS
+from personal_agent.quickstart_service import (CONTINUATION_EFFECT_NOTE_HEAD, LOCATION_NOT_CONTINUED_TEXT, LOCATION_RECEIVED_TEXT,
+                                              RETRY_EFFECT_TOOLS)
 from personal_agent.quickstart_store import QuickStore
 from personal_agent.telegram_presence import draft_id_for
 
@@ -235,12 +236,33 @@ class Continuation(_LocationCase):
         self.assertEqual(removals(), [], 'the asking Work\'s own reply keeps the button while the request waits')
         self.now += 30
         self.location()
+        # #1305 (owner 2026-10-10): the button goes as soon as the location arrives, before the request runs.
+        [removal] = removals()
+        self.assertEqual((removal['text'], removal['reply_markup']), (LOCATION_RECEIVED_TEXT, {'remove_keyboard': True}))
         self.assertTrue(self.service.run_one())
         while self.service.deliver_one():
             pass
-        [removal] = removals()
-        self.assertEqual(removal['reply_markup'], {'remove_keyboard': True}, 'the continuation\'s answer removes it')
+        self.assertEqual(len(removals()), 1, 'the continuation\'s answer carries nothing more')
         self.assertIsNone(self.service.location_keyboard_removal(CHAT), 'removed once; later answers carry nothing')
+
+    def test_an_unrequested_location_or_a_failed_removal_sends_nothing_more(self):
+        """#1305: only a location that continued a request withdraws the keyboard; #992 stays the fallback."""
+        removals = lambda: [body for body in self.sends() if (body.get('reply_markup') or {}).get('remove_keyboard')]
+        self.location()
+        self.assertEqual(removals(), [], 'no request was pending')
+        self.ask()
+        original = self._telegram
+
+        def refusing(url, body=None, headers=None, timeout=60):
+            if (body or {}).get('reply_markup', {}).get('remove_keyboard'):
+                return {'ok': False, 'error_code': 400, 'description': 'Bad Request'}
+            return original(url, body, headers, timeout)
+        self.service.telegram_transport = refusing
+        self.now += 30
+        self.location()
+        self.assertEqual(len(self.continued()), 1, 'the request still continues')
+        self.assertEqual(self.service.location_keyboard_removal(CHAT), {'remove_keyboard': True},
+                         'the next reply still removes it')
 
     def test_a_keyboard_from_before_the_record_existed_is_removed_once(self):
         """#992 (live 2026-10-03): a keyboard sent before the deploy left no record and stayed."""

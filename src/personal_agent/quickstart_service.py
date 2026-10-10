@@ -322,6 +322,8 @@ CONTINUATION_EFFECT_NOTE_HEAD=('AgentOS note (not from the owner): the request b
                                'earlier Work called tools that may have changed state:')
 #: #774 review: an answered location request whose continuation could not be queued.
 LOCATION_NOT_CONTINUED_TEXT='대기 중인 작업이 많아 보내 주신 위치로 요청을 이어서 처리하지 못했습니다. 잠시 후 위치를 다시 보내 주세요.'
+#: #1305: the one line that carries the location keyboard's removal once the owner's location arrived.
+LOCATION_RECEIVED_TEXT='위치 받았어요. 이어서 할게요.'
 #: Owner direction 2026-09-30: approval prompts answer with the same pair as the
 #: memory ask (#881).  The message above the buttons names what is approved.
 APPROVE_BUTTON,DENY_BUTTON='👍','👎'
@@ -8420,6 +8422,27 @@ class AgentService:
         self.store.put(self.LOCATION_KEYBOARD_KEY,{'chat_id':cfg['user_id']})
         return request_id
 
+    def withdraw_location_keyboard(self, chat_id):
+        """Take the location keyboard away as soon as the owner's location arrived (#1305).
+
+        Telegram removes a reply keyboard only with a message carrying
+        ``ReplyKeyboardRemove``, so one short acknowledgement carries it.  Only
+        when the keyboard may still show and no request is pending there
+        (``location_keyboard_removal``).  A failed send leaves the #992 removal
+        on the next reply in place.
+        """
+        try:
+            removal=self.location_keyboard_removal(chat_id)
+            if not removal:return False
+            self.telegram.send_message(chat_id,LOCATION_RECEIVED_TEXT,removal)
+        except ProviderError:
+            return False
+        except Exception as exc:  # presentation only; the continuation already queued
+            LOG.info('location keyboard withdrawal skipped: %s',type(exc).__name__)
+            return False
+        self.store.put(self.LOCATION_KEYBOARD_KEY,{})
+        return True
+
     #: #992: config row set while a location keyboard may still be showing in the owner's chat.
     LOCATION_KEYBOARD_KEY='telegram_location_keyboard'
     #: Neutral fallback; the owner's AI normally writes the label in the owner's language (#1230).
@@ -8579,6 +8602,8 @@ class AgentService:
             guided_context_requested=(authorized and isinstance(text,str) and self.requests_guided_context(text)
                                       and bool(self.context_inbox().list()))
             unqueued=[]
+            # #1305: the chat whose location just continued a request; its keyboard goes at once.
+            located_chat=None
             with self.store.db() as db:
                 db.execute('BEGIN IMMEDIATE')
                 guided_context=False
@@ -8658,8 +8683,11 @@ class AgentService:
                     answered=[]
                     self.context_observations.ingest_telegram(db,update,generation,sender,answered)
                     for answer in answered:
-                        if self.continue_located_work(db,answer,message,generation,sender) is False:
+                        continued=self.continue_located_work(db,answer,message,generation,sender)
+                        if continued is False:
                             unqueued.append(answer['job_id'])
+                        elif continued:
+                            located_chat=sender
                 cfg['cursor']=update_id+1
                 db.execute('INSERT INTO config VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',('telegram',json.dumps(cfg)))
             for job_id in unqueued:
@@ -8679,6 +8707,8 @@ class AgentService:
             if authorized and task_id and not paired and not guided_context and not has_photo \
                     and self.is_natural_language(text):
                 self.consider_steer(task_id,text)
+        if located_chat is not None:
+            self.withdraw_location_keyboard(located_chat)
 
     def ingest_reaction(self, reaction, generation):
         """The owner's emoji on an assistant message (#996): an observation, judged by the Judgment AI.

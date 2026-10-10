@@ -553,3 +553,75 @@ class PreparationContinuation(_LocationCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PlanAsksLocation(_LocationCase):
+    """#1293 (owner 2026-10-10, "위치 공유가 너무 늦네"): the plan asks before any worker starts.
+
+    The decision model judged the reply needs the owner's position and none is
+    known; the location keyboard goes out without a worker run, and that
+    question is the Work's whole reply.
+    """
+    REQUEST = '갈 커피 전문점 찾아줘'
+    QUESTION = '지금 계신 곳 근처로 찾을게요. 현재 위치를 보내 주세요.'
+
+    def setUp(self):
+        super().setUp()
+        from personal_agent.decision import OUTCOME_DECIDED, FixtureDecisionEngine, StructuredDecision, fixture_confidence
+        self.schemas = []
+
+        def structured(context, question, schema):
+            self.schemas.append(schema)
+            offered = 'ask_location' in schema['properties']
+            data = {'worker': schema['properties']['worker']['enum'][0], 'model': '', 'brief': {'notes': ''},
+                    'reason': 'fits', 'account_change': False, 'owner_situation': True,
+                    **({'ask_location': self.QUESTION, 'location_button': '현재 위치 보내기'} if offered else {})}
+            return StructuredDecision(OUTCOME_DECIDED, data, fixture_confidence())
+        base = self.judge
+        self.judge = FixtureDecisionEngine(judge=base._judge, structured=structured)
+        self.service.use_decision_engine(self.judge)
+
+    def keyboards(self):
+        return [body for body in self.sends() if (body.get('reply_markup') or {}).get('keyboard')]
+
+    def test_the_question_goes_out_before_any_worker_and_the_answer_continues_the_request(self):
+        work = self.receive(self.REQUEST)
+        self.assertEqual(self.model_calls, [], 'no worker ran')
+        [prompt] = self.keyboards()
+        self.assertEqual(prompt['text'], self.QUESTION)
+        self.assertEqual(prompt['reply_markup']['keyboard'][0][0], {'text': '현재 위치 보내기', 'request_location': True})
+        self.assertEqual([body['text'] for body in self.sends()], [self.QUESTION], 'the question is the one reply')
+        row = self.store.job(work)
+        self.assertEqual((row['status'], row['response'], row['delivery']), ('succeeded', self.QUESTION, 'none'))
+        self.service.deliver_one()
+        self.assertEqual(len(self.sends()), 1, 'nothing more is delivered')
+        self.assertEqual([request['job_id'] for request in self.pending()], [work])
+
+        self.now += 30
+        self.location()
+        [continuation] = self.continued()
+        self.assertTrue(self.service.run_one())
+        self.assertNotIn('ask_location', self.schemas[-1]['properties'], 'a continuation never asks again')
+        self.assertTrue(self.model_calls, 'the worker runs, with the position')
+        self.assertIn('current_position_report', json.dumps(self.model_calls[0], ensure_ascii=False))
+        self.assertEqual(self.store.job(continuation['id'])['status'], 'succeeded')
+
+    def test_a_web_work_is_not_offered_the_question(self):
+        work = self.web_turn(self.REQUEST)
+        self.assertNotIn('ask_location', self.schemas[-1]['properties'])
+        self.assertEqual(self.keyboards(), [])
+        self.assertTrue(self.model_calls)
+        self.assertEqual(self.store.job(work)['status'], 'succeeded')
+
+    def test_a_question_that_could_not_be_sent_runs_the_planned_worker(self):
+        original = self._telegram
+
+        def refusing(url, body=None, headers=None, timeout=60):
+            if (body or {}).get('reply_markup', {}).get('keyboard'):
+                return {'ok': False, 'error_code': 400, 'description': 'Bad Request'}
+            return original(url, body, headers, timeout)
+        self.service.telegram_transport = refusing
+        work = self.receive(self.REQUEST)
+        self.assertTrue(self.model_calls, 'the worker ran as before')
+        self.assertEqual(self.pending(), [])
+        self.assertNotEqual(self.store.job(work)['model'], 'orchestration')

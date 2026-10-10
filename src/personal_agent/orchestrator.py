@@ -186,6 +186,16 @@ QUESTION = (
     'true when a useful reply depends on the owner\'s own situation - where they are, when or how they will act on '
     'it, who they are with, what they are trying to get done - and not only on facts that would be the same for '
     'anyone, else false; such work never runs on the lowest-cost model either.')
+#: #1293: offered only when this Work can ask the paired chat for a position (``can_ask_location``).
+LOCATION_QUESTION = (
+    ' ask_location is "" unless a useful reply needs where the owner is right now and current_context has no '
+    'position for this Work (a saved place or the time alone does not say where they are now); then it is the short '
+    'question, in the owner\'s language, that asks them to share their current location, and AgentOS asks it at '
+    'once instead of starting a worker: the owner\'s answer continues this request with that position. '
+    'location_button is the label of the share button in the same language ("" when ask_location is "").')
+#: Bounds of the location question and its button label (Telegram keyboard text stays short).
+MAX_LOCATION_QUESTION_CHARS = 300
+MAX_LOCATION_BUTTON_CHARS = 40
 PURPOSE = 'work-orchestration'
 
 
@@ -525,18 +535,23 @@ def lift_model(worker, model):
     return higher[0] if higher else None
 
 
-def plan_schema(workers):
-    return {'type': 'object', 'additionalProperties': False,
-            'properties': {
-                'worker': {'type': 'string', 'enum': [worker['id'] for worker in workers]},
-                'model': {'type': 'string'},
-                'brief': {'type': 'object', 'additionalProperties': False,
-                          'properties': {'notes': {'type': 'string'}},
-                          'required': ['notes']},
-                'reason': {'type': 'string'},
-                'account_change': {'type': 'boolean'},
-                'owner_situation': {'type': 'boolean'}},
-            'required': ['worker', 'model', 'brief', 'reason', 'account_change', 'owner_situation']}
+def plan_schema(workers, ask_location=False):
+    schema = {'type': 'object', 'additionalProperties': False,
+              'properties': {
+                  'worker': {'type': 'string', 'enum': [worker['id'] for worker in workers]},
+                  'model': {'type': 'string'},
+                  'brief': {'type': 'object', 'additionalProperties': False,
+                            'properties': {'notes': {'type': 'string'}},
+                            'required': ['notes']},
+                  'reason': {'type': 'string'},
+                  'account_change': {'type': 'boolean'},
+                  'owner_situation': {'type': 'boolean'}},
+              'required': ['worker', 'model', 'brief', 'reason', 'account_change', 'owner_situation']}
+    if ask_location:
+        # #1293: required with "" for none, as strict structured outputs need every property listed.
+        schema['properties'].update(ask_location={'type': 'string'}, location_button={'type': 'string'})
+        schema['required'] += ['ask_location', 'location_button']
+    return schema
 
 
 def plan_shape(data):
@@ -546,7 +561,8 @@ def plan_shape(data):
             and isinstance(brief, dict) and isinstance(brief.get('notes'), str) and isinstance(data.get('reason'), str)
             # #948 review: "true" or 1 is a malformed plan, never a silent false.
             and isinstance(data.get('account_change', False), bool)
-            and isinstance(data.get('owner_situation', False), bool))
+            and isinstance(data.get('owner_situation', False), bool)
+            and isinstance(data.get('ask_location', ''), str) and isinstance(data.get('location_button', ''), str))
 
 
 # --- one attempt -------------------------------------------------------------
@@ -559,7 +575,8 @@ class Attempt:
     """
 
     __slots__ = ('number', 'worker', 'model', 'notes', 'sections', 'reason', 'planned',
-                 'fallback', 'digest', 'signature', 'account_change', 'owner_situation', 'lifted_from')
+                 'fallback', 'digest', 'signature', 'account_change', 'owner_situation', 'lifted_from',
+                 'ask_location', 'location_button')
 
     def __init__(self, number, worker, *, model='', notes='', reason='', planned=False, fallback=''):
         self.number, self.worker, self.model = number, worker, model
@@ -572,6 +589,8 @@ class Attempt:
         self.account_change, self.lifted_from = False, None
         #: #1008: the plan judged a useful reply depends on the owner's own situation.
         self.owner_situation = False
+        #: #1293: the question (and button label) the plan asks the owner for a current position, or "".
+        self.ask_location, self.location_button = '', ''
 
     def brief(self, adjusted=False):
         """The notes section text a worker receives, or None (#820: supplementary only).
@@ -603,8 +622,11 @@ class Orchestration:
     """
 
     def __init__(self, judgments, catalogue, *, request, conversation='', continues='', sections=None, budget=None,
-                 record=None, state=None, work_id=None, policy=None, qualifying=None):
+                 record=None, state=None, work_id=None, policy=None, qualifying=None, can_ask_location=False):
         self.judgments, self.catalogue = judgments, catalogue
+        #: #1293: whether the first plan may ask the owner for a current position (a Work the paired
+        #: chat can answer, not itself a location continuation).  Later plans never may.
+        self.can_ask_location = bool(can_ask_location)
         self.request, self.conversation = str(request or ''), str(conversation or '')
         #: #980: the owner message and reply of the Work this one follows up, when the
         #: follow-up judgment linked them ('' otherwise).  Read first for what the message refers to.
@@ -626,6 +648,8 @@ class Orchestration:
         self.notice = ''
         self.orchestrated = False
         self.early_used = False
+        #: #1293: the plan inputs that differed from the early plan's when it was not used.
+        self.early_missed = []
         #: The evaluation of the last attempt when no further attempt followed
         #: (the caller keeps a CLI Work judged short from being stored as succeeded).
         self.terminal = None
@@ -689,6 +713,12 @@ class Orchestration:
                         f'answer excerpt (model-stated)={one_line(answer, ANSWER_EXCERPT_CHARS)}')
         return '\n'.join(rows)[-ATTEMPTS_CHARS:]
 
+    def _question(self):
+        return QUESTION + (LOCATION_QUESTION if getattr(self, 'can_ask_location', False) else '')
+
+    def _schema(self, candidates):
+        return plan_schema(candidates, ask_location=getattr(self, 'can_ask_location', False))
+
     def _plan_context(self, candidates):
         """The ``DecisionContext`` one plan call over ``candidates`` reads."""
         request = self._redact(self.request, private=False)
@@ -715,9 +745,18 @@ class Orchestration:
     def plan_digest(self, candidates):
         """#1261: what a plan call over ``candidates`` would be asked, except the budget's
         remaining seconds (the only fact that moves while routing runs)."""
+        return digest(self._plan_inputs(candidates))
+
+    def _plan_inputs(self, candidates):
         facts = dict(self._plan_context(candidates).facts)
         facts.pop('budget', None)
-        return digest({'facts': facts, 'question': QUESTION, 'schema': plan_schema(candidates)})
+        return {'facts': facts, 'question': self._question(), 'schema': self._schema(candidates)}
+
+    def _input_digests(self, candidates):
+        """#1293: one digest per plan input (fact keys, question, schema), so a miss can name what changed."""
+        inputs = self._plan_inputs(candidates)
+        return {**{key: digest(value) for key, value in inputs['facts'].items()},
+                'question': digest(inputs['question']), 'schema': digest(inputs['schema'])}
 
     def early_plan(self):
         """#1261: the first plan call, asked ahead of routing: ``{'digest', 'data', 'failure'}``.
@@ -726,8 +765,9 @@ class Orchestration:
         inputs it would ask over are the same.
         """
         candidates = self.catalogue.available()
+        inputs = self._input_digests(candidates)
         data, failure = self._ask(candidates)
-        return {'digest': self.plan_digest(candidates), 'data': data, 'failure': failure}
+        return {'digest': self.plan_digest(candidates), 'data': data, 'failure': failure, 'inputs': inputs}
 
     def _ask(self, candidates):
         """``(data, failure)`` for one plan call over ``candidates``."""
@@ -740,7 +780,7 @@ class Orchestration:
             return None, FALLBACK_BUDGET
         context = self._plan_context(candidates)
         try:
-            decision = method(context, QUESTION, plan_schema(candidates), plan_shape)
+            decision = method(context, self._question(), self._schema(candidates), plan_shape)
         except Exception:
             return None, FALLBACK_UNAVAILABLE
         if decision.outcome == OUTCOME_MALFORMED:
@@ -800,6 +840,10 @@ class Orchestration:
                           planned=True)
         attempt.account_change, attempt.lifted_from = account_change, lifted_from
         attempt.owner_situation = owner_situation
+        if getattr(self, 'can_ask_location', False) and number == 1:
+            attempt.ask_location = ' '.join(data.get('ask_location', '').split())[:MAX_LOCATION_QUESTION_CHARS]
+            attempt.location_button = (' '.join(data.get('location_button', '').split())[:MAX_LOCATION_BUTTON_CHARS]
+                                       if attempt.ask_location else '')
         attempt.signature = self.signature(worker, model)
         return attempt, ''
 
@@ -846,6 +890,8 @@ class Orchestration:
                               'account_change': getattr(attempt, 'account_change', False),
                               'owner_situation': getattr(attempt, 'owner_situation', False),
                               'lifted_from': getattr(attempt, 'lifted_from', None),
+                              **({'ask_location': True} if getattr(attempt, 'ask_location', '') else {}),
+                              **({'early_missed': self.early_missed} if attempt.number == 1 and getattr(self, 'early_missed', None) else {}),
                               'brief_digest': attempt.digest, 'sections': sorted(attempt.sections),
                               'reason': self._redact(attempt.reason),
                               'text': f'{attempt.number}번째 시도: {self._worker_label(attempt)} — {self._redact(attempt.reason)}'})
@@ -885,12 +931,20 @@ class Orchestration:
                 ahead = early.result()
             except Exception:
                 ahead = None
+        self.early_missed = []
         if (isinstance(ahead, dict) and ahead.get('failure') != FALLBACK_BUDGET and self.budget_allows()
                 and ahead.get('digest') == self.plan_digest(candidates)):
             data, failure, self.early_used = ahead.get('data'), ahead.get('failure') or '', True
         else:
+            if isinstance(ahead, dict) and isinstance(ahead.get('inputs'), dict):
+                # #1293: which plan inputs changed while routing ran (names only), so a miss is explained.
+                now = self._input_digests(candidates)
+                self.early_missed = sorted(key for key in set(now) | set(ahead['inputs'])
+                                           if now.get(key) != ahead['inputs'].get(key))
             data, failure = self._ask(candidates)
         attempt, invalid = (self.validate(data, candidates, 1) if data is not None else (None, ''))
+        # #1293: only the first plan may ask for a position; a re-plan runs a worker.
+        self.can_ask_location = False
         if attempt is not None:
             self.orchestrated = True
             self._set_state('active')
@@ -915,6 +969,7 @@ class Orchestration:
         if failure == FALLBACK_UNAVAILABLE and previous.get('state') == 'active':
             self.notice = NOTICE_ONCE
         self.record(FALLBACK, {'attempt': 1, 'worker': attempt.worker, 'code': failure, 'invalid': invalid or None,
+                               **({'early_missed': self.early_missed} if self.early_missed else {}),
                                'notice': bool(self.notice), 'text': FALLBACK_TEXT[failure]})
         return attempt
 

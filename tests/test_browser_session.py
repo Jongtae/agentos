@@ -1346,6 +1346,23 @@ class LoopTests(unittest.TestCase):
         typed = [json.loads(c['function']['arguments']) for row in responded for c in row['tool_calls'] if c['function']['name'] == 'browser_type']
         self.assertEqual(sorted(row['text'] for row in typed), ['[가림: 16자]', '[가림: 17자]'])
 
+    def test_the_attempts_latest_pages_are_kept_in_memory_for_its_judgment_once(self):
+        """#1282: the mediated page text a step returned, newest first, taken once; never in Evidence."""
+        script = Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/cart', effect='read')]},
+                        {'content': '확인했습니다.'})
+        caps = self.caps(script, FakeDriver())
+        run_agent(caps.adapter, CFG, '', [{'role': 'user', 'content': '장바구니 봐줘'}], '', caps, self.record)
+        pages = caps.take_browser_pages()
+        self.assertEqual([url for url, _title, _text in pages], [ORIGIN + '/cart'])
+        self.assertTrue(pages[0][2])
+        self.assertEqual(caps.take_browser_pages(), [], 'taken once')
+        stored = ' '.join(d for _t, _s, d in self.events)
+        self.assertNotIn(pages[0][2][:40], stored, 'the page text is not recorded as Evidence')
+        for n in range(5):
+            caps._keep_browser_page({'url': f'{ORIGIN}/p{n}', 'title': '', 'text': f'page {n}'})
+        caps._keep_browser_page({'url': f'{ORIGIN}/p2', 'title': '', 'text': 'page 2 again'})
+        self.assertEqual([text for _u, _t, text in caps.take_browser_pages()], ['page 2 again', 'page 4', 'page 3'])
+
     def test_login_required_keeps_the_turn_from_claiming_success(self):
         script = Script({'tool_calls': [call('1', 'browser_open', url=ORIGIN + '/login', effect='navigate')]},
                         {'content': '장바구니에 담았습니다.'})

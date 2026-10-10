@@ -27,7 +27,8 @@ from personal_agent.decision import (OUTCOME_DECIDED, OUTCOME_MALFORMED, OUTCOME
                                      ModelDecisionEngine, RoutedDecisionEngine, StructuredDecision,
                                      UnavailableDecisionEngine, audit_record, fixture_confidence)
 from personal_agent.decision_adapters import JevDecisionEngine
-from personal_agent.orchestrator import (ATTEMPTS_CHARS, EVENT_TOOL, FALLBACK_TEXT, MAX_REDELEGATIONS, NOTICE_ONCE,
+from personal_agent.orchestrator import (ATTEMPTS_CHARS, EVENT_TOOL, OBSERVATION_CHARS, PAGE_TEXT_FLOOR_CHARS, PAGE_TEXT_HEADER,
+                                         observations_with_pages, FALLBACK_TEXT, MAX_REDELEGATIONS, NOTICE_ONCE,
                                          QUESTION, SECTIONS, Attempt, Catalogue, Orchestration, plan_schema,
                                          render_catalogue)
 from personal_agent.providers import ModelAdapter
@@ -625,6 +626,62 @@ class ToolsAndReplan(Harness):
         self.assertEqual(seen[0]['reply'], 'about forty minutes by car')
         self.assertIn('"sources": []', seen[0]['observations'])
         self.assertIn('own web searches that reported no source URL: 1', self.asked_plans[1][0].facts['previous_attempts'])
+
+
+    def test_goal_reached_reads_the_attempts_latest_page_text_and_the_next_attempt_does_not(self):
+        """#1282 (live 2026-10-10): a cart answer was judged short because the judgment saw only URLs and titles."""
+        seen = []
+
+        def browse(tools):
+            if len(self.engine.turns) == 1:
+                bridge_step(tools.capabilities.record, 'browser_open', 'read', host='shop.example.test')
+                tools.capabilities._keep_browser_page({'url': 'https://shop.example.test/cart', 'title': 'Cart',
+                                                       'text': 'Cart\n  Book A   45,000 won  qty 1\nTotal items: 5'})
+        self.engine.before = browse
+        self.engine.answers = ['Added Book A (45,000 won); the cart holds 5 items.', 'Answered directly.']
+        self.script([plan('codex', 'Add it.'), plan('openai', 'Answer directly.')])
+
+        def judge(context, proposition):
+            if context.purpose == 'goal-reached':
+                seen.append(dict(context.facts))
+            return BinaryDecision(OUTCOME_DECIDED, False, fixture_confidence())
+        self.service.decision_engine._judge = judge
+        self.run_work('장바구니 담아줘')
+        self.assertIn(PAGE_TEXT_HEADER, seen[0]['observations'])
+        self.assertIn('Book A 45,000 won qty 1\nTotal items: 5', seen[0]['observations'])
+        self.assertIn('- browser_open:', seen[0]['observations'], 'the step lines stay')
+        self.assertTrue(all(PAGE_TEXT_HEADER not in facts['observations'] for facts in seen[1:]),
+                        'an attempt\'s pages are judged with that attempt only')
+
+
+
+class ObservationsWithPages(unittest.TestCase):
+    """#1282: the CLI judgment reads page text within the same total bound as the direct route."""
+
+    def test_no_pages_leaves_the_step_lines_unchanged(self):
+        self.assertEqual(observations_with_pages(['- a', '- b'], []), '- a\n- b')
+
+    def test_pages_come_newest_first_redacted_and_within_the_bound(self):
+        calls = []
+
+        def redact(text, private=True):
+            calls.append(private)
+            return text.replace('SECRET', '[redacted]')
+        text = observations_with_pages(['- browser_open: {}'], [('https://s.test/cart', 'Cart', 'item SECRET\n\n  x  y'),
+                                                                 ('https://s.test/', '', 'home')], redact)
+        self.assertLess(text.index('Cart (https://s.test/cart)'), text.index('- https://s.test/:'))
+        self.assertIn('item [redacted]\nx y', text)
+        self.assertEqual(set(calls), {False}, 'the secrets-only pass both routes use (#826)')
+        self.assertLessEqual(len(text), OBSERVATION_CHARS)
+
+    def test_a_long_page_and_many_steps_keep_the_floor_and_the_bound(self):
+        lines = [f'- browser_click: step {n} ' + 'x' * 200 for n in range(40)]
+        text = observations_with_pages(lines, [('https://s.test/cart', 'Cart', 'y' * 9000), ('https://s.test/a', 'A', 'z' * 900)])
+        self.assertLessEqual(len(text), OBSERVATION_CHARS)
+        self.assertGreaterEqual(text.count('y'), PAGE_TEXT_FLOOR_CHARS - 200)
+        self.assertNotIn('zzz', text, 'the newest page takes the room first')
+        self.assertIn('step 39', text, 'the latest step lines are kept, the oldest cut')
+        self.assertNotIn('step 0 ', text)
 
 
 class RunnableModels(Harness):

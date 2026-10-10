@@ -109,14 +109,15 @@ agentos start
 
 <picture>
   <source media="(max-width: 600px)" srcset="../../docs/assets/readme/presence-overview.zh-CN.narrow.svg">
-  <img src="../../docs/assets/readme/presence-overview.zh-CN.svg" alt="概念图：助手回答 NVIDIA 问题，任务型智能体处理明确的 Amazon 购物车请求，PA 延续会议的未决事项。AgentOS 关联获准使用的日程、提案与记录的来源，保留未完工作，并通过权限和实际结果区分邮件草稿与发送。AI 和工具可替换。这是产品方向示例，并非已观测运行或已发布的集成功能。">
+  <img src="../../docs/assets/readme/presence-overview.zh-CN.svg" alt="概念图：与你的关系（目标、记忆、偏好、承诺、权限）连接 Assistant、Finance、Research 三种专业视角；领域、角色、委托范围与权限进入 Decision Model。Unified Presence 维持同一段关系，并把你在工作进行中的介入反馈给判断。这是产品方向示例，并非已发布的功能。">
 </picture>
 
-- **PA** 是你对话的智能体，**AgentOS** 是保管它的上下文、未完成工作、权限和证据的环境。
-- **判断层** 为每个请求选择 AI 和工具，撰写任务说明，检查结果，不达标时重新委派。
-- **本体** 把一个有来源的对象（如一场会议或账户余额）与其周围的工作、角色和权限联系起来，不会把草稿当成已发送，也不会把邀请当成已接受。
+- **与你的关系** 把目标、记忆、偏好、承诺和权限保留在你的掌控之下。
+- **专业视角** 从相关领域和角色解读同一情境。委托范围确定目标与限制，实际权限另行把守。
+- **Decision Model** 判断是思考、执行、委派、询问、汇报还是持续跟进，而不只是挑选工具。
+- **Unified Presence** 不是一种角色。它跨越所有角色维持同一段关系：有意义的进展会告诉你，你的纠正会作用于进行中的工作（在运行环境支持的范围内）。
 
-此图是设计方向，并非已观测的运行。详情：[架构与本体](../../docs/personal-agentos-architecture.en.md) · [Presence](../../docs/presence-experience-contract.en.md)
+角色不等于资质或执行权限；多种角色协同工作是产品方向，并非已发布的功能（[契约](../../docs/professional-roles-and-communication-contract.en.md)）。此图是设计方向，并非已观测的运行。详情：[架构与本体](../../docs/personal-agentos-architecture.en.md) · [Presence](../../docs/presence-experience-contract.en.md)
 
 <!-- readme-section:ai-switch -->
 

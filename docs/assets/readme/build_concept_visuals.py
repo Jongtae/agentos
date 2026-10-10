@@ -240,212 +240,49 @@ def usage(d,mobile):
  f.out[3]=f.out[3].replace('height="3000"',f'height="{int(y)}"')
  return f
 
+# The README overview (2026-10-10, #1266): one relationship across professional
+# lenses, the Decision Model and Presence that feeds back into it.  The
+# composition follows the owner's own sketch; it is direction, not evidence.
 OVERVIEW = {'en': {'title': 'Personal AgentOS',
-        'subtitle': 'One PA. Your work and context stay yours.',
-        'illustration_label': 'Interaction model · product direction',
-        'comparison_title': 'From answers and commands to continuing work',
-        'cards': [{'name': 'Assistant',
-                   'verb': 'Answers',
-                   'quote': 'What’s the current price of NVIDIA?',
-                   'reply': 'I’ll check the current information.',
-                   'flow': ['Question', 'Search', 'Answer'],
-                   'caption': 'An answer to your question.'},
-                  {'name': 'Task agent',
-                   'verb': 'Acts',
-                   'quote': 'Add these headphones to my Amazon cart.',
-                   'reply': 'I’ll open the item in the browser.',
-                   'flow': ['Command', 'Browser / tool', 'Action / handoff'],
-                   'caption': 'An explicit task, with access as needed.'},
-                  {'name': 'Personal AgentOS',
-                   'verb': 'Carries work forward',
-                   'quote': 'Keep track of next week’s meeting.',
-                   'reply': 'I’ll keep the open decision and next step in view.',
-                   'flow': ['Intent', 'Open work', 'Next preparation'],
-                   'caption': 'Delegated work has a next step over time.'}],
-        'architecture_title': 'One PA, with work and authority held by you',
-        'owner': 'You',
-        'pa': 'PA · the agent you talk to',
-        'owned': 'Your environment holds the PA’s state.',
-        'links': [('One sourced meeting', 'Invitation + proposal + earlier decisions'),
-                  ('Different relationships', 'Calendar: time; project: decision; invite ≠ acceptance'),
-                  ('Work continues', 'Prepare brief → receive notes → next step'),
-                  ('Authority + evidence', 'Draft ≠ sent; check permission and actual result')],
-        'judgment': 'Judgment / orchestration',
-        'replaceable_ai': 'Replaceable AI',
-        'tools': 'Tools',
-        'services': 'Services',
-        'same_pa': 'Same PA.',
-        'different_ai': 'Different AI.',
-        'context_stays': 'Open work and evidence stay with you.',
-        'usage_title': 'One conversation, over time',
-        'usage': [{'time': 'First',
-                   'quote': 'We’re almost out of coffee.',
-                   'reply': 'Coffee for the next shop.',
-                   'label': 'A small remark becomes context.'},
-                  {'time': 'Hours later',
-                   'quote': 'I’m heading out now. Is there somewhere on the way I can pick it up?',
-                   'reply': 'The coffee? Share your route and I’ll look.',
-                   'label': 'Earlier context meets the situation now.'},
-                  {'time': 'Later',
-                   'quote': 'No time. Just get the same one as last time.',
-                   'reply': 'The same coffee. I’ll confirm before payment.',
-                   'label': 'Earlier choice · authority when needed'}],
-        'usage_note': 'You keep talking. AgentOS connects the context, work and permitted capabilities.',
-        'footer': 'Illustrative interaction patterns and product direction. No observed live run or shipped '
-                  'integration is claimed.'},
+        'subtitle': 'Many professional roles, one relationship.',
+        'relationship': ('Owner Relationship', 'Goals · Memory · Preferences · Commitments · Authority'),
+        'lenses': [('Assistant', 'Work coordination'), ('Finance', 'Wealth context'), ('Research', 'Evidence analysis')],
+        'composition': 'Domain + Role + Mandate + Authority',
+        'decision': ('Decision Model', 'Reason · Act · Delegate · Ask · Report · Follow up'),
+        'presence': ('Unified Presence', 'One relationship · Contextual communication · Continuing collaboration'),
+        'loop': 'Execution observations ↔ your intervention ↔ decision updates',
+        'desc': 'The owner relationship informs Assistant, Finance and Research professional lenses; domain, role, mandate and authority feed the Decision Model; Unified Presence keeps one relationship and feeds interventions back into decisions.',
+        'footer': 'Conceptual product direction, not evidence of shipped behavior.'},
  'ko': {'title': 'Personal AgentOS',
-        'subtitle': '하나의 PA. 내 일과 맥락은 내 환경에.',
-        'illustration_label': '상호작용 모델 · 제품 방향',
-        'comparison_title': '답변과 명령을 넘어, 이어지는 일로',
-        'cards': [{'name': 'Assistant',
-                   'verb': '답합니다',
-                   'quote': '지금 NVIDIA 주가는 얼마야?',
-                   'reply': '최신 정보를 확인할게요.',
-                   'flow': ['질문', '검색', '답변'],
-                   'caption': '질문에 필요한 답을 얻습니다.'},
-                  {'name': '실행형 에이전트',
-                   'verb': '실행합니다',
-                   'quote': '이 헤드폰을 Amazon 장바구니에 넣어줘.',
-                   'reply': '브라우저에서 상품을 열어볼게요.',
-                   'flow': ['명령', '브라우저·도구', '실행·권한 연결'],
-                   'caption': '명시한 일을 하고, 필요한 접근을 요청합니다.'},
-                  {'name': 'Personal AgentOS',
-                   'verb': '맡긴 일을 이어갑니다',
-                   'quote': '다음 주 미팅 좀 챙겨줘.',
-                   'reply': '남은 결정과 다음 준비를 이어갈게요.',
-                   'flow': ['의도', '남은 일', '다음 준비'],
-                   'caption': '맡긴 일의 다음 단계가 이어집니다.'}],
-        'architecture_title': '하나의 PA, 내 환경에 남는 일과 권한',
-        'owner': '나',
-        'pa': 'PA · 나와 대화하는 에이전트',
-        'owned': '내 환경이 PA의 상태를 이어갑니다.',
-        'links': [('출처가 있는 미팅 하나', '일정 초대 + 제안서 + 이전 결정'),
-                  ('서로 다른 관계', '일정: 시간; 프로젝트: 결정; 초대 ≠ 수락'),
-                  ('이어지는 일', '준비 자료 → 메모 → 다음 단계'),
-                  ('권한과 근거', '초안 ≠ 발송; 허용 범위와 실제 결과 확인')],
-        'judgment': '판단·조율',
-        'replaceable_ai': '교체 가능한 AI',
-        'tools': '도구',
-        'services': '서비스',
-        'same_pa': '같은 PA.',
-        'different_ai': '다른 AI.',
-        'context_stays': '남은 일과 근거는 내 환경에 남습니다.',
-        'usage_title': '시간이 지나도 이어지는 대화',
-        'usage': [{'time': '처음',
-                   'quote': '커피 거의 다 떨어졌네.',
-                   'reply': '다음에 장 볼 때 커피도 챙기면 되겠네요.',
-                   'label': '짧은 일상 이야기가 맥락이 됩니다.'},
-                  {'time': '몇 시간 뒤',
-                   'quote': '이제 나가려고. 가는 길에 살 만한 데 있을까?',
-                   'reply': '커피 말씀이죠? 가는 길을 알려주시면 찾아볼게요.',
-                   'label': '앞선 이야기와 지금 상황을 연결합니다.'},
-                  {'time': '나중에',
-                   'quote': '시간 없네. 지난번에 사던 걸로 그냥 사줘.',
-                   'reply': '지난번 커피로요. 결제 전에는 확인받을게요.',
-                   'label': '이전 선택 · 필요해진 순간의 권한'}],
-        'usage_note': '나는 대화를 이어갑니다. AgentOS가 맥락과 일, 허용된 기능을 연결합니다.',
-        'footer': '상호작용과 제품 방향을 설명하는 예시입니다. 실제 관측 실행이나 배포된 연동 기능을 뜻하지 않습니다.'},
+        'subtitle': '여러 전문 역할을 맡아도, 관계는 하나.',
+        'relationship': ('나와의 관계', '목적 · 기억 · 선호 · 약속 · 권한'),
+        'lenses': [('Assistant', '업무 조율'), ('Finance', '자산 관리'), ('Research', '정보 분석')],
+        'composition': '도메인 + 역할 + 위임 범위 + 권한',
+        'decision': ('Decision Model', '판단 · 실행 · 위임 · 질문 · 보고 · 추적'),
+        'presence': ('Unified Presence', '하나의 관계 · 맥락에 맞는 소통 · 지속적 협업'),
+        'loop': '실행 관찰 ↔ 나의 개입 ↔ 판단 갱신',
+        'desc': '나와의 관계가 Assistant·Finance·Research 전문 관점에 이어지고, 도메인·역할·위임 범위·권한이 Decision Model로 들어가며, Unified Presence가 하나의 관계를 지키면서 나의 개입을 판단에 되돌립니다.',
+        'footer': '개념적인 제품 방향이며, 배포된 기능의 근거가 아닙니다.'},
  'ja': {'title': 'Personal AgentOS',
-        'subtitle': '同じ PA。文脈は手元に。',
-        'illustration_label': '対話の形 · 製品の方向性',
-        'comparison_title': '答えと指示の先へ、続く仕事',
-        'cards': [{'name': 'Assistant',
-                   'verb': '答える',
-                   'quote': 'NVIDIA の今の株価は？',
-                   'reply': '最新の情報を確認します。',
-                   'flow': ['質問', '検索', '回答'],
-                   'caption': '質問への答えを得る。'},
-                  {'name': '実行型エージェント',
-                   'verb': '実行する',
-                   'quote': 'このヘッドホンを Amazon のカートに入れて。',
-                   'reply': 'ブラウザーで商品を開きます。',
-                   'flow': ['指示', 'ブラウザー・ツール', '実行・権限の確認'],
-                   'caption': '指示された仕事を、必要な権限で進める。'},
-                  {'name': 'Personal AgentOS',
-                   'verb': '任せた仕事を引き継ぐ',
-                   'quote': '来週の会議、気にかけておいて。',
-                   'reply': '未決のことと次の準備を引き継ぎます。',
-                   'flow': ['意図', '残る仕事', '次の準備'],
-                   'caption': '任せた仕事は時間をまたいで続く。'}],
-        'architecture_title': '一人の PA、仕事と権限は自分の環境に',
-        'owner': 'あなた',
-        'pa': 'PA · 会話するエージェント',
-        'owned': '自分の環境が PA の状態を保つ。',
-        'links': [('出典のある一つの会議', '予定の招待 + 提案書 + 以前の決定'),
-                  ('異なる関係', '予定: 時間; プロジェクト: 決定; 招待 ≠ 受諾'),
-                  ('続く仕事', '事前資料 → メモ → 次の段階'),
-                  ('権限と根拠', '下書き ≠ 送信; 許可と実際の結果を確認')],
-        'judgment': '判断・調整',
-        'replaceable_ai': '交換可能な AI',
-        'tools': 'ツール',
-        'services': 'サービス',
-        'same_pa': '同じ PA。',
-        'different_ai': '変わる AI。',
-        'context_stays': '残る仕事と根拠は自分の環境に。',
-        'usage_title': '時間がたっても、話は続く',
-        'usage': [{'time': 'はじめに',
-                   'quote': 'コーヒー、もうなくなりそう。',
-                   'reply': '次の買い物ではコーヒーも必要ですね。',
-                   'label': '何気ない一言が文脈になる。'},
-                  {'time': '数時間後',
-                   'quote': '今から出るんだけど、途中で買えるところあるかな？',
-                   'reply': 'コーヒーですね。通る道を教えてもらえれば探します。',
-                   'label': '前の話と今の状況がつながる。'},
-                  {'time': 'その後',
-                   'quote': '時間ないな。前と同じものを買っておいて。',
-                   'reply': '前回のコーヒーですね。支払い前に確認します。',
-                   'label': '前の選択 · 必要になった時に権限確認'}],
-        'usage_note': '自分は話を続ける。AgentOS が文脈と仕事、許可された機能をつなぐ。',
-        'footer': '対話の形と製品の方向性を説明する例です。実際に観測した動作や提供済みの連携機能ではありません。'},
+        'subtitle': 'さまざまな専門的役割を担っても、関係は一つ。',
+        'relationship': ('あなたとの関係', '目的 · 記憶 · 好み · 約束 · 権限'),
+        'lenses': [('Assistant', '業務調整'), ('Finance', '資産管理'), ('Research', '情報分析')],
+        'composition': 'ドメイン + 役割 + 委任範囲 + 権限',
+        'decision': ('Decision Model', '判断 · 実行 · 委任 · 質問 · 報告 · 追跡'),
+        'presence': ('Unified Presence', '一つの関係 · 文脈に合った対話 · 継続的な協働'),
+        'loop': '実行の観察 ↔ あなたの介入 ↔ 判断の更新',
+        'desc': 'あなたとの関係が Assistant・Finance・Research の専門的視点につながり、ドメイン・役割・委任範囲・権限が Decision Model に入り、Unified Presence が一つの関係を保ちながらあなたの介入を判断に戻します。',
+        'footer': '概念的な製品の方向性であり、提供済み機能の根拠ではありません。'},
  'zh-CN': {'title': 'Personal AgentOS',
-           'subtitle': '同一个 PA，工作与上下文由你掌控。',
-           'illustration_label': '交互方式 · 产品方向',
-           'comparison_title': '从回答和执行，到持续推进工作',
-           'cards': [{'name': 'Assistant',
-                      'verb': '回答问题',
-                      'quote': 'NVIDIA 现在的股价是多少？',
-                      'reply': '我来查一下最新信息。',
-                      'flow': ['提问', '搜索', '回答'],
-                      'caption': '为一个问题找到答案。'},
-                     {'name': '任务型智能体',
-                      'verb': '执行指令',
-                      'quote': '把这款耳机放进我的 Amazon 购物车。',
-                      'reply': '我先在浏览器里打开商品。',
-                      'flow': ['指令', '浏览器与工具', '执行与权限交接'],
-                      'caption': '完成明确的任务，按需获取权限。'},
-                     {'name': 'Personal AgentOS',
-                      'verb': '持续推进受托工作',
-                      'quote': '下周的会议帮我留意一下。',
-                      'reply': '我会记下未决事项，准备下一步。',
-                      'flow': ['意图', '未完工作', '下一步准备'],
-                      'caption': '受托的工作跨越时间继续。'}],
-           'architecture_title': '同一个 PA，工作与权限由你掌控',
-           'owner': '你',
-           'pa': 'PA · 与你对话的智能体',
-           'owned': '你的环境保留 PA 的状态。',
-           'links': [('一场有来源的会议', '日程邀请 + 提案 + 此前的决定'),
-                     ('不同的关系', '日程: 时间; 项目: 决定; 邀请 ≠ 接受'),
-                     ('持续中的工作', '会前材料 → 会议记录 → 下一步'),
-                     ('权限与证据', '草稿 ≠ 发送; 核对授权与实际结果')],
-           'judgment': '判断与协调',
-           'replaceable_ai': '可替换的 AI',
-           'tools': '工具',
-           'services': '服务',
-           'same_pa': '同一个 PA。',
-           'different_ai': '不同的 AI。',
-           'context_stays': '未完工作与证据留在你的环境中。',
-           'usage_title': '时间过去，对话继续',
-           'usage': [{'time': '起初', 'quote': '咖啡快没了。', 'reply': '下次买东西时，也得补上咖啡。', 'label': '随口一句，成为后续的上下文。'},
-                     {'time': '几小时后',
-                      'quote': '我准备出门了，路上有地方可以买到吗？',
-                      'reply': '是说咖啡吧？告诉我路线，我来找找。',
-                      'label': '接上前文，结合现在的情况。'},
-                     {'time': '之后',
-                      'quote': '没时间了，就买上次那款吧。',
-                      'reply': '上次那款咖啡。付款前会请你确认。',
-                      'label': '先前的选择 · 需要时再请求权限'}],
-           'usage_note': '你继续说话，AgentOS 连接上下文、工作与获准的能力。',
-           'footer': '交互方式与产品方向的示例，并非实际观测的运行，也不代表已发布的集成功能。'}}
+        'subtitle': '承担多种专业角色，始终是同一段关系。',
+        'relationship': ('与你的关系', '目标 · 记忆 · 偏好 · 承诺 · 权限'),
+        'lenses': [('Assistant', '事务协调'), ('Finance', '资产管理'), ('Research', '信息分析')],
+        'composition': '领域 + 角色 + 委托范围 + 权限',
+        'decision': ('Decision Model', '判断 · 执行 · 委派 · 询问 · 汇报 · 跟进'),
+        'presence': ('Unified Presence', '同一段关系 · 合乎情境的沟通 · 持续协作'),
+        'loop': '执行观察 ↔ 你的介入 ↔ 判断更新',
+        'desc': '与你的关系连接 Assistant、Finance、Research 三种专业视角；领域、角色、委托范围与权限进入 Decision Model；Unified Presence 维持同一段关系，并把你的介入反馈给判断。',
+        'footer': '概念性的产品方向，并非已发布功能的证据。'}}
 
 class OverviewFigure(Figure):
  def measure(self, text, width, size=22, gap=None):
@@ -492,123 +329,60 @@ class OverviewFigure(Figure):
 
 def overview(d,mobile):
  w=420 if mobile else 1120
- f=OverviewFigure(w,6000,d['title'],d['footer'])
- margin=20 if mobile else 28
+ f=OverviewFigure(w,6000,d['title'],d['desc'])
+ margin=20 if mobile else 40
  usable=w-2*margin
+ mid=w/2
+ gap=34
+
+ def box(y,name,detail,fill='#ffffff',stroke='#d8dee5',x=margin,width=usable,size=28):
+  inner=width-32
+  height=20+f.measure(name,inner,size)+8+f.measure(detail,inner,17)+20
+  f.rect(x,y,width,height,fill,stroke,16)
+  top=y+20
+  top+=f.label(x+width/2,top,name,inner,size,'bold','middle')+8
+  f.label(x+width/2,top,detail,inner,17,'muted','middle')
+  return height
+
+ def down(y):
+  f.arrow(mid,y+4,mid,y+gap-6)
+  return gap
+
  y=24
- y+=f.label(margin,y,d['title'],usable,34,'bold')+8
- y+=f.label(margin,y,d['subtitle'],usable,23,'blue')+14
- y+=f.label(margin,y,d['illustration_label'],usable,20,'muted')+32
- y+=f.section(y,'01',d['comparison_title'],w)
- cw=usable if mobile else (usable-40)/3
- card_heights=[]
- for card in d['cards']:
-  height=188
-  height+=f.dialogue_height(card['quote'],cw-36)+12
-  height+=f.dialogue_height(card['reply'],cw-36)+22
-  height+=f.measure(' → '.join(card['flow']),cw-40,20)+20
-  card_heights.append(height)
- desktop_height=max(card_heights)
- for index,card in enumerate(d['cards']):
-  x=margin if mobile else margin+index*(cw+20)
-  top=y if mobile else y
-  ch=card_heights[index] if mobile else desktop_height
-  accent='#257a69' if index==2 else '#245b92'
-  fill='#eff7f3' if index==2 else '#f7f9fc'
-  f.rect(x,top,cw,ch,fill,'#b7d1c5' if index==2 else '#d4dce5',16)
-  f.circle(x+cw/2,top+56,39,'#e0eee6' if index==2 else '#e9eff7')
-  f.icon(['search','cart','work'][index],x+cw/2-30,top+24,60,accent)
-  f.label(x+20,top+110,card['name'],cw-40,25,'bold')
-  f.label(x+20,top+148,card['verb'],cw-40,22,'blue bold')
-  cy=top+188
-  cy+=f.dialogue(x+18,cy,cw-36,card['quote'])+12
-  cy+=f.dialogue(x+18,cy,cw-36,card['reply'],True)+22
-  f.label(x+20,cy,' → '.join(card['flow']),cw-40,20,'blue bold')
-  if mobile:y+=ch+20
- if not mobile:y+=desktop_height
- y+=32
- y+=f.section(y,'02',d['architecture_title'],w)
+ y+=f.label(margin,y,d['title'],usable,34,'bold')+6
+ y+=f.label(margin,y,d['subtitle'],usable,22,'blue')+24
+ y+=box(y,*d['relationship'],fill='#f0f2f5')
+ y+=down(y)
  if mobile:
-  owner_x=110; pa_x=300
-  f.icon('owner',owner_x-23,y,46,'#53657a')
-  f.icon('pa',pa_x-23,y,46,'#257a69')
-  f.path(f'M{owner_x+38} {y+24}H{pa_x-38}','#8296a9')
-  f.path(f'M{owner_x+45} {y+18}L{owner_x+38} {y+24}L{owner_x+45} {y+30}M{pa_x-45} {y+18}L{pa_x-38} {y+24}L{pa_x-45} {y+30}','#8296a9')
-  f.label(owner_x,y+54,d['owner'],130,22,'bold','middle')
-  f.label(pa_x,y+54,d['pa'],175,20,'bold','middle')
-  conversation_bottom=y+54+max(f.measure(d['owner'],130,22),f.measure(d['pa'],175,20))
-  sy=conversation_bottom+44
-  ox=margin; ow=usable
-  f.path(f'M{pa_x} {conversation_bottom+12}V{sy-12}H{w/2}V{sy}','#8296a9')
+  for name,detail in d['lenses']:
+   y+=box(y,name,detail,size=22)+12
+  y-=12
  else:
-  ox=220; ow=654; sy=y
-  f.icon('owner',71,sy+97,64,'#53657a')
-  f.label(103,sy+175,d['owner'],160,23,'bold','middle')
- first_offset=59+f.measure(d['owned'],ow-40,20)+22 if mobile else 179
- row_gap=14
- title_width=ow-112
- detail_width=ow-134
- row_title_size=22 if mobile else 20
- row_detail_size=20 if mobile else 18
- row_heights=[max(94,30+f.measure(title,title_width,row_title_size)+f.measure(detail,detail_width,row_detail_size)) for title,detail in d['links']]
- grid_height=sum(row_heights)+(len(row_heights)-1)*row_gap
- judgment_height=f.measure(d['judgment'],ow-32,21)
- oh=first_offset+grid_height+24+judgment_height+20
- f.rect(ox,sy,ow,oh,'#f0f6f9','#b6cad9',18)
- f.label(ox+20,sy+20,'Personal AgentOS',ow-40,26,'bold')
- f.label(ox+20,sy+59,d['owned'],ow-40,20,'muted')
+  each=(usable-2*20)/3
+  heights=[]
+  for i,(name,detail) in enumerate(d['lenses']):
+   heights.append(box(y,name,detail,x=margin+i*(each+20),width=each,size=22))
+  y+=max(heights)
+ y+=14
+ y+=f.label(mid,y,d['composition'],usable,19,'muted','middle')+6
+ y+=down(y)
+ decision_top=y
+ y+=box(y,*d['decision'])
+ y+=down(y)
+ presence_top=y
+ y+=box(y,*d['presence'],fill='#eaf1f8',stroke='#cbd7e3')
  if not mobile:
-  f.rect(ox+20,sy+102,ow-40,54,'#e3f0e9','#bad3c8',12)
-  f.icon('pa',ox+38,sy+115,28,'#257a69')
-  f.label(ox+ow/2+10,sy+113,d['pa'],ow-120,22,'bold','middle')
-  f.path(f'M153 {sy+129}H{ox+20}','#8296a9')
-  f.path(f'M160 {sy+123}L153 {sy+129}L160 {sy+135}M{ox+13} {sy+123}L{ox+20} {sy+129}L{ox+13} {sy+135}','#8296a9')
- first=sy+first_offset
- st=first
- kinds=['memory','context','work','authority']
- for index,((title,detail),row_height) in enumerate(zip(d['links'],row_heights)):
-  sx=ox+20
-  f.rect(sx,st,ow-40,row_height,'#fff','#d8e1e7',10)
-  f.icon(kinds[index],sx+15,st+21,38,'#427665' if index<2 else '#496d92')
-  title_height=f.label(sx+72,st+10,title,title_width,row_title_size,'bold')
-  f.label(sx+72,st+18+title_height,detail,detail_width,row_detail_size,'muted')
-  if index<len(row_heights)-1:
-   f.arrow(ox+ow/2,st+row_height+1,ox+ow/2,st+row_height+row_gap-2)
-  st+=row_height+row_gap
- f.label(ox+ow/2,first+grid_height+24,d['judgment'],ow-32,21,'blue bold','middle')
- f.arrow(ox+ow/2,sy+oh+4,ox+ow/2,sy+oh+27)
- ey=sy+oh+34
- if mobile:
-  f.rect(ox,ey,ow,106,'#fafbfd','#d4dce5',12)
-  f.icon('model',ox+20,ey+25,48,'#526b91')
-  f.label(ox+88,ey+15,d['replaceable_ai'],ow-108,22,'bold')
-  f.label(ox+88,ey+54,'AI A  →  AI B',ow-108,22,'blue')
-  f.icon('tools',ox+24,ey+128,30,'#526b91')
-  f.label(ox+68,ey+130,d['tools'],115,20)
-  f.icon('services',ox+208,ey+128,30,'#526b91')
-  f.label(ox+250,ey+130,d['services'],ow-265,20)
-  cy=ey+186
-  cy+=f.label(w/2,cy,d['same_pa']+' '+d['different_ai'],usable,25,'blue bold','middle')+8
-  cy+=f.label(w/2,cy,d['context_stays'],usable,22,'muted','middle')
-  y=cy+36
- else:
-  ew=(ow-24)/3
-  for index,(label,kind) in enumerate([(d['replaceable_ai'],'model'),(d['tools'],'tools'),(d['services'],'services')]):
-   ex=ox+index*(ew+12)
-   f.rect(ex,ey,ew,109,'#fafbfd','#d4dce5',12)
-   f.icon(kind,ex+ew/2-19,ey+12,38,'#526b91')
-   f.label(ex+ew/2,ey+61,label,ew-20,20,'muted','middle')
-  rx=908; rw=184; cy=sy+102
-  f.icon('pa',rx,cy-56,38,'#257a69')
-  cy+=f.label(rx,cy,d['same_pa'],rw,27,'blue bold')+8
-  cy+=f.label(rx,cy,d['different_ai'],rw,27,'blue bold')+20
-  cy+=f.label(rx,cy,d['context_stays'],rw,22,'muted')+28
-  f.label(rx,cy,'AI A → AI B',rw,22,'blue bold')
-  y=ey+145
- f.path(f'M{margin} {y}H{w-margin}','#d4dce5')
+  # Presence feeds back into the Decision Model while the work runs.
+  x=w-margin+18
+  f.path(f'M{w-margin} {presence_top+30} H{x} V{decision_top+30} H{w-margin+6}','#8492a3',dash=True)
+  f.path(f'M{w-margin+11} {decision_top+26} L{w-margin+6} {decision_top+30} L{w-margin+11} {decision_top+34}')
  y+=16
- y+=f.label(margin,y,d['footer'],usable,20,'muted')+24
+ y+=f.label(mid,y,d['loop'],usable,17,'blue','middle')+22
+ f.path(f'M{margin} {y}H{w-margin}','#d4dce5')
+ y+=12
+ y+=f.label(margin,y,d['footer'],usable,15,'muted')+20
  return f.finish(int(y))
+
 
 SCENES = {'en': {'title': 'Everyday conversation, continuing context',
         'label': 'Illustrative reconstruction · product direction',

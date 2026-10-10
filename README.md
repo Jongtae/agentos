@@ -109,15 +109,15 @@ Local-first is not local-only: you can use a local or hosted model. With a hoste
 
 <picture>
   <source media="(max-width: 600px)" srcset="docs/assets/readme/presence-overview.en.narrow.svg">
-  <img src="docs/assets/readme/presence-overview.en.svg" alt="Concept diagram: Owner Relationship informs Assistant, Finance and Research professional lenses, with Domain, Role, Mandate and Authority considered by the Decision Model. Unified Presence maintains one relationship, contextual communication and owner intervention that feeds back into decisions. Illustrative product direction, not shipped implementation.">
+  <img src="docs/assets/readme/presence-overview.en.svg" alt="Concept diagram: the owner relationship (goals, memory, preferences, commitments, authority) informs Assistant, Finance and Research professional lenses; domain, role, mandate and authority feed the Decision Model; Unified Presence keeps one relationship, and your interventions during the work feed back into decisions. Illustrative product direction, not shipped implementation.">
 </picture>
 
-- **Owner Relationship** holds goals, memory, preferences, commitments and authority under owner control.
-- **Professional lenses** interpret the same reality through relevant domains and roles. Mandates specify goals and constraints; enforced authority remains separate.
-- **The Decision Model** judges whether to reason, act, delegate, ask, report or follow up; it does not merely route tools.
-- **Unified Presence** maintains one speaking relationship and allows meaningful updates and owner corrections to influence ongoing decisions, subject to actual runtime support.
+- **Owner relationship** holds your goals, memory, preferences, commitments and authority under your control.
+- **Professional lenses** read the same situation through the relevant domain and role. A mandate sets goals and limits; enforced authority stays separate.
+- **The Decision Model** judges whether to reason, act, delegate, ask, report or follow up; it does more than route tools.
+- **Unified Presence** is not a role: it keeps one relationship across all of them, so meaningful updates reach you and your corrections change the work in progress, as far as the runtime supports.
 
-The figure shows the intended design, not an observed run. Details: [architecture and ontology](docs/personal-agentos-architecture.en.md) · [Presence](docs/presence-experience-contract.en.md).
+A role is not a licence or a permission to act, and several roles working together is product direction, not shipped behavior ([contract](docs/professional-roles-and-communication-contract.en.md)). The figure shows the intended design, not an observed run. Details: [architecture and ontology](docs/personal-agentos-architecture.en.md) · [Presence](docs/presence-experience-contract.en.md).
 
 <!-- readme-section:ai-switch -->
 
@@ -171,8 +171,3 @@ On the way home, the PA asks for your location before suggesting places to eat. 
 ## License
 
 [AGPL-3.0-only](LICENSE). The Personal AgentOS name and logo follow the [trademark notice](docs/TRADEMARKS.md).
-
-<!-- professional-role-direction -->
-### Beyond a secretary: professional roles, one owner relationship
-
-Personal AgentOS is not limited to secretary tasks. The same owner-controlled agent can interpret a request through several professional lenses (such as executive assistance, finance, research and purchasing), with domain meaning, an explicit mandate and separately enforced authority. A role is not a license or permission to execute. The Decision Model selects how to reason, ask, delegate or act; Presence keeps the owner informed and able to correct ongoing work. This is **product direction, not a claim of shipped multi-role execution**. See the [Professional Roles and Communication Contract](docs/professional-roles-and-communication-contract.en.md).

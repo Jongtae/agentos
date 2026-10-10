@@ -170,3 +170,8 @@ On the way home, the PA asks for your location before suggesting places to eat. 
 ## License
 
 [AGPL-3.0-only](LICENSE). The Personal AgentOS name and logo follow the [trademark notice](docs/TRADEMARKS.md).
+
+<!-- professional-role-direction -->
+### Beyond a secretary: professional roles, one owner relationship
+
+Personal AgentOS is not limited to secretary tasks. The same owner-controlled agent can interpret a request through several professional lenses (such as executive assistance, finance, research and purchasing), with domain meaning, an explicit mandate and separately enforced authority. A role is not a license or permission to execute. The Decision Model selects how to reason, ask, delegate or act; Presence keeps the owner informed and able to correct ongoing work. This is **product direction, not a claim of shipped multi-role execution**. See the [Professional Roles and Communication Contract](docs/professional-roles-and-communication-contract.en.md).

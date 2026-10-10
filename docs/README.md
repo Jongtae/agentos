@@ -42,3 +42,7 @@ Finished one-off implementation records belong under [archive/history/](archive/
 ## Editing rule
 
 Prefer changing one canonical source and linking to it over copying current state into several documents. If a document needs a point-in-time snapshot, label it explicitly as historical or dated evidence. A documentation cleanup must not silently change runtime policy, owner authority, delivery selection or the meaning of prior evidence.
+
+## Cross-role semantic and communication contract
+
+[Professional Roles and Communication Contract](professional-roles-and-communication-contract.en.md) is the normative design/acceptance entry point for domain/role lenses, mandate versus authority, collaborative in-flight Presence, communication protocol and commitments. It complements (does not supersede) Architecture, Decision Layer, Presence and Secretary Agency. It is not implementation evidence or a change to `delivery-plan.yaml`.

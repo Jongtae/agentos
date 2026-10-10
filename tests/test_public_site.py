@@ -43,3 +43,37 @@ def test_privacy_page_explains_separate_local_deletion_and_provider_revocation()
     assert "operating system’s file-management tools" in privacy
     assert "provider revocation are separate actions" in privacy
     assert "로컬 삭제와 제공자 권한 철회는 서로 다른 작업" in privacy
+
+
+def test_site_release_stamp_follows_readme_and_manifest(tmp_path):
+    import shutil, sys
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import stamp_site_release as stamp
+
+    commit, version = stamp.release_values(ROOT)
+    copy = tmp_path / "site"
+    shutil.copytree(SITE, copy)
+    for page in copy.glob("*.html"):
+        text = page.read_text(encoding="utf-8")
+        text = stamp.PIN.sub(lambda m: m.group(1) + "0" * 40 + m.group(3), text)
+        text = stamp.VERSION.sub(lambda m: m.group(1) + "v0.0.0" + m.group(2), text)
+        page.write_text(text, encoding="utf-8")
+    stamp.stamp(copy, commit, version)
+    for name in ("index.html", "ko.html", "ja.html", "zh-CN.html"):
+        body = (copy / name).read_text(encoding="utf-8")
+        assert f"Jongtae/agentos/{commit}/scripts/install.sh" in body
+        assert f'<span data-release="version">v{version}</span>' in body
+        assert "0" * 40 not in body
+    workflow = (ROOT / ".github/workflows/deploy-pages.yml").read_text(encoding="utf-8")
+    assert "scripts/stamp_site_release.py site" in workflow
+
+
+def test_homepage_is_offered_in_the_readme_languages():
+    homes = {"en": "index.html", "ko": "ko.html", "ja": "ja.html", "zh-CN": "zh-CN.html"}
+    for lang, name in homes.items():
+        body = (SITE / name).read_text(encoding="utf-8")
+        assert f'<html lang="{lang}">' in body
+        assert "<script" not in body.lower() and "<form" not in body.lower()
+        for other, target in homes.items():
+            assert f'hreflang="{other}"' in body
+        assert 'aria-current="page"' in body

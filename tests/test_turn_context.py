@@ -39,6 +39,16 @@ class TurnContextBuilder(unittest.TestCase):
         self.assertEqual(api['instructions'], POLICY, 'the direct-API system text is the shared core plus its tool guidance')
         self.assertIn('Personal AgentOS', CORE_INSTRUCTIONS)
 
+    def test_every_route_carries_the_warm_style_without_flattery(self):
+        # #1272: the conversation style reaches both routes, and warmth is bounded by accuracy.
+        for route in ('api', 'cli'):
+            instructions = turn_context([{'role': 'user', 'content': 'hi'}], route)['instructions']
+            with self.subTest(route=route):
+                self.assertIn('Sound warm and natural', instructions)
+                self.assertIn('one genuine follow-up question', instructions)
+                self.assertIn('thank them for their patience', instructions)
+                self.assertIn('never praise or agree just to please', instructions)
+
     def test_order_budget_and_current_request_are_preserved(self):
         history = [{'role': 'user', 'content': f'old {i}'} for i in range(30)]
         history.append({'role': 'user', 'content': 'current request'})

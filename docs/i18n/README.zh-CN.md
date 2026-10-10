@@ -79,9 +79,9 @@ brew install jongtae/agentos/agentos
 agentos start
 ```
 
-1. 设置页面会在 [http://127.0.0.1:8787](http://127.0.0.1:8787/) 打开。点击 **바로 시작하기**（立即开始）；设置界面目前为韩语。
+1. 浏览器会打开 [http://127.0.0.1:8787](http://127.0.0.1:8787/)。界面默认为英语，可在左下角切换为简体中文、韩语或日语。部分固定的 Telegram 状态提示目前仍为韩语。
 2. 连接你的 AI：支持工具调用的 Ollama 模型，OpenAI、OpenAI 兼容或 Anthropic 的 API 密钥，或 Codex、Claude Code 订阅。
-3. 可选：在 **설정 → 외부 연결**（设置 → 外部连接）中填入你自己的 Telegram 机器人令牌，然后打开配对链接。
+3. 可选：在 **设置 → 外部连接**中填入你自己的 Telegram 机器人令牌，然后打开配对链接。
 4. 试着说：**“这周要完成一份提案，帮我把接下来的事拆成几步。”**
 
 在 Windows 上，请在 PowerShell 中运行 `wsl --install` 并重启，然后打开 Ubuntu 运行第一条命令。Windows 说明、安装脚本做了什么、从源码运行以及所有设置，请见 [QUICKSTART](../../docs/QUICKSTART.md)。对话期间请保持 `agentos start` 运行。

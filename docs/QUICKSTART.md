@@ -1,6 +1,6 @@
 # AgentOS — install, configure, talk
 
-AgentOS is a self-hosted personal agent preview. One local process serves browser setup and task records; conversations take place in your paired Telegram chat. The Homebrew release interface is Korean. Docker and Kubernetes are not required. Homebrew installs Python automatically; model runtimes and model weights are separate.
+AgentOS is a self-hosted personal agent preview. One local process serves browser setup and task records; conversations take place in your paired Telegram chat. The browser screens are in English by default, with Korean, Simplified Chinese and Japanese selectable; some fixed Telegram status lines are still Korean. Docker and Kubernetes are not required. Homebrew installs Python automatically; model runtimes and model weights are separate.
 
 ## Current use versus planned work
 
